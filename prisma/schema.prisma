@@ -1,0 +1,218 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String        @id @default(cuid())
+  email        String        @unique
+  name         String
+  password     String
+  role         String        @default("user") // user, admin
+  emailVerified Boolean      @default(false)
+  avatar       String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  subscriptions Subscription[]
+  payments      Payment[]
+  projects      Project[]
+  domains       Domain[]
+  deployments   Deployment[]
+  automationLogs AutomationLog[]
+}
+
+model Plan {
+  id          String   @id @default(cuid())
+  name        String   @unique // Starter, Pro, Business
+  slug        String   @unique
+  description String
+  price       Float    // monthly price in USD
+  ram         String   // e.g. "1GB"
+  cpu         String   // e.g. "1 vCPU"
+  storage     String   // e.g. "10GB"
+  bandwidth   String   // e.g. "100GB"
+  projects    Int      @default(1)
+  ssl         Boolean  @default(true)
+  customDomain Boolean @default(false)
+  priority    Int      @default(0)
+  popular     Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  subscriptions Subscription[]
+}
+
+model Subscription {
+  id          String   @id @default(cuid())
+  userId      String
+  planId      String
+  status      String   @default("active") // active, cancelled, past_due, trialing
+  stripeSubId String?  // Stripe subscription ID
+  currentPeriodStart DateTime
+  currentPeriodEnd   DateTime
+  cancelAtPeriodEnd  Boolean @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User  @relation(fields: [userId], references: [id])
+  plan Plan  @relation(fields: [planId], references: [id])
+  payments Payment[]
+}
+
+model Payment {
+  id              String   @id @default(cuid())
+  userId          String
+  subscriptionId  String?
+  amount          Float
+  currency        String   @default("usd")
+  status          String   @default("pending") // pending, completed, failed, refunded
+  type            String   // hosting, domain, both
+  stripePaymentId String?
+  stripeInvoiceId String?
+  metadata        String?  // JSON string for extra data
+  createdAt       DateTime @default(now())
+
+  user          User          @relation(fields: [userId], references: [id])
+  subscription  Subscription? @relation(fields: [subscriptionId], references: [id])
+}
+
+model Project {
+  id           String   @id @default(cuid())
+  userId       String
+  name         String
+  slug         String
+  description  String?
+  framework    String   @default("nextjs") // nextjs, react, node, static
+  status       String   @default("creating") // creating, running, stopped, error
+  coolifyId    String?  // Coolify project ID
+  serverId     String?
+  subdomain    String   // e.g. myapp.deployhub.io
+  customDomain String?
+  repoUrl      String?  // GitHub repo URL
+  autoDeploy   Boolean  @default(true)
+  sslEnabled   Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user         User          @relation(fields: [userId], references: [id])
+  server       Server?       @relation(fields: [serverId], references: [id])
+  deployments  Deployment[]
+  domains      Domain[]
+  automationLogs AutomationLog[]
+}
+
+model Domain {
+  id              String   @id @default(cuid())
+  userId          String
+  projectId       String?
+  name            String   @unique // e.g. example.com
+  status          String   @default("pending") // pending, active, expired, transferring
+  registrar       String   @default("openprovider")
+  registeredAt    DateTime?
+  expiresAt       DateTime?
+  autoRenew       Boolean  @default(true)
+  whoisPrivacy    Boolean  @default(true)
+  nameservers     String?  // JSON array
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user         User          @relation(fields: [userId], references: [id])
+  project      Project?      @relation(fields: [projectId], references: [id])
+  dnsRecords   DnsRecord[]
+  automationLogs AutomationLog[]
+}
+
+model DnsRecord {
+  id        String   @id @default(cuid())
+  domainId  String
+  type      String   // A, CNAME, MX, TXT, AAAA, SRV
+  name      String   // subdomain or @
+  value     String   // IP, hostname, text
+  ttl       Int      @default(3600)
+  priority  Int?
+  proxied   Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  domain Domain @relation(fields: [domainId], references: [id], onDelete: Cascade)
+}
+
+model Server {
+  id            String   @id @default(cuid())
+  name          String
+  ip            String
+  provider      String   @default("netcup")
+  status        String   @default("active") // active, maintenance, offline
+  cpuCores      Int
+  ramGB         Int
+  storageGB     Int
+  bandwidthGB   Int
+  usedRamGB     Float    @default(0)
+  usedStorageGB Float    @default(0)
+  coolifyUrl    String?
+  coolifyToken  String?
+  region        String   @default("eu-central")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  projects Project[]
+}
+
+model Deployment {
+  id          String   @id @default(cuid())
+  projectId   String
+  userId      String
+  commit      String?
+  branch      String   @default("main")
+  status      String   @default("queued") // queued, building, deploying, live, failed, rolled_back
+  buildLog    String?
+  deployUrl   String?
+  duration    Int?     // seconds
+  triggeredBy String   @default("user") // user, webhook, auto
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+}
+
+model AutomationLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  projectId String?
+  domainId  String?
+  eventType String   // payment_success, hosting_requested, domain_requested, etc.
+  action    String   // create_project, register_domain, setup_dns, deploy_app
+  status    String   @default("pending") // pending, running, completed, failed
+  input     String?  // JSON input data
+  output    String?  // JSON output data
+  error     String?
+  retryCount Int     @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user    User?    @relation(fields: [userId], references: [id])
+  project Project? @relation(fields: [projectId], references: [id])
+  domain  Domain?  @relation(fields: [domainId], references: [id])
+}
+
+model JobQueue {
+  id          String   @id @default(cuid())
+  type        String   // provision_hosting, register_domain, setup_dns, deploy_app
+  payload     String   // JSON payload
+  status      String   @default("queued") // queued, processing, completed, failed
+  attempts    Int      @default(0)
+  maxAttempts Int      @default(3)
+  runAt       DateTime @default(now())
+  startedAt   DateTime?
+  completedAt DateTime?
+  error       String?
+  result      String?  // JSON result
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
