@@ -46,13 +46,13 @@ export async function POST(request: Request) {
       )
     }
 
-    // Find a server for DNS records
+    // Find a server for DNS records (pick least loaded)
     const server = await db.server.findFirst({
       where: { status: 'active' },
       orderBy: { usedRamGB: 'asc' },
     })
 
-    // Create the domain
+    // Create the domain with status 'active'
     const domain = await db.domain.create({
       data: {
         userId: decoded.userId,
@@ -72,7 +72,7 @@ export async function POST(request: Request) {
       },
     })
 
-    // Create default DNS records
+    // Auto-create default DNS records
     const dnsRecords = []
 
     // A record pointing to server IP
@@ -103,7 +103,7 @@ export async function POST(request: Request) {
     })
     dnsRecords.push(cnameRecord)
 
-    // Link domain to project if projectId provided
+    // Link domain to project if projectId is provided
     if (projectId) {
       await db.project.update({
         where: { id: projectId },
@@ -111,8 +111,8 @@ export async function POST(request: Request) {
       })
     }
 
-    // Trigger automation
-    await processEvent({
+    // Trigger automation for domain_requested event
+    const automationResult = await processEvent({
       type: 'domain_requested',
       userId: decoded.userId,
       payload: {
@@ -133,8 +133,10 @@ export async function POST(request: Request) {
         autoRenew: domain.autoRenew,
         whoisPrivacy: domain.whoisPrivacy,
         nameservers: JSON.parse(domain.nameservers || '[]'),
+        projectId: domain.projectId,
         dnsRecords,
       },
+      automation: automationResult,
     }, { status: 201 })
   } catch (error) {
     console.error('Register domain error:', error)

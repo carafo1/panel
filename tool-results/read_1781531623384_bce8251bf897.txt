@@ -1,0 +1,894 @@
+     1→'use client'
+     2→
+     3→import { useState, useEffect, useCallback } from 'react'
+     4→import { toast } from 'sonner'
+     5→import {
+     6→  Plus,
+     7→  Globe,
+     8→  Rocket,
+     9→  StopCircle,
+    10→  Trash2,
+    11→  ArrowLeft,
+    12→  ExternalLink,
+    13→  Server,
+    14→  Shield,
+    15→  Zap,
+    16→  RefreshCw,
+    17→  Clock,
+    18→  GitBranch,
+    19→  MoreVertical,
+    20→} from 'lucide-react'
+    21→import {
+    22→  Card,
+    23→  CardContent,
+    24→  CardDescription,
+    25→  CardHeader,
+    26→  CardTitle,
+    27→} from '@/components/ui/card'
+    28→import { Button } from '@/components/ui/button'
+    29→import { Input } from '@/components/ui/input'
+    30→import { Label } from '@/components/ui/label'
+    31→import { Badge } from '@/components/ui/badge'
+    32→import { Skeleton } from '@/components/ui/skeleton'
+    33→import { Separator } from '@/components/ui/separator'
+    34→import {
+    35→  Dialog,
+    36→  DialogContent,
+    37→  DialogDescription,
+    38→  DialogFooter,
+    39→  DialogHeader,
+    40→  DialogTitle,
+    41→} from '@/components/ui/dialog'
+    42→import {
+    43→  Select,
+    44→  SelectContent,
+    45→  SelectItem,
+    46→  SelectTrigger,
+    47→  SelectValue,
+    48→} from '@/components/ui/select'
+    49→import {
+    50→  Table,
+    51→  TableBody,
+    52→  TableCell,
+    53→  TableHead,
+    54→  TableHeader,
+    55→  TableRow,
+    56→} from '@/components/ui/table'
+    57→import {
+    58→  DropdownMenu,
+    59→  DropdownMenuContent,
+    60→  DropdownMenuItem,
+    61→  DropdownMenuTrigger,
+    62→} from '@/components/ui/dropdown-menu'
+    63→
+    64→// Types
+    65→interface Project {
+    66→  id: string
+    67→  name: string
+    68→  slug: string
+    69→  description?: string
+    70→  framework: string
+    71→  status: string
+    72→  subdomain: string
+    73→  customDomain?: string
+    74→  sslEnabled: boolean
+    75→  autoDeploy: boolean
+    76→  server?: {
+    77→    id: string
+    78→    name: string
+    79→    ip: string
+    80→    region: string
+    81→  } | null
+    82→  lastDeployment?: {
+    83→    id: string
+    84→    status: string
+    85→    deployUrl?: string
+    86→  } | null
+    87→  domains?: { id: string; name: string; status: string }[]
+    88→  createdAt: string
+    89→  updatedAt: string
+    90→}
+    91→
+    92→interface ProjectDetail extends Project {
+    93→  coolifyId?: string
+    94→  repoUrl?: string
+    95→  deployments: Deployment[]
+    96→  domains: { id: string; name: string; status: string; dnsRecords?: unknown[] }[]
+    97→}
+    98→
+    99→interface Deployment {
+   100→  id: string
+   101→  commit?: string
+   102→  branch: string
+   103→  status: string
+   104→  deployUrl?: string
+   105→  duration?: number
+   106→  triggeredBy: string
+   107→  createdAt: string
+   108→  updatedAt: string
+   109→}
+   110→
+   111→interface Plan {
+   112→  id: string
+   113→  name: string
+   114→  slug: string
+   115→  description: string
+   116→  price: number
+   117→  ram: string
+   118→  cpu: string
+   119→  storage: string
+   120→  bandwidth: string
+   121→  projects: number
+   122→  ssl: boolean
+   123→  customDomain: boolean
+   124→  popular: boolean
+   125→}
+   126→
+   127→// Helpers
+   128→function getAuthHeaders(): Record<string, string> {
+   129→  const token = localStorage.getItem('deployhub_token')
+   130→  return {
+   131→    'Authorization': `Bearer ${token}`,
+   132→    'Content-Type': 'application/json',
+   133→  }
+   134→}
+   135→
+   136→function statusColor(status: string) {
+   137→  switch (status) {
+   138→    case 'running':
+   139→    case 'live':
+   140→      return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+   141→    case 'creating':
+   142→    case 'building':
+   143→    case 'deploying':
+   144→    case 'queued':
+   145→      return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
+   146→    case 'stopped':
+   147→    case 'rolled_back':
+   148→      return 'bg-gray-100 text-gray-600 dark:bg-gray-800/30 dark:text-gray-400'
+   149→    case 'error':
+   150→    case 'failed':
+   151→      return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+   152→    default:
+   153→      return 'bg-gray-100 text-gray-600 dark:bg-gray-800/30 dark:text-gray-400'
+   154→  }
+   155→}
+   156→
+   157→function frameworkLabel(fw: string) {
+   158→  switch (fw) {
+   159→    case 'nextjs':
+   160→      return 'Next.js'
+   161→    case 'react':
+   162→      return 'React'
+   163→    case 'node':
+   164→      return 'Node.js'
+   165→    case 'static':
+   166→      return 'Static'
+   167→    default:
+   168→      return fw
+   169→  }
+   170→}
+   171→
+   172→function frameworkColor(fw: string) {
+   173→  switch (fw) {
+   174→    case 'nextjs':
+   175→      return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+   176→    case 'react':
+   177→      return 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400'
+   178→    case 'node':
+   179→      return 'bg-lime-100 text-lime-700 dark:bg-lime-900/30 dark:text-lime-400'
+   180→    case 'static':
+   181→      return 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
+   182→    default:
+   183→      return 'bg-gray-100 text-gray-700 dark:bg-gray-800/30 dark:text-gray-400'
+   184→  }
+   185→}
+   186→
+   187→function deployStatusIcon(status: string) {
+   188→  switch (status) {
+   189→    case 'live':
+   190→      return <div className="size-2 rounded-full bg-emerald-500" />
+   191→    case 'building':
+   192→    case 'deploying':
+   193→      return <div className="size-2 rounded-full bg-yellow-500 animate-pulse" />
+   194→    case 'failed':
+   195→    case 'rolled_back':
+   196→      return <div className="size-2 rounded-full bg-red-500" />
+   197→    case 'queued':
+   198→      return <div className="size-2 rounded-full bg-gray-400" />
+   199→    default:
+   200→      return <div className="size-2 rounded-full bg-gray-400" />
+   201→  }
+   202→}
+   203→
+   204→function formatDate(dateStr: string) {
+   205→  try {
+   206→    return new Date(dateStr).toLocaleDateString('en-US', {
+   207→      month: 'short',
+   208→      day: 'numeric',
+   209→      year: 'numeric',
+   210→      hour: '2-digit',
+   211→      minute: '2-digit',
+   212→    })
+   213→  } catch {
+   214→    return dateStr
+   215→  }
+   216→}
+   217→
+   218→// ─── Sub-components ─────────────────────────────────────────────
+   219→
+   220→function ProjectCardSkeleton() {
+   221→  return (
+   222→    <Card className="transition-all">
+   223→      <CardHeader className="pb-2">
+   224→        <Skeleton className="h-5 w-32" />
+   225→        <Skeleton className="h-4 w-48" />
+   226→      </CardHeader>
+   227→      <CardContent>
+   228→        <div className="flex gap-2">
+   229→          <Skeleton className="h-5 w-16" />
+   230→          <Skeleton className="h-5 w-16" />
+   231→        </div>
+   232→        <Skeleton className="mt-3 h-4 w-40" />
+   233→      </CardContent>
+   234→    </Card>
+   235→  )
+   236→}
+   237→
+   238→function ProjectCard({
+   239→  project,
+   240→  onClick,
+   241→}: {
+   242→  project: Project
+   243→  onClick: () => void
+   244→}) {
+   245→  return (
+   246→    <Card
+   247→      className="cursor-pointer transition-all hover:shadow-md hover:border-emerald-200 dark:hover:border-emerald-800"
+   248→      onClick={onClick}
+   249→    >
+   250→      <CardHeader className="pb-2">
+   251→        <div className="flex items-start justify-between">
+   252→          <CardTitle className="text-base">{project.name}</CardTitle>
+   253→          <Badge variant="outline" className={frameworkColor(project.framework)}>
+   254→            {frameworkLabel(project.framework)}
+   255→          </Badge>
+   256→        </div>
+   257→        <CardDescription className="text-xs font-mono">
+   258→          {project.subdomain}
+   259→        </CardDescription>
+   260→      </CardHeader>
+   261→      <CardContent>
+   262→        <div className="flex items-center gap-2 flex-wrap">
+   263→          <Badge variant="outline" className={statusColor(project.status)}>
+   264→            {project.status}
+   265→          </Badge>
+   266→          {project.sslEnabled && (
+   267→            <Badge variant="outline" className="bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400 text-xs">
+   268→              <Shield className="size-3 mr-1" />
+   269→              SSL
+   270→            </Badge>
+   271→          )}
+   272→        </div>
+   273→        <div className="mt-3 flex items-center gap-1 text-xs text-muted-foreground">
+   274→          <Clock className="size-3" />
+   275→          {formatDate(project.createdAt)}
+   276→        </div>
+   277→      </CardContent>
+   278→    </Card>
+   279→  )
+   280→}
+   281→
+   282→function CreateProjectDialog({
+   283→  open,
+   284→  onClose,
+   285→  onCreated,
+   286→}: {
+   287→  open: boolean
+   288→  onClose: () => void
+   289→  onCreated: () => void
+   290→}) {
+   291→  const [name, setName] = useState('')
+   292→  const [framework, setFramework] = useState('nextjs')
+   293→  const [planId, setPlanId] = useState('')
+   294→  const [plans, setPlans] = useState<Plan[]>([])
+   295→  const [loading, setLoading] = useState(false)
+   296→  const [plansLoading, setPlansLoading] = useState(false)
+   297→
+   298→  useEffect(() => {
+   299→    if (open) {
+   300→      setPlansLoading(true)
+   301→      fetch('/api/billing/plans')
+   302→        .then((r) => r.json())
+   303→        .then((data) => {
+   304→          setPlans(data.plans || [])
+   305→          if (data.plans?.length > 0 && !planId) {
+   306→            setPlanId(data.plans[0].id)
+   307→          }
+   308→        })
+   309→        .catch(() => toast.error('Failed to load plans'))
+   310→        .finally(() => setPlansLoading(false))
+   311→    }
+   312→  }, [open, planId])
+   313→
+   314→  const handleCreate = async () => {
+   315→    if (!name.trim()) {
+   316→      toast.error('Project name is required')
+   317→      return
+   318→    }
+   319→    setLoading(true)
+   320→    try {
+   321→      const res = await fetch('/api/hosting/create', {
+   322→        method: 'POST',
+   323→        headers: getAuthHeaders(),
+   324→        body: JSON.stringify({ name: name.trim(), framework, planId: planId || undefined }),
+   325→      })
+   326→      const data = await res.json()
+   327→      if (!res.ok) {
+   328→        toast.error(data.error || 'Failed to create project')
+   329→        return
+   330→      }
+   331→      toast.success('Project created successfully!')
+   332→      setName('')
+   333→      setFramework('nextjs')
+   334→      onCreated()
+   335→      onClose()
+   336→    } catch {
+   337→      toast.error('Network error. Please try again.')
+   338→    } finally {
+   339→      setLoading(false)
+   340→    }
+   341→  }
+   342→
+   343→  return (
+   344→    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+   345→      <DialogContent className="sm:max-w-lg">
+   346→        <DialogHeader>
+   347→          <DialogTitle>Create New Project</DialogTitle>
+   348→          <DialogDescription>
+   349→            Set up a new hosting project with your preferred framework and plan.
+   350→          </DialogDescription>
+   351→        </DialogHeader>
+   352→
+   353→        <div className="grid gap-4 py-4">
+   354→          <div className="grid gap-2">
+   355→            <Label htmlFor="project-name">Project Name</Label>
+   356→            <Input
+   357→              id="project-name"
+   358→              placeholder="my-awesome-app"
+   359→              value={name}
+   360→              onChange={(e) => setName(e.target.value)}
+   361→            />
+   362→          </div>
+   363→
+   364→          <div className="grid gap-2">
+   365→            <Label>Framework</Label>
+   366→            <Select value={framework} onValueChange={setFramework}>
+   367→              <SelectTrigger className="w-full">
+   368→                <SelectValue placeholder="Select framework" />
+   369→              </SelectTrigger>
+   370→              <SelectContent>
+   371→                <SelectItem value="nextjs">Next.js</SelectItem>
+   372→                <SelectItem value="react">React</SelectItem>
+   373→                <SelectItem value="node">Node.js</SelectItem>
+   374→                <SelectItem value="static">Static</SelectItem>
+   375→              </SelectContent>
+   376→            </Select>
+   377→          </div>
+   378→
+   379→          <div className="grid gap-2">
+   380→            <Label>Plan</Label>
+   381→            {plansLoading ? (
+   382→              <div className="grid gap-2">
+   383→                <Skeleton className="h-20 w-full" />
+   384→                <Skeleton className="h-20 w-full" />
+   385→              </div>
+   386→            ) : (
+   387→              <div className="grid gap-2">
+   388→                {plans.map((plan) => (
+   389→                  <button
+   390→                    key={plan.id}
+   391→                    type="button"
+   392→                    onClick={() => setPlanId(plan.id)}
+   393→                    className={`relative flex items-center gap-3 rounded-lg border p-3 text-left transition-all hover:border-emerald-300 dark:hover:border-emerald-700 ${
+   394→                      planId === plan.id
+   395→                        ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 ring-1 ring-emerald-500'
+   396→                        : 'border-border'
+   397→                    }`}
+   398→                  >
+   399→                    {plan.popular && (
+   400→                      <Badge className="absolute -top-2 right-3 bg-emerald-600 text-white text-[10px] px-1.5 py-0">
+   401→                        Popular
+   402→                      </Badge>
+   403→                    )}
+   404→                    <div className="flex-1">
+   405→                      <div className="font-medium text-sm">{plan.name}</div>
+   406→                      <div className="text-xs text-muted-foreground mt-0.5">
+   407→                        {plan.cpu} &middot; {plan.ram} &middot; {plan.storage}
+   408→                      </div>
+   409→                    </div>
+   410→                    <div className="text-right">
+   411→                      <div className="font-semibold text-emerald-600 dark:text-emerald-400">
+   412→                        ${plan.price}
+   413→                      </div>
+   414→                      <div className="text-[10px] text-muted-foreground">/mo</div>
+   415→                    </div>
+   416→                  </button>
+   417→                ))}
+   418→              </div>
+   419→            )}
+   420→          </div>
+   421→        </div>
+   422→
+   423→        <DialogFooter>
+   424→          <Button variant="outline" onClick={onClose} disabled={loading}>
+   425→            Cancel
+   426→          </Button>
+   427→          <Button
+   428→            onClick={handleCreate}
+   429→            disabled={loading || !name.trim()}
+   430→            className="bg-emerald-600 hover:bg-emerald-700 text-white"
+   431→          >
+   432→            {loading ? (
+   433→              <>
+   434→                <RefreshCw className="size-4 mr-2 animate-spin" />
+   435→                Creating...
+   436→              </>
+   437→            ) : (
+   438→              <>
+   439→                <Rocket className="size-4 mr-2" />
+   440→                Create Project
+   441→              </>
+   442→            )}
+   443→          </Button>
+   444→        </DialogFooter>
+   445→      </DialogContent>
+   446→    </Dialog>
+   447→  )
+   448→}
+   449→
+   450→function ProjectDetailView({
+   451→  projectId,
+   452→  onBack,
+   453→  onRefresh,
+   454→}: {
+   455→  projectId: string
+   456→  onBack: () => void
+   457→  onRefresh: () => void
+   458→}) {
+   459→  const [project, setProject] = useState<ProjectDetail | null>(null)
+   460→  const [loading, setLoading] = useState(true)
+   461→  const [deploying, setDeploying] = useState(false)
+   462→
+   463→  const fetchProject = useCallback(async () => {
+   464→    try {
+   465→      const res = await fetch(`/api/hosting/${projectId}`, {
+   466→        headers: getAuthHeaders(),
+   467→      })
+   468→      const data = await res.json()
+   469→      if (!res.ok) {
+   470→        toast.error(data.error || 'Failed to load project')
+   471→        onBack()
+   472→        return
+   473→      }
+   474→      setProject(data.project)
+   475→    } catch {
+   476→      toast.error('Network error')
+   477→      onBack()
+   478→    } finally {
+   479→      setLoading(false)
+   480→    }
+   481→  }, [projectId, onBack])
+   482→
+   483→  useEffect(() => {
+   484→    setLoading(true)
+   485→    fetchProject()
+   486→  }, [fetchProject])
+   487→
+   488→  const handleDeploy = async () => {
+   489→    setDeploying(true)
+   490→    try {
+   491→      const res = await fetch(`/api/hosting/${projectId}/deploy`, {
+   492→        method: 'POST',
+   493→        headers: getAuthHeaders(),
+   494→      })
+   495→      const data = await res.json()
+   496→      if (!res.ok) {
+   497→        toast.error(data.error || 'Deploy failed')
+   498→        return
+   499→      }
+   500→      toast.success('Deployment triggered!')
+   501→      fetchProject()
+   502→      onRefresh()
+   503→    } catch {
+   504→      toast.error('Network error')
+   505→    } finally {
+   506→      setDeploying(false)
+   507→    }
+   508→  }
+   509→
+   510→  const handleStop = async () => {
+   511→    try {
+   512→      const res = await fetch(`/api/hosting/${projectId}`, {
+   513→        method: 'DELETE',
+   514→        headers: getAuthHeaders(),
+   515→      })
+   516→      const data = await res.json()
+   517→      if (!res.ok) {
+   518→        toast.error(data.error || 'Failed to stop project')
+   519→        return
+   520→      }
+   521→      toast.success('Project stopped')
+   522→      fetchProject()
+   523→      onRefresh()
+   524→    } catch {
+   525→      toast.error('Network error')
+   526→    }
+   527→  }
+   528→
+   529→  const handleDelete = async () => {
+   530→    if (!confirm('Are you sure you want to delete this project? This action cannot be undone.')) return
+   531→    try {
+   532→      const res = await fetch(`/api/hosting/${projectId}`, {
+   533→        method: 'DELETE',
+   534→        headers: getAuthHeaders(),
+   535→      })
+   536→      const data = await res.json()
+   537→      if (!res.ok) {
+   538→        toast.error(data.error || 'Failed to delete project')
+   539→        return
+   540→      }
+   541→      toast.success('Project deleted')
+   542→      onRefresh()
+   543→      onBack()
+   544→    } catch {
+   545→      toast.error('Network error')
+   546→    }
+   547→  }
+   548→
+   549→  if (loading) {
+   550→    return (
+   551→      <div className="space-y-4">
+   552→        <Skeleton className="h-8 w-32" />
+   553→        <Skeleton className="h-40 w-full" />
+   554→        <Skeleton className="h-60 w-full" />
+   555→      </div>
+   556→    )
+   557→  }
+   558→
+   559→  if (!project) return null
+   560→
+   561→  return (
+   562→    <div className="space-y-6">
+   563→      {/* Header */}
+   564→      <div className="flex items-center gap-3">
+   565→        <Button variant="ghost" size="sm" onClick={onBack}>
+   566→          <ArrowLeft className="size-4 mr-1" />
+   567→          Back
+   568→        </Button>
+   569→      </div>
+   570→
+   571→      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+   572→        <div>
+   573→          <div className="flex items-center gap-3">
+   574→            <h2 className="text-2xl font-bold">{project.name}</h2>
+   575→            <Badge variant="outline" className={statusColor(project.status)}>
+   576→              {project.status}
+   577→            </Badge>
+   578→            <Badge variant="outline" className={frameworkColor(project.framework)}>
+   579→              {frameworkLabel(project.framework)}
+   580→            </Badge>
+   581→          </div>
+   582→          <div className="flex items-center gap-2 mt-1 text-sm text-muted-foreground">
+   583→            <Globe className="size-3.5" />
+   584→            <a
+   585→              href={`https://${project.subdomain}`}
+   586→              target="_blank"
+   587→              rel="noopener noreferrer"
+   588→              className="hover:text-emerald-600 transition-colors font-mono"
+   589→            >
+   590→              {project.subdomain}
+   591→              <ExternalLink className="size-3 inline ml-1" />
+   592→            </a>
+   593→          </div>
+   594→          {project.customDomain && (
+   595→            <div className="flex items-center gap-2 mt-1 text-sm text-muted-foreground">
+   596→              <Globe className="size-3.5" />
+   597→              <span className="font-mono">{project.customDomain}</span>
+   598→            </div>
+   599→          )}
+   600→        </div>
+   601→
+   602→        <div className="flex items-center gap-2 flex-wrap">
+   603→          <Button
+   604→            onClick={handleDeploy}
+   605→            disabled={deploying || project.status !== 'running'}
+   606→            className="bg-emerald-600 hover:bg-emerald-700 text-white"
+   607→          >
+   608→            {deploying ? (
+   609→              <RefreshCw className="size-4 mr-2 animate-spin" />
+   610→            ) : (
+   611→              <Rocket className="size-4 mr-2" />
+   612→            )}
+   613→            Deploy
+   614→          </Button>
+   615→          <Button variant="outline" onClick={handleStop} disabled={project.status !== 'running'}>
+   616→            <StopCircle className="size-4 mr-2" />
+   617→            Stop
+   618→          </Button>
+   619→          <DropdownMenu>
+   620→            <DropdownMenuTrigger asChild>
+   621→              <Button variant="outline" size="icon">
+   622→                <MoreVertical className="size-4" />
+   623→              </Button>
+   624→            </DropdownMenuTrigger>
+   625→            <DropdownMenuContent align="end">
+   626→              <DropdownMenuItem className="text-red-600 focus:text-red-600" onClick={handleDelete}>
+   627→                <Trash2 className="size-4 mr-2" />
+   628→                Delete Project
+   629→              </DropdownMenuItem>
+   630→            </DropdownMenuContent>
+   631→          </DropdownMenu>
+   632→        </div>
+   633→      </div>
+   634→
+   635→      <Separator />
+   636→
+   637→      {/* Info Cards */}
+   638→      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+   639→        <Card>
+   640→          <CardHeader className="pb-2">
+   641→            <CardDescription className="flex items-center gap-1.5">
+   642→              <Server className="size-3.5" />
+   643→              Server
+   644→            </CardDescription>
+   645→          </CardHeader>
+   646→          <CardContent>
+   647→            {project.server ? (
+   648→              <div>
+   649→                <div className="font-medium text-sm">{project.server.name}</div>
+   650→                <div className="text-xs text-muted-foreground font-mono">{project.server.ip}</div>
+   651→                <div className="text-xs text-muted-foreground">{project.server.region}</div>
+   652→              </div>
+   653→            ) : (
+   654→              <div className="text-sm text-muted-foreground">No server assigned</div>
+   655→            )}
+   656→          </CardContent>
+   657→        </Card>
+   658→
+   659→        <Card>
+   660→          <CardHeader className="pb-2">
+   661→            <CardDescription className="flex items-center gap-1.5">
+   662→              <Shield className="size-3.5" />
+   663→              Security
+   664→            </CardDescription>
+   665→          </CardHeader>
+   666→          <CardContent>
+   667→            <div className="text-sm">
+   668→              <div className="flex items-center gap-2">
+   669→                <div className={`size-2 rounded-full ${project.sslEnabled ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+   670→                SSL {project.sslEnabled ? 'Enabled' : 'Disabled'}
+   671→              </div>
+   672→              <div className="flex items-center gap-2 mt-1">
+   673→                <div className={`size-2 rounded-full ${project.autoDeploy ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+   674→                Auto Deploy {project.autoDeploy ? 'On' : 'Off'}
+   675→              </div>
+   676→            </div>
+   677→          </CardContent>
+   678→        </Card>
+   679→
+   680→        <Card>
+   681→          <CardHeader className="pb-2">
+   682→            <CardDescription className="flex items-center gap-1.5">
+   683→              <Globe className="size-3.5" />
+   684→              Domains
+   685→            </CardDescription>
+   686→          </CardHeader>
+   687→          <CardContent>
+   688→            {project.domains.length > 0 ? (
+   689→              <div className="space-y-1">
+   690→                {project.domains.map((d) => (
+   691→                  <div key={d.id} className="text-sm font-mono flex items-center gap-1.5">
+   692→                    <div className={`size-1.5 rounded-full ${d.status === 'active' ? 'bg-emerald-500' : 'bg-yellow-500'}`} />
+   693→                    {d.name}
+   694→                  </div>
+   695→                ))}
+   696→              </div>
+   697→            ) : (
+   698→              <div className="text-sm text-muted-foreground">No custom domains</div>
+   699→            )}
+   700→          </CardContent>
+   701→        </Card>
+   702→
+   703→        <Card>
+   704→          <CardHeader className="pb-2">
+   705→            <CardDescription className="flex items-center gap-1.5">
+   706→              <Zap className="size-3.5" />
+   707→              Quick Info
+   708→            </CardDescription>
+   709→          </CardHeader>
+   710→          <CardContent>
+   711→            <div className="text-sm space-y-1">
+   712→              <div className="text-muted-foreground">Created: {formatDate(project.createdAt)}</div>
+   713→              <div className="text-muted-foreground">Updated: {formatDate(project.updatedAt)}</div>
+   714→              {project.repoUrl && (
+   715→                <div className="text-muted-foreground truncate">Repo: {project.repoUrl}</div>
+   716→              )}
+   717→            </div>
+   718→          </CardContent>
+   719→        </Card>
+   720→      </div>
+   721→
+   722→      {/* Deployment History */}
+   723→      <Card>
+   724→        <CardHeader>
+   725→          <CardTitle className="text-lg">Deployment History</CardTitle>
+   726→          <CardDescription>Recent deployments for this project</CardDescription>
+   727→        </CardHeader>
+   728→        <CardContent>
+   729→          {project.deployments.length === 0 ? (
+   730→            <div className="text-center py-8 text-muted-foreground">
+   731→              <Rocket className="size-8 mx-auto mb-2 opacity-40" />
+   732→              <p className="text-sm">No deployments yet</p>
+   733→            </div>
+   734→          ) : (
+   735→            <div className="max-h-96 overflow-y-auto">
+   736→              <Table>
+   737→                <TableHeader>
+   738→                  <TableRow>
+   739→                    <TableHead>Status</TableHead>
+   740→                    <TableHead>Branch</TableHead>
+   741→                    <TableHead>Commit</TableHead>
+   742→                    <TableHead>Duration</TableHead>
+   743→                    <TableHead>Trigger</TableHead>
+   744→                    <TableHead>Date</TableHead>
+   745→                  </TableRow>
+   746→                </TableHeader>
+   747→                <TableBody>
+   748→                  {project.deployments.map((dep) => (
+   749→                    <TableRow key={dep.id}>
+   750→                      <TableCell>
+   751→                        <div className="flex items-center gap-2">
+   752→                          {deployStatusIcon(dep.status)}
+   753→                          <Badge variant="outline" className={statusColor(dep.status)}>
+   754→                            {dep.status}
+   755→                          </Badge>
+   756→                        </div>
+   757→                      </TableCell>
+   758→                      <TableCell>
+   759→                        <div className="flex items-center gap-1 text-xs">
+   760→                          <GitBranch className="size-3 text-muted-foreground" />
+   761→                          {dep.branch}
+   762→                        </div>
+   763→                      </TableCell>
+   764→                      <TableCell className="font-mono text-xs">
+   765→                        {dep.commit ? dep.commit.substring(0, 8) : '-'}
+   766→                      </TableCell>
+   767→                      <TableCell className="text-xs">
+   768→                        {dep.duration ? `${dep.duration}s` : '-'}
+   769→                      </TableCell>
+   770→                      <TableCell className="text-xs capitalize">{dep.triggeredBy}</TableCell>
+   771→                      <TableCell className="text-xs text-muted-foreground">
+   772→                        {formatDate(dep.createdAt)}
+   773→                      </TableCell>
+   774→                    </TableRow>
+   775→                  ))}
+   776→                </TableBody>
+   777→              </Table>
+   778→            </div>
+   779→          )}
+   780→        </CardContent>
+   781→      </Card>
+   782→    </div>
+   783→  )
+   784→}
+   785→
+   786→// ─── Main Component ─────────────────────────────────────────────
+   787→
+   788→export default function HostingPanel() {
+   789→  const [projects, setProjects] = useState<Project[]>([])
+   790→  const [loading, setLoading] = useState(true)
+   791→  const [showCreate, setShowCreate] = useState(false)
+   792→  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
+   793→
+   794→  const fetchProjects = useCallback(async () => {
+   795→    try {
+   796→      const res = await fetch('/api/hosting', {
+   797→        headers: getAuthHeaders(),
+   798→      })
+   799→      const data = await res.json()
+   800→      if (res.ok) {
+   801→        setProjects(data.projects || [])
+   802→      } else {
+   803→        toast.error(data.error || 'Failed to load projects')
+   804→      }
+   805→    } catch {
+   806→      toast.error('Network error. Please try again.')
+   807→    } finally {
+   808→      setLoading(false)
+   809→    }
+   810→  }, [])
+   811→
+   812→  useEffect(() => {
+   813→    fetchProjects()
+   814→  }, [fetchProjects])
+   815→
+   816→  // Detail View
+   817→  if (selectedProjectId) {
+   818→    return (
+   819→      <div>
+   820→        <ProjectDetailView
+   821→          projectId={selectedProjectId}
+   822→          onBack={() => setSelectedProjectId(null)}
+   823→          onRefresh={fetchProjects}
+   824→        />
+   825→      </div>
+   826→    )
+   827→  }
+   828→
+   829→  // List View
+   830→  return (
+   831→    <div className="space-y-6">
+   832→      {/* Header */}
+   833→      <div className="flex items-center justify-between">
+   834→        <div>
+   835→          <h2 className="text-2xl font-bold">Hosting Projects</h2>
+   836→          <p className="text-sm text-muted-foreground mt-1">
+   837→            Manage your deployed applications and services
+   838→          </p>
+   839→        </div>
+   840→        <Button
+   841→          onClick={() => setShowCreate(true)}
+   842→          className="bg-emerald-600 hover:bg-emerald-700 text-white"
+   843→        >
+   844→          <Plus className="size-4 mr-2" />
+   845→          New Project
+   846→        </Button>
+   847→      </div>
+   848→
+   849→      {/* Project Grid */}
+   850→      {loading ? (
+   851→        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+   852→          <ProjectCardSkeleton />
+   853→          <ProjectCardSkeleton />
+   854→          <ProjectCardSkeleton />
+   855→          <ProjectCardSkeleton />
+   856→        </div>
+   857→      ) : projects.length === 0 ? (
+   858→        <Card className="border-dashed">
+   859→          <CardContent className="flex flex-col items-center justify-center py-16">
+   860→            <Rocket className="size-12 text-muted-foreground/40 mb-4" />
+   861→            <h3 className="text-lg font-semibold mb-1">No projects yet</h3>
+   862→            <p className="text-sm text-muted-foreground mb-4">
+   863→              Create your first hosting project to get started
+   864→            </p>
+   865→            <Button
+   866→              onClick={() => setShowCreate(true)}
+   867→              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+   868→            >
+   869→              <Plus className="size-4 mr-2" />
+   870→              Create Project
+   871→            </Button>
+   872→          </CardContent>
+   873→        </Card>
+   874→      ) : (
+   875→        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+   876→          {projects.map((project) => (
+   877→            <ProjectCard
+   878→              key={project.id}
+   879→              project={project}
+   880→              onClick={() => setSelectedProjectId(project.id)}
+   881→            />
+   882→          ))}
+   883→        </div>
+   884→      )}
+   885→
+   886→      <CreateProjectDialog
+   887→        open={showCreate}
+   888→        onClose={() => setShowCreate(false)}
+   889→        onCreated={fetchProjects}
+   890→      />
+   891→    </div>
+   892→  )
+   893→}
+   894→

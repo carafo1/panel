@@ -11,6 +11,24 @@ import {
 } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import {
   Table,
   TableHeader,
@@ -20,7 +38,20 @@ import {
   TableCell,
 } from '@/components/ui/table'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Check, CreditCard, Zap, Crown, Building2, ArrowRight } from 'lucide-react'
+import {
+  Check,
+  CreditCard,
+  Zap,
+  Crown,
+  Building2,
+  ArrowRight,
+  Globe,
+  Server,
+  Package,
+  ExternalLink,
+  Loader2,
+  Search,
+} from 'lucide-react'
 import { toast } from 'sonner'
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -46,7 +77,7 @@ interface Subscription {
   status: string
   currentPeriodStart: string
   currentPeriodEnd: string
-  plan?: { name: string; price: number; slug: string }
+  plan?: { name: string; price: number; slug: string; id: string }
 }
 
 interface Payment {
@@ -58,6 +89,17 @@ interface Payment {
   metadata: { planName?: string; domainName?: string; purchaseType?: string } | null
   createdAt: string
   plan: { name: string; price: number } | null
+}
+
+type PurchaseType = 'hosting' | 'domain' | 'both'
+
+interface CheckoutResult {
+  payment: { id: string; amount: number; currency: string; status: string; type: string }
+  subscription: { id: string; status: string; planName: string; planId: string } | null
+  project?: { id: string; name: string; slug: string; subdomain: string; status: string; framework: string; customDomain: string | null } | null
+  domain?: { id: string; name: string; status: string; registrar: string } | null
+  deployment?: { id: string; status: string; deployUrl: string | null; branch: string } | null
+  automation?: { processed: boolean; actionsCount: number; results: unknown[] }
 }
 
 // ── API helper ─────────────────────────────────────────────────────────
@@ -111,6 +153,13 @@ const PLAN_DEFINITIONS: {
   },
 ]
 
+const FRAMEWORKS = [
+  { value: 'nextjs', label: 'Next.js' },
+  { value: 'react', label: 'React' },
+  { value: 'node', label: 'Node.js' },
+  { value: 'static', label: 'Static Site' },
+]
+
 // ── Status badge helper ────────────────────────────────────────────────
 function PaymentStatusBadge({ status }: { status: string }) {
   const map: Record<string, { className: string; label: string }> = {
@@ -127,6 +176,323 @@ function PaymentStatusBadge({ status }: { status: string }) {
   )
 }
 
+// ── Checkout Dialog Component ──────────────────────────────────────────
+function CheckoutDialog({
+  open,
+  onOpenChange,
+  plan,
+  planDefinition,
+  onSuccess,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  plan: Plan
+  planDefinition: typeof PLAN_DEFINITIONS[number]
+  onSuccess: (result: CheckoutResult) => void
+}) {
+  const [purchaseType, setPurchaseType] = useState<PurchaseType>('hosting')
+  const [domainName, setDomainName] = useState('')
+  const [projectName, setProjectName] = useState('')
+  const [framework, setFramework] = useState('nextjs')
+  const [loading, setLoading] = useState(false)
+  const [success, setSuccess] = useState<CheckoutResult | null>(null)
+
+  const showDomain = purchaseType === 'domain' || purchaseType === 'both'
+  const showProject = purchaseType === 'hosting' || purchaseType === 'both'
+
+  const calculateTotal = () => {
+    if (purchaseType === 'domain') return 12.99
+    if (purchaseType === 'both') return plan.price + 12.99
+    return plan.price
+  }
+
+  const handlePurchase = async () => {
+    if (showDomain && !domainName.trim()) {
+      toast.error('Please enter a domain name')
+      return
+    }
+    if (showProject && !projectName.trim()) {
+      toast.error('Please enter a project name')
+      return
+    }
+
+    setLoading(true)
+    try {
+      const result = await apiFetch<CheckoutResult>('/billing/checkout', {
+        method: 'POST',
+        body: JSON.stringify({
+          planId: plan.id,
+          type: purchaseType,
+          domainName: showDomain ? domainName.trim() : undefined,
+          projectName: showProject ? projectName.trim() : undefined,
+          framework: showProject ? framework : undefined,
+        }),
+      })
+      setSuccess(result)
+      toast.success('Purchase completed successfully!')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Checkout failed')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleClose = () => {
+    if (success) {
+      onSuccess(success)
+    }
+    setSuccess(null)
+    setPurchaseType('hosting')
+    setDomainName('')
+    setProjectName('')
+    setFramework('nextjs')
+    onOpenChange(false)
+  }
+
+  const Icon = planDefinition.icon
+
+  return (
+    <Dialog open={open} onOpenChange={handleClose}>
+      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+        {success ? (
+          // ── Success State ──────────────────────────────────────
+          <div className="space-y-4">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-emerald-700">
+                <Check className="size-5" />
+                Purchase Complete!
+              </DialogTitle>
+              <DialogDescription>
+                Your resources have been provisioned automatically.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-3 rounded-lg border p-4 bg-emerald-50/50">
+              {success.project && (
+                <div className="flex items-start gap-3">
+                  <Server className="size-5 text-emerald-600 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="font-medium text-sm">Project Created</p>
+                    <p className="text-sm text-muted-foreground">{success.project.name}</p>
+                    <p className="text-xs text-emerald-600 mt-1">
+                      https://{success.project.subdomain}
+                    </p>
+                    {success.project.customDomain && (
+                      <p className="text-xs text-emerald-600">
+                        Custom: {success.project.customDomain}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {success.domain && (
+                <div className="flex items-start gap-3">
+                  <Globe className="size-5 text-emerald-600 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="font-medium text-sm">Domain Registered</p>
+                    <p className="text-sm text-muted-foreground">{success.domain.name}</p>
+                    <p className="text-xs text-emerald-600 mt-1">
+                      Status: {success.domain.status}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {success.deployment && (
+                <div className="flex items-start gap-3">
+                  <Package className="size-5 text-emerald-600 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="font-medium text-sm">Initial Deployment</p>
+                    <p className="text-xs text-emerald-600 mt-1">
+                      Status: {success.deployment.status} | Branch: {success.deployment.branch}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {success.subscription && (
+                <div className="flex items-start gap-3">
+                  <CreditCard className="size-5 text-emerald-600 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="font-medium text-sm">Subscription Active</p>
+                    <p className="text-sm text-muted-foreground">
+                      {success.subscription.planName} Plan
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <DialogFooter>
+              <Button onClick={handleClose} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+                Done
+              </Button>
+            </DialogFooter>
+          </div>
+        ) : (
+          // ── Checkout Form ──────────────────────────────────────
+          <div className="space-y-5">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Icon className="size-5 text-emerald-600" />
+                {planDefinition.name} Plan Checkout
+              </DialogTitle>
+              <DialogDescription>
+                Configure your purchase and complete checkout.
+              </DialogDescription>
+            </DialogHeader>
+
+            {/* Plan summary */}
+            <div className="rounded-lg border bg-muted/30 p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium">{planDefinition.name} Plan</span>
+                <span className="text-sm font-bold">${planDefinition.price}/mo</span>
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {planDefinition.features.slice(0, 4).map((f) => (
+                  <span key={f} className="text-xs bg-background border rounded px-1.5 py-0.5">
+                    {f}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* Purchase type selection */}
+            <div className="space-y-2">
+              <Label>What would you like to purchase?</Label>
+              <RadioGroup
+                value={purchaseType}
+                onValueChange={(v) => setPurchaseType(v as PurchaseType)}
+                className="grid grid-cols-3 gap-2"
+              >
+                <Label
+                  htmlFor="type-hosting"
+                  className={`flex flex-col items-center gap-1.5 rounded-lg border p-3 cursor-pointer transition-colors hover:bg-emerald-50 ${
+                    purchaseType === 'hosting' ? 'border-emerald-500 bg-emerald-50' : ''
+                  }`}
+                >
+                  <RadioGroupItem value="hosting" id="type-hosting" className="sr-only" />
+                  <Server className="size-5 text-emerald-600" />
+                  <span className="text-xs font-medium text-center">Hosting Only</span>
+                  <span className="text-xs text-muted-foreground">${plan.price}/mo</span>
+                </Label>
+                <Label
+                  htmlFor="type-domain"
+                  className={`flex flex-col items-center gap-1.5 rounded-lg border p-3 cursor-pointer transition-colors hover:bg-emerald-50 ${
+                    purchaseType === 'domain' ? 'border-emerald-500 bg-emerald-50' : ''
+                  }`}
+                >
+                  <RadioGroupItem value="domain" id="type-domain" className="sr-only" />
+                  <Globe className="size-5 text-emerald-600" />
+                  <span className="text-xs font-medium text-center">Domain Only</span>
+                  <span className="text-xs text-muted-foreground">$12.99/yr</span>
+                </Label>
+                <Label
+                  htmlFor="type-both"
+                  className={`flex flex-col items-center gap-1.5 rounded-lg border p-3 cursor-pointer transition-colors hover:bg-emerald-50 ${
+                    purchaseType === 'both' ? 'border-emerald-500 bg-emerald-50' : ''
+                  }`}
+                >
+                  <RadioGroupItem value="both" id="type-both" className="sr-only" />
+                  <Package className="size-5 text-emerald-600" />
+                  <span className="text-xs font-medium text-center">Hosting + Domain</span>
+                  <span className="text-xs text-muted-foreground">${(plan.price + 12.99).toFixed(2)}</span>
+                </Label>
+              </RadioGroup>
+            </div>
+
+            {/* Domain input */}
+            {showDomain && (
+              <div className="space-y-2">
+                <Label htmlFor="domain-name">Domain Name</Label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                  <Input
+                    id="domain-name"
+                    placeholder="example.com"
+                    value={domainName}
+                    onChange={(e) => setDomainName(e.target.value)}
+                    className="pl-9"
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Enter the domain you want to register (e.g., myapp.com)
+                </p>
+              </div>
+            )}
+
+            {/* Project input */}
+            {showProject && (
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <Label htmlFor="project-name">Project Name</Label>
+                  <Input
+                    id="project-name"
+                    placeholder="My Awesome Project"
+                    value={projectName}
+                    onChange={(e) => setProjectName(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    A subdomain will be auto-generated (e.g., my-awesome-project.deployhub.io)
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label>Framework</Label>
+                  <Select value={framework} onValueChange={setFramework}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Select framework" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {FRAMEWORKS.map((fw) => (
+                        <SelectItem key={fw.value} value={fw.value}>
+                          {fw.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
+
+            {/* Total */}
+            <div className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50/50 p-3">
+              <span className="text-sm font-medium">Total</span>
+              <span className="text-lg font-bold text-emerald-700">
+                ${calculateTotal().toFixed(2)}
+                {purchaseType !== 'domain' ? '/mo' : '/yr'}
+              </span>
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={handleClose} disabled={loading}>
+                Cancel
+              </Button>
+              <Button
+                onClick={handlePurchase}
+                disabled={loading}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white"
+              >
+                {loading ? (
+                  <span className="flex items-center gap-2">
+                    <Loader2 className="size-4 animate-spin" />
+                    Processing…
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-2">
+                    Complete Purchase
+                    <ArrowRight className="size-4" />
+                  </span>
+                )}
+              </Button>
+            </DialogFooter>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 // ── Component ──────────────────────────────────────────────────────────
 export function BillingPanel() {
   const [plans, setPlans] = useState<Plan[]>([])
@@ -135,39 +501,22 @@ export function BillingPanel() {
   const [loading, setLoading] = useState(true)
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null)
 
+  // Checkout dialog state
+  const [checkoutOpen, setCheckoutOpen] = useState(false)
+  const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null)
+  const [selectedPlanDef, setSelectedPlanDef] = useState<typeof PLAN_DEFINITIONS[number] | null>(null)
+
   const fetchData = useCallback(async () => {
     setLoading(true)
     try {
-      const [plansRes, historyRes] = await Promise.all([
+      const [plansRes, historyRes, subRes] = await Promise.all([
         apiFetch<{ plans: Plan[] }>('/billing/plans'),
         apiFetch<{ payments: Payment[] }>('/billing/history'),
+        apiFetch<{ subscription: Subscription | null }>('/billing/subscription'),
       ])
       setPlans(plansRes.plans)
       setPayments(historyRes.payments)
-
-      // Determine active subscription from payment metadata
-      const activePayment = historyRes.payments.find(
-        (p) => p.status === 'completed' && (p.type === 'hosting' || p.type === 'both')
-      )
-      if (activePayment) {
-        const planId = activePayment.metadata?.planName
-          ? plansRes.plans.find(
-              (pl) => pl.name === activePayment.metadata?.planName
-            )?.id
-          : null
-        setSubscription({
-          id: activePayment.id,
-          planId: planId || '',
-          status: 'active',
-          currentPeriodStart: activePayment.createdAt,
-          currentPeriodEnd: new Date(
-            new Date(activePayment.createdAt).getTime() + 30 * 24 * 60 * 60 * 1000
-          ).toISOString(),
-          plan: activePayment.plan
-            ? { name: activePayment.plan.name, price: activePayment.plan.price, slug: activePayment.plan.name.toLowerCase() }
-            : null,
-        })
-      }
+      setSubscription(subRes.subscription)
     } catch {
       toast.error('Failed to load billing data')
     } finally {
@@ -179,20 +528,17 @@ export function BillingPanel() {
     fetchData()
   }, [fetchData])
 
-  const handleCheckout = async (planId: string, planName: string) => {
-    setCheckoutLoading(planId)
-    try {
-      await apiFetch('/billing/checkout', {
-        method: 'POST',
-        body: JSON.stringify({ planId, type: 'hosting' }),
-      })
-      toast.success(`Subscribed to ${planName} plan!`)
-      await fetchData()
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Checkout failed')
-    } finally {
-      setCheckoutLoading(null)
-    }
+  const handleSelectPlan = (plan: Plan, planDef: typeof PLAN_DEFINITIONS[number]) => {
+    setSelectedPlan(plan)
+    setSelectedPlanDef(planDef)
+    setCheckoutOpen(true)
+  }
+
+  const handleCheckoutSuccess = (_result: CheckoutResult) => {
+    setCheckoutOpen(false)
+    setSelectedPlan(null)
+    setSelectedPlanDef(null)
+    fetchData() // Refresh all data
   }
 
   // ── Loading skeleton ────────────────────────────────────────────────
@@ -340,9 +686,25 @@ export function BillingPanel() {
                       disabled={checkoutLoading !== null}
                       onClick={() => {
                         if (matchedPlan) {
-                          handleCheckout(matchedPlan.id, def.name)
+                          handleSelectPlan(matchedPlan, def)
                         } else {
-                          toast.error('Plan not available')
+                          // Fallback: create a plan object from the definition
+                          const fallbackPlan: Plan = {
+                            id: `plan-${def.slug}`,
+                            name: def.name,
+                            slug: def.slug,
+                            description: `${def.name} plan`,
+                            price: def.price,
+                            ram: def.features[0] || '1GB',
+                            cpu: def.features[1] || '1 vCPU',
+                            storage: def.features[2] || '10GB',
+                            bandwidth: def.features[3] || '100GB',
+                            projects: 1,
+                            ssl: true,
+                            customDomain: def.slug !== 'starter',
+                            popular: def.slug === 'pro',
+                          }
+                          handleSelectPlan(fallbackPlan, def)
                         }
                       }}
                     >
@@ -417,6 +779,17 @@ export function BillingPanel() {
           )}
         </CardContent>
       </Card>
+
+      {/* ── Checkout Dialog ───────────────────────────────────────── */}
+      {selectedPlan && selectedPlanDef && (
+        <CheckoutDialog
+          open={checkoutOpen}
+          onOpenChange={setCheckoutOpen}
+          plan={selectedPlan}
+          planDefinition={selectedPlanDef}
+          onSuccess={handleCheckoutSuccess}
+        />
+      )}
     </div>
   )
 }
