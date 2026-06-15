@@ -1,0 +1,1050 @@
+     1→'use client'
+     2→
+     3→import { useState, useEffect, useCallback } from 'react'
+     4→import { apiFetch } from '@/store/auth-store'
+     5→import { toast } from 'sonner'
+     6→import {
+     7→  Card,
+     8→  CardContent,
+     9→  CardHeader,
+    10→  CardTitle,
+    11→  CardDescription,
+    12→} from '@/components/ui/card'
+    13→import { Input } from '@/components/ui/input'
+    14→import { Button } from '@/components/ui/button'
+    15→import { Label } from '@/components/ui/label'
+    16→import { Badge } from '@/components/ui/badge'
+    17→import { Skeleton } from '@/components/ui/skeleton'
+    18→import { Separator } from '@/components/ui/separator'
+    19→import { Switch } from '@/components/ui/switch'
+    20→import { ScrollArea } from '@/components/ui/scroll-area'
+    21→import { Checkbox } from '@/components/ui/checkbox'
+    22→import {
+    23→  Dialog,
+    24→  DialogContent,
+    25→  DialogDescription,
+    26→  DialogFooter,
+    27→  DialogHeader,
+    28→  DialogTitle,
+    29→} from '@/components/ui/dialog'
+    30→import {
+    31→  AlertDialog,
+    32→  AlertDialogAction,
+    33→  AlertDialogCancel,
+    34→  AlertDialogContent,
+    35→  AlertDialogDescription,
+    36→  AlertDialogFooter,
+    37→  AlertDialogHeader,
+    38→  AlertDialogTitle,
+    39→} from '@/components/ui/alert-dialog'
+    40→import {
+    41→  Select,
+    42→  SelectContent,
+    43→  SelectItem,
+    44→  SelectTrigger,
+    45→  SelectValue,
+    46→} from '@/components/ui/select'
+    47→import {
+    48→  Table,
+    49→  TableBody,
+    50→  TableCell,
+    51→  TableHead,
+    52→  TableHeader,
+    53→  TableRow,
+    54→} from '@/components/ui/table'
+    55→import {
+    56→  Webhook,
+    57→  Plus,
+    58→  Trash2,
+    59→  ExternalLink,
+    60→  ArrowLeft,
+    61→  CheckCircle2,
+    62→  XCircle,
+    63→  Clock,
+    64→  Send,
+    65→  Loader2,
+    66→  Copy,
+    67→  Eye,
+    68→  EyeOff,
+    69→  Globe,
+    70→  Zap,
+    71→  Key,
+    72→} from 'lucide-react'
+    73→
+    74→// ── Types ────────────────────────────────────────────────────────────────
+    75→
+    76→interface WebhookItem {
+    77→  id: string
+    78→  name: string
+    79→  url: string
+    80→  secret: string
+    81→  events: string[]
+    82→  active: boolean
+    83→  projectId: string | null
+    84→  project: {
+    85→    id: string
+    86→    name: string
+    87→    slug: string
+    88→  } | null
+    89→  deliveryCount: number
+    90→  lastTriggeredAt: string | null
+    91→  createdAt: string
+    92→  updatedAt: string
+    93→}
+    94→
+    95→interface WebhookDelivery {
+    96→  id: string
+    97→  event: string
+    98→  statusCode: number | null
+    99→  success: boolean
+   100→  duration: number | null
+   101→  createdAt: string
+   102→}
+   103→
+   104→interface WebhookDetail extends WebhookItem {
+   105→  recentDeliveries: WebhookDelivery[]
+   106→}
+   107→
+   108→interface ProjectOption {
+   109→  id: string
+   110→  name: string
+   111→  slug: string
+   112→}
+   113→
+   114→// ── Constants ────────────────────────────────────────────────────────────
+   115→
+   116→const WEBHOOK_EVENTS = [
+   117→  { id: 'deployment.success', label: 'Deployment Success', description: 'When a deployment succeeds' },
+   118→  { id: 'deployment.failed', label: 'Deployment Failed', description: 'When a deployment fails' },
+   119→  { id: 'deployment.started', label: 'Deployment Started', description: 'When a deployment starts' },
+   120→  { id: 'domain.registered', label: 'Domain Registered', description: 'When a new domain is registered' },
+   121→  { id: 'domain.expiring', label: 'Domain Expiring', description: 'When a domain is about to expire' },
+   122→  { id: 'project.created', label: 'Project Created', description: 'When a new project is created' },
+   123→  { id: 'project.deleted', label: 'Project Deleted', description: 'When a project is deleted' },
+   124→  { id: 'ssl.renewed', label: 'SSL Renewed', description: 'When an SSL certificate is renewed' },
+   125→  { id: 'payment.success', label: 'Payment Success', description: 'When a payment succeeds' },
+   126→  { id: 'payment.failed', label: 'Payment Failed', description: 'When a payment fails' },
+   127→]
+   128→
+   129→// ── Helper ───────────────────────────────────────────────────────────────
+   130→
+   131→function truncateUrl(url: string, maxLen = 45): string {
+   132→  if (url.length <= maxLen) return url
+   133→  return url.substring(0, maxLen - 3) + '...'
+   134→}
+   135→
+   136→function formatRelativeTime(dateStr: string | null): string {
+   137→  if (!dateStr) return 'Never'
+   138→  const diff = Date.now() - new Date(dateStr).getTime()
+   139→  const seconds = Math.floor(diff / 1000)
+   140→  if (seconds < 60) return 'Just now'
+   141→  const minutes = Math.floor(seconds / 60)
+   142→  if (minutes < 60) return `${minutes}m ago`
+   143→  const hours = Math.floor(minutes / 60)
+   144→  if (hours < 24) return `${hours}h ago`
+   145→  const days = Math.floor(hours / 24)
+   146→  return `${days}d ago`
+   147→}
+   148→
+   149→function getEventBadgeColor(eventId: string): string {
+   150→  const prefix = eventId.split('.')[0]
+   151→  switch (prefix) {
+   152→    case 'deployment':
+   153→      return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
+   154→    case 'domain':
+   155→      return 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
+   156→    case 'project':
+   157→      return 'bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-300'
+   158→    case 'ssl':
+   159→      return 'bg-cyan-100 text-cyan-700 dark:bg-cyan-950 dark:text-cyan-300'
+   160→    case 'payment':
+   161→      return 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300'
+   162→    default:
+   163→      return 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'
+   164→  }
+   165→}
+   166→
+   167→function getEventLabel(eventId: string): string {
+   168→  const found = WEBHOOK_EVENTS.find((e) => e.id === eventId)
+   169→  return found ? found.label : eventId
+   170→}
+   171→
+   172→// ── Component ────────────────────────────────────────────────────────────
+   173→
+   174→export default function WebhooksPanel() {
+   175→  // ── State ──────────────────────────────────────────────────────────────
+   176→  const [webhooks, setWebhooks] = useState<WebhookItem[]>([])
+   177→  const [loading, setLoading] = useState(true)
+   178→  const [selectedWebhook, setSelectedWebhook] = useState<WebhookDetail | null>(null)
+   179→  const [view, setView] = useState<'list' | 'detail'>('list')
+   180→
+   181→  // Create dialog
+   182→  const [createOpen, setCreateOpen] = useState(false)
+   183→  const [createForm, setCreateForm] = useState({
+   184→    name: '',
+   185→    url: '',
+   186→    projectId: '',
+   187→    events: [] as string[],
+   188→  })
+   189→  const [creating, setCreating] = useState(false)
+   190→  const [projects, setProjects] = useState<ProjectOption[]>([])
+   191→
+   192→  // Delete dialog
+   193→  const [deleteTarget, setDeleteTarget] = useState<WebhookItem | null>(null)
+   194→  const [deleting, setDeleting] = useState(false)
+   195→
+   196→  // Detail view
+   197→  const [deliveries, setDeliveries] = useState<WebhookDelivery[]>([])
+   198→  const [deliveriesLoading, setDeliveriesLoading] = useState(false)
+   199→  const [secretVisible, setSecretVisible] = useState(false)
+   200→  const [testingWebhookId, setTestingWebhookId] = useState<string | null>(null)
+   201→  const [togglingId, setTogglingId] = useState<string | null>(null)
+   202→
+   203→  // ── Fetch webhooks ─────────────────────────────────────────────────────
+   204→  const fetchWebhooks = useCallback(async () => {
+   205→    try {
+   206→      setLoading(true)
+   207→      const data = await apiFetch('/webhooks')
+   208→      setWebhooks(data.webhooks || [])
+   209→    } catch (err) {
+   210→      toast.error('Failed to load webhooks', {
+   211→        description: err instanceof Error ? err.message : 'Unknown error',
+   212→      })
+   213→    } finally {
+   214→      setLoading(false)
+   215→    }
+   216→  }, [])
+   217→
+   218→  // ── Fetch projects for the create dialog ───────────────────────────────
+   219→  const fetchProjects = useCallback(async () => {
+   220→    try {
+   221→      const data = await apiFetch('/hosting')
+   222→      setProjects(
+   223→        (data.projects || []).map((p: { id: string; name: string; slug: string }) => ({
+   224→          id: p.id,
+   225→          name: p.name,
+   226→          slug: p.slug,
+   227→        }))
+   228→      )
+   229→    } catch {
+   230→      // Silently fail — project selector will just be empty
+   231→    }
+   232→  }, [])
+   233→
+   234→  useEffect(() => {
+   235→    fetchWebhooks()
+   236→  }, [fetchWebhooks])
+   237→
+   238→  useEffect(() => {
+   239→    if (createOpen) {
+   240→      fetchProjects()
+   241→    }
+   242→  }, [createOpen, fetchProjects])
+   243→
+   244→  // ── Create webhook ─────────────────────────────────────────────────────
+   245→  const handleCreate = async () => {
+   246→    if (!createForm.name.trim()) {
+   247→      toast.error('Name is required')
+   248→      return
+   249→    }
+   250→    if (!createForm.url.trim()) {
+   251→      toast.error('URL is required')
+   252→      return
+   253→    }
+   254→    try {
+   255→      new URL(createForm.url)
+   256→    } catch {
+   257→      toast.error('Invalid URL format')
+   258→      return
+   259→    }
+   260→    if (createForm.events.length === 0) {
+   261→      toast.error('Select at least one event')
+   262→      return
+   263→    }
+   264→
+   265→    try {
+   266→      setCreating(true)
+   267→      await apiFetch('/webhooks', {
+   268→        method: 'POST',
+   269→        body: JSON.stringify({
+   270→          name: createForm.name.trim(),
+   271→          url: createForm.url.trim(),
+   272→          projectId: createForm.projectId || null,
+   273→          events: createForm.events,
+   274→          active: true,
+   275→        }),
+   276→      })
+   277→      toast.success('Webhook created', {
+   278→        description: `${createForm.name} is now active.`,
+   279→      })
+   280→      setCreateOpen(false)
+   281→      setCreateForm({ name: '', url: '', projectId: '', events: [] })
+   282→      fetchWebhooks()
+   283→    } catch (err) {
+   284→      toast.error('Failed to create webhook', {
+   285→        description: err instanceof Error ? err.message : 'Unknown error',
+   286→      })
+   287→    } finally {
+   288→      setCreating(false)
+   289→    }
+   290→  }
+   291→
+   292→  // ── Delete webhook ─────────────────────────────────────────────────────
+   293→  const handleDelete = async () => {
+   294→    if (!deleteTarget) return
+   295→    try {
+   296→      setDeleting(true)
+   297→      await apiFetch(`/webhooks/${deleteTarget.id}`, {
+   298→        method: 'PATCH',
+   299→        body: JSON.stringify({ _delete: true }),
+   300→      })
+   301→      toast.success('Webhook deleted', {
+   302→        description: `${deleteTarget.name} has been removed.`,
+   303→      })
+   304→      setDeleteTarget(null)
+   305→      if (selectedWebhook?.id === deleteTarget.id) {
+   306→        setSelectedWebhook(null)
+   307→        setView('list')
+   308→      }
+   309→      fetchWebhooks()
+   310→    } catch (err) {
+   311→      toast.error('Failed to delete webhook', {
+   312→        description: err instanceof Error ? err.message : 'Unknown error',
+   313→      })
+   314→    } finally {
+   315→      setDeleting(false)
+   316→    }
+   317→  }
+   318→
+   319→  // ── Toggle active/inactive ─────────────────────────────────────────────
+   320→  const handleToggleActive = async (webhook: WebhookItem) => {
+   321→    try {
+   322→      setTogglingId(webhook.id)
+   323→      await apiFetch(`/webhooks/${webhook.id}`, {
+   324→        method: 'PATCH',
+   325→        body: JSON.stringify({ active: !webhook.active }),
+   326→      })
+   327→      toast.success(webhook.active ? 'Webhook disabled' : 'Webhook enabled', {
+   328→        description: `${webhook.name} is now ${webhook.active ? 'inactive' : 'active'}.`,
+   329→      })
+   330→      fetchWebhooks()
+   331→      // Also refresh detail view if it's the same webhook
+   332→      if (selectedWebhook?.id === webhook.id) {
+   333→        fetchWebhookDetail(webhook.id)
+   334→      }
+   335→    } catch (err) {
+   336→      toast.error('Failed to update webhook', {
+   337→        description: err instanceof Error ? err.message : 'Unknown error',
+   338→      })
+   339→    } finally {
+   340→      setTogglingId(null)
+   341→    }
+   342→  }
+   343→
+   344→  // ── Fetch webhook detail + deliveries ──────────────────────────────────
+   345→  const fetchWebhookDetail = async (id: string) => {
+   346→    try {
+   347→      const data = await apiFetch(`/webhooks/${id}`)
+   348→      setSelectedWebhook(data.webhook)
+   349→      // Recent deliveries come from the detail endpoint
+   350→      setDeliveries(data.webhook?.recentDeliveries || [])
+   351→    } catch (err) {
+   352→      toast.error('Failed to load webhook details', {
+   353→        description: err instanceof Error ? err.message : 'Unknown error',
+   354→      })
+   355→    }
+   356→  }
+   357→
+   358→  const fetchDeliveries = async (id: string) => {
+   359→    try {
+   360→      setDeliveriesLoading(true)
+   361→      const data = await apiFetch(`/webhooks/${id}/deliveries`)
+   362→      setDeliveries(data.deliveries || [])
+   363→    } catch (err) {
+   364→      toast.error('Failed to load deliveries', {
+   365→        description: err instanceof Error ? err.message : 'Unknown error',
+   366→      })
+   367→    } finally {
+   368→      setDeliveriesLoading(false)
+   369→    }
+   370→  }
+   371→
+   372→  // ── Open detail view ───────────────────────────────────────────────────
+   373→  const openDetail = (webhook: WebhookItem) => {
+   374→    setView('detail')
+   375→    setSecretVisible(false)
+   376→    // Set initial data from list item
+   377→    setSelectedWebhook({
+   378→      ...webhook,
+   379→      recentDeliveries: [],
+   380→    })
+   381→    fetchWebhookDetail(webhook.id)
+   382→    fetchDeliveries(webhook.id)
+   383→  }
+   384→
+   385→  // ── Test webhook ───────────────────────────────────────────────────────
+   386→  const handleTestWebhook = async (id: string, name: string) => {
+   387→    try {
+   388→      setTestingWebhookId(id)
+   389→      const data = await apiFetch(`/webhooks/${id}/test`, {
+   390→        method: 'POST',
+   391→      })
+   392→      if (data.delivery?.success) {
+   393→        toast.success('Test delivery succeeded', {
+   394→          description: `Status ${data.delivery.statusCode} in ${data.delivery.duration}ms`,
+   395→        })
+   396→      } else {
+   397→        toast.error('Test delivery failed', {
+   398→          description: data.delivery?.statusCode
+   399→            ? `Status ${data.delivery.statusCode} in ${data.delivery.duration}ms`
+   400→            : 'Could not reach the endpoint',
+   401→        })
+   402→      }
+   403→      // Refresh deliveries if viewing detail
+   404→      if (selectedWebhook?.id === id) {
+   405→        fetchDeliveries(id)
+   406→        fetchWebhookDetail(id)
+   407→      }
+   408→      fetchWebhooks()
+   409→    } catch (err) {
+   410→      toast.error('Test delivery failed', {
+   411→        description: err instanceof Error ? err.message : 'Unknown error',
+   412→      })
+   413→    } finally {
+   414→      setTestingWebhookId(null)
+   415→    }
+   416→  }
+   417→
+   418→  // ── Copy secret ────────────────────────────────────────────────────────
+   419→  const copySecret = (secret: string) => {
+   420→    navigator.clipboard.writeText(secret).then(
+   421→      () => toast.success('Secret copied to clipboard'),
+   422→      () => toast.error('Failed to copy secret')
+   423→    )
+   424→  }
+   425→
+   426→  // ── Event toggle in create form ────────────────────────────────────────
+   427→  const toggleEvent = (eventId: string) => {
+   428→    setCreateForm((prev) => ({
+   429→      ...prev,
+   430→      events: prev.events.includes(eventId)
+   431→        ? prev.events.filter((e) => e !== eventId)
+   432→        : [...prev.events, eventId],
+   433→    }))
+   434→  }
+   435→
+   436→  // ── Render: Loading skeleton ───────────────────────────────────────────
+   437→  if (loading) {
+   438→    return (
+   439→      <div className="space-y-4 p-4 md:p-6">
+   440→        <div className="flex items-center justify-between">
+   441→          <Skeleton className="h-8 w-48" />
+   442→          <Skeleton className="h-10 w-36" />
+   443→        </div>
+   444→        {[1, 2, 3].map((i) => (
+   445→          <Card key={i}>
+   446→            <CardContent className="p-6">
+   447→              <div className="space-y-3">
+   448→                <Skeleton className="h-5 w-40" />
+   449→                <Skeleton className="h-4 w-64" />
+   450→                <div className="flex gap-2">
+   451→                  <Skeleton className="h-6 w-24" />
+   452→                  <Skeleton className="h-6 w-24" />
+   453→                </div>
+   454→              </div>
+   455→            </CardContent>
+   456→          </Card>
+   457→        ))}
+   458→      </div>
+   459→    )
+   460→  }
+   461→
+   462→  // ── Render: Detail view ────────────────────────────────────────────────
+   463→  if (view === 'detail' && selectedWebhook) {
+   464→    return (
+   465→      <div className="space-y-6 p-4 md:p-6">
+   466→        {/* Header */}
+   467→        <div className="flex items-center gap-3">
+   468→          <Button
+   469→            variant="ghost"
+   470→            size="icon"
+   471→            onClick={() => {
+   472→              setView('list')
+   473→              setSelectedWebhook(null)
+   474→              fetchWebhooks()
+   475→            }}
+   476→            className="shrink-0"
+   477→          >
+   478→            <ArrowLeft className="h-4 w-4" />
+   479→          </Button>
+   480→          <div className="min-w-0 flex-1">
+   481→            <h2 className="truncate text-xl font-semibold">{selectedWebhook.name}</h2>
+   482→            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+   483→              <Globe className="h-3.5 w-3.5 shrink-0" />
+   484→              <span className="truncate">{selectedWebhook.url}</span>
+   485→            </div>
+   486→          </div>
+   487→          <div className="flex items-center gap-2">
+   488→            <Button
+   489→              variant="outline"
+   490→              size="sm"
+   491→              onClick={() => handleTestWebhook(selectedWebhook.id, selectedWebhook.name)}
+   492→              disabled={testingWebhookId === selectedWebhook.id}
+   493→            >
+   494→              {testingWebhookId === selectedWebhook.id ? (
+   495→                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+   496→              ) : (
+   497→                <Send className="mr-1.5 h-3.5 w-3.5" />
+   498→              )}
+   499→              Test
+   500→            </Button>
+   501→            <Button
+   502→              variant="outline"
+   503→              size="sm"
+   504→              onClick={() => handleToggleActive(selectedWebhook)}
+   505→              disabled={togglingId === selectedWebhook.id}
+   506→            >
+   507→              {togglingId === selectedWebhook.id ? (
+   508→                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+   509→              ) : null}
+   510→              {selectedWebhook.active ? 'Disable' : 'Enable'}
+   511→            </Button>
+   512→            <Button
+   513→              variant="outline"
+   514→              size="sm"
+   515→              className="text-destructive hover:bg-destructive/10"
+   516→              onClick={() => setDeleteTarget(selectedWebhook)}
+   517→            >
+   518→              <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+   519→              Delete
+   520→            </Button>
+   521→          </div>
+   522→        </div>
+   523→
+   524→        {/* Status & meta */}
+   525→        <Card>
+   526→          <CardHeader className="pb-3">
+   527→            <CardTitle className="text-base">Webhook Information</CardTitle>
+   528→          </CardHeader>
+   529→          <CardContent className="space-y-4">
+   530→            <div className="grid gap-4 sm:grid-cols-2">
+   531→              {/* Status */}
+   532→              <div className="space-y-1">
+   533→                <p className="text-sm font-medium text-muted-foreground">Status</p>
+   534→                <div className="flex items-center gap-2">
+   535→                  {selectedWebhook.active ? (
+   536→                    <Badge className="bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+   537→                      <CheckCircle2 className="mr-1 h-3 w-3" />
+   538→                      Active
+   539→                    </Badge>
+   540→                  ) : (
+   541→                    <Badge variant="secondary">
+   542→                      <XCircle className="mr-1 h-3 w-3" />
+   543→                      Inactive
+   544→                    </Badge>
+   545→                  )}
+   546→                </div>
+   547→              </div>
+   548→
+   549→              {/* Project */}
+   550→              <div className="space-y-1">
+   551→                <p className="text-sm font-medium text-muted-foreground">Project</p>
+   552→                <p className="text-sm">
+   553→                  {selectedWebhook.project ? selectedWebhook.project.name : 'All Projects'}
+   554→                </p>
+   555→              </div>
+   556→
+   557→              {/* Last triggered */}
+   558→              <div className="space-y-1">
+   559→                <p className="text-sm font-medium text-muted-foreground">Last Triggered</p>
+   560→                <div className="flex items-center gap-1.5 text-sm">
+   561→                  <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+   562→                  {formatRelativeTime(selectedWebhook.lastTriggeredAt)}
+   563→                </div>
+   564→              </div>
+   565→
+   566→              {/* Created */}
+   567→              <div className="space-y-1">
+   568→                <p className="text-sm font-medium text-muted-foreground">Created</p>
+   569→                <p className="text-sm">
+   570→                  {new Date(selectedWebhook.createdAt).toLocaleDateString(undefined, {
+   571→                    year: 'numeric',
+   572→                    month: 'short',
+   573→                    day: 'numeric',
+   574→                  })}
+   575→                </p>
+   576→              </div>
+   577→            </div>
+   578→
+   579→            <Separator />
+   580→
+   581→            {/* Events */}
+   582→            <div className="space-y-2">
+   583→              <p className="text-sm font-medium text-muted-foreground">Subscribed Events</p>
+   584→              <div className="flex flex-wrap gap-2">
+   585→                {selectedWebhook.events.map((evt) => (
+   586→                  <Badge key={evt} variant="secondary" className={getEventBadgeColor(evt)}>
+   587→                    <Zap className="mr-1 h-3 w-3" />
+   588→                    {getEventLabel(evt)}
+   589→                  </Badge>
+   590→                ))}
+   591→              </div>
+   592→            </div>
+   593→
+   594→            <Separator />
+   595→
+   596→            {/* Secret */}
+   597→            <div className="space-y-2">
+   598→              <p className="text-sm font-medium text-muted-foreground">
+   599→                <Key className="mr-1 inline h-3.5 w-3.5" />
+   600→                Signing Secret
+   601→              </p>
+   602→              <div className="flex items-center gap-2">
+   603→                <code className="flex-1 rounded-md bg-muted px-3 py-2 text-xs font-mono break-all">
+   604→                  {secretVisible
+   605→                    ? selectedWebhook.secret
+   606→                    : '•••••••••••••••••••••••••••••••••••••••••••'}
+   607→                </code>
+   608→                <Button
+   609→                  variant="ghost"
+   610→                  size="icon"
+   611→                  className="shrink-0"
+   612→                  onClick={() => setSecretVisible(!secretVisible)}
+   613→                >
+   614→                  {secretVisible ? (
+   615→                    <EyeOff className="h-4 w-4" />
+   616→                  ) : (
+   617→                    <Eye className="h-4 w-4" />
+   618→                  )}
+   619→                </Button>
+   620→                <Button
+   621→                  variant="ghost"
+   622→                  size="icon"
+   623→                  className="shrink-0"
+   624→                  onClick={() => copySecret(selectedWebhook.secret)}
+   625→                >
+   626→                  <Copy className="h-4 w-4" />
+   627→                </Button>
+   628→              </div>
+   629→              <p className="text-xs text-muted-foreground">
+   630→                Use this secret to verify webhook signatures. The signature is sent in the{' '}
+   631→                <code className="rounded bg-muted px-1 py-0.5">X-DeployHub-Signature</code> header.
+   632→              </p>
+   633→            </div>
+   634→          </CardContent>
+   635→        </Card>
+   636→
+   637→        {/* Delivery history */}
+   638→        <Card>
+   639→          <CardHeader className="pb-3">
+   640→            <div className="flex items-center justify-between">
+   641→              <CardTitle className="text-base">Delivery History</CardTitle>
+   642→              <Button
+   643→                variant="ghost"
+   644→                size="sm"
+   645→                onClick={() => fetchDeliveries(selectedWebhook.id)}
+   646→                disabled={deliveriesLoading}
+   647→              >
+   648→                {deliveriesLoading ? (
+   649→                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+   650→                ) : null}
+   651→                Refresh
+   652→              </Button>
+   653→            </div>
+   654→            <CardDescription>Recent webhook deliveries and their status</CardDescription>
+   655→          </CardHeader>
+   656→          <CardContent>
+   657→            {deliveriesLoading && deliveries.length === 0 ? (
+   658→              <div className="space-y-3 py-4">
+   659→                {[1, 2, 3].map((i) => (
+   660→                  <Skeleton key={i} className="h-10 w-full" />
+   661→                ))}
+   662→              </div>
+   663→            ) : deliveries.length === 0 ? (
+   664→              <div className="flex flex-col items-center justify-center py-12 text-center">
+   665→                <Send className="mb-3 h-10 w-10 text-muted-foreground/40" />
+   666→                <p className="text-sm font-medium text-muted-foreground">No deliveries yet</p>
+   667→                <p className="mt-1 text-xs text-muted-foreground/70">
+   668→                  Test the webhook or wait for an event to trigger a delivery.
+   669→                </p>
+   670→              </div>
+   671→            ) : (
+   672→              <ScrollArea className="max-h-96">
+   673→                <Table>
+   674→                  <TableHeader>
+   675→                    <TableRow>
+   676→                      <TableHead>Event</TableHead>
+   677→                      <TableHead>Status</TableHead>
+   678→                      <TableHead>Duration</TableHead>
+   679→                      <TableHead className="text-right">Time</TableHead>
+   680→                    </TableRow>
+   681→                  </TableHeader>
+   682→                  <TableBody>
+   683→                    {deliveries.map((d) => (
+   684→                      <TableRow key={d.id}>
+   685→                        <TableCell>
+   686→                          <Badge variant="secondary" className={getEventBadgeColor(d.event)}>
+   687→                            {getEventLabel(d.event)}
+   688→                          </Badge>
+   689→                        </TableCell>
+   690→                        <TableCell>
+   691→                          <div className="flex items-center gap-1.5">
+   692→                            {d.success ? (
+   693→                              <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+   694→                            ) : (
+   695→                              <XCircle className="h-4 w-4 text-destructive" />
+   696→                            )}
+   697→                            <span className="text-sm">
+   698→                              {d.statusCode ?? '—'}
+   699→                            </span>
+   700→                          </div>
+   701→                        </TableCell>
+   702→                        <TableCell className="text-sm text-muted-foreground">
+   703→                          {d.duration != null ? `${d.duration}ms` : '—'}
+   704→                        </TableCell>
+   705→                        <TableCell className="text-right text-sm text-muted-foreground">
+   706→                          {formatRelativeTime(d.createdAt)}
+   707→                        </TableCell>
+   708→                      </TableRow>
+   709→                    ))}
+   710→                  </TableBody>
+   711→                </Table>
+   712→              </ScrollArea>
+   713→            )}
+   714→          </CardContent>
+   715→        </Card>
+   716→
+   717→        {/* Delete confirmation dialog (detail view) */}
+   718→        <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+   719→          <AlertDialogContent>
+   720→            <AlertDialogHeader>
+   721→              <AlertDialogTitle>Delete Webhook</AlertDialogTitle>
+   722→              <AlertDialogDescription>
+   723→                Are you sure you want to delete <strong>{deleteTarget?.name}</strong>? This action
+   724→                cannot be undone. All delivery history will be permanently removed.
+   725→              </AlertDialogDescription>
+   726→            </AlertDialogHeader>
+   727→            <AlertDialogFooter>
+   728→              <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+   729→              <AlertDialogAction
+   730→                onClick={handleDelete}
+   731→                disabled={deleting}
+   732→                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+   733→              >
+   734→                {deleting ? (
+   735→                  <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+   736→                ) : (
+   737→                  <Trash2 className="mr-1.5 h-4 w-4" />
+   738→                )}
+   739→                Delete
+   740→              </AlertDialogAction>
+   741→            </AlertDialogFooter>
+   742→          </AlertDialogContent>
+   743→        </AlertDialog>
+   744→      </div>
+   745→    )
+   746→  }
+   747→
+   748→  // ── Render: List view ──────────────────────────────────────────────────
+   749→  return (
+   750→    <div className="space-y-6 p-4 md:p-6">
+   751→      {/* Header */}
+   752→      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+   753→        <div>
+   754→          <h2 className="text-xl font-semibold">Webhooks</h2>
+   755→          <p className="text-sm text-muted-foreground">
+   756→            Manage webhook endpoints to receive real-time event notifications.
+   757→          </p>
+   758→        </div>
+   759→        <Button
+   760→          onClick={() => setCreateOpen(true)}
+   761→          className="bg-emerald-600 hover:bg-emerald-700 shrink-0"
+   762→        >
+   763→          <Plus className="mr-1.5 h-4 w-4" />
+   764→          New Webhook
+   765→        </Button>
+   766→      </div>
+   767→
+   768→      {/* Empty state */}
+   769→      {webhooks.length === 0 ? (
+   770→        <Card>
+   771→          <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+   772→            <div className="mb-4 rounded-full bg-emerald-100 p-4 dark:bg-emerald-950">
+   773→              <Webhook className="h-8 w-8 text-emerald-600 dark:text-emerald-400" />
+   774→            </div>
+   775→            <h3 className="text-lg font-semibold">No webhooks configured</h3>
+   776→            <p className="mt-1 max-w-sm text-sm text-muted-foreground">
+   777→              Create a webhook to receive HTTP requests when events like deployments, domain changes,
+   778→              or payments occur in your projects.
+   779→            </p>
+   780→            <Button
+   781→              onClick={() => setCreateOpen(true)}
+   782→              className="mt-4 bg-emerald-600 hover:bg-emerald-700"
+   783→            >
+   784→              <Plus className="mr-1.5 h-4 w-4" />
+   785→              Create Your First Webhook
+   786→            </Button>
+   787→          </CardContent>
+   788→        </Card>
+   789→      ) : (
+   790→        /* Webhook list */
+   791→        <div className="grid gap-4">
+   792→          {webhooks.map((wh) => (
+   793→            <Card
+   794→              key={wh.id}
+   795→              className="group transition-shadow hover:shadow-md cursor-pointer"
+   796→              onClick={() => openDetail(wh)}
+   797→            >
+   798→              <CardContent className="p-4 md:p-6">
+   799→                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+   800→                  {/* Left: info */}
+   801→                  <div className="min-w-0 flex-1 space-y-2">
+   802→                    <div className="flex items-center gap-2">
+   803→                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-emerald-100 dark:bg-emerald-950">
+   804→                        <Webhook className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+   805→                      </div>
+   806→                      <div className="min-w-0 flex-1">
+   807→                        <h3 className="font-medium leading-tight">{wh.name}</h3>
+   808→                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+   809→                          <Globe className="h-3 w-3 shrink-0" />
+   810→                          <span className="truncate">{truncateUrl(wh.url)}</span>
+   811→                          <ExternalLink className="h-3 w-3 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+   812→                        </div>
+   813→                      </div>
+   814→                    </div>
+   815→
+   816→                    {/* Events */}
+   817→                    <div className="flex flex-wrap gap-1.5">
+   818→                      {wh.events.slice(0, 3).map((evt) => (
+   819→                        <Badge
+   820→                          key={evt}
+   821→                          variant="secondary"
+   822→                          className={`text-xs ${getEventBadgeColor(evt)}`}
+   823→                        >
+   824→                          {getEventLabel(evt)}
+   825→                        </Badge>
+   826→                      ))}
+   827→                      {wh.events.length > 3 && (
+   828→                        <Badge variant="secondary" className="text-xs">
+   829→                          +{wh.events.length - 3} more
+   830→                        </Badge>
+   831→                      )}
+   832→                    </div>
+   833→
+   834→                    {/* Meta row */}
+   835→                    <div className="flex items-center gap-3 text-xs text-muted-foreground">
+   836→                      {wh.project && (
+   837→                        <span className="flex items-center gap-1">
+   838→                          <Globe className="h-3 w-3" />
+   839→                          {wh.project.name}
+   840→                        </span>
+   841→                      )}
+   842→                      <span className="flex items-center gap-1">
+   843→                        <Clock className="h-3 w-3" />
+   844→                        {formatRelativeTime(wh.lastTriggeredAt)}
+   845→                      </span>
+   846→                      {wh.deliveryCount > 0 && (
+   847→                        <span>{wh.deliveryCount} deliveries</span>
+   848→                      )}
+   849→                    </div>
+   850→                  </div>
+   851→
+   852→                  {/* Right: actions */}
+   853→                  <div className="flex items-center gap-3 shrink-0" onClick={(e) => e.stopPropagation()}>
+   854→                    {/* Active toggle */}
+   855→                    <div className="flex items-center gap-2">
+   856→                      {togglingId === wh.id ? (
+   857→                        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+   858→                      ) : (
+   859→                        <Switch
+   860→                          checked={wh.active}
+   861→                          onCheckedChange={() => handleToggleActive(wh)}
+   862→                          aria-label={`Toggle ${wh.name}`}
+   863→                          className="data-[state=checked]:bg-emerald-600"
+   864→                        />
+   865→                      )}
+   866→                      <span className="text-xs text-muted-foreground">
+   867→                        {wh.active ? 'Active' : 'Inactive'}
+   868→                      </span>
+   869→                    </div>
+   870→
+   871→                    {/* Test */}
+   872→                    <Button
+   873→                      variant="outline"
+   874→                      size="sm"
+   875→                      onClick={() => handleTestWebhook(wh.id, wh.name)}
+   876→                      disabled={testingWebhookId === wh.id || !wh.active}
+   877→                    >
+   878→                      {testingWebhookId === wh.id ? (
+   879→                        <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+   880→                      ) : (
+   881→                        <Send className="mr-1.5 h-3.5 w-3.5" />
+   882→                      )}
+   883→                      Test
+   884→                    </Button>
+   885→
+   886→                    {/* Delete */}
+   887→                    <Button
+   888→                      variant="ghost"
+   889→                      size="icon"
+   890→                      className="text-muted-foreground hover:text-destructive"
+   891→                      onClick={() => setDeleteTarget(wh)}
+   892→                    >
+   893→                      <Trash2 className="h-4 w-4" />
+   894→                    </Button>
+   895→                  </div>
+   896→                </div>
+   897→              </CardContent>
+   898→            </Card>
+   899→          ))}
+   900→        </div>
+   901→      )}
+   902→
+   903→      {/* ── Create Dialog ──────────────────────────────────────────────── */}
+   904→      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+   905→        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+   906→          <DialogHeader>
+   907→            <DialogTitle className="flex items-center gap-2">
+   908→              <Webhook className="h-5 w-5 text-emerald-600" />
+   909→              Create Webhook
+   910→            </DialogTitle>
+   911→            <DialogDescription>
+   912→              Set up a new webhook to receive event notifications at your endpoint.
+   913→            </DialogDescription>
+   914→          </DialogHeader>
+   915→
+   916→          <div className="space-y-5 py-2">
+   917→            {/* Name */}
+   918→            <div className="space-y-2">
+   919→              <Label htmlFor="wh-name">Name</Label>
+   920→              <Input
+   921→                id="wh-name"
+   922→                placeholder="e.g., Slack Notifications"
+   923→                value={createForm.name}
+   924→                onChange={(e) => setCreateForm((p) => ({ ...p, name: e.target.value }))}
+   925→              />
+   926→              <p className="text-xs text-muted-foreground">
+   927→                A descriptive name to identify this webhook.
+   928→              </p>
+   929→            </div>
+   930→
+   931→            {/* URL */}
+   932→            <div className="space-y-2">
+   933→              <Label htmlFor="wh-url">Payload URL</Label>
+   934→              <Input
+   935→                id="wh-url"
+   936→                placeholder="https://example.com/webhooks/deployhub"
+   937→                value={createForm.url}
+   938→                onChange={(e) => setCreateForm((p) => ({ ...p, url: e.target.value }))}
+   939→              />
+   940→              <p className="text-xs text-muted-foreground">
+   941→                The URL where DeployHub will send HTTP POST requests.
+   942→              </p>
+   943→            </div>
+   944→
+   945→            {/* Project selector */}
+   946→            <div className="space-y-2">
+   947→              <Label>Project (Optional)</Label>
+   948→              <Select
+   949→                value={createForm.projectId}
+   950→                onValueChange={(val) =>
+   951→                  setCreateForm((p) => ({ ...p, projectId: val === '__all__' ? '' : val }))
+   952→                }
+   953→              >
+   954→                <SelectTrigger>
+   955→                  <SelectValue placeholder="All Projects" />
+   956→                </SelectTrigger>
+   957→                <SelectContent>
+   958→                  <SelectItem value="__all__">All Projects</SelectItem>
+   959→                  {projects.map((p) => (
+   960→                    <SelectItem key={p.id} value={p.id}>
+   961→                      {p.name}
+   962→                    </SelectItem>
+   963→                  ))}
+   964→                </SelectContent>
+   965→              </Select>
+   966→              <p className="text-xs text-muted-foreground">
+   967→                Limit this webhook to events from a specific project.
+   968→              </p>
+   969→            </div>
+   970→
+   971→            <Separator />
+   972→
+   973→            {/* Events */}
+   974→            <div className="space-y-3">
+   975→              <Label>Events</Label>
+   976→              <p className="text-xs text-muted-foreground">
+   977→                Choose which events should trigger this webhook.
+   978→              </p>
+   979→              <div className="space-y-2">
+   980→                {WEBHOOK_EVENTS.map((evt) => (
+   981→                  <label
+   982→                    key={evt.id}
+   983→                    className="flex items-start gap-3 rounded-lg border p-3 cursor-pointer transition-colors hover:bg-muted/50 has-[:checked]:border-emerald-500 has-[:checked]:bg-emerald-50 dark:has-[:checked]:bg-emerald-950/30"
+   984→                  >
+   985→                    <Checkbox
+   986→                      checked={createForm.events.includes(evt.id)}
+   987→                      onCheckedChange={() => toggleEvent(evt.id)}
+   988→                      className="mt-0.5 data-[state=checked]:bg-emerald-600 data-[state=checked]:border-emerald-600"
+   989→                    />
+   990→                    <div className="space-y-0.5">
+   991→                      <p className="text-sm font-medium leading-none">{evt.label}</p>
+   992→                      <p className="text-xs text-muted-foreground">{evt.description}</p>
+   993→                    </div>
+   994→                  </label>
+   995→                ))}
+   996→              </div>
+   997→            </div>
+   998→          </div>
+   999→
+  1000→          <DialogFooter>
+  1001→            <Button variant="outline" onClick={() => setCreateOpen(false)} disabled={creating}>
+  1002→              Cancel
+  1003→            </Button>
+  1004→            <Button
+  1005→              onClick={handleCreate}
+  1006→              disabled={creating}
+  1007→              className="bg-emerald-600 hover:bg-emerald-700"
+  1008→            >
+  1009→              {creating ? (
+  1010→                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+  1011→              ) : (
+  1012→                <Plus className="mr-1.5 h-4 w-4" />
+  1013→              )}
+  1014→              Create Webhook
+  1015→            </Button>
+  1016→          </DialogFooter>
+  1017→        </DialogContent>
+  1018→      </Dialog>
+  1019→
+  1020→      {/* ── Delete Confirmation (list view) ─────────────────────────────── */}
+  1021→      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+  1022→        <AlertDialogContent>
+  1023→          <AlertDialogHeader>
+  1024→            <AlertDialogTitle>Delete Webhook</AlertDialogTitle>
+  1025→            <AlertDialogDescription>
+  1026→              Are you sure you want to delete <strong>{deleteTarget?.name}</strong>? This action
+  1027→              cannot be undone. All delivery history will be permanently removed.
+  1028→            </AlertDialogDescription>
+  1029→          </AlertDialogHeader>
+  1030→          <AlertDialogFooter>
+  1031→            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+  1032→            <AlertDialogAction
+  1033→              onClick={handleDelete}
+  1034→              disabled={deleting}
+  1035→              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+  1036→            >
+  1037→              {deleting ? (
+  1038→                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+  1039→              ) : (
+  1040→                <Trash2 className="mr-1.5 h-4 w-4" />
+  1041→              )}
+  1042→              Delete
+  1043→            </AlertDialogAction>
+  1044→          </AlertDialogFooter>
+  1045→        </AlertDialogContent>
+  1046→      </AlertDialog>
+  1047→    </div>
+  1048→  )
+  1049→}
+  1050→

@@ -1,0 +1,654 @@
+     1→'use client'
+     2→
+     3→import { useState, useEffect, useCallback } from 'react'
+     4→import {
+     5→  Rocket,
+     6→  ArrowRight,
+     7→  ArrowLeft,
+     8→  Check,
+     9→  Triangle,
+    10→  Hexagon,
+    11→  FileCode,
+    12→  Layout,
+    13→  Search,
+    14→  Globe,
+    15→  Star,
+    16→  Quote,
+    17→  Sparkles,
+    18→  ExternalLink,
+    19→  Loader2,
+    20→} from 'lucide-react'
+    21→import { Button } from '@/components/ui/button'
+    22→import { Input } from '@/components/ui/input'
+    23→import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+    24→import { Badge } from '@/components/ui/badge'
+    25→import { useAuthStore } from '@/store/auth-store'
+    26→import { toast } from 'sonner'
+    27→
+    28→/* ── Types ── */
+    29→interface FrameworkOption {
+    30→  id: string
+    31→  name: string
+    32→  icon: React.ElementType
+    33→  description: string
+    34→  color: string
+    35→}
+    36→
+    37→interface DomainResult {
+    38→  domain: string
+    39→  available: boolean
+    40→  price: number | null
+    41→  message: string
+    42→  suggestions?: Array<{ domain: string; available: boolean; price: number }>
+    43→}
+    44→
+    45→interface PlanOption {
+    46→  id: string
+    47→  name: string
+    48→  price: number
+    49→  description: string
+    50→  features: string[]
+    51→  popular?: boolean
+    52→}
+    53→
+    54→/* ── Data ── */
+    55→const FRAMEWORKS: FrameworkOption[] = [
+    56→  { id: 'nextjs', name: 'Next.js', icon: Triangle, description: 'Full-stack React framework with SSR', color: 'text-black dark:text-white' },
+    57→  { id: 'react', name: 'React', icon: Hexagon, description: 'Client-side SPA with React', color: 'text-sky-500' },
+    58→  { id: 'nodejs', name: 'Node.js', icon: FileCode, description: 'Backend API server', color: 'text-green-600' },
+    59→  { id: 'static', name: 'Static', icon: Layout, description: 'HTML/CSS/JS static site', color: 'text-orange-500' },
+    60→]
+    61→
+    62→const STEP_LABELS = ['Welcome', 'Project', 'Domain', 'Plan', 'Deploy']
+    63→
+    64→/* ── Confetti particles ── */
+    65→function ConfettiEffect() {
+    66→  const particles = Array.from({ length: 30 }, (_, i) => ({
+    67→    id: i,
+    68→    left: `${Math.random() * 100}%`,
+    69→    delay: `${Math.random() * 0.8}s`,
+    70→    color: ['#10b981', '#34d399', '#6ee7b7', '#fbbf24', '#f59e0b', '#8b5cf6', '#ec4899'][i % 7],
+    71→    size: Math.random() * 8 + 4,
+    72→  }))
+    73→
+    74→  return (
+    75→    <div className="absolute inset-0 overflow-hidden pointer-events-none">
+    76→      {particles.map((p) => (
+    77→        <div
+    78→          key={p.id}
+    79→          className="absolute animate-confetti"
+    80→          style={{
+    81→            left: p.left,
+    82→            top: '30%',
+    83→            animationDelay: p.delay,
+    84→            width: p.size,
+    85→            height: p.size,
+    86→            backgroundColor: p.color,
+    87→            borderRadius: Math.random() > 0.5 ? '50%' : '2px',
+    88→          }}
+    89→        />
+    90→      ))}
+    91→    </div>
+    92→  )
+    93→}
+    94→
+    95→/* ── Main Component ── */
+    96→interface OnboardingWizardProps {
+    97→  onComplete: () => void
+    98→  onSkip: () => void
+    99→}
+   100→
+   101→export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizardProps) {
+   102→  const [step, setStep] = useState(1)
+   103→  const [projectName, setProjectName] = useState('my-first-app')
+   104→  const [framework, setFramework] = useState('nextjs')
+   105→  const [domainSearch, setDomainSearch] = useState('')
+   106→  const [domainResults, setDomainResults] = useState<DomainResult | null>(null)
+   107→  const [selectedDomain, setSelectedDomain] = useState<string | null>(null)
+   108→  const [useFreeSubdomain, setUseFreeSubdomain] = useState(false)
+   109→  const [plans, setPlans] = useState<PlanOption[]>([])
+   110→  const [selectedPlan, setSelectedPlan] = useState<string | null>(null)
+   111→  const [deploying, setDeploying] = useState(false)
+   112→  const [deploySuccess, setDeploySuccess] = useState(false)
+   113→  const [deployUrl, setDeployUrl] = useState('')
+   114→  const [searchingDomain, setSearchingDomain] = useState(false)
+   115→  const [loadingPlans, setLoadingPlans] = useState(false)
+   116→  const { user, token } = useAuthStore()
+   117→
+   118→  // Fetch plans on mount
+   119→  useEffect(() => {
+   120→    async function fetchPlans() {
+   121→      setLoadingPlans(true)
+   122→      try {
+   123→        const res = await fetch('/api/billing/plans')
+   124→        const data = await res.json()
+   125→        if (data.plans) {
+   126→          const mapped = data.plans.map((p: Record<string, unknown>) => ({
+   127→            id: p.id as string,
+   128→            name: p.name as string,
+   129→            price: p.price as number,
+   130→            description: p.name === 'Starter'
+   131→              ? 'Perfect for side projects'
+   132→              : p.name === 'Pro'
+   133→                ? 'For growing teams and businesses'
+   134→                : 'For large-scale operations',
+   135→            features: Array.isArray(p.features) ? p.features as string[] : [],
+   136→            popular: p.name === 'Pro',
+   137→          }))
+   138→          setPlans(mapped)
+   139→          setSelectedPlan(mapped.find((p: PlanOption) => p.name === 'Starter')?.id || mapped[0]?.id || null)
+   140→        }
+   141→      } catch {
+   142→        // fallback plans
+   143→        const fallback = [
+   144→          { id: 'starter', name: 'Starter', price: 9, description: 'Perfect for side projects', features: ['1GB RAM', '1 vCPU', '10GB Storage', '1 Project', 'Free SSL'], popular: false },
+   145→          { id: 'pro', name: 'Pro', price: 29, description: 'For growing teams', features: ['4GB RAM', '2 vCPU', '50GB Storage', '5 Projects', 'Free SSL', 'Custom Domains'], popular: true },
+   146→          { id: 'business', name: 'Business', price: 79, description: 'For large-scale operations', features: ['16GB RAM', '4 vCPU', '200GB Storage', 'Unlimited Projects', 'Free SSL', 'Custom Domains', 'Priority Support'], popular: false },
+   147→        ]
+   148→        setPlans(fallback)
+   149→        setSelectedPlan('starter')
+   150→      }
+   151→      setLoadingPlans(false)
+   152→    }
+   153→    fetchPlans()
+   154→  }, [])
+   155→
+   156→  // Search domains
+   157→  const handleDomainSearch = useCallback(async () => {
+   158→    if (!domainSearch.trim()) return
+   159→    setSearchingDomain(true)
+   160→    try {
+   161→      const res = await fetch('/api/domains/search', {
+   162→        method: 'POST',
+   163→        headers: { 'Content-Type': 'application/json' },
+   164→        body: JSON.stringify({ domain: domainSearch.trim() }),
+   165→      })
+   166→      const data = await res.json()
+   167→      setDomainResults(data)
+   168→      setUseFreeSubdomain(false)
+   169→      setSelectedDomain(null)
+   170→    } catch {
+   171→      toast.error('Failed to search domains')
+   172→    }
+   173→    setSearchingDomain(false)
+   174→  }, [domainSearch])
+   175→
+   176→  // Deploy
+   177→  const handleDeploy = useCallback(async () => {
+   178→    if (!selectedPlan || !token) return
+   179→    setDeploying(true)
+   180→    try {
+   181→      const slug = projectName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+   182→      const type = selectedDomain && !useFreeSubdomain ? 'both' : 'hosting'
+   183→      const res = await fetch('/api/billing/checkout', {
+   184→        method: 'POST',
+   185→        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+   186→        body: JSON.stringify({
+   187→          planId: selectedPlan,
+   188→          type,
+   189→          projectName,
+   190→          framework,
+   191→          domainName: selectedDomain && !useFreeSubdomain ? selectedDomain : undefined,
+   192→        }),
+   193→      })
+   194→      const data = await res.json()
+   195→      if (res.ok) {
+   196→        const url = data.project?.subdomain || `${slug}.deployhub.io`
+   197→        setDeployUrl(url)
+   198→        setDeploySuccess(true)
+   199→        toast.success('Deployment successful!')
+   200→      } else {
+   201→        toast.error(data.error || 'Deployment failed')
+   202→      }
+   203→    } catch {
+   204→      toast.error('Deployment failed. Please try again.')
+   205→    }
+   206→    setDeploying(false)
+   207→  }, [selectedPlan, token, projectName, framework, selectedDomain, useFreeSubdomain])
+   208→
+   209→  // Progress
+   210→  const progress = (step / 5) * 100
+   211→  const slug = projectName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+   212→
+   213→  const selectedPlanData = plans.find((p) => p.id === selectedPlan)
+   214→  const monthlyCost = selectedPlanData ? selectedPlanData.price : 0
+   215→
+   216→  return (
+   217→    <div className="fixed inset-0 z-[100] bg-background/95 backdrop-blur-sm flex items-center justify-center p-4">
+   218→      <div className="w-full max-w-2xl animate-fade-in-up">
+   219→        {/* Progress Bar */}
+   220→        <div className="mb-8">
+   221→          <div className="flex items-center justify-between mb-3">
+   222→            {STEP_LABELS.map((label, i) => {
+   223→              const stepNum = i + 1
+   224→              const isCompleted = step > stepNum
+   225→              const isCurrent = step === stepNum
+   226→              return (
+   227→                <div key={label} className="flex flex-col items-center gap-1.5">
+   228→                  <div
+   229→                    className={`flex size-9 items-center justify-center rounded-full text-sm font-semibold transition-all duration-300 ${
+   230→                      isCompleted
+   231→                        ? 'bg-emerald-500 text-white'
+   232→                        : isCurrent
+   233→                          ? 'bg-emerald-500/10 text-emerald-600 border-2 border-emerald-500'
+   234→                          : 'bg-muted text-muted-foreground'
+   235→                    }`}
+   236→                  >
+   237→                    {isCompleted ? <Check className="size-4" /> : stepNum}
+   238→                  </div>
+   239→                  <span className={`text-[10px] font-medium hidden sm:block ${isCurrent ? 'text-emerald-600' : 'text-muted-foreground'}`}>
+   240→                    {label}
+   241→                  </span>
+   242→                </div>
+   243→              )
+   244→            })}
+   245→          </div>
+   246→          <div className="h-2 bg-muted rounded-full overflow-hidden">
+   247→            <div
+   248→              className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 rounded-full transition-all duration-500 ease-out"
+   249→              style={{ width: `${progress}%` }}
+   250→            />
+   251→          </div>
+   252→        </div>
+   253→
+   254→        {/* Step Content */}
+   255→        <Card className="border-0 shadow-2xl">
+   256→          <CardContent className="p-6 sm:p-10 min-h-[400px] flex flex-col">
+   257→            {/* ─── Step 1: Welcome ─── */}
+   258→            {step === 1 && (
+   259→              <div className="flex-1 flex flex-col items-center justify-center text-center animate-fade-in-up">
+   260→                <div className="relative mb-6">
+   261→                  <div className="size-20 rounded-2xl bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-500/30">
+   262→                    <Rocket className="size-10 text-white" />
+   263→                  </div>
+   264→                  <div className="absolute -top-2 -right-2 size-6 rounded-full bg-emerald-400 flex items-center justify-center animate-float">
+   265→                    <Sparkles className="size-3 text-white" />
+   266→                  </div>
+   267→                </div>
+   268→                <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight mb-3">
+   269→                  Welcome to DeployHub!
+   270→                </h1>
+   271→                <p className="text-muted-foreground text-lg max-w-md mb-8">
+   272→                  Let&apos;s get your first project deployed in under 2 minutes
+   273→                </p>
+   274→                <Button
+   275→                  size="lg"
+   276→                  className="bg-emerald-500 hover:bg-emerald-600 text-white px-10 h-12 text-base animate-pulse-glow"
+   277→                  onClick={() => setStep(2)}
+   278→                >
+   279→                  Get Started
+   280→                  <ArrowRight className="size-4 ml-2" />
+   281→                </Button>
+   282→                <button
+   283→                  className="mt-4 text-sm text-muted-foreground hover:text-foreground transition-colors"
+   284→                  onClick={onSkip}
+   285→                >
+   286→                  Skip for now
+   287→                </button>
+   288→              </div>
+   289→            )}
+   290→
+   291→            {/* ─── Step 2: Create Your First Project ─── */}
+   292→            {step === 2 && (
+   293→              <div className="flex-1 flex flex-col animate-fade-in-up">
+   294→                <div className="text-center mb-8">
+   295→                  <h2 className="text-2xl font-bold mb-2">Create Your First Project</h2>
+   296→                  <p className="text-muted-foreground">Name your project and choose a framework</p>
+   297→                </div>
+   298→
+   299→                <div className="mb-6">
+   300→                  <label className="text-sm font-medium mb-2 block">Project Name</label>
+   301→                  <Input
+   302→                    value={projectName}
+   303→                    onChange={(e) => setProjectName(e.target.value)}
+   304→                    placeholder="my-first-app"
+   305→                    className="h-11"
+   306→                  />
+   307→                </div>
+   308→
+   309→                <div className="mb-8">
+   310→                  <label className="text-sm font-medium mb-3 block">Framework</label>
+   311→                  <div className="grid grid-cols-2 gap-3">
+   312→                    {FRAMEWORKS.map((fw) => {
+   313→                      const isSelected = framework === fw.id
+   314→                      return (
+   315→                        <button
+   316→                          key={fw.id}
+   317→                          onClick={() => setFramework(fw.id)}
+   318→                          className={`flex items-start gap-3 p-4 rounded-xl border-2 text-left transition-all duration-200 hover:shadow-md ${
+   319→                            isSelected
+   320→                              ? 'border-emerald-500 bg-emerald-500/5 shadow-md shadow-emerald-500/10'
+   321→                              : 'border-border hover:border-emerald-500/30'
+   322→                          }`}
+   323→                        >
+   324→                          <div className={`flex size-10 shrink-0 items-center justify-center rounded-lg ${isSelected ? 'bg-emerald-500/10' : 'bg-muted'}`}>
+   325→                            <fw.icon className={`size-5 ${isSelected ? 'text-emerald-600' : fw.color}`} />
+   326→                          </div>
+   327→                          <div>
+   328→                            <p className={`font-semibold text-sm ${isSelected ? 'text-emerald-600' : ''}`}>{fw.name}</p>
+   329→                            <p className="text-xs text-muted-foreground mt-0.5">{fw.description}</p>
+   330→                          </div>
+   331→                        </button>
+   332→                      )
+   333→                    })}
+   334→                  </div>
+   335→                </div>
+   336→
+   337→                <div className="mt-auto flex items-center justify-between">
+   338→                  <button
+   339→                    className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+   340→                    onClick={onSkip}
+   341→                  >
+   342→                    Skip for now
+   343→                  </button>
+   344→                  <div className="flex gap-3">
+   345→                    <Button variant="outline" onClick={() => setStep(1)}>
+   346→                      <ArrowLeft className="size-4 mr-1" /> Back
+   347→                    </Button>
+   348→                    <Button
+   349→                      className="bg-emerald-500 hover:bg-emerald-600 text-white"
+   350→                      onClick={() => setStep(3)}
+   351→                      disabled={!projectName.trim()}
+   352→                    >
+   353→                      Continue <ArrowRight className="size-4 ml-1" />
+   354→                    </Button>
+   355→                  </div>
+   356→                </div>
+   357→              </div>
+   358→            )}
+   359→
+   360→            {/* ─── Step 3: Choose a Domain ─── */}
+   361→            {step === 3 && (
+   362→              <div className="flex-1 flex flex-col animate-fade-in-up">
+   363→                <div className="text-center mb-8">
+   364→                  <h2 className="text-2xl font-bold mb-2">Choose a Domain</h2>
+   365→                  <p className="text-muted-foreground">Search for a custom domain or use a free subdomain</p>
+   366→                </div>
+   367→
+   368→                <div className="mb-6">
+   369→                  <div className="flex gap-2">
+   370→                    <div className="relative flex-1">
+   371→                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+   372→                      <Input
+   373→                        value={domainSearch}
+   374→                        onChange={(e) => setDomainSearch(e.target.value)}
+   375→                        placeholder="e.g. myapp.com"
+   376→                        className="h-11 pl-10"
+   377→                        onKeyDown={(e) => e.key === 'Enter' && handleDomainSearch()}
+   378→                      />
+   379→                    </div>
+   380→                    <Button
+   381→                      className="bg-emerald-500 hover:bg-emerald-600 text-white"
+   382→                      onClick={handleDomainSearch}
+   383→                      disabled={searchingDomain}
+   384→                    >
+   385→                      {searchingDomain ? <Loader2 className="size-4 animate-spin" /> : 'Search'}
+   386→                    </Button>
+   387→                  </div>
+   388→                </div>
+   389→
+   390→                {/* Domain results */}
+   391→                {domainResults && (
+   392→                  <div className="mb-4 space-y-2 max-h-48 overflow-y-auto">
+   393→                    {domainResults.available && (
+   394→                      <button
+   395→                        onClick={() => { setSelectedDomain(domainResults.domain); setUseFreeSubdomain(false) }}
+   396→                        className={`w-full flex items-center justify-between p-3 rounded-lg border-2 transition-all ${
+   397→                          selectedDomain === domainResults.domain && !useFreeSubdomain
+   398→                            ? 'border-emerald-500 bg-emerald-500/5'
+   399→                            : 'border-border hover:border-emerald-500/30'
+   400→                        }`}
+   401→                      >
+   402→                        <div className="flex items-center gap-2">
+   403→                          <Check className="size-4 text-emerald-500" />
+   404→                          <span className="font-medium text-sm">{domainResults.domain}</span>
+   405→                          <Badge variant="secondary" className="text-[10px] bg-emerald-500/10 text-emerald-600">Available</Badge>
+   406→                        </div>
+   407→                        <span className="font-semibold text-emerald-600">${domainResults.price}/yr</span>
+   408→                      </button>
+   409→                    )}
+   410→                    {domainResults.suggestions?.map((s) => (
+   411→                      <button
+   412→                        key={s.domain}
+   413→                        onClick={() => { setSelectedDomain(s.domain); setUseFreeSubdomain(false) }}
+   414→                        className={`w-full flex items-center justify-between p-3 rounded-lg border-2 transition-all ${
+   415→                          selectedDomain === s.domain && !useFreeSubdomain
+   416→                            ? 'border-emerald-500 bg-emerald-500/5'
+   417→                            : 'border-border hover:border-emerald-500/30'
+   418→                        }`}
+   419→                      >
+   420→                        <div className="flex items-center gap-2">
+   421→                          <Globe className="size-4 text-muted-foreground" />
+   422→                          <span className="font-medium text-sm">{s.domain}</span>
+   423→                        </div>
+   424→                        <span className="font-semibold text-emerald-600">${s.price}/yr</span>
+   425→                      </button>
+   426→                    ))}
+   427→                  </div>
+   428→                )}
+   429→
+   430→                {/* Free subdomain option */}
+   431→                <button
+   432→                  onClick={() => { setUseFreeSubdomain(true); setSelectedDomain(null) }}
+   433→                  className={`w-full flex items-center gap-3 p-4 rounded-xl border-2 transition-all mb-4 ${
+   434→                    useFreeSubdomain
+   435→                      ? 'border-emerald-500 bg-emerald-500/5'
+   436→                      : 'border-border hover:border-emerald-500/30'
+   437→                  }`}
+   438→                >
+   439→                  <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10">
+   440→                    <Globe className="size-5 text-emerald-500" />
+   441→                  </div>
+   442→                  <div className="text-left">
+   443→                    <p className="font-semibold text-sm">Use a free subdomain</p>
+   444→                    <p className="text-xs text-muted-foreground">
+   445→                      <span className="text-emerald-600 font-mono">{slug}.deployhub.io</span> — Free with any plan
+   446→                    </p>
+   447→                  </div>
+   448→                  <Badge variant="secondary" className="ml-auto bg-emerald-500/10 text-emerald-600 text-[10px]">FREE</Badge>
+   449→                </button>
+   450→
+   451→                <div className="mt-auto flex items-center justify-between">
+   452→                  <button
+   453→                    className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+   454→                    onClick={onSkip}
+   455→                  >
+   456→                    Skip for now
+   457→                  </button>
+   458→                  <div className="flex gap-3">
+   459→                    <Button variant="outline" onClick={() => setStep(2)}>
+   460→                      <ArrowLeft className="size-4 mr-1" /> Back
+   461→                    </Button>
+   462→                    <Button
+   463→                      className="bg-emerald-500 hover:bg-emerald-600 text-white"
+   464→                      onClick={() => setStep(4)}
+   465→                      disabled={!selectedDomain && !useFreeSubdomain}
+   466→                    >
+   467→                      Continue <ArrowRight className="size-4 ml-1" />
+   468→                    </Button>
+   469→                  </div>
+   470→                </div>
+   471→              </div>
+   472→            )}
+   473→
+   474→            {/* ─── Step 4: Select a Plan ─── */}
+   475→            {step === 4 && (
+   476→              <div className="flex-1 flex flex-col animate-fade-in-up">
+   477→                <div className="text-center mb-8">
+   478→                  <h2 className="text-2xl font-bold mb-2">Select a Plan</h2>
+   479→                  <p className="text-muted-foreground">Choose the plan that fits your needs</p>
+   480→                </div>
+   481→
+   482→                {loadingPlans ? (
+   483→                  <div className="flex-1 flex items-center justify-center">
+   484→                    <Loader2 className="size-8 animate-spin text-emerald-500" />
+   485→                  </div>
+   486→                ) : (
+   487→                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
+   488→                    {plans.map((plan) => {
+   489→                      const isSelected = selectedPlan === plan.id
+   490→                      return (
+   491→                        <button
+   492→                          key={plan.id}
+   493→                          onClick={() => setSelectedPlan(plan.id)}
+   494→                          className={`relative flex flex-col p-4 rounded-xl border-2 text-left transition-all duration-200 hover:shadow-md ${
+   495→                            isSelected
+   496→                              ? 'border-emerald-500 bg-emerald-500/5 shadow-md shadow-emerald-500/10'
+   497→                              : 'border-border hover:border-emerald-500/30'
+   498→                          }`}
+   499→                        >
+   500→                          {plan.popular && (
+   501→                            <Badge className="absolute -top-2.5 left-1/2 -translate-x-1/2 bg-emerald-500 text-white border-0 text-[10px] px-2 py-0">
+   502→                              POPULAR
+   503→                            </Badge>
+   504→                          )}
+   505→                          <p className="font-bold text-sm">{plan.name}</p>
+   506→                          <div className="mt-1 mb-3">
+   507→                            <span className="text-2xl font-extrabold">${plan.price}</span>
+   508→                            <span className="text-xs text-muted-foreground">/mo</span>
+   509→                          </div>
+   510→                          <p className="text-[11px] text-muted-foreground">{plan.description}</p>
+   511→                          {plan.features.length > 0 && (
+   512→                            <ul className="mt-3 space-y-1">
+   513→                              {plan.features.slice(0, 3).map((f) => (
+   514→                                <li key={f} className="flex items-center gap-1.5 text-[11px]">
+   515→                                  <Check className="size-3 text-emerald-500 shrink-0" />
+   516→                                  {f}
+   517→                                </li>
+   518→                              ))}
+   519→                            </ul>
+   520→                          )}
+   521→                        </button>
+   522→                      )
+   523→                    })}
+   524→                  </div>
+   525→                )}
+   526→
+   527→                <div className="mt-auto flex items-center justify-between">
+   528→                  <button
+   529→                    className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+   530→                    onClick={onSkip}
+   531→                  >
+   532→                    Skip for now
+   533→                  </button>
+   534→                  <div className="flex gap-3">
+   535→                    <Button variant="outline" onClick={() => setStep(3)}>
+   536→                      <ArrowLeft className="size-4 mr-1" /> Back
+   537→                    </Button>
+   538→                    <Button
+   539→                      className="bg-emerald-500 hover:bg-emerald-600 text-white"
+   540→                      onClick={() => setStep(5)}
+   541→                      disabled={!selectedPlan}
+   542→                    >
+   543→                      Continue <ArrowRight className="size-4 ml-1" />
+   544→                    </Button>
+   545→                  </div>
+   546→                </div>
+   547→              </div>
+   548→            )}
+   549→
+   550→            {/* ─── Step 5: Deploy! ─── */}
+   551→            {step === 5 && !deploySuccess && (
+   552→              <div className="flex-1 flex flex-col animate-fade-in-up">
+   553→                <div className="text-center mb-8">
+   554→                  <h2 className="text-2xl font-bold mb-2">Ready to Deploy!</h2>
+   555→                  <p className="text-muted-foreground">Review your choices and hit deploy</p>
+   556→                </div>
+   557→
+   558→                <div className="space-y-3 mb-8 bg-muted/50 rounded-xl p-5">
+   559→                  <div className="flex items-center justify-between py-2 border-b border-border">
+   560→                    <span className="text-sm text-muted-foreground">Project</span>
+   561→                    <span className="font-semibold text-sm">{projectName}</span>
+   562→                  </div>
+   563→                  <div className="flex items-center justify-between py-2 border-b border-border">
+   564→                    <span className="text-sm text-muted-foreground">Framework</span>
+   565→                    <span className="font-semibold text-sm">{FRAMEWORKS.find((f) => f.id === framework)?.name}</span>
+   566→                  </div>
+   567→                  <div className="flex items-center justify-between py-2 border-b border-border">
+   568→                    <span className="text-sm text-muted-foreground">Domain</span>
+   569→                    <span className="font-semibold text-sm font-mono">
+   570→                      {useFreeSubdomain ? `${slug}.deployhub.io` : selectedDomain}
+   571→                    </span>
+   572→                  </div>
+   573→                  <div className="flex items-center justify-between py-2 border-b border-border">
+   574→                    <span className="text-sm text-muted-foreground">Plan</span>
+   575→                    <span className="font-semibold text-sm">{selectedPlanData?.name || 'Starter'}</span>
+   576→                  </div>
+   577→                  <div className="flex items-center justify-between py-2">
+   578→                    <span className="text-sm text-muted-foreground">Monthly Cost</span>
+   579→                    <span className="font-bold text-lg text-emerald-600">${monthlyCost}/mo</span>
+   580→                  </div>
+   581→                </div>
+   582→
+   583→                <div className="mt-auto flex items-center justify-between">
+   584→                  <button
+   585→                    className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+   586→                    onClick={onSkip}
+   587→                  >
+   588→                    Skip for now
+   589→                  </button>
+   590→                  <div className="flex gap-3">
+   591→                    <Button variant="outline" onClick={() => setStep(4)}>
+   592→                      <ArrowLeft className="size-4 mr-1" /> Back
+   593→                    </Button>
+   594→                    <Button
+   595→                      className="bg-emerald-500 hover:bg-emerald-600 text-white px-8"
+   596→                      onClick={handleDeploy}
+   597→                      disabled={deploying}
+   598→                    >
+   599→                      {deploying ? (
+   600→                        <>
+   601→                          <Loader2 className="size-4 animate-spin mr-2" />
+   602→                          Deploying...
+   603→                        </>
+   604→                      ) : (
+   605→                        <>
+   606→                          <Rocket className="size-4 mr-2" />
+   607→                          Deploy Now
+   608→                        </>
+   609→                      )}
+   610→                    </Button>
+   611→                  </div>
+   612→                </div>
+   613→              </div>
+   614→            )}
+   615→
+   616→            {/* ─── Step 5: Deploy Success ─── */}
+   617→            {step === 5 && deploySuccess && (
+   618→              <div className="flex-1 flex flex-col items-center justify-center text-center relative animate-fade-in-up">
+   619→                <ConfettiEffect />
+   620→                <div className="animate-success-bounce mb-6">
+   621→                  <div className="size-20 rounded-full bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-500/30">
+   622→                    <Check className="size-10 text-white" />
+   623→                  </div>
+   624→                </div>
+   625→                <h2 className="text-3xl font-extrabold tracking-tight mb-2">
+   626→                  Your project is live!
+   627→                </h2>
+   628→                <p className="text-muted-foreground mb-6">
+   629→                  Congratulations! Your project has been deployed successfully.
+   630→                </p>
+   631→                <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-4 py-3 mb-8">
+   632→                  <Globe className="size-4 text-emerald-500" />
+   633→                  <span className="font-mono font-semibold text-emerald-600 text-sm">
+   634→                    https://{deployUrl}
+   635→                  </span>
+   636→                  <ExternalLink className="size-3 text-emerald-500" />
+   637→                </div>
+   638→                <Button
+   639→                  size="lg"
+   640→                  className="bg-emerald-500 hover:bg-emerald-600 text-white px-10 h-12 text-base"
+   641→                  onClick={onComplete}
+   642→                >
+   643→                  Go to Dashboard
+   644→                  <ArrowRight className="size-4 ml-2" />
+   645→                </Button>
+   646→              </div>
+   647→            )}
+   648→          </CardContent>
+   649→        </Card>
+   650→      </div>
+   651→    </div>
+   652→  )
+   653→}
+   654→

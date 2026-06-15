@@ -1,8 +1,8 @@
 import { create } from 'zustand'
 
 export type AppView = 'landing' | 'auth' | 'dashboard'
-export type DashboardTab = 'overview' | 'hosting' | 'domains' | 'deployments' | 'billing' | 'admin'
-export type AuthMode = 'login' | 'register'
+export type DashboardTab = 'overview' | 'hosting' | 'domains' | 'deployments' | 'billing' | 'admin' | 'teams' | 'settings' | 'analytics' | 'pipelines' | 'templates' | 'webhooks' | 'github' | 'assistant' | 'monitoring'
+export type AuthMode = 'login' | 'register' | 'forgot-password' | 'reset-password' | 'two-factor'
 
 interface AppState {
   view: AppView

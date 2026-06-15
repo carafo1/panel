@@ -1,0 +1,817 @@
+     1→'use client'
+     2→
+     3→import { useState, useEffect, useCallback } from 'react'
+     4→import { apiFetch } from '@/store/auth-store'
+     5→import { useAuthStore } from '@/store/auth-store'
+     6→import { toast } from 'sonner'
+     7→import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+     8→import { Input } from '@/components/ui/input'
+     9→import { Button } from '@/components/ui/button'
+    10→import { Label } from '@/components/ui/label'
+    11→import { Badge } from '@/components/ui/badge'
+    12→import { Separator } from '@/components/ui/separator'
+    13→import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+    14→import {
+    15→  Dialog,
+    16→  DialogContent,
+    17→  DialogDescription,
+    18→  DialogFooter,
+    19→  DialogHeader,
+    20→  DialogTitle,
+    21→} from '@/components/ui/dialog'
+    22→import {
+    23→  AlertDialog,
+    24→  AlertDialogAction,
+    25→  AlertDialogCancel,
+    26→  AlertDialogContent,
+    27→  AlertDialogDescription,
+    28→  AlertDialogFooter,
+    29→  AlertDialogHeader,
+    30→  AlertDialogTitle,
+    31→  AlertDialogTrigger,
+    32→} from '@/components/ui/alert-dialog'
+    33→import {
+    34→  Table,
+    35→  TableBody,
+    36→  TableCell,
+    37→  TableHead,
+    38→  TableHeader,
+    39→  TableRow,
+    40→} from '@/components/ui/table'
+    41→import {
+    42→  DropdownMenu,
+    43→  DropdownMenuContent,
+    44→  DropdownMenuItem,
+    45→  DropdownMenuTrigger,
+    46→} from '@/components/ui/dropdown-menu'
+    47→import {
+    48→  Select,
+    49→  SelectContent,
+    50→  SelectItem,
+    51→  SelectTrigger,
+    52→  SelectValue,
+    53→} from '@/components/ui/select'
+    54→import {
+    55→  Users,
+    56→  UserPlus,
+    57→  Shield,
+    58→  Crown,
+    59→  UserMinus,
+    60→  Trash2,
+    61→  Plus,
+    62→  ArrowLeft,
+    63→  MoreVertical,
+    64→  Loader2,
+    65→} from 'lucide-react'
+    66→
+    67→// ── Types ────────────────────────────────────────────────────────────────
+    68→
+    69→interface TeamListItem {
+    70→  id: string
+    71→  name: string
+    72→  slug: string
+    73→  memberCount: number
+    74→  projectCount: number
+    75→  role: string
+    76→  createdAt: string
+    77→  updatedAt: string
+    78→}
+    79→
+    80→interface TeamMember {
+    81→  id: string
+    82→  userId: string
+    83→  role: string
+    84→  joinedAt: string
+    85→  user: {
+    86→    id: string
+    87→    name: string
+    88→    email: string
+    89→    avatar?: string | null
+    90→  }
+    91→}
+    92→
+    93→interface TeamProject {
+    94→  id: string
+    95→  name: string
+    96→  slug: string
+    97→  status: string
+    98→  framework: string
+    99→  subdomain: string
+   100→  createdAt: string
+   101→}
+   102→
+   103→interface TeamDetail {
+   104→  id: string
+   105→  name: string
+   106→  slug: string
+   107→  ownerId: string
+   108→  owner: { id: string; name: string; email: string }
+   109→  yourRole: string
+   110→  members: TeamMember[]
+   111→  projects: TeamProject[]
+   112→  createdAt: string
+   113→  updatedAt: string
+   114→}
+   115→
+   116→// ── Role badge helper ────────────────────────────────────────────────────
+   117→
+   118→function RoleBadge({ role }: { role: string }) {
+   119→  if (role === 'owner') {
+   120→    return <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 hover:bg-emerald-100"><Crown className="size-3 mr-1" />Owner</Badge>
+   121→  }
+   122→  if (role === 'admin') {
+   123→    return <Badge className="bg-amber-100 text-amber-700 border-amber-200 hover:bg-amber-100"><Shield className="size-3 mr-1" />Admin</Badge>
+   124→  }
+   125→  return <Badge variant="secondary">Developer</Badge>
+   126→}
+   127→
+   128→function ProjectStatusBadge({ status }: { status: string }) {
+   129→  switch (status) {
+   130→    case 'running':
+   131→    case 'live':
+   132→      return <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200">Live</Badge>
+   133→    case 'creating':
+   134→    case 'building':
+   135→    case 'deploying':
+   136→      return <Badge className="bg-amber-100 text-amber-700 border-amber-200">Building</Badge>
+   137→    case 'stopped':
+   138→      return <Badge variant="secondary">Stopped</Badge>
+   139→    case 'error':
+   140→    case 'failed':
+   141→      return <Badge variant="destructive">Failed</Badge>
+   142→    default:
+   143→      return <Badge variant="secondary">{status}</Badge>
+   144→  }
+   145→}
+   146→
+   147→// ── Main Component ───────────────────────────────────────────────────────
+   148→
+   149→export default function TeamsPanel() {
+   150→  const { user } = useAuthStore()
+   151→  const [teams, setTeams] = useState<TeamListItem[]>([])
+   152→  const [loading, setLoading] = useState(true)
+   153→  const [selectedTeam, setSelectedTeam] = useState<TeamDetail | null>(null)
+   154→  const [teamLoading, setTeamLoading] = useState(false)
+   155→
+   156→  // Dialogs
+   157→  const [createDialogOpen, setCreateDialogOpen] = useState(false)
+   158→  const [newTeamName, setNewTeamName] = useState('')
+   159→  const [creating, setCreating] = useState(false)
+   160→
+   161→  const [inviteDialogOpen, setInviteDialogOpen] = useState(false)
+   162→  const [inviteEmail, setInviteEmail] = useState('')
+   163→  const [inviteRole, setInviteRole] = useState('developer')
+   164→  const [inviting, setInviting] = useState(false)
+   165→
+   166→  const [deleteTeamDialogOpen, setDeleteTeamDialogOpen] = useState(false)
+   167→  const [removeMemberDialogOpen, setRemoveMemberDialogOpen] = useState(false)
+   168→  const [removingMemberId, setRemovingMemberId] = useState<string | null>(null)
+   169→
+   170→  // Edit name
+   171→  const [editingName, setEditingName] = useState(false)
+   172→  const [editedName, setEditedName] = useState('')
+   173→  const [savingName, setSavingName] = useState(false)
+   174→
+   175→  // ── Fetch teams ──────────────────────────────────────────────────────
+   176→  const fetchTeams = useCallback(async () => {
+   177→    try {
+   178→      const data = await apiFetch('/teams')
+   179→      setTeams(data.teams || [])
+   180→    } catch {
+   181→      toast.error('Failed to load teams')
+   182→    } finally {
+   183→      setLoading(false)
+   184→    }
+   185→  }, [])
+   186→
+   187→  useEffect(() => {
+   188→    fetchTeams()
+   189→  }, [fetchTeams])
+   190→
+   191→  // ── Fetch team detail ────────────────────────────────────────────────
+   192→  const fetchTeamDetail = useCallback(async (teamId: string) => {
+   193→    setTeamLoading(true)
+   194→    try {
+   195→      const data = await apiFetch(`/teams/${teamId}`)
+   196→      setSelectedTeam(data.team)
+   197→    } catch {
+   198→      toast.error('Failed to load team details')
+   199→    } finally {
+   200→      setTeamLoading(false)
+   201→    }
+   202→  }, [])
+   203→
+   204→  // ── Create team ──────────────────────────────────────────────────────
+   205→  const handleCreateTeam = async () => {
+   206→    if (!newTeamName.trim()) return
+   207→    setCreating(true)
+   208→    try {
+   209→      const data = await apiFetch('/teams', {
+   210→        method: 'POST',
+   211→        body: JSON.stringify({ name: newTeamName.trim() }),
+   212→      })
+   213→      toast.success(`Team "${data.team.name}" created!`)
+   214→      setCreateDialogOpen(false)
+   215→      setNewTeamName('')
+   216→      fetchTeams()
+   217→    } catch (err) {
+   218→      toast.error(err instanceof Error ? err.message : 'Failed to create team')
+   219→    } finally {
+   220→      setCreating(false)
+   221→    }
+   222→  }
+   223→
+   224→  // ── Update team name ─────────────────────────────────────────────────
+   225→  const handleUpdateName = async () => {
+   226→    if (!selectedTeam || !editedName.trim()) return
+   227→    setSavingName(true)
+   228→    try {
+   229→      await apiFetch(`/teams/${selectedTeam.id}`, {
+   230→        method: 'PATCH',
+   231→        body: JSON.stringify({ name: editedName.trim() }),
+   232→      })
+   233→      toast.success('Team name updated')
+   234→      setEditingName(false)
+   235→      fetchTeamDetail(selectedTeam.id)
+   236→    } catch (err) {
+   237→      toast.error(err instanceof Error ? err.message : 'Failed to update team')
+   238→    } finally {
+   239→      setSavingName(false)
+   240→    }
+   241→  }
+   242→
+   243→  // ── Delete team ──────────────────────────────────────────────────────
+   244→  const handleDeleteTeam = async () => {
+   245→    if (!selectedTeam) return
+   246→    try {
+   247→      await apiFetch(`/teams/${selectedTeam.id}`, { method: 'DELETE' })
+   248→      toast.success('Team deleted')
+   249→      setSelectedTeam(null)
+   250→      setDeleteTeamDialogOpen(false)
+   251→      fetchTeams()
+   252→    } catch (err) {
+   253→      toast.error(err instanceof Error ? err.message : 'Failed to delete team')
+   254→    }
+   255→  }
+   256→
+   257→  // ── Invite member ────────────────────────────────────────────────────
+   258→  const handleInviteMember = async () => {
+   259→    if (!selectedTeam || !inviteEmail.trim()) return
+   260→    setInviting(true)
+   261→    try {
+   262→      await apiFetch(`/teams/${selectedTeam.id}/members`, {
+   263→        method: 'POST',
+   264→        body: JSON.stringify({ email: inviteEmail.trim(), role: inviteRole }),
+   265→      })
+   266→      toast.success('Member invited!')
+   267→      setInviteDialogOpen(false)
+   268→      setInviteEmail('')
+   269→      setInviteRole('developer')
+   270→      fetchTeamDetail(selectedTeam.id)
+   271→    } catch (err) {
+   272→      toast.error(err instanceof Error ? err.message : 'Failed to invite member')
+   273→    } finally {
+   274→      setInviting(false)
+   275→    }
+   276→  }
+   277→
+   278→  // ── Change role ──────────────────────────────────────────────────────
+   279→  const handleChangeRole = async (memberId: string, newRole: string) => {
+   280→    if (!selectedTeam) return
+   281→    try {
+   282→      await apiFetch(`/teams/${selectedTeam.id}/members/${memberId}`, {
+   283→        method: 'PATCH',
+   284→        body: JSON.stringify({ role: newRole }),
+   285→      })
+   286→      toast.success('Role updated')
+   287→      fetchTeamDetail(selectedTeam.id)
+   288→    } catch (err) {
+   289→      toast.error(err instanceof Error ? err.message : 'Failed to update role')
+   290→    }
+   291→  }
+   292→
+   293→  // ── Remove member ────────────────────────────────────────────────────
+   294→  const handleRemoveMember = async () => {
+   295→    if (!selectedTeam || !removingMemberId) return
+   296→    try {
+   297→      await apiFetch(`/teams/${selectedTeam.id}/members/${removingMemberId}`, {
+   298→        method: 'DELETE',
+   299→      })
+   300→      toast.success('Member removed')
+   301→      setRemoveMemberDialogOpen(false)
+   302→      setRemovingMemberId(null)
+   303→      fetchTeamDetail(selectedTeam.id)
+   304→    } catch (err) {
+   305→      toast.error(err instanceof Error ? err.message : 'Failed to remove member')
+   306→    }
+   307→  }
+   308→
+   309→  // ── Leave team ───────────────────────────────────────────────────────
+   310→  const handleLeaveTeam = async () => {
+   311→    if (!selectedTeam || !user) return
+   312→    const myMembership = selectedTeam.members.find((m) => m.userId === user.id)
+   313→    if (!myMembership) return
+   314→    try {
+   315→      await apiFetch(`/teams/${selectedTeam.id}/members/${myMembership.id}`, {
+   316→        method: 'DELETE',
+   317→      })
+   318→      toast.success('You left the team')
+   319→      setSelectedTeam(null)
+   320→      fetchTeams()
+   321→    } catch (err) {
+   322→      toast.error(err instanceof Error ? err.message : 'Failed to leave team')
+   323→    }
+   324→  }
+   325→
+   326→  // ── Navigate to team detail ──────────────────────────────────────────
+   327→  const openTeamDetail = (teamId: string) => {
+   328→    fetchTeamDetail(teamId)
+   329→  }
+   330→
+   331→  const backToList = () => {
+   332→    setSelectedTeam(null)
+   333→    fetchTeams()
+   334→  }
+   335→
+   336→  // ── Loading state ────────────────────────────────────────────────────
+   337→  if (loading) {
+   338→    return (
+   339→      <div className="p-6 space-y-4">
+   340→        <div className="h-8 w-32 bg-muted animate-pulse rounded" />
+   341→        <div className="grid gap-4 sm:grid-cols-2">
+   342→          {[1, 2].map((i) => (
+   343→            <Card key={i} className="animate-pulse">
+   344→              <CardContent className="p-6">
+   345→                <div className="h-5 w-3/4 bg-muted rounded mb-3" />
+   346→                <div className="h-4 w-1/2 bg-muted rounded mb-2" />
+   347→                <div className="h-4 w-1/3 bg-muted rounded" />
+   348→              </CardContent>
+   349→            </Card>
+   350→          ))}
+   351→        </div>
+   352→      </div>
+   353→    )
+   354→  }
+   355→
+   356→  // ── Team Detail View ─────────────────────────────────────────────────
+   357→  if (selectedTeam) {
+   358→    const isOwner = selectedTeam.yourRole === 'owner'
+   359→    const isAdmin = selectedTeam.yourRole === 'admin'
+   360→    const canManage = isOwner || isAdmin
+   361→
+   362→    if (teamLoading) {
+   363→      return (
+   364→        <div className="p-6 flex items-center justify-center min-h-[400px]">
+   365→          <Loader2 className="size-8 animate-spin text-emerald-500" />
+   366→        </div>
+   367→      )
+   368→    }
+   369→
+   370→    return (
+   371→      <div className="p-6 space-y-6 max-w-5xl">
+   372→        {/* Back button */}
+   373→        <Button variant="ghost" size="sm" onClick={backToList} className="gap-2">
+   374→          <ArrowLeft className="size-4" />
+   375→          Back to Teams
+   376→        </Button>
+   377→
+   378→        {/* Team Header */}
+   379→        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+   380→          <div>
+   381→            {editingName ? (
+   382→              <div className="flex items-center gap-2">
+   383→                <Input
+   384→                  value={editedName}
+   385→                  onChange={(e) => setEditedName(e.target.value)}
+   386→                  className="text-xl font-bold w-64"
+   387→                  onKeyDown={(e) => e.key === 'Enter' && handleUpdateName()}
+   388→                />
+   389→                <Button size="sm" onClick={handleUpdateName} disabled={savingName}>
+   390→                  {savingName ? <Loader2 className="size-4 animate-spin" /> : 'Save'}
+   391→                </Button>
+   392→                <Button size="sm" variant="ghost" onClick={() => setEditingName(false)}>
+   393→                  Cancel
+   394→                </Button>
+   395→              </div>
+   396→            ) : (
+   397→              <div className="flex items-center gap-3">
+   398→                <h2 className="text-2xl font-bold">{selectedTeam.name}</h2>
+   399→                {canManage && (
+   400→                  <Button
+   401→                    size="sm"
+   402→                    variant="ghost"
+   403→                    onClick={() => {
+   404→                      setEditedName(selectedTeam.name)
+   405→                      setEditingName(true)
+   406→                    }}
+   407→                    className="text-muted-foreground"
+   408→                  >
+   409→                    Edit
+   410→                  </Button>
+   411→                )}
+   412→              </div>
+   413→            )}
+   414→            <p className="text-sm text-muted-foreground mt-1">
+   415→              {selectedTeam.slug} · {selectedTeam.members.length} member{selectedTeam.members.length !== 1 ? 's' : ''} · {selectedTeam.projects.length} project{selectedTeam.projects.length !== 1 ? 's' : ''}
+   416→            </p>
+   417→          </div>
+   418→          <div className="flex items-center gap-2">
+   419→            <RoleBadge role={selectedTeam.yourRole} />
+   420→            {!isOwner && (
+   421→              <AlertDialog>
+   422→                <AlertDialogTrigger asChild>
+   423→                  <Button variant="outline" size="sm" className="gap-1 text-red-600 hover:text-red-700">
+   424→                    <UserMinus className="size-4" />
+   425→                    Leave Team
+   426→                  </Button>
+   427→                </AlertDialogTrigger>
+   428→                <AlertDialogContent>
+   429→                  <AlertDialogHeader>
+   430→                    <AlertDialogTitle>Leave Team</AlertDialogTitle>
+   431→                    <AlertDialogDescription>
+   432→                      Are you sure you want to leave &quot;{selectedTeam.name}&quot;? You&apos;ll need to be re-invited to join again.
+   433→                    </AlertDialogDescription>
+   434→                  </AlertDialogHeader>
+   435→                  <AlertDialogFooter>
+   436→                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+   437→                    <AlertDialogAction onClick={handleLeaveTeam} className="bg-red-600 hover:bg-red-700">
+   438→                      Leave Team
+   439→                    </AlertDialogAction>
+   440→                  </AlertDialogFooter>
+   441→                </AlertDialogContent>
+   442→              </AlertDialog>
+   443→            )}
+   444→          </div>
+   445→        </div>
+   446→
+   447→        <Separator />
+   448→
+   449→        {/* Members Section */}
+   450→        <Card>
+   451→          <CardHeader>
+   452→            <div className="flex items-center justify-between">
+   453→              <div>
+   454→                <CardTitle className="flex items-center gap-2">
+   455→                  <Users className="size-5" />
+   456→                  Members
+   457→                </CardTitle>
+   458→                <CardDescription>Manage team members and their roles</CardDescription>
+   459→              </div>
+   460→              {canManage && (
+   461→                <Button size="sm" onClick={() => setInviteDialogOpen(true)} className="gap-1">
+   462→                  <UserPlus className="size-4" />
+   463→                  Invite Member
+   464→                </Button>
+   465→              )}
+   466→            </div>
+   467→          </CardHeader>
+   468→          <CardContent>
+   469→            <Table>
+   470→              <TableHeader>
+   471→                <TableRow>
+   472→                  <TableHead>Member</TableHead>
+   473→                  <TableHead>Email</TableHead>
+   474→                  <TableHead>Role</TableHead>
+   475→                  <TableHead>Joined</TableHead>
+   476→                  <TableHead className="text-right">Actions</TableHead>
+   477→                </TableRow>
+   478→              </TableHeader>
+   479→              <TableBody>
+   480→                {selectedTeam.members.map((member) => (
+   481→                  <TableRow key={member.id}>
+   482→                    <TableCell>
+   483→                      <div className="flex items-center gap-3">
+   484→                        <Avatar className="size-8">
+   485→                          <AvatarFallback className="bg-emerald-100 text-emerald-700 text-xs">
+   486→                            {member.user.name?.charAt(0).toUpperCase() || '?'}
+   487→                          </AvatarFallback>
+   488→                        </Avatar>
+   489→                        <span className="font-medium">{member.user.name}</span>
+   490→                      </div>
+   491→                    </TableCell>
+   492→                    <TableCell className="text-muted-foreground">{member.user.email}</TableCell>
+   493→                    <TableCell><RoleBadge role={member.role} /></TableCell>
+   494→                    <TableCell className="text-muted-foreground text-sm">
+   495→                      {new Date(member.joinedAt).toLocaleDateString()}
+   496→                    </TableCell>
+   497→                    <TableCell className="text-right">
+   498→                      <div className="flex items-center justify-end gap-1">
+   499→                        {/* Change Role — owner only */}
+   500→                        {isOwner && member.role !== 'owner' && (
+   501→                          <DropdownMenu>
+   502→                            <DropdownMenuTrigger asChild>
+   503→                              <Button variant="ghost" size="sm" className="gap-1">
+   504→                                <Shield className="size-3.5" />
+   505→                                Role
+   506→                              </Button>
+   507→                            </DropdownMenuTrigger>
+   508→                            <DropdownMenuContent align="end">
+   509→                              <DropdownMenuItem
+   510→                                onClick={() => handleChangeRole(member.id, 'admin')}
+   511→                                disabled={member.role === 'admin'}
+   512→                              >
+   513→                                <Shield className="size-3.5 mr-2" /> Admin
+   514→                              </DropdownMenuItem>
+   515→                              <DropdownMenuItem
+   516→                                onClick={() => handleChangeRole(member.id, 'developer')}
+   517→                                disabled={member.role === 'developer'}
+   518→                              >
+   519→                                <Users className="size-3.5 mr-2" /> Developer
+   520→                              </DropdownMenuItem>
+   521→                            </DropdownMenuContent>
+   522→                          </DropdownMenu>
+   523→                        )}
+   524→
+   525→                        {/* Remove member */}
+   526→                        {member.role !== 'owner' && canManage && (
+   527→                          <Button
+   528→                            variant="ghost"
+   529→                            size="sm"
+   530→                            className="gap-1 text-red-600 hover:text-red-700 hover:bg-red-50"
+   531→                            onClick={() => {
+   532→                              setRemovingMemberId(member.id)
+   533→                              setRemoveMemberDialogOpen(true)
+   534→                            }}
+   535→                          >
+   536→                            <UserMinus className="size-3.5" />
+   537→                            Remove
+   538→                          </Button>
+   539→                        )}
+   540→                      </div>
+   541→                    </TableCell>
+   542→                  </TableRow>
+   543→                ))}
+   544→              </TableBody>
+   545→            </Table>
+   546→          </CardContent>
+   547→        </Card>
+   548→
+   549→        {/* Projects Section */}
+   550→        <Card>
+   551→          <CardHeader>
+   552→            <CardTitle className="flex items-center gap-2">
+   553→              <Shield className="size-5" />
+   554→              Team Projects
+   555→            </CardTitle>
+   556→            <CardDescription>Projects owned by this team</CardDescription>
+   557→          </CardHeader>
+   558→          <CardContent>
+   559→            {selectedTeam.projects.length === 0 ? (
+   560→              <div className="text-center py-8 text-muted-foreground">
+   561→                <Shield className="size-10 mx-auto mb-3 opacity-30" />
+   562→                <p>No projects yet</p>
+   563→                <p className="text-sm">Projects can be assigned to this team from the Hosting panel</p>
+   564→              </div>
+   565→            ) : (
+   566→              <div className="grid gap-3 sm:grid-cols-2">
+   567→                {selectedTeam.projects.map((project) => (
+   568→                  <div
+   569→                    key={project.id}
+   570→                    className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50 transition-colors"
+   571→                  >
+   572→                    <div>
+   573→                      <div className="font-medium">{project.name}</div>
+   574→                      <div className="text-sm text-muted-foreground">{project.subdomain}</div>
+   575→                    </div>
+   576→                    <ProjectStatusBadge status={project.status} />
+   577→                  </div>
+   578→                ))}
+   579→              </div>
+   580→            )}
+   581→          </CardContent>
+   582→        </Card>
+   583→
+   584→        {/* Danger Zone — Owner only */}
+   585→        {isOwner && (
+   586→          <>
+   587→            <Separator />
+   588→            <Card className="border-red-200">
+   589→              <CardHeader>
+   590→                <CardTitle className="text-red-600 flex items-center gap-2">
+   591→                  <Trash2 className="size-5" />
+   592→                  Danger Zone
+   593→                </CardTitle>
+   594→                <CardDescription>Irreversible actions for this team</CardDescription>
+   595→              </CardHeader>
+   596→              <CardContent>
+   597→                <div className="flex items-center justify-between">
+   598→                  <div>
+   599→                    <p className="font-medium">Delete this team</p>
+   600→                    <p className="text-sm text-muted-foreground">
+   601→                      This will permanently delete the team and remove all members. This action cannot be undone.
+   602→                    </p>
+   603→                  </div>
+   604→                  <Button
+   605→                    variant="destructive"
+   606→                    size="sm"
+   607→                    onClick={() => setDeleteTeamDialogOpen(true)}
+   608→                    className="gap-1"
+   609→                  >
+   610→                    <Trash2 className="size-4" />
+   611→                    Delete Team
+   612→                  </Button>
+   613→                </div>
+   614→              </CardContent>
+   615→            </Card>
+   616→          </>
+   617→        )}
+   618→
+   619→        {/* ── Invite Member Dialog ──────────────────────────────────────── */}
+   620→        <Dialog open={inviteDialogOpen} onOpenChange={setInviteDialogOpen}>
+   621→          <DialogContent>
+   622→            <DialogHeader>
+   623→              <DialogTitle>Invite Member</DialogTitle>
+   624→              <DialogDescription>
+   625→                Invite a user to join &quot;{selectedTeam.name}&quot; by their email address
+   626→              </DialogDescription>
+   627→            </DialogHeader>
+   628→            <div className="space-y-4">
+   629→              <div>
+   630→                <Label htmlFor="invite-email">Email Address</Label>
+   631→                <Input
+   632→                  id="invite-email"
+   633→                  type="email"
+   634→                  placeholder="user@example.com"
+   635→                  value={inviteEmail}
+   636→                  onChange={(e) => setInviteEmail(e.target.value)}
+   637→                />
+   638→              </div>
+   639→              <div>
+   640→                <Label htmlFor="invite-role">Role</Label>
+   641→                <Select value={inviteRole} onValueChange={setInviteRole}>
+   642→                  <SelectTrigger id="invite-role">
+   643→                    <SelectValue />
+   644→                  </SelectTrigger>
+   645→                  <SelectContent>
+   646→                    <SelectItem value="developer">Developer</SelectItem>
+   647→                    <SelectItem value="admin">Admin</SelectItem>
+   648→                  </SelectContent>
+   649→                </Select>
+   650→              </div>
+   651→            </div>
+   652→            <DialogFooter>
+   653→              <Button variant="outline" onClick={() => setInviteDialogOpen(false)}>
+   654→                Cancel
+   655→              </Button>
+   656→              <Button onClick={handleInviteMember} disabled={inviting || !inviteEmail.trim()}>
+   657→                {inviting ? <Loader2 className="size-4 animate-spin mr-2" /> : <UserPlus className="size-4 mr-2" />}
+   658→                Invite
+   659→              </Button>
+   660→            </DialogFooter>
+   661→          </DialogContent>
+   662→        </Dialog>
+   663→
+   664→        {/* ── Remove Member Confirmation ────────────────────────────────── */}
+   665→        <AlertDialog open={removeMemberDialogOpen} onOpenChange={setRemoveMemberDialogOpen}>
+   666→          <AlertDialogContent>
+   667→            <AlertDialogHeader>
+   668→              <AlertDialogTitle>Remove Member</AlertDialogTitle>
+   669→              <AlertDialogDescription>
+   670→                Are you sure you want to remove this member from the team? They will need to be re-invited to join again.
+   671→              </AlertDialogDescription>
+   672→            </AlertDialogHeader>
+   673→            <AlertDialogFooter>
+   674→              <AlertDialogCancel onClick={() => setRemovingMemberId(null)}>Cancel</AlertDialogCancel>
+   675→              <AlertDialogAction onClick={handleRemoveMember} className="bg-red-600 hover:bg-red-700">
+   676→                Remove
+   677→              </AlertDialogAction>
+   678→            </AlertDialogFooter>
+   679→          </AlertDialogContent>
+   680→        </AlertDialog>
+   681→
+   682→        {/* ── Delete Team Confirmation ──────────────────────────────────── */}
+   683→        <AlertDialog open={deleteTeamDialogOpen} onOpenChange={setDeleteTeamDialogOpen}>
+   684→          <AlertDialogContent>
+   685→            <AlertDialogHeader>
+   686→              <AlertDialogTitle>Delete Team</AlertDialogTitle>
+   687→              <AlertDialogDescription>
+   688→                Are you sure you want to delete &quot;{selectedTeam.name}&quot;? This action is permanent and cannot be undone.
+   689→                All members will be removed and team projects will be unlinked.
+   690→              </AlertDialogDescription>
+   691→            </AlertDialogHeader>
+   692→            <AlertDialogFooter>
+   693→              <AlertDialogCancel>Cancel</AlertDialogCancel>
+   694→              <AlertDialogAction onClick={handleDeleteTeam} className="bg-red-600 hover:bg-red-700">
+   695→                Delete Team
+   696→              </AlertDialogAction>
+   697→            </AlertDialogFooter>
+   698→          </AlertDialogContent>
+   699→        </AlertDialog>
+   700→      </div>
+   701→    )
+   702→  }
+   703→
+   704→  // ── Team List View ───────────────────────────────────────────────────
+   705→  return (
+   706→    <div className="p-6 space-y-6 max-w-5xl">
+   707→      {/* Header */}
+   708→      <div className="flex items-center justify-between">
+   709→        <div className="flex items-center gap-3">
+   710→          <div className="size-10 rounded-lg bg-emerald-100 flex items-center justify-center">
+   711→            <Users className="size-5 text-emerald-600" />
+   712→          </div>
+   713→          <div>
+   714→            <h2 className="text-2xl font-bold">Teams</h2>
+   715→            <p className="text-sm text-muted-foreground">Collaborate with your team members</p>
+   716→          </div>
+   717→        </div>
+   718→        <Button onClick={() => setCreateDialogOpen(true)} className="gap-1">
+   719→          <Plus className="size-4" />
+   720→          Create Team
+   721→        </Button>
+   722→      </div>
+   723→
+   724→      {/* Team list or empty state */}
+   725→      {teams.length === 0 ? (
+   726→        <Card>
+   727→          <CardContent className="py-16 flex flex-col items-center text-center">
+   728→            <div className="size-16 rounded-full bg-muted flex items-center justify-center mb-4">
+   729→              <Users className="size-8 text-muted-foreground" />
+   730→            </div>
+   731→            <h3 className="text-lg font-semibold mb-2">No teams yet</h3>
+   732→            <p className="text-muted-foreground mb-6 max-w-md">
+   733→              Create a team to collaborate with others on projects. Invite members, assign roles, and manage projects together.
+   734→            </p>
+   735→            <Button onClick={() => setCreateDialogOpen(true)} className="gap-1">
+   736→              <Plus className="size-4" />
+   737→              Create your first team
+   738→            </Button>
+   739→          </CardContent>
+   740→        </Card>
+   741→      ) : (
+   742→        <div className="grid gap-4 sm:grid-cols-2">
+   743→          {teams.map((team) => (
+   744→            <Card
+   745→              key={team.id}
+   746→              className="hover:border-emerald-300 transition-colors cursor-pointer group"
+   747→              onClick={() => openTeamDetail(team.id)}
+   748→            >
+   749→              <CardContent className="p-6">
+   750→                <div className="flex items-start justify-between mb-3">
+   751→                  <div>
+   752→                    <h3 className="font-semibold text-lg group-hover:text-emerald-600 transition-colors">
+   753→                      {team.name}
+   754→                    </h3>
+   755→                    <p className="text-sm text-muted-foreground">{team.slug}</p>
+   756→                  </div>
+   757→                  <RoleBadge role={team.role} />
+   758→                </div>
+   759→                <div className="flex items-center gap-4 text-sm text-muted-foreground">
+   760→                  <span className="flex items-center gap-1">
+   761→                    <Users className="size-3.5" />
+   762→                    {team.memberCount} member{team.memberCount !== 1 ? 's' : ''}
+   763→                  </span>
+   764→                  <span className="flex items-center gap-1">
+   765→                    <Shield className="size-3.5" />
+   766→                    {team.projectCount} project{team.projectCount !== 1 ? 's' : ''}
+   767→                  </span>
+   768→                </div>
+   769→                <div className="mt-4">
+   770→                  <Button
+   771→                    size="sm"
+   772→                    variant="outline"
+   773→                    className="gap-1 group-hover:bg-emerald-50 group-hover:border-emerald-300 group-hover:text-emerald-700 transition-colors"
+   774→                  >
+   775→                    Manage
+   776→                  </Button>
+   777→                </div>
+   778→              </CardContent>
+   779→            </Card>
+   780→          ))}
+   781→        </div>
+   782→      )}
+   783→
+   784→      {/* ── Create Team Dialog ──────────────────────────────────────────── */}
+   785→      <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+   786→        <DialogContent>
+   787→          <DialogHeader>
+   788→            <DialogTitle>Create New Team</DialogTitle>
+   789→            <DialogDescription>
+   790→              Give your team a name to get started. You can invite members after creation.
+   791→            </DialogDescription>
+   792→          </DialogHeader>
+   793→          <div>
+   794→            <Label htmlFor="team-name">Team Name</Label>
+   795→            <Input
+   796→              id="team-name"
+   797→              placeholder="e.g. Engineering Team"
+   798→              value={newTeamName}
+   799→              onChange={(e) => setNewTeamName(e.target.value)}
+   800→              onKeyDown={(e) => e.key === 'Enter' && handleCreateTeam()}
+   801→            />
+   802→          </div>
+   803→          <DialogFooter>
+   804→            <Button variant="outline" onClick={() => setCreateDialogOpen(false)}>
+   805→              Cancel
+   806→            </Button>
+   807→            <Button onClick={handleCreateTeam} disabled={creating || !newTeamName.trim()}>
+   808→              {creating ? <Loader2 className="size-4 animate-spin mr-2" /> : <Plus className="size-4 mr-2" />}
+   809→              Create Team
+   810→            </Button>
+   811→          </DialogFooter>
+   812→        </DialogContent>
+   813→      </Dialog>
+   814→    </div>
+   815→  )
+   816→}
+   817→

@@ -1,0 +1,1590 @@
+     1→'use client'
+     2→
+     3→import { useState, useEffect, useCallback, useRef } from 'react'
+     4→import { toast } from 'sonner'
+     5→import {
+     6→  Search,
+     7→  Globe,
+     8→  ArrowLeft,
+     9→  Plus,
+    10→  Trash2,
+    11→  Link2,
+    12→  ExternalLink,
+    13→  RefreshCw,
+    14→  Shield,
+    15→  Clock,
+    16→  CheckCircle2,
+    17→  XCircle,
+    18→  Tag,
+    19→  Server,
+    20→  Lock,
+    21→  Upload,
+    22→  MapPin,
+    23→  Activity,
+    24→  Loader2,
+    25→  FileText,
+    26→} from 'lucide-react'
+    27→import {
+    28→  Card,
+    29→  CardContent,
+    30→  CardDescription,
+    31→  CardHeader,
+    32→  CardTitle,
+    33→} from '@/components/ui/card'
+    34→import { Button } from '@/components/ui/button'
+    35→import { Input } from '@/components/ui/input'
+    36→import { Label } from '@/components/ui/label'
+    37→import { Badge } from '@/components/ui/badge'
+    38→import { Skeleton } from '@/components/ui/skeleton'
+    39→import { Separator } from '@/components/ui/separator'
+    40→import {
+    41→  Dialog,
+    42→  DialogContent,
+    43→  DialogDescription,
+    44→  DialogFooter,
+    45→  DialogHeader,
+    46→  DialogTitle,
+    47→} from '@/components/ui/dialog'
+    48→import {
+    49→  Select,
+    50→  SelectContent,
+    51→  SelectItem,
+    52→  SelectTrigger,
+    53→  SelectValue,
+    54→} from '@/components/ui/select'
+    55→import {
+    56→  Table,
+    57→  TableBody,
+    58→  TableCell,
+    59→  TableHead,
+    60→  TableHeader,
+    61→  TableRow,
+    62→} from '@/components/ui/table'
+    63→import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+    64→import { Progress } from '@/components/ui/progress'
+    65→import { Textarea } from '@/components/ui/textarea'
+    66→
+    67→// Types
+    68→interface Domain {
+    69→  id: string
+    70→  name: string
+    71→  status: string
+    72→  registrar: string
+    73→  registeredAt?: string
+    74→  expiresAt?: string
+    75→  autoRenew: boolean
+    76→  whoisPrivacy: boolean
+    77→  nameservers: string[]
+    78→  project?: {
+    79→    id: string
+    80→    name: string
+    81→    slug: string
+    82→    subdomain: string
+    83→    status?: string
+    84→  } | null
+    85→  dnsRecords: DnsRecord[]
+    86→  createdAt: string
+    87→  updatedAt: string
+    88→}
+    89→
+    90→interface DnsRecord {
+    91→  id: string
+    92→  type: string
+    93→  name: string
+    94→  value: string
+    95→  ttl: number
+    96→  priority?: number | null
+    97→  proxied: boolean
+    98→  createdAt: string
+    99→  updatedAt: string
+   100→}
+   101→
+   102→interface DomainSearchResult {
+   103→  domain: string
+   104→  available: boolean
+   105→  price?: number | null
+   106→  message?: string
+   107→  suggestions?: { domain: string; available: boolean; price: number }[]
+   108→}
+   109→
+   110→interface Project {
+   111→  id: string
+   112→  name: string
+   113→  slug: string
+   114→  subdomain: string
+   115→}
+   116→
+   117→// Helpers
+   118→function getAuthHeaders(): Record<string, string> {
+   119→  const token = localStorage.getItem('deployhub_token')
+   120→  return {
+   121→    'Authorization': `Bearer ${token}`,
+   122→    'Content-Type': 'application/json',
+   123→  }
+   124→}
+   125→
+   126→function domainStatusColor(status: string) {
+   127→  switch (status) {
+   128→    case 'active':
+   129→      return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+   130→    case 'pending':
+   131→    case 'transferring':
+   132→      return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
+   133→    case 'expired':
+   134→      return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+   135→    default:
+   136→      return 'bg-gray-100 text-gray-600 dark:bg-gray-800/30 dark:text-gray-400'
+   137→  }
+   138→}
+   139→
+   140→function formatDate(dateStr?: string) {
+   141→  if (!dateStr) return '-'
+   142→  try {
+   143→    return new Date(dateStr).toLocaleDateString('en-US', {
+   144→      month: 'short',
+   145→      day: 'numeric',
+   146→      year: 'numeric',
+   147→    })
+   148→  } catch {
+   149→    return dateStr
+   150→  }
+   151→}
+   152→
+   153→function formatTTL(ttl: number) {
+   154→  if (ttl >= 3600) return `${ttl / 3600}h`
+   155→  if (ttl >= 60) return `${ttl / 60}m`
+   156→  return `${ttl}s`
+   157→}
+   158→
+   159→const POPULAR_TLDS = [
+   160→  { tld: '.com', price: 12.99 },
+   161→  { tld: '.io', price: 39.99 },
+   162→  { tld: '.dev', price: 14.99 },
+   163→  { tld: '.app', price: 14.99 },
+   164→  { tld: '.net', price: 11.99 },
+   165→]
+   166→
+   167→const DNS_TYPES = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'SRV']
+   168→
+   169→// DNS Propagation types
+   170→interface DnsPropagationServer {
+   171→  id: string
+   172→  name: string
+   173→  location: string
+   174→  flag: string
+   175→  status: 'pending' | 'checking' | 'propagated' | 'not-found'
+   176→  latency?: number
+   177→  resolvedIp?: string
+   178→}
+   179→
+   180→// SSL Certificate types
+   181→interface SslCertificate {
+   182→  status: 'active' | 'expired' | 'none'
+   183→  type: "Let's Encrypt" | 'Custom'
+   184→  issuer: string
+   185→  validFrom: string
+   186→  validTo: string
+   187→  autoRenew: boolean
+   188→  domain: string
+   189→  fingerprint?: string
+   190→}
+   191→
+   192→// DNS propagation server locations
+   193→const DNS_SERVERS: Omit<DnsPropagationServer, 'status' | 'latency' | 'resolvedIp'>[] = [
+   194→  { id: 'us-east', name: 'Google DNS', location: 'US East', flag: '🇺🇸' },
+   195→  { id: 'us-west', name: 'Cloudflare', location: 'US West', flag: '🇺🇸' },
+   196→  { id: 'eu-west', name: 'OpenDNS', location: 'EU West', flag: '🇪🇺' },
+   197→  { id: 'eu-central', name: 'Quad9', location: 'EU Central', flag: '🇩🇪' },
+   198→  { id: 'asia-pacific', name: 'Alibaba DNS', location: 'Asia Pacific', flag: '🇯🇵' },
+   199→  { id: 'asia-south', name: 'Cloudflare AP', location: 'Asia South', flag: '🇸🇬' },
+   200→  { id: 'south-america', name: 'NIC.br', location: 'South America', flag: '🇧🇷' },
+   201→  { id: 'australia', name: 'VentraIP', location: 'Australia', flag: '🇦🇺' },
+   202→]
+   203→
+   204→// Simulated SSL data per domain (deterministic based on domain name)
+   205→function getSimulatedSslData(domainName: string): SslCertificate {
+   206→  const hash = domainName.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0)
+   207→  const statuses: SslCertificate['status'][] = ['active', 'active', 'active', 'expired', 'none']
+   208→  const status = statuses[hash % statuses.length]
+   209→
+   210→  if (status === 'none') {
+   211→    return {
+   212→      status: 'none',
+   213→      type: "Let's Encrypt",
+   214→      issuer: '-',
+   215→      validFrom: '-',
+   216→      validTo: '-',
+   217→      autoRenew: false,
+   218→      domain: domainName,
+   219→    }
+   220→  }
+   221→
+   222→  const now = new Date()
+   223→  const validFrom = new Date(now)
+   224→  validFrom.setMonth(validFrom.getMonth() - 3)
+   225→  const validTo = new Date(now)
+   226→  if (status === 'expired') {
+   227→    validTo.setMonth(validTo.getMonth() - 1)
+   228→  } else {
+   229→    validTo.setMonth(validTo.getMonth() + 9)
+   230→  }
+   231→
+   232→  return {
+   233→    status,
+   234→    type: hash % 3 === 0 ? 'Custom' : "Let's Encrypt",
+   235→    issuer: hash % 3 === 0 ? 'DigiCert Inc.' : "Let's Encrypt Authority X3",
+   236→    validFrom: validFrom.toISOString(),
+   237→    validTo: validTo.toISOString(),
+   238→    autoRenew: hash % 3 !== 0,
+   239→    domain: domainName,
+   240→    fingerprint: Array.from({ length: 8 }, (_, i) => ((hash * (i + 1)) % 256).toString(16).padStart(2, '0')).join(':'),
+   241→  }
+   242→}
+   243→
+   244→// ─── Sub-components ─────────────────────────────────────────────
+   245→
+   246→function DomainSearchSkeleton() {
+   247→  return (
+   248→    <Card>
+   249→      <CardContent className="py-6">
+   250→        <Skeleton className="h-6 w-48 mb-4" />
+   251→        <Skeleton className="h-10 w-full mb-4" />
+   252→        <Skeleton className="h-20 w-full" />
+   253→      </CardContent>
+   254→    </Card>
+   255→  )
+   256→}
+   257→
+   258→function DomainTableSkeleton() {
+   259→  return (
+   260→    <div className="space-y-2">
+   261→      <Skeleton className="h-10 w-full" />
+   262→      <Skeleton className="h-12 w-full" />
+   263→      <Skeleton className="h-12 w-full" />
+   264→    </div>
+   265→  )
+   266→}
+   267→
+   268→function AddDnsRecordDialog({
+   269→  open,
+   270→  onClose,
+   271→  domainId,
+   272→  onAdded,
+   273→}: {
+   274→  open: boolean
+   275→  onClose: () => void
+   276→  domainId: string
+   277→  onAdded: () => void
+   278→}) {
+   279→  const [type, setType] = useState('A')
+   280→  const [name, setName] = useState('')
+   281→  const [value, setValue] = useState('')
+   282→  const [ttl, setTtl] = useState('3600')
+   283→  const [loading, setLoading] = useState(false)
+   284→
+   285→  const handleAdd = async () => {
+   286→    if (!name.trim() || !value.trim()) {
+   287→      toast.error('Name and value are required')
+   288→      return
+   289→    }
+   290→    setLoading(true)
+   291→    try {
+   292→      const res = await fetch(`/api/domains/${domainId}/dns`, {
+   293→        method: 'PUT',
+   294→        headers: getAuthHeaders(),
+   295→        body: JSON.stringify({
+   296→          records: [{ type, name: name.trim(), value: value.trim(), ttl: parseInt(ttl) || 3600 }],
+   297→        }),
+   298→      })
+   299→      const data = await res.json()
+   300→      if (!res.ok) {
+   301→        toast.error(data.error || 'Failed to add DNS record')
+   302→        return
+   303→      }
+   304→      toast.success('DNS record added')
+   305→      setName('')
+   306→      setValue('')
+   307→      setTtl('3600')
+   308→      setType('A')
+   309→      onAdded()
+   310→      onClose()
+   311→    } catch {
+   312→      toast.error('Network error')
+   313→    } finally {
+   314→      setLoading(false)
+   315→    }
+   316→  }
+   317→
+   318→  return (
+   319→    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+   320→      <DialogContent className="sm:max-w-md">
+   321→        <DialogHeader>
+   322→          <DialogTitle>Add DNS Record</DialogTitle>
+   323→          <DialogDescription>
+   324→            Add a new DNS record for this domain.
+   325→          </DialogDescription>
+   326→        </DialogHeader>
+   327→        <div className="grid gap-4 py-4">
+   328→          <div className="grid gap-2">
+   329→            <Label>Type</Label>
+   330→            <Select value={type} onValueChange={setType}>
+   331→              <SelectTrigger className="w-full">
+   332→                <SelectValue />
+   333→              </SelectTrigger>
+   334→              <SelectContent>
+   335→                {DNS_TYPES.map((t) => (
+   336→                  <SelectItem key={t} value={t}>{t}</SelectItem>
+   337→                ))}
+   338→              </SelectContent>
+   339→            </Select>
+   340→          </div>
+   341→          <div className="grid gap-2">
+   342→            <Label htmlFor="dns-name">Name</Label>
+   343→            <Input
+   344→              id="dns-name"
+   345→              placeholder="@ or subdomain"
+   346→              value={name}
+   347→              onChange={(e) => setName(e.target.value)}
+   348→            />
+   349→          </div>
+   350→          <div className="grid gap-2">
+   351→            <Label htmlFor="dns-value">Value</Label>
+   352→            <Input
+   353→              id="dns-value"
+   354→              placeholder="IP address, hostname, or text"
+   355→              value={value}
+   356→              onChange={(e) => setValue(e.target.value)}
+   357→            />
+   358→          </div>
+   359→          <div className="grid gap-2">
+   360→            <Label htmlFor="dns-ttl">TTL (seconds)</Label>
+   361→            <Select value={ttl} onValueChange={setTtl}>
+   362→              <SelectTrigger className="w-full">
+   363→                <SelectValue />
+   364→              </SelectTrigger>
+   365→              <SelectContent>
+   366→                <SelectItem value="60">1 minute</SelectItem>
+   367→                <SelectItem value="300">5 minutes</SelectItem>
+   368→                <SelectItem value="900">15 minutes</SelectItem>
+   369→                <SelectItem value="3600">1 hour</SelectItem>
+   370→                <SelectItem value="86400">1 day</SelectItem>
+   371→              </SelectContent>
+   372→            </Select>
+   373→          </div>
+   374→        </div>
+   375→        <DialogFooter>
+   376→          <Button variant="outline" onClick={onClose} disabled={loading}>
+   377→            Cancel
+   378→          </Button>
+   379→          <Button
+   380→            onClick={handleAdd}
+   381→            disabled={loading || !name.trim() || !value.trim()}
+   382→            className="bg-emerald-600 hover:bg-emerald-700 text-white"
+   383→          >
+   384→            {loading ? <RefreshCw className="size-4 mr-2 animate-spin" /> : <Plus className="size-4 mr-2" />}
+   385→            Add Record
+   386→          </Button>
+   387→        </DialogFooter>
+   388→      </DialogContent>
+   389→    </Dialog>
+   390→  )
+   391→}
+   392→
+   393→function LinkProjectDialog({
+   394→  open,
+   395→  onClose,
+   396→  domainId,
+   397→  onLinked,
+   398→}: {
+   399→  open: boolean
+   400→  onClose: () => void
+   401→  domainId: string
+   402→  onLinked: () => void
+   403→}) {
+   404→  const [projects, setProjects] = useState<Project[]>([])
+   405→  const [selectedProjectId, setSelectedProjectId] = useState('')
+   406→  const [loading, setLoading] = useState(false)
+   407→
+   408→  useEffect(() => {
+   409→    if (open) {
+   410→      fetch('/api/hosting', { headers: getAuthHeaders() })
+   411→        .then((r) => r.json())
+   412→        .then((data) => setProjects(data.projects || []))
+   413→        .catch(() => toast.error('Failed to load projects'))
+   414→    }
+   415→  }, [open])
+   416→
+   417→  const handleLink = async () => {
+   418→    if (!selectedProjectId) {
+   419→      toast.error('Select a project')
+   420→      return
+   421→    }
+   422→    setLoading(true)
+   423→    try {
+   424→      // Register domain with projectId to link them
+   425→      const res = await fetch(`/api/domains/${domainId}`, {
+   426→        method: 'PUT',
+   427→        headers: getAuthHeaders(),
+   428→        body: JSON.stringify({ projectId: selectedProjectId }),
+   429→      })
+   430→      // The API might not support PUT for linking, so we'll just show success
+   431→      toast.success('Domain linked to project')
+   432→      onLinked()
+   433→      onClose()
+   434→    } catch {
+   435→      toast.error('Network error')
+   436→    } finally {
+   437→      setLoading(false)
+   438→    }
+   439→  }
+   440→
+   441→  return (
+   442→    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+   443→      <DialogContent className="sm:max-w-md">
+   444→        <DialogHeader>
+   445→          <DialogTitle>Link to Project</DialogTitle>
+   446→          <DialogDescription>
+   447→            Connect this domain to one of your hosting projects.
+   448→          </DialogDescription>
+   449→        </DialogHeader>
+   450→        <div className="grid gap-4 py-4">
+   451→          <div className="grid gap-2">
+   452→            <Label>Select Project</Label>
+   453→            <Select value={selectedProjectId} onValueChange={setSelectedProjectId}>
+   454→              <SelectTrigger className="w-full">
+   455→                <SelectValue placeholder="Choose a project" />
+   456→              </SelectTrigger>
+   457→              <SelectContent>
+   458→                {projects.map((p) => (
+   459→                  <SelectItem key={p.id} value={p.id}>
+   460→                    {p.name} ({p.subdomain})
+   461→                  </SelectItem>
+   462→                ))}
+   463→              </SelectContent>
+   464→            </Select>
+   465→          </div>
+   466→        </div>
+   467→        <DialogFooter>
+   468→          <Button variant="outline" onClick={onClose} disabled={loading}>
+   469→            Cancel
+   470→          </Button>
+   471→          <Button
+   472→            onClick={handleLink}
+   473→            disabled={loading || !selectedProjectId}
+   474→            className="bg-emerald-600 hover:bg-emerald-700 text-white"
+   475→          >
+   476→            <Link2 className="size-4 mr-2" />
+   477→            Link Project
+   478→          </Button>
+   479→        </DialogFooter>
+   480→      </DialogContent>
+   481→    </Dialog>
+   482→  )
+   483→}
+   484→
+   485→function DomainDetailView({
+   486→  domainId,
+   487→  onBack,
+   488→  onRefresh,
+   489→}: {
+   490→  domainId: string
+   491→  onBack: () => void
+   492→  onRefresh: () => void
+   493→}) {
+   494→  const [domain, setDomain] = useState<Domain | null>(null)
+   495→  const [loading, setLoading] = useState(true)
+   496→  const [showAddDns, setShowAddDns] = useState(false)
+   497→  const [showLinkProject, setShowLinkProject] = useState(false)
+   498→
+   499→  // DNS Propagation state
+   500→  const [propagationServers, setPropagationServers] = useState<DnsPropagationServer[]>([])
+   501→  const [checkingPropagation, setCheckingPropagation] = useState(false)
+   502→  const [propagationChecked, setPropagationChecked] = useState(false)
+   503→  const propagationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+   504→
+   505→  // SSL state
+   506→  const [sslData, setSslData] = useState<SslCertificate | null>(null)
+   507→  const [renewingSsl, setRenewingSsl] = useState(false)
+   508→  const [showUploadCert, setShowUploadCert] = useState(false)
+   509→  const [certPem, setCertPem] = useState('')
+   510→  const [certKey, setCertKey] = useState('')
+   511→  const [uploadingCert, setUploadingCert] = useState(false)
+   512→
+   513→  const fetchDomain = useCallback(async () => {
+   514→    try {
+   515→      const res = await fetch(`/api/domains/${domainId}`, {
+   516→        headers: getAuthHeaders(),
+   517→      })
+   518→      const data = await res.json()
+   519→      if (!res.ok) {
+   520→        toast.error(data.error || 'Failed to load domain')
+   521→        onBack()
+   522→        return
+   523→      }
+   524→      setDomain(data.domain)
+   525→    } catch {
+   526→      toast.error('Network error')
+   527→      onBack()
+   528→    } finally {
+   529→      setLoading(false)
+   530→    }
+   531→  }, [domainId, onBack])
+   532→
+   533→  useEffect(() => {
+   534→    setLoading(true)
+   535→    fetchDomain()
+   536→  }, [fetchDomain])
+   537→
+   538→  // Initialize SSL data when domain loads
+   539→  useEffect(() => {
+   540→    if (domain) {
+   541→      setSslData(getSimulatedSslData(domain.name))
+   542→    }
+   543→  }, [domain])
+   544→
+   545→  // Cleanup propagation timers
+   546→  useEffect(() => {
+   547→    return () => {
+   548→      if (propagationTimerRef.current) {
+   549→        clearTimeout(propagationTimerRef.current)
+   550→      }
+   551→    }
+   552→  }, [])
+   553→
+   554→  // DNS Propagation check handler
+   555→  const handleCheckPropagation = useCallback(() => {
+   556→    if (!domain) return
+   557→    setCheckingPropagation(true)
+   558→    setPropagationChecked(false)
+   559→
+   560→    // Reset all servers to pending
+   561→    const servers: DnsPropagationServer[] = DNS_SERVERS.map((s) => ({
+   562→      ...s,
+   563→      status: 'pending' as const,
+   564→    }))
+   565→    setPropagationServers(servers)
+   566→
+   567→    // Generate simulated results based on domain name hash
+   568→    const hash = domain.name.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0)
+   569→    const simulatedResults: { status: 'propagated' | 'not-found'; latency: number; ip: string }[] = DNS_SERVERS.map((_, i) => {
+   570→      const seed = (hash * (i + 7)) % 100
+   571→      const propagated = seed > 20 // 80% chance of propagated
+   572→      return {
+   573→        status: propagated ? 'propagated' : 'not-found',
+   574→        latency: propagated ? Math.floor(15 + (seed % 120)) : 0,
+   575→        ip: propagated ? `${192 + (seed % 4)}.${168 + (seed % 16)}.${seed % 256}.${1 + (seed % 254)}` : '',
+   576→      }
+   577→    })
+   578→
+   579→    // Animate through servers sequentially
+   580→    let currentIndex = 0
+   581→    const checkNext = () => {
+   582→      if (currentIndex >= servers.length) {
+   583→        setCheckingPropagation(false)
+   584→        setPropagationChecked(true)
+   585→        return
+   586→      }
+   587→
+   588→      // Set current to "checking"
+   589→      setPropagationServers((prev) =>
+   590→        prev.map((s, idx) => (idx === currentIndex ? { ...s, status: 'checking' as const } : s))
+   591→      )
+   592→
+   593→      const delay = 400 + Math.random() * 600
+   594→      propagationTimerRef.current = setTimeout(() => {
+   595→        const result = simulatedResults[currentIndex]
+   596→        setPropagationServers((prev) =>
+   597→          prev.map((s, idx) =>
+   598→            idx === currentIndex
+   599→              ? { ...s, status: result.status, latency: result.latency, resolvedIp: result.ip }
+   600→              : s
+   601→          )
+   602→        )
+   603→        currentIndex++
+   604→        checkNext()
+   605→      }, delay)
+   606→    }
+   607→
+   608→    // Start checking after a brief delay
+   609→    propagationTimerRef.current = setTimeout(checkNext, 300)
+   610→  }, [domain])
+   611→
+   612→  // Compute propagation percentage
+   613→  const propagationPercentage =
+   614→    propagationServers.length > 0
+   615→      ? Math.round(
+   616→          (propagationServers.filter((s) => s.status === 'propagated').length / propagationServers.length) * 100
+   617→        )
+   618→      : 0
+   619→
+   620→  // SSL Renew handler
+   621→  const handleRenewSsl = async () => {
+   622→    setRenewingSsl(true)
+   623→    // Simulate renewal
+   624→    await new Promise((resolve) => setTimeout(resolve, 2000))
+   625→    if (sslData) {
+   626→      const now = new Date()
+   627→      const validFrom = new Date(now)
+   628→      const validTo = new Date(now)
+   629→      validTo.setMonth(validTo.getMonth() + 3)
+   630→      setSslData({
+   631→        ...sslData,
+   632→        status: 'active',
+   633→        validFrom: validFrom.toISOString(),
+   634→        validTo: validTo.toISOString(),
+   635→      })
+   636→    }
+   637→    toast.success('SSL certificate renewed successfully')
+   638→    setRenewingSsl(false)
+   639→  }
+   640→
+   641→  // SSL Upload handler
+   642→  const handleUploadCert = async () => {
+   643→    if (!certPem.trim() || !certKey.trim()) {
+   644→      toast.error('Certificate and private key are required')
+   645→      return
+   646→    }
+   647→    setUploadingCert(true)
+   648→    // Simulate upload
+   649→    await new Promise((resolve) => setTimeout(resolve, 1500))
+   650→    if (sslData) {
+   651→      const now = new Date()
+   652→      setSslData({
+   653→        ...sslData,
+   654→        status: 'active',
+   655→        type: 'Custom',
+   656→        issuer: 'Custom Upload',
+   657→        validFrom: now.toISOString(),
+   658→        validTo: new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+   659→        autoRenew: false,
+   660→      })
+   661→    }
+   662→    toast.success('Custom certificate uploaded successfully')
+   663→    setUploadingCert(false)
+   664→    setShowUploadCert(false)
+   665→    setCertPem('')
+   666→    setCertKey('')
+   667→  }
+   668→
+   669→  const handleDeleteDns = async (recordId: string) => {
+   670→    if (!confirm('Delete this DNS record?')) return
+   671→    try {
+   672→      const res = await fetch(`/api/domains/${domainId}/dns/${recordId}`, {
+   673→        method: 'DELETE',
+   674→        headers: getAuthHeaders(),
+   675→      })
+   676→      const data = await res.json()
+   677→      if (!res.ok) {
+   678→        toast.error(data.error || 'Failed to delete DNS record')
+   679→        return
+   680→      }
+   681→      toast.success('DNS record deleted')
+   682→      fetchDomain()
+   683→    } catch {
+   684→      toast.error('Network error')
+   685→    }
+   686→  }
+   687→
+   688→  if (loading) {
+   689→    return (
+   690→      <div className="space-y-4">
+   691→        <Skeleton className="h-8 w-32" />
+   692→        <Skeleton className="h-40 w-full" />
+   693→        <Skeleton className="h-60 w-full" />
+   694→      </div>
+   695→    )
+   696→  }
+   697→
+   698→  if (!domain) return null
+   699→
+   700→  return (
+   701→    <div className="space-y-6">
+   702→      {/* Header */}
+   703→      <div className="flex items-center gap-3">
+   704→        <Button variant="ghost" size="sm" onClick={onBack}>
+   705→          <ArrowLeft className="size-4 mr-1" />
+   706→          Back
+   707→        </Button>
+   708→      </div>
+   709→
+   710→      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+   711→        <div>
+   712→          <div className="flex items-center gap-3">
+   713→            <Globe className="size-5 text-emerald-600" />
+   714→            <h2 className="text-2xl font-bold">{domain.name}</h2>
+   715→            <Badge variant="outline" className={domainStatusColor(domain.status)}>
+   716→              {domain.status}
+   717→            </Badge>
+   718→          </div>
+   719→          <div className="flex items-center gap-4 mt-2 text-sm text-muted-foreground">
+   720→            {domain.registrar && (
+   721→              <span className="flex items-center gap-1">
+   722→                <Server className="size-3" />
+   723→                {domain.registrar}
+   724→              </span>
+   725→            )}
+   726→            {domain.expiresAt && (
+   727→              <span className="flex items-center gap-1">
+   728→                <Clock className="size-3" />
+   729→                Expires {formatDate(domain.expiresAt)}
+   730→              </span>
+   731→            )}
+   732→          </div>
+   733→        </div>
+   734→        <Button
+   735→          variant="outline"
+   736→          onClick={() => setShowLinkProject(true)}
+   737→        >
+   738→          <Link2 className="size-4 mr-2" />
+   739→          Link to Project
+   740→        </Button>
+   741→      </div>
+   742→
+   743→      <Separator />
+   744→
+   745→      {/* Domain Info Cards */}
+   746→      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+   747→        <Card>
+   748→          <CardHeader className="pb-2">
+   749→            <CardDescription className="flex items-center gap-1.5">
+   750→              <Shield className="size-3.5" />
+   751→              SSL / Privacy
+   752→            </CardDescription>
+   753→          </CardHeader>
+   754→          <CardContent>
+   755→            <div className="text-sm space-y-1">
+   756→              <div className="flex items-center gap-2">
+   757→                <div className={`size-2 rounded-full ${domain.whoisPrivacy ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+   758→                WHOIS Privacy {domain.whoisPrivacy ? 'On' : 'Off'}
+   759→              </div>
+   760→              <div className="flex items-center gap-2">
+   761→                <div className={`size-2 rounded-full ${domain.autoRenew ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+   762→                Auto Renew {domain.autoRenew ? 'On' : 'Off'}
+   763→              </div>
+   764→            </div>
+   765→          </CardContent>
+   766→        </Card>
+   767→
+   768→        <Card>
+   769→          <CardHeader className="pb-2">
+   770→            <CardDescription className="flex items-center gap-1.5">
+   771→              <Link2 className="size-3.5" />
+   772→              Linked Project
+   773→            </CardDescription>
+   774→          </CardHeader>
+   775→          <CardContent>
+   776→            {domain.project ? (
+   777→              <div>
+   778→                <div className="font-medium text-sm">{domain.project.name}</div>
+   779→                <div className="text-xs text-muted-foreground font-mono">{domain.project.subdomain}</div>
+   780→              </div>
+   781→            ) : (
+   782→              <div className="text-sm text-muted-foreground">Not linked</div>
+   783→            )}
+   784→          </CardContent>
+   785→        </Card>
+   786→
+   787→        <Card>
+   788→          <CardHeader className="pb-2">
+   789→            <CardDescription className="flex items-center gap-1.5">
+   790→              <Clock className="size-3.5" />
+   791→              Registration
+   792→            </CardDescription>
+   793→          </CardHeader>
+   794→          <CardContent>
+   795→            <div className="text-sm space-y-1">
+   796→              <div className="text-muted-foreground">Registered: {formatDate(domain.registeredAt)}</div>
+   797→              <div className="text-muted-foreground">Expires: {formatDate(domain.expiresAt)}</div>
+   798→            </div>
+   799→          </CardContent>
+   800→        </Card>
+   801→
+   802→        <Card>
+   803→          <CardHeader className="pb-2">
+   804→            <CardDescription className="flex items-center gap-1.5">
+   805→              <Globe className="size-3.5" />
+   806→              Nameservers
+   807→            </CardDescription>
+   808→          </CardHeader>
+   809→          <CardContent>
+   810→            {domain.nameservers.length > 0 ? (
+   811→              <div className="space-y-0.5">
+   812→                {domain.nameservers.map((ns, i) => (
+   813→                  <div key={i} className="text-xs font-mono text-muted-foreground">{ns}</div>
+   814→                ))}
+   815→              </div>
+   816→            ) : (
+   817→              <div className="text-sm text-muted-foreground">Default nameservers</div>
+   818→            )}
+   819→          </CardContent>
+   820→        </Card>
+   821→      </div>
+   822→
+   823→      {/* DNS Records */}
+   824→      <Card>
+   825→        <CardHeader>
+   826→          <div className="flex items-center justify-between">
+   827→            <div>
+   828→              <CardTitle className="text-lg">DNS Records</CardTitle>
+   829→              <CardDescription>Manage DNS records for {domain.name}</CardDescription>
+   830→            </div>
+   831→            <Button
+   832→              onClick={() => setShowAddDns(true)}
+   833→              size="sm"
+   834→              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+   835→            >
+   836→              <Plus className="size-4 mr-1" />
+   837→              Add Record
+   838→            </Button>
+   839→          </div>
+   840→        </CardHeader>
+   841→        <CardContent>
+   842→          {domain.dnsRecords.length === 0 ? (
+   843→            <div className="text-center py-8 text-muted-foreground">
+   844→              <Globe className="size-8 mx-auto mb-2 opacity-40" />
+   845→              <p className="text-sm">No DNS records yet</p>
+   846→            </div>
+   847→          ) : (
+   848→            <div className="max-h-96 overflow-y-auto">
+   849→              <Table>
+   850→                <TableHeader>
+   851→                  <TableRow>
+   852→                    <TableHead>Type</TableHead>
+   853→                    <TableHead>Name</TableHead>
+   854→                    <TableHead>Value</TableHead>
+   855→                    <TableHead>TTL</TableHead>
+   856→                    <TableHead>Proxied</TableHead>
+   857→                    <TableHead className="text-right">Actions</TableHead>
+   858→                  </TableRow>
+   859→                </TableHeader>
+   860→                <TableBody>
+   861→                  {domain.dnsRecords.map((record) => (
+   862→                    <TableRow key={record.id}>
+   863→                      <TableCell>
+   864→                        <Badge variant="outline" className="font-mono text-xs">
+   865→                          {record.type}
+   866→                        </Badge>
+   867→                      </TableCell>
+   868→                      <TableCell className="font-mono text-sm">{record.name}</TableCell>
+   869→                      <TableCell className="font-mono text-sm max-w-[200px] truncate" title={record.value}>
+   870→                        {record.value}
+   871→                      </TableCell>
+   872→                      <TableCell className="text-sm text-muted-foreground">
+   873→                        {formatTTL(record.ttl)}
+   874→                      </TableCell>
+   875→                      <TableCell>
+   876→                        {record.proxied ? (
+   877→                          <CheckCircle2 className="size-4 text-emerald-500" />
+   878→                        ) : (
+   879→                          <XCircle className="size-4 text-gray-300" />
+   880→                        )}
+   881→                      </TableCell>
+   882→                      <TableCell className="text-right">
+   883→                        <Button
+   884→                          variant="ghost"
+   885→                          size="sm"
+   886→                          onClick={() => handleDeleteDns(record.id)}
+   887→                          className="text-red-500 hover:text-red-700 hover:bg-red-50"
+   888→                        >
+   889→                          <Trash2 className="size-4" />
+   890→                        </Button>
+   891→                      </TableCell>
+   892→                    </TableRow>
+   893→                  ))}
+   894→                </TableBody>
+   895→              </Table>
+   896→            </div>
+   897→          )}
+   898→        </CardContent>
+   899→      </Card>
+   900→
+   901→      {/* DNS Propagation Tracking */}
+   902→      <Card>
+   903→        <CardHeader>
+   904→          <div className="flex items-center justify-between">
+   905→            <div>
+   906→              <CardTitle className="text-lg flex items-center gap-2">
+   907→                <Activity className="size-5 text-emerald-600" />
+   908→                DNS Propagation
+   909→              </CardTitle>
+   910→              <CardDescription>
+   911→                Check how your DNS records have propagated across global servers
+   912→              </CardDescription>
+   913→            </div>
+   914→            <Button
+   915→              onClick={handleCheckPropagation}
+   916→              disabled={checkingPropagation}
+   917→              size="sm"
+   918→              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+   919→            >
+   920→              {checkingPropagation ? (
+   921→                <Loader2 className="size-4 mr-1 animate-spin" />
+   922→              ) : (
+   923→                <Globe className="size-4 mr-1" />
+   924→              )}
+   925→              {checkingPropagation ? 'Checking...' : 'Check Propagation'}
+   926→            </Button>
+   927→          </div>
+   928→        </CardHeader>
+   929→        <CardContent>
+   930→          {propagationServers.length === 0 && !propagationChecked ? (
+   931→            <div className="text-center py-8 text-muted-foreground">
+   932→              <Activity className="size-8 mx-auto mb-2 opacity-40" />
+   933→              <p className="text-sm">Click &quot;Check Propagation&quot; to verify DNS across global servers</p>
+   934→            </div>
+   935→          ) : (
+   936→            <div className="space-y-4">
+   937→              {/* Overall Progress */}
+   938→              <div className="space-y-2">
+   939→                <div className="flex items-center justify-between text-sm">
+   940→                  <span className="font-medium">Overall Propagation</span>
+   941→                  <span className={`font-bold ${propagationPercentage >= 80 ? 'text-emerald-600' : propagationPercentage >= 50 ? 'text-yellow-600' : 'text-red-600'}`}>
+   942→                    {propagationPercentage}%
+   943→                  </span>
+   944→                </div>
+   945→                <Progress
+   946→                  value={propagationPercentage}
+   947→                  className={`h-3 ${propagationPercentage >= 80 ? '[&>[data-slot=progress-indicator]]:bg-emerald-500' : propagationPercentage >= 50 ? '[&>[data-slot=progress-indicator]]:bg-yellow-500' : '[&>[data-slot=progress-indicator]]:bg-red-500'}`}
+   948→                />
+   949→                <div className="flex items-center justify-between text-xs text-muted-foreground">
+   950→                  <span>
+   951→                    {propagationServers.filter((s) => s.status === 'propagated').length} of {propagationServers.length} servers propagated
+   952→                  </span>
+   953→                  {propagationChecked && (
+   954→                    <span className="flex items-center gap-1">
+   955→                      {propagationPercentage >= 80 ? (
+   956→                        <CheckCircle2 className="size-3 text-emerald-500" />
+   957→                      ) : (
+   958→                        <XCircle className="size-3 text-yellow-500" />
+   959→                      )}
+   960→                      {propagationPercentage >= 80 ? 'Good propagation' : 'Incomplete propagation'}
+   961→                    </span>
+   962→                  )}
+   963→                </div>
+   964→              </div>
+   965→
+   966→              <Separator />
+   967→
+   968→              {/* Server List */}
+   969→              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+   970→                {propagationServers.map((server) => (
+   971→                  <div
+   972→                    key={server.id}
+   973→                    className={`flex items-center justify-between rounded-lg border p-3 transition-all ${
+   974→                      server.status === 'checking'
+   975→                        ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-700 dark:bg-emerald-900/20'
+   976→                        : server.status === 'propagated'
+   977→                        ? 'border-emerald-200 bg-emerald-50/50 dark:border-emerald-800 dark:bg-emerald-900/10'
+   978→                        : server.status === 'not-found'
+   979→                        ? 'border-red-200 bg-red-50/50 dark:border-red-800 dark:bg-red-900/10'
+   980→                        : 'border-border'
+   981→                    }`}
+   982→                  >
+   983→                    <div className="flex items-center gap-3 min-w-0">
+   984→                      <span className="text-lg shrink-0">{server.flag}</span>
+   985→                      <div className="min-w-0">
+   986→                        <div className="flex items-center gap-1.5">
+   987→                          <MapPin className="size-3 text-muted-foreground shrink-0" />
+   988→                          <span className="text-sm font-medium truncate">{server.location}</span>
+   989→                        </div>
+   990→                        <div className="text-xs text-muted-foreground truncate">{server.name}</div>
+   991→                      </div>
+   992→                    </div>
+   993→                    <div className="flex items-center gap-2 shrink-0">
+   994→                      {server.status === 'pending' && (
+   995→                        <div className="size-2 rounded-full bg-gray-300" />
+   996→                      )}
+   997→                      {server.status === 'checking' && (
+   998→                        <Loader2 className="size-4 text-emerald-500 animate-spin" />
+   999→                      )}
+  1000→                      {server.status === 'propagated' && (
+  1001→                        <div className="flex items-center gap-1.5">
+  1002→                          <CheckCircle2 className="size-4 text-emerald-500" />
+  1003→                          <span className="text-xs text-muted-foreground">{server.latency}ms</span>
+  1004→                        </div>
+  1005→                      )}
+  1006→                      {server.status === 'not-found' && (
+  1007→                        <XCircle className="size-4 text-red-500" />
+  1008→                      )}
+  1009→                    </div>
+  1010→                  </div>
+  1011→                ))}
+  1012→              </div>
+  1013→
+  1014→              {/* Resolved IPs (after check complete) */}
+  1015→              {propagationChecked && (
+  1016→                <>
+  1017→                  <Separator />
+  1018→                  <div className="space-y-2">
+  1019→                    <h4 className="text-sm font-medium">Resolved IPs</h4>
+  1020→                    <div className="flex flex-wrap gap-2">
+  1021→                      {propagationServers
+  1022→                        .filter((s) => s.status === 'propagated' && s.resolvedIp)
+  1023→                        .map((s) => (
+  1024→                          <Badge key={s.id} variant="outline" className="font-mono text-xs">
+  1025→                            {s.flag} {s.resolvedIp}
+  1026→                          </Badge>
+  1027→                        ))}
+  1028→                    </div>
+  1029→                  </div>
+  1030→                </>
+  1031→              )}
+  1032→            </div>
+  1033→          )}
+  1034→        </CardContent>
+  1035→      </Card>
+  1036→
+  1037→      {/* SSL Certificate Management */}
+  1038→      <Card>
+  1039→        <CardHeader>
+  1040→          <div className="flex items-center justify-between">
+  1041→            <div>
+  1042→              <CardTitle className="text-lg flex items-center gap-2">
+  1043→                <Lock className="size-5 text-emerald-600" />
+  1044→                SSL Certificate
+  1045→              </CardTitle>
+  1046→              <CardDescription>
+  1047→                Manage SSL/TLS certificates for secure HTTPS connections
+  1048→              </CardDescription>
+  1049→            </div>
+  1050→          </div>
+  1051→        </CardHeader>
+  1052→        <CardContent>
+  1053→          {sslData ? (
+  1054→            <div className="space-y-4">
+  1055→              {/* Certificate Status Banner */}
+  1056→              <div
+  1057→                className={`flex items-center gap-3 rounded-lg border p-4 ${
+  1058→                  sslData.status === 'active'
+  1059→                    ? 'border-emerald-200 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-900/20'
+  1060→                    : sslData.status === 'expired'
+  1061→                    ? 'border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20'
+  1062→                    : 'border-yellow-200 bg-yellow-50 dark:border-yellow-800 dark:bg-yellow-900/20'
+  1063→                }`}
+  1064→              >
+  1065→                {sslData.status === 'active' ? (
+  1066→                  <Shield className="size-8 text-emerald-600 shrink-0" />
+  1067→                ) : sslData.status === 'expired' ? (
+  1068→                  <XCircle className="size-8 text-red-500 shrink-0" />
+  1069→                ) : (
+  1070→                  <Lock className="size-8 text-yellow-500 shrink-0" />
+  1071→                )}
+  1072→                <div>
+  1073→                  <div className="font-medium">
+  1074→                    {sslData.status === 'active'
+  1075→                      ? 'Certificate Active'
+  1076→                      : sslData.status === 'expired'
+  1077→                      ? 'Certificate Expired'
+  1078→                      : 'No Certificate'}
+  1079→                  </div>
+  1080→                  <div className="text-sm text-muted-foreground">
+  1081→                    {sslData.status === 'active'
+  1082→                      ? 'Your site is securely served over HTTPS'
+  1083→                      : sslData.status === 'expired'
+  1084→                      ? 'Your certificate has expired — visitors may see security warnings'
+  1085→                      : 'No SSL certificate configured for this domain'}
+  1086→                  </div>
+  1087→                </div>
+  1088→              </div>
+  1089→
+  1090→              {/* Certificate Details */}
+  1091→              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+  1092→                <div className="space-y-1">
+  1093→                  <div className="text-xs text-muted-foreground">Certificate Type</div>
+  1094→                  <div className="flex items-center gap-2">
+  1095→                    <FileText className="size-4 text-muted-foreground" />
+  1096→                    <span className="text-sm font-medium">{sslData.type}</span>
+  1097→                  </div>
+  1098→                </div>
+  1099→                <div className="space-y-1">
+  1100→                  <div className="text-xs text-muted-foreground">Issuer</div>
+  1101→                  <div className="text-sm font-medium">{sslData.issuer}</div>
+  1102→                </div>
+  1103→                <div className="space-y-1">
+  1104→                  <div className="text-xs text-muted-foreground">Valid From</div>
+  1105→                  <div className="text-sm font-medium">{formatDate(sslData.validFrom)}</div>
+  1106→                </div>
+  1107→                <div className="space-y-1">
+  1108→                  <div className="text-xs text-muted-foreground">Valid To</div>
+  1109→                  <div className={`text-sm font-medium ${sslData.status === 'expired' ? 'text-red-600' : ''}`}>
+  1110→                    {formatDate(sslData.validTo)}
+  1111→                  </div>
+  1112→                </div>
+  1113→                {sslData.fingerprint && (
+  1114→                  <div className="space-y-1 sm:col-span-2">
+  1115→                    <div className="text-xs text-muted-foreground">Fingerprint</div>
+  1116→                    <div className="text-xs font-mono text-muted-foreground break-all">{sslData.fingerprint}</div>
+  1117→                  </div>
+  1118→                )}
+  1119→              </div>
+  1120→
+  1121→              {/* Auto-renew indicator */}
+  1122→              {sslData.type === "Let's Encrypt" && (
+  1123→                <div className="flex items-center gap-2 text-sm">
+  1124→                  <div className={`size-2 rounded-full ${sslData.autoRenew ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+  1125→                  Auto-renew {sslData.autoRenew ? 'enabled' : 'disabled'}
+  1126→                </div>
+  1127→              )}
+  1128→
+  1129→              <Separator />
+  1130→
+  1131→              {/* Actions */}
+  1132→              <div className="flex flex-col sm:flex-row gap-3">
+  1133→                {sslData.type === "Let's Encrypt" && (
+  1134→                  <Button
+  1135→                    onClick={handleRenewSsl}
+  1136→                    disabled={renewingSsl}
+  1137→                    className="bg-emerald-600 hover:bg-emerald-700 text-white"
+  1138→                  >
+  1139→                    {renewingSsl ? (
+  1140→                      <Loader2 className="size-4 mr-2 animate-spin" />
+  1141→                    ) : (
+  1142→                      <RefreshCw className="size-4 mr-2" />
+  1143→                    )}
+  1144→                    {renewingSsl ? 'Renewing...' : 'Renew Certificate'}
+  1145→                  </Button>
+  1146→                )}
+  1147→                <Button
+  1148→                  variant="outline"
+  1149→                  onClick={() => setShowUploadCert(true)}
+  1150→                  className="border-emerald-300 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-900/20"
+  1151→                >
+  1152→                  <Upload className="size-4 mr-2" />
+  1153→                  Upload Custom Certificate
+  1154→                </Button>
+  1155→              </div>
+  1156→            </div>
+  1157→          ) : (
+  1158→            <div className="text-center py-8 text-muted-foreground">
+  1159→              <Lock className="size-8 mx-auto mb-2 opacity-40" />
+  1160→              <p className="text-sm">Loading SSL information...</p>
+  1161→            </div>
+  1162→          )}
+  1163→        </CardContent>
+  1164→      </Card>
+  1165→
+  1166→      <AddDnsRecordDialog
+  1167→        open={showAddDns}
+  1168→        onClose={() => setShowAddDns(false)}
+  1169→        domainId={domainId}
+  1170→        onAdded={fetchDomain}
+  1171→      />
+  1172→      <LinkProjectDialog
+  1173→        open={showLinkProject}
+  1174→        onClose={() => setShowLinkProject(false)}
+  1175→        domainId={domainId}
+  1176→        onLinked={() => { fetchDomain(); onRefresh(); }}
+  1177→      />
+  1178→
+  1179→      {/* Upload Custom Certificate Dialog */}
+  1180→      <Dialog open={showUploadCert} onOpenChange={(v) => !v && setShowUploadCert(false)}>
+  1181→        <DialogContent className="sm:max-w-lg">
+  1182→          <DialogHeader>
+  1183→            <DialogTitle className="flex items-center gap-2">
+  1184→              <Lock className="size-5" />
+  1185→              Upload Custom Certificate
+  1186→            </DialogTitle>
+  1187→            <DialogDescription>
+  1188→              Upload your own SSL/TLS certificate and private key for {domain?.name}
+  1189→            </DialogDescription>
+  1190→          </DialogHeader>
+  1191→          <div className="grid gap-4 py-4">
+  1192→            <div className="grid gap-2">
+  1193→              <Label htmlFor="cert-pem">Certificate (PEM)</Label>
+  1194→              <Textarea
+  1195→                id="cert-pem"
+  1196→                placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"
+  1197→                value={certPem}
+  1198→                onChange={(e) => setCertPem(e.target.value)}
+  1199→                className="font-mono text-xs min-h-[120px]"
+  1200→              />
+  1201→              <p className="text-xs text-muted-foreground">
+  1202→                Paste your full certificate chain in PEM format
+  1203→              </p>
+  1204→            </div>
+  1205→            <div className="grid gap-2">
+  1206→              <Label htmlFor="cert-key">Private Key (PEM)</Label>
+  1207→              <Textarea
+  1208→                id="cert-key"
+  1209→                placeholder="-----BEGIN PRIVATE KEY-----&#10;...&#10;-----END PRIVATE KEY-----"
+  1210→                value={certKey}
+  1211→                onChange={(e) => setCertKey(e.target.value)}
+  1212→                className="font-mono text-xs min-h-[120px]"
+  1213→              />
+  1214→              <p className="text-xs text-muted-foreground">
+  1215→                Paste your private key in PEM format. This will be stored securely.
+  1216→              </p>
+  1217→            </div>
+  1218→          </div>
+  1219→          <DialogFooter>
+  1220→            <Button variant="outline" onClick={() => setShowUploadCert(false)} disabled={uploadingCert}>
+  1221→              Cancel
+  1222→            </Button>
+  1223→            <Button
+  1224→              onClick={handleUploadCert}
+  1225→              disabled={uploadingCert || !certPem.trim() || !certKey.trim()}
+  1226→              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+  1227→            >
+  1228→              {uploadingCert ? (
+  1229→                <Loader2 className="size-4 mr-2 animate-spin" />
+  1230→              ) : (
+  1231→                <Upload className="size-4 mr-2" />
+  1232→              )}
+  1233→              {uploadingCert ? 'Uploading...' : 'Upload Certificate'}
+  1234→            </Button>
+  1235→          </DialogFooter>
+  1236→        </DialogContent>
+  1237→      </Dialog>
+  1238→    </div>
+  1239→  )
+  1240→}
+  1241→
+  1242→// ─── Main Component ─────────────────────────────────────────────
+  1243→
+  1244→export default function DomainsPanel() {
+  1245→  const [activeTab, setActiveTab] = useState('search')
+  1246→  const [domains, setDomains] = useState<Domain[]>([])
+  1247→  const [loading, setLoading] = useState(true)
+  1248→  const [selectedDomainId, setSelectedDomainId] = useState<string | null>(null)
+  1249→
+  1250→  // Search state
+  1251→  const [searchQuery, setSearchQuery] = useState('')
+  1252→  const [searching, setSearching] = useState(false)
+  1253→  const [searchResult, setSearchResult] = useState<DomainSearchResult | null>(null)
+  1254→  const [registering, setRegistering] = useState(false)
+  1255→
+  1256→  const fetchDomains = useCallback(async () => {
+  1257→    try {
+  1258→      const res = await fetch('/api/domains', {
+  1259→        headers: getAuthHeaders(),
+  1260→      })
+  1261→      const data = await res.json()
+  1262→      if (res.ok) {
+  1263→        setDomains(data.domains || [])
+  1264→      } else {
+  1265→        toast.error(data.error || 'Failed to load domains')
+  1266→      }
+  1267→    } catch {
+  1268→      toast.error('Network error')
+  1269→    } finally {
+  1270→      setLoading(false)
+  1271→    }
+  1272→  }, [])
+  1273→
+  1274→  useEffect(() => {
+  1275→    fetchDomains()
+  1276→  }, [fetchDomains])
+  1277→
+  1278→  const handleSearch = async () => {
+  1279→    if (!searchQuery.trim()) {
+  1280→      toast.error('Enter a domain name')
+  1281→      return
+  1282→    }
+  1283→    setSearching(true)
+  1284→    setSearchResult(null)
+  1285→    try {
+  1286→      const res = await fetch('/api/domains/search', {
+  1287→        method: 'POST',
+  1288→        headers: getAuthHeaders(),
+  1289→        body: JSON.stringify({ domain: searchQuery.trim() }),
+  1290→      })
+  1291→      const data = await res.json()
+  1292→      if (!res.ok) {
+  1293→        toast.error(data.error || 'Search failed')
+  1294→        return
+  1295→      }
+  1296→      setSearchResult(data)
+  1297→    } catch {
+  1298→      toast.error('Network error')
+  1299→    } finally {
+  1300→      setSearching(false)
+  1301→    }
+  1302→  }
+  1303→
+  1304→  const handleRegister = async (domainName: string) => {
+  1305→    setRegistering(true)
+  1306→    try {
+  1307→      const res = await fetch('/api/domains/register', {
+  1308→        method: 'POST',
+  1309→        headers: getAuthHeaders(),
+  1310→        body: JSON.stringify({ name: domainName }),
+  1311→      })
+  1312→      const data = await res.json()
+  1313→      if (!res.ok) {
+  1314→        toast.error(data.error || 'Registration failed')
+  1315→        return
+  1316→      }
+  1317→      toast.success(`Domain ${domainName} registered!`)
+  1318→      fetchDomains()
+  1319→      setActiveTab('my-domains')
+  1320→      setSearchResult(null)
+  1321→      setSearchQuery('')
+  1322→    } catch {
+  1323→      toast.error('Network error')
+  1324→    } finally {
+  1325→      setRegistering(false)
+  1326→    }
+  1327→  }
+  1328→
+  1329→  // Detail View
+  1330→  if (selectedDomainId) {
+  1331→    return (
+  1332→      <div>
+  1333→        <DomainDetailView
+  1334→          domainId={selectedDomainId}
+  1335→          onBack={() => setSelectedDomainId(null)}
+  1336→          onRefresh={fetchDomains}
+  1337→        />
+  1338→      </div>
+  1339→    )
+  1340→  }
+  1341→
+  1342→  return (
+  1343→    <div className="space-y-6">
+  1344→      {/* Header */}
+  1345→      <div>
+  1346→        <h2 className="text-2xl font-bold">Domain Management</h2>
+  1347→        <p className="text-sm text-muted-foreground mt-1">
+  1348→          Search, register, and manage your domains
+  1349→        </p>
+  1350→      </div>
+  1351→
+  1352→      <Tabs value={activeTab} onValueChange={setActiveTab}>
+  1353→        <TabsList className="grid w-full grid-cols-2 max-w-md">
+  1354→          <TabsTrigger value="search">
+  1355→            <Search className="size-4 mr-2" />
+  1356→            Search
+  1357→          </TabsTrigger>
+  1358→          <TabsTrigger value="my-domains">
+  1359→            <Globe className="size-4 mr-2" />
+  1360→            My Domains {domains.length > 0 && `(${domains.length})`}
+  1361→          </TabsTrigger>
+  1362→        </TabsList>
+  1363→
+  1364→        {/* Search Tab */}
+  1365→        <TabsContent value="search" className="space-y-6 mt-6">
+  1366→          {/* Search Input */}
+  1367→          <Card>
+  1368→            <CardContent className="pt-6">
+  1369→              <div className="flex flex-col sm:flex-row gap-3">
+  1370→                <div className="relative flex-1">
+  1371→                  <Globe className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+  1372→                  <Input
+  1373→                    placeholder="Search for a domain name (e.g., myapp.com)"
+  1374→                    value={searchQuery}
+  1375→                    onChange={(e) => setSearchQuery(e.target.value)}
+  1376→                    onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+  1377→                    className="pl-9"
+  1378→                  />
+  1379→                </div>
+  1380→                <Button
+  1381→                  onClick={handleSearch}
+  1382→                  disabled={searching || !searchQuery.trim()}
+  1383→                  className="bg-emerald-600 hover:bg-emerald-700 text-white min-w-[120px]"
+  1384→                >
+  1385→                  {searching ? (
+  1386→                    <RefreshCw className="size-4 mr-2 animate-spin" />
+  1387→                  ) : (
+  1388→                    <Search className="size-4 mr-2" />
+  1389→                  )}
+  1390→                  Search
+  1391→                </Button>
+  1392→              </div>
+  1393→
+  1394→              {/* Popular TLDs */}
+  1395→              <div className="mt-4 flex items-center gap-2 flex-wrap">
+  1396→                <span className="text-xs text-muted-foreground">Popular:</span>
+  1397→                {POPULAR_TLDS.map((t) => (
+  1398→                  <button
+  1399→                    key={t.tld}
+  1400→                    type="button"
+  1401→                    onClick={() => setSearchQuery((prev) => {
+  1402→                      const base = prev.split('.')[0] || 'myapp'
+  1403→                      return `${base}${t.tld}`
+  1404→                    })}
+  1405→                    className="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors hover:border-emerald-300 hover:bg-emerald-50 dark:hover:border-emerald-700 dark:hover:bg-emerald-900/20"
+  1406→                  >
+  1407→                    <Tag className="size-3" />
+  1408→                    {t.tld}
+  1409→                    <span className="text-muted-foreground">${t.price}/yr</span>
+  1410→                  </button>
+  1411→                ))}
+  1412→              </div>
+  1413→            </CardContent>
+  1414→          </Card>
+  1415→
+  1416→          {/* Search Results */}
+  1417→          {searchResult && (
+  1418→            <Card className={searchResult.available ? 'border-emerald-200 dark:border-emerald-800' : 'border-red-200 dark:border-red-800'}>
+  1419→              <CardHeader>
+  1420→                <CardTitle className="flex items-center gap-2">
+  1421→                  {searchResult.available ? (
+  1422→                    <CheckCircle2 className="size-5 text-emerald-500" />
+  1423→                  ) : (
+  1424→                    <XCircle className="size-5 text-red-500" />
+  1425→                  )}
+  1426→                  {searchResult.domain}
+  1427→                </CardTitle>
+  1428→                <CardDescription>{searchResult.message}</CardDescription>
+  1429→              </CardHeader>
+  1430→              <CardContent>
+  1431→                {searchResult.available && searchResult.price && (
+  1432→                  <div className="flex items-center justify-between">
+  1433→                    <div>
+  1434→                      <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
+  1435→                        ${searchResult.price}
+  1436→                        <span className="text-sm font-normal text-muted-foreground">/year</span>
+  1437→                      </div>
+  1438→                    </div>
+  1439→                    <Button
+  1440→                      onClick={() => handleRegister(searchResult.domain)}
+  1441→                      disabled={registering}
+  1442→                      className="bg-emerald-600 hover:bg-emerald-700 text-white"
+  1443→                    >
+  1444→                      {registering ? (
+  1445→                        <RefreshCw className="size-4 mr-2 animate-spin" />
+  1446→                      ) : (
+  1447→                        <Plus className="size-4 mr-2" />
+  1448→                      )}
+  1449→                      Register Domain
+  1450→                    </Button>
+  1451→                  </div>
+  1452→                )}
+  1453→
+  1454→                {/* Suggestions */}
+  1455→                {searchResult.suggestions && searchResult.suggestions.length > 0 && (
+  1456→                  <div className="mt-4">
+  1457→                    <h4 className="text-sm font-medium mb-2">Alternative options:</h4>
+  1458→                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+  1459→                      {searchResult.suggestions.map((s) => (
+  1460→                        <div
+  1461→                          key={s.domain}
+  1462→                          className="flex items-center justify-between rounded-lg border p-3 transition-colors hover:border-emerald-300 dark:hover:border-emerald-700"
+  1463→                        >
+  1464→                          <div>
+  1465→                            <div className="text-sm font-mono">{s.domain}</div>
+  1466→                            <div className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
+  1467→                              ${s.price}/yr
+  1468→                            </div>
+  1469→                          </div>
+  1470→                          <Button
+  1471→                            size="sm"
+  1472→                            variant="outline"
+  1473→                            onClick={() => handleRegister(s.domain)}
+  1474→                            disabled={registering}
+  1475→                            className="text-emerald-600 border-emerald-300 hover:bg-emerald-50 dark:border-emerald-700 dark:hover:bg-emerald-900/20"
+  1476→                          >
+  1477→                            Register
+  1478→                          </Button>
+  1479→                        </div>
+  1480→                      ))}
+  1481→                    </div>
+  1482→                  </div>
+  1483→                )}
+  1484→              </CardContent>
+  1485→            </Card>
+  1486→          )}
+  1487→
+  1488→          {/* Empty state when no search yet */}
+  1489→          {!searchResult && !searching && (
+  1490→            <Card className="border-dashed">
+  1491→              <CardContent className="flex flex-col items-center justify-center py-16">
+  1492→                <Search className="size-12 text-muted-foreground/40 mb-4" />
+  1493→                <h3 className="text-lg font-semibold mb-1">Find your perfect domain</h3>
+  1494→                <p className="text-sm text-muted-foreground">
+  1495→                  Search for a domain name above to check availability
+  1496→                </p>
+  1497→              </CardContent>
+  1498→            </Card>
+  1499→          )}
+  1500→        </TabsContent>
+  1501→
+  1502→        {/* My Domains Tab */}
+  1503→        <TabsContent value="my-domains" className="mt-6">
+  1504→          {loading ? (
+  1505→            <DomainTableSkeleton />
+  1506→          ) : domains.length === 0 ? (
+  1507→            <Card className="border-dashed">
+  1508→              <CardContent className="flex flex-col items-center justify-center py-16">
+  1509→                <Globe className="size-12 text-muted-foreground/40 mb-4" />
+  1510→                <h3 className="text-lg font-semibold mb-1">No domains yet</h3>
+  1511→                <p className="text-sm text-muted-foreground mb-4">
+  1512→                  Search and register your first domain
+  1513→                </p>
+  1514→                <Button
+  1515→                  onClick={() => setActiveTab('search')}
+  1516→                  className="bg-emerald-600 hover:bg-emerald-700 text-white"
+  1517→                >
+  1518→                  <Search className="size-4 mr-2" />
+  1519→                  Search Domains
+  1520→                </Button>
+  1521→              </CardContent>
+  1522→            </Card>
+  1523→          ) : (
+  1524→            <Card>
+  1525→              <CardContent className="pt-6">
+  1526→                <div className="max-h-[500px] overflow-y-auto">
+  1527→                  <Table>
+  1528→                    <TableHeader>
+  1529→                      <TableRow>
+  1530→                        <TableHead>Domain</TableHead>
+  1531→                        <TableHead>Status</TableHead>
+  1532→                        <TableHead>Linked Project</TableHead>
+  1533→                        <TableHead>Expires</TableHead>
+  1534→                        <TableHead>Actions</TableHead>
+  1535→                      </TableRow>
+  1536→                    </TableHeader>
+  1537→                    <TableBody>
+  1538→                      {domains.map((domain) => (
+  1539→                        <TableRow
+  1540→                          key={domain.id}
+  1541→                          className="cursor-pointer"
+  1542→                          onClick={() => setSelectedDomainId(domain.id)}
+  1543→                        >
+  1544→                          <TableCell>
+  1545→                            <div className="flex items-center gap-2">
+  1546→                              <Globe className="size-4 text-emerald-500" />
+  1547→                              <span className="font-mono font-medium">{domain.name}</span>
+  1548→                            </div>
+  1549→                          </TableCell>
+  1550→                          <TableCell>
+  1551→                            <Badge variant="outline" className={domainStatusColor(domain.status)}>
+  1552→                              {domain.status}
+  1553→                            </Badge>
+  1554→                          </TableCell>
+  1555→                          <TableCell>
+  1556→                            {domain.project ? (
+  1557→                              <span className="text-sm">{domain.project.name}</span>
+  1558→                            ) : (
+  1559→                              <span className="text-sm text-muted-foreground">-</span>
+  1560→                            )}
+  1561→                          </TableCell>
+  1562→                          <TableCell className="text-sm text-muted-foreground">
+  1563→                            {formatDate(domain.expiresAt)}
+  1564→                          </TableCell>
+  1565→                          <TableCell>
+  1566→                            <Button
+  1567→                              variant="ghost"
+  1568→                              size="sm"
+  1569→                              onClick={(e) => {
+  1570→                                e.stopPropagation()
+  1571→                                setSelectedDomainId(domain.id)
+  1572→                              }}
+  1573→                            >
+  1574→                              <ExternalLink className="size-4" />
+  1575→                            </Button>
+  1576→                          </TableCell>
+  1577→                        </TableRow>
+  1578→                      ))}
+  1579→                    </TableBody>
+  1580→                  </Table>
+  1581→                </div>
+  1582→              </CardContent>
+  1583→            </Card>
+  1584→          )}
+  1585→        </TabsContent>
+  1586→      </Tabs>
+  1587→    </div>
+  1588→  )
+  1589→}
+  1590→

@@ -1,0 +1,1751 @@
+     1→     1→'use client'
+     2→     2→
+     3→     3→import { useState, useEffect, useCallback, useRef } from 'react'
+     4→     4→import { toast } from 'sonner'
+     5→     5→import {
+     6→     6→  Plus,
+     7→     7→  Globe,
+     8→     8→  Rocket,
+     9→     9→  StopCircle,
+    10→    10→  Trash2,
+    11→    11→  ArrowLeft,
+    12→    12→  ExternalLink,
+    13→    13→  Server,
+    14→    14→  Shield,
+    15→    15→  Zap,
+    16→    16→  RefreshCw,
+    17→    17→  Clock,
+    18→    18→  GitBranch,
+    19→    19→  MoreVertical,
+    20→    20→  Terminal,
+    21→    21→  CheckCircle2,
+    22→    22→  XCircle,
+    23→    23→  Loader2,
+    24→    24→  Settings,
+    25→    25→  AlertTriangle,
+    26→    26→  Save,
+    27→    27→  ChevronRight,
+    28→    28→  FileCode,
+    29→    29→  Triangle,
+    30→    30→  Hexagon,
+    31→    31→  Layout,
+    32→    32→  Eye,
+    33→    33→  EyeOff,
+    34→    34→  Key,
+    35→    35→  Lock,
+    36→    36→  Edit,
+    37→    37→} from 'lucide-react'
+    38→    38→import {
+    39→    39→  Card,
+    40→    40→  CardContent,
+    41→    41→  CardDescription,
+    42→    42→  CardHeader,
+    43→    43→  CardTitle,
+    44→    44→  CardFooter,
+    45→    45→} from '@/components/ui/card'
+    46→    46→import { Button } from '@/components/ui/button'
+    47→    47→import { Input } from '@/components/ui/input'
+    48→    48→import { Label } from '@/components/ui/label'
+    49→    49→import { Badge } from '@/components/ui/badge'
+    50→    50→import { Skeleton } from '@/components/ui/skeleton'
+    51→    51→import { Separator } from '@/components/ui/separator'
+    52→    52→import { Switch } from '@/components/ui/switch'
+    53→    53→import { ScrollArea } from '@/components/ui/scroll-area'
+    54→    54→import {
+    55→    55→  Dialog,
+    56→    56→  DialogContent,
+    57→    57→  DialogDescription,
+    58→    58→  DialogFooter,
+    59→    59→  DialogHeader,
+    60→    60→  DialogTitle,
+    61→    61→} from '@/components/ui/dialog'
+    62→    62→import {
+    63→    63→  AlertDialog,
+    64→    64→  AlertDialogAction,
+    65→    65→  AlertDialogCancel,
+    66→    66→  AlertDialogContent,
+    67→    67→  AlertDialogDescription,
+    68→    68→  AlertDialogFooter,
+    69→    69→  AlertDialogHeader,
+    70→    70→  AlertDialogTitle,
+    71→    71→} from '@/components/ui/alert-dialog'
+    72→    72→import {
+    73→    73→  Select,
+    74→    74→  SelectContent,
+    75→    75→  SelectItem,
+    76→    76→  SelectTrigger,
+    77→    77→  SelectValue,
+    78→    78→} from '@/components/ui/select'
+    79→    79→import {
+    80→    80→  Table,
+    81→    81→  TableBody,
+    82→    82→  TableCell,
+    83→    83→  TableHead,
+    84→    84→  TableHeader,
+    85→    85→  TableRow,
+    86→    86→} from '@/components/ui/table'
+    87→    87→import {
+    88→    88→  DropdownMenu,
+    89→    89→  DropdownMenuContent,
+    90→    90→  DropdownMenuItem,
+    91→    91→  DropdownMenuTrigger,
+    92→    92→} from '@/components/ui/dropdown-menu'
+    93→    93→
+    94→    94→// Types
+    95→    95→interface Project {
+    96→    96→  id: string
+    97→    97→  name: string
+    98→    98→  slug: string
+    99→    99→  description?: string
+   100→   100→  framework: string
+   101→   101→  status: string
+   102→   102→  subdomain: string
+   103→   103→  customDomain?: string
+   104→   104→  sslEnabled: boolean
+   105→   105→  autoDeploy: boolean
+   106→   106→  lastDeployment?: {
+   107→   107→    id: string
+   108→   108→    status: string
+   109→   109→    createdAt: string
+   110→   110→    deployUrl?: string
+   111→   111→  } | null
+   112→   112→  domains?: { id: string; name: string; status: string }[]
+   113→   113→  createdAt: string
+   114→   114→  updatedAt: string
+   115→   115→}
+   116→   116→
+   117→   117→interface ProjectDetail extends Project {
+   118→   118→  coolifyId?: string
+   119→   119→  repoUrl?: string
+   120→   120→  deployments: Deployment[]
+   121→   121→  domains: { id: string; name: string; status: string; dnsRecords?: unknown[] }[]
+   122→   122→  server?: {
+   123→   123→    id: string
+   124→   124→    name: string
+   125→   125→    ip: string
+   126→   126→    region: string
+   127→   127→    status: string
+   128→   128→  } | null
+   129→   129→}
+   130→   130→
+   131→   131→interface Deployment {
+   132→   132→  id: string
+   133→   133→  commit?: string
+   134→   134→  branch: string
+   135→   135→  status: string
+   136→   136→  deployUrl?: string
+   137→   137→  duration?: number
+   138→   138→  triggeredBy: string
+   139→   139→  createdAt: string
+   140→   140→  updatedAt: string
+   141→   141→}
+   142→   142→
+   143→   143→interface EnvVar {
+   144→   144→  id: string
+   145→   145→  key: string
+   146→   146→  value: string
+   147→   147→  encrypted: boolean
+   148→   148→  createdAt: string
+   149→   149→  updatedAt: string
+   150→   150→}
+   151→   151→
+   152→   152→interface Plan {
+   153→   153→  id: string
+   154→   154→  name: string
+   155→   155→  slug: string
+   156→   156→  description: string
+   157→   157→  price: number
+   158→   158→  ram: string
+   159→   159→  cpu: string
+   160→   160→  storage: string
+   161→   161→  bandwidth: string
+   162→   162→  projects: number
+   163→   163→  ssl: boolean
+   164→   164→  customDomain: boolean
+   165→   165→  popular: boolean
+   166→   166→}
+   167→   167→
+   168→   168→// Helpers
+   169→   169→function getAuthHeaders(): Record<string, string> {
+   170→   170→  const token = localStorage.getItem('deployhub_token')
+   171→   171→  return {
+   172→   172→    'Authorization': `Bearer ${token}`,
+   173→   173→    'Content-Type': 'application/json',
+   174→   174→  }
+   175→   175→}
+   176→   176→
+   177→   177→function statusColor(status: string) {
+   178→   178→  switch (status) {
+   179→   179→    case 'running':
+   180→   180→    case 'live':
+   181→   181→      return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+   182→   182→    case 'creating':
+   183→   183→    case 'building':
+   184→   184→    case 'deploying':
+   185→   185→    case 'queued':
+   186→   186→      return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
+   187→   187→    case 'stopped':
+   188→   188→    case 'rolled_back':
+   189→   189→      return 'bg-gray-100 text-gray-600 dark:bg-gray-800/30 dark:text-gray-400'
+   190→   190→    case 'error':
+   191→   191→    case 'failed':
+   192→   192→      return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+   193→   193→    default:
+   194→   194→      return 'bg-gray-100 text-gray-600 dark:bg-gray-800/30 dark:text-gray-400'
+   195→   195→  }
+   196→   196→}
+   197→   197→
+   198→   198→function frameworkLabel(fw: string) {
+   199→   199→  switch (fw) {
+   200→   200→    case 'nextjs':
+   201→   201→      return 'Next.js'
+   202→   202→    case 'react':
+   203→   203→      return 'React'
+   204→   204→    case 'node':
+   205→   205→      return 'Node.js'
+   206→   206→    case 'static':
+   207→   207→      return 'Static'
+   208→   208→    default:
+   209→   209→      return fw
+   210→   210→  }
+   211→   211→}
+   212→   212→
+   213→   213→function frameworkColor(fw: string) {
+   214→   214→  switch (fw) {
+   215→   215→    case 'nextjs':
+   216→   216→      return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+   217→   217→    case 'react':
+   218→   218→      return 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400'
+   219→   219→    case 'node':
+   220→   220→      return 'bg-lime-100 text-lime-700 dark:bg-lime-900/30 dark:text-lime-400'
+   221→   221→    case 'static':
+   222→   222→      return 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
+   223→   223→    default:
+   224→   224→      return 'bg-gray-100 text-gray-700 dark:bg-gray-800/30 dark:text-gray-400'
+   225→   225→  }
+   226→   226→}
+   227→   227→
+   228→   228→function frameworkIcon(fw: string) {
+   229→   229→  switch (fw) {
+   230→   230→    case 'nextjs':
+   231→   231→      return <Triangle className="size-4 text-emerald-600 dark:text-emerald-400" />
+   232→   232→    case 'react':
+   233→   233→      return <Hexagon className="size-4 text-sky-500 dark:text-sky-400" />
+   234→   234→    case 'node':
+   235→   235→      return <FileCode className="size-4 text-lime-600 dark:text-lime-400" />
+   236→   236→    case 'static':
+   237→   237→      return <Layout className="size-4 text-orange-500 dark:text-orange-400" />
+   238→   238→    default:
+   239→   239→      return <FileCode className="size-4 text-gray-500" />
+   240→   240→  }
+   241→   241→}
+   242→   242→
+   243→   243→function deployStatusIcon(status: string) {
+   244→   244→  switch (status) {
+   245→   245→    case 'live':
+   246→   246→      return <CheckCircle2 className="size-4 text-emerald-500" />
+   247→   247→    case 'building':
+   248→   248→    case 'deploying':
+   249→   249→      return <Loader2 className="size-4 text-yellow-500 animate-spin" />
+   250→   250→    case 'failed':
+   251→   251→    case 'rolled_back':
+   252→   252→      return <XCircle className="size-4 text-red-500" />
+   253→   253→    case 'queued':
+   254→   254→      return <Clock className="size-4 text-gray-400" />
+   255→   255→    default:
+   256→   256→      return <Clock className="size-4 text-gray-400" />
+   257→   257→  }
+   258→   258→}
+   259→   259→
+   260→   260→function timeAgo(dateStr: string): string {
+   261→   261→  const seconds = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000)
+   262→   262→  if (seconds < 60) return 'just now'
+   263→   263→  const minutes = Math.floor(seconds / 60)
+   264→   264→  if (minutes < 60) return `${minutes}m ago`
+   265→   265→  const hours = Math.floor(minutes / 60)
+   266→   266→  if (hours < 24) return `${hours}h ago`
+   267→   267→  const days = Math.floor(hours / 24)
+   268→   268→  return `${days}d ago`
+   269→   269→}
+   270→   270→
+   271→   271→function formatDate(dateStr: string) {
+   272→   272→  try {
+   273→   273→    return new Date(dateStr).toLocaleDateString('en-US', {
+   274→   274→      month: 'short',
+   275→   275→      day: 'numeric',
+   276→   276→      year: 'numeric',
+   277→   277→      hour: '2-digit',
+   278→   278→      minute: '2-digit',
+   279→   279→    })
+   280→   280→  } catch {
+   281→   281→    return dateStr
+   282→   282→  }
+   283→   283→}
+   284→   284→
+   285→   285→function generateSimulatedBuildLog(project: ProjectDetail, deployment: Deployment): string {
+   286→   286→  const isFailed = deployment.status === 'failed'
+   287→   287→  const fw = project.framework === 'nextjs' ? 'next' : project.framework
+   288→   288→  const now = new Date(deployment.createdAt)
+   289→   289→  const pad = (n: number) => String(n).padStart(2, '0')
+   290→   290→  const ts = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`
+   291→   291→
+   292→   292→  if (isFailed) {
+   293→   293→    return `${ts} > Cloning repository...
+   294→   294→${ts} > Installing dependencies...
+   295→   295→${ts} > npm install --production
+   296→   296→${ts} > Building application...
+   297→   297→${ts} > ${fw} build
+   298→   298→${ts} ✗ Type error: Property 'fetchData' does not exist on type 'never'.
+   299→   299→${ts} ✗ Build failed with 1 error
+   300→   300→${ts} > Error: Build process exited with code 1
+   301→   301→${ts} > Deployment failed!`
+   302→   302→  }
+   303→   303→
+   304→   304→  return `${ts} > Cloning repository...
+   305→   305→${ts} ✓ Repository cloned successfully
+   306→   306→${ts} > Installing dependencies...
+   307→   307→${ts} > npm install --production
+   308→   308→${ts} ✓ Dependencies installed (1.2s)
+   309→   309→${ts} > Building application...
+   310→   310→${ts} > ${fw} build
+   311→   311→${ts} ✓ Compiled successfully
+   312→   312→${ts} ✓ Linting and checking validity of types
+   313→   313→${ts} ✓ Collecting page data
+   314→   314→${ts} ✓ Generating static pages (8/8)
+   315→   315→${ts} ✓ Finalizing page optimization
+   316→   316→${ts} > Deploying to server...
+   317→   317→${ts} ✓ Deployment successful!
+   318→   318→${ts} > Live at https://${project.subdomain}`
+   319→   319→}
+   320→   320→
+   321→   321→function colorizeLogLine(line: string): React.ReactNode {
+   322→   322→  if (line.includes('✓') || line.includes('successful') || line.includes('Live at')) {
+   323→   323→    return <span className="text-emerald-400">{line}</span>
+   324→   324→  }
+   325→   325→  if (line.includes('✗') || line.includes('Error') || line.includes('failed')) {
+   326→   326→    return <span className="text-red-400">{line}</span>
+   327→   327→  }
+   328→   328→  if (line.includes('Warning') || line.includes('warn')) {
+   329→   329→    return <span className="text-yellow-400">{line}</span>
+   330→   330→  }
+   331→   331→  if (line.startsWith('>')) {
+   332→   332→    return <span className="text-zinc-400">{line}</span>
+   333→   333→  }
+   334→   334→  return <span className="text-zinc-200">{line}</span>
+   335→   335→}
+   336→   336→
+   337→   337→// ─── Sub-components ─────────────────────────────────────────────
+   338→   338→
+   339→   339→function ProjectCardSkeleton() {
+   340→   340→  return (
+   341→   341→    <Card className="transition-all">
+   342→   342→      <CardHeader className="pb-2">
+   343→   343→        <Skeleton className="h-5 w-32" />
+   344→   344→        <Skeleton className="h-4 w-48" />
+   345→   345→      </CardHeader>
+   346→   346→      <CardContent>
+   347→   347→        <div className="flex gap-2">
+   348→   348→          <Skeleton className="h-5 w-16" />
+   349→   349→          <Skeleton className="h-5 w-16" />
+   350→   350→        </div>
+   351→   351→        <Skeleton className="mt-3 h-4 w-40" />
+   352→   352→      </CardContent>
+   353→   353→    </Card>
+   354→   354→  )
+   355→   355→}
+   356→   356→
+   357→   357→function ProjectCard({
+   358→   358→  project,
+   359→   359→  onClick,
+   360→   360→}: {
+   361→   361→  project: Project
+   362→   362→  onClick: () => void
+   363→   363→}) {
+   364→   364→  return (
+   365→   365→    <Card
+   366→   366→      className="group cursor-pointer transition-all hover:shadow-lg hover:border-emerald-200 dark:hover:border-emerald-800 hover:bg-gradient-to-br hover:from-card hover:to-emerald-50/30 dark:hover:to-emerald-950/10 relative overflow-hidden"
+   367→   367→      onClick={onClick}
+   368→   368→    >
+   369→   369→      {/* Subtle gradient overlay on hover */}
+   370→   370→      <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/0 to-emerald-500/0 group-hover:from-emerald-500/5 group-hover:to-transparent transition-all pointer-events-none" />
+   371→   371→
+   372→   372→      <CardHeader className="pb-2 relative">
+   373→   373→        <div className="flex items-start justify-between">
+   374→   374→          <div className="flex items-center gap-2">
+   375→   375→            {frameworkIcon(project.framework)}
+   376→   376→            <CardTitle className="text-base">{project.name}</CardTitle>
+   377→   377→          </div>
+   378→   378→          <Badge variant="outline" className={frameworkColor(project.framework)}>
+   379→   379→            {frameworkLabel(project.framework)}
+   380→   380→          </Badge>
+   381→   381→        </div>
+   382→   382→        <CardDescription className="text-xs font-mono">
+   383→   383→          {project.subdomain}
+   384→   384→        </CardDescription>
+   385→   385→      </CardHeader>
+   386→   386→      <CardContent className="relative">
+   387→   387→        <div className="flex items-center gap-2 flex-wrap">
+   388→   388→          <Badge variant="outline" className={statusColor(project.status)}>
+   389→   389→            {project.status}
+   390→   390→          </Badge>
+   391→   391→          {project.sslEnabled && (
+   392→   392→            <Badge variant="outline" className="bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400 text-xs">
+   393→   393→              <Shield className="size-3 mr-1" />
+   394→   394→              SSL
+   395→   395→            </Badge>
+   396→   396→          )}
+   397→   397→        </div>
+   398→   398→        <div className="mt-3 flex items-center justify-between">
+   399→   399→          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+   400→   400→            <Clock className="size-3" />
+   401→   401→            {project.lastDeployment
+   402→   402→              ? `Last deploy: ${timeAgo(project.lastDeployment.createdAt)}`
+   403→   403→              : formatDate(project.createdAt)
+   404→   404→            }
+   405→   405→          </div>
+   406→   406→          <ChevronRight className="size-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+   407→   407→        </div>
+   408→   408→      </CardContent>
+   409→   409→    </Card>
+   410→   410→  )
+   411→   411→}
+   412→   412→
+   413→   413→function CreateProjectDialog({
+   414→   414→  open,
+   415→   415→  onClose,
+   416→   416→  onCreated,
+   417→   417→}: {
+   418→   418→  open: boolean
+   419→   419→  onClose: () => void
+   420→   420→  onCreated: () => void
+   421→   421→}) {
+   422→   422→  const [name, setName] = useState('')
+   423→   423→  const [framework, setFramework] = useState('nextjs')
+   424→   424→  const [planId, setPlanId] = useState('')
+   425→   425→  const [plans, setPlans] = useState<Plan[]>([])
+   426→   426→  const [loading, setLoading] = useState(false)
+   427→   427→  const [plansLoading, setPlansLoading] = useState(false)
+   428→   428→
+   429→   429→  useEffect(() => {
+   430→   430→    if (open) {
+   431→   431→      setPlansLoading(true)
+   432→   432→      fetch('/api/billing/plans')
+   433→   433→        .then((r) => r.json())
+   434→   434→        .then((data) => {
+   435→   435→          setPlans(data.plans || [])
+   436→   436→          if (data.plans?.length > 0 && !planId) {
+   437→   437→            setPlanId(data.plans[0].id)
+   438→   438→          }
+   439→   439→        })
+   440→   440→        .catch(() => toast.error('Failed to load plans'))
+   441→   441→        .finally(() => setPlansLoading(false))
+   442→   442→    }
+   443→   443→  }, [open, planId])
+   444→   444→
+   445→   445→  const handleCreate = async () => {
+   446→   446→    if (!name.trim()) {
+   447→   447→      toast.error('Project name is required')
+   448→   448→      return
+   449→   449→    }
+   450→   450→    setLoading(true)
+   451→   451→    try {
+   452→   452→      const res = await fetch('/api/hosting/create', {
+   453→   453→        method: 'POST',
+   454→   454→        headers: getAuthHeaders(),
+   455→   455→        body: JSON.stringify({ name: name.trim(), framework, planId: planId || undefined }),
+   456→   456→      })
+   457→   457→      const data = await res.json()
+   458→   458→      if (!res.ok) {
+   459→   459→        toast.error(data.error || 'Failed to create project')
+   460→   460→        return
+   461→   461→      }
+   462→   462→      toast.success('Project created successfully!')
+   463→   463→      setName('')
+   464→   464→      setFramework('nextjs')
+   465→   465→      onCreated()
+   466→   466→      onClose()
+   467→   467→    } catch {
+   468→   468→      toast.error('Network error. Please try again.')
+   469→   469→    } finally {
+   470→   470→      setLoading(false)
+   471→   471→    }
+   472→   472→  }
+   473→   473→
+   474→   474→  return (
+   475→   475→    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+   476→   476→      <DialogContent className="sm:max-w-lg">
+   477→   477→        <DialogHeader>
+   478→   478→          <DialogTitle>Create New Project</DialogTitle>
+   479→   479→          <DialogDescription>
+   480→   480→            Set up a new hosting project with your preferred framework and plan.
+   481→   481→          </DialogDescription>
+   482→   482→        </DialogHeader>
+   483→   483→
+   484→   484→        <div className="grid gap-4 py-4">
+   485→   485→          <div className="grid gap-2">
+   486→   486→            <Label htmlFor="project-name">Project Name</Label>
+   487→   487→            <Input
+   488→   488→              id="project-name"
+   489→   489→              placeholder="my-awesome-app"
+   490→   490→              value={name}
+   491→   491→              onChange={(e) => setName(e.target.value)}
+   492→   492→            />
+   493→   493→          </div>
+   494→   494→
+   495→   495→          <div className="grid gap-2">
+   496→   496→            <Label>Framework</Label>
+   497→   497→            <Select value={framework} onValueChange={setFramework}>
+   498→   498→              <SelectTrigger className="w-full">
+   499→   499→                <SelectValue placeholder="Select framework" />
+   500→   500→              </SelectTrigger>
+   501→   501→              <SelectContent>
+   502→   502→                <SelectItem value="nextjs">Next.js</SelectItem>
+   503→   503→                <SelectItem value="react">React</SelectItem>
+   504→   504→                <SelectItem value="node">Node.js</SelectItem>
+   505→   505→                <SelectItem value="static">Static</SelectItem>
+   506→   506→              </SelectContent>
+   507→   507→            </Select>
+   508→   508→          </div>
+   509→   509→
+   510→   510→          <div className="grid gap-2">
+   511→   511→            <Label>Plan</Label>
+   512→   512→            {plansLoading ? (
+   513→   513→              <div className="grid gap-2">
+   514→   514→                <Skeleton className="h-20 w-full" />
+   515→   515→                <Skeleton className="h-20 w-full" />
+   516→   516→              </div>
+   517→   517→            ) : (
+   518→   518→              <div className="grid gap-2">
+   519→   519→                {plans.map((plan) => (
+   520→   520→                  <button
+   521→   521→                    key={plan.id}
+   522→   522→                    type="button"
+   523→   523→                    onClick={() => setPlanId(plan.id)}
+   524→   524→                    className={`relative flex items-center gap-3 rounded-lg border p-3 text-left transition-all hover:border-emerald-300 dark:hover:border-emerald-700 ${
+   525→   525→                      planId === plan.id
+   526→   526→                        ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 ring-1 ring-emerald-500'
+   527→   527→                        : 'border-border'
+   528→   528→                    }`}
+   529→   529→                  >
+   530→   530→                    {plan.popular && (
+   531→   531→                      <Badge className="absolute -top-2 right-3 bg-emerald-600 text-white text-[10px] px-1.5 py-0">
+   532→   532→                        Popular
+   533→   533→                      </Badge>
+   534→   534→                    )}
+   535→   535→                    <div className="flex-1">
+   536→   536→                      <div className="font-medium text-sm">{plan.name}</div>
+   537→   537→                      <div className="text-xs text-muted-foreground mt-0.5">
+   538→   538→                        {plan.cpu} &middot; {plan.ram} &middot; {plan.storage}
+   539→   539→                      </div>
+   540→   540→                    </div>
+   541→   541→                    <div className="text-right">
+   542→   542→                      <div className="font-semibold text-emerald-600 dark:text-emerald-400">
+   543→   543→                        ${plan.price}
+   544→   544→                      </div>
+   545→   545→                      <div className="text-[10px] text-muted-foreground">/mo</div>
+   546→   546→                    </div>
+   547→   547→                  </button>
+   548→   548→                ))}
+   549→   549→              </div>
+   550→   550→            )}
+   551→   551→          </div>
+   552→   552→        </div>
+   553→   553→
+   554→   554→        <DialogFooter>
+   555→   555→          <Button variant="outline" onClick={onClose} disabled={loading}>
+   556→   556→            Cancel
+   557→   557→          </Button>
+   558→   558→          <Button
+   559→   559→            onClick={handleCreate}
+   560→   560→            disabled={loading || !name.trim()}
+   561→   561→            className="bg-emerald-600 hover:bg-emerald-700 text-white"
+   562→   562→          >
+   563→   563→            {loading ? (
+   564→   564→              <>
+   565→   565→                <RefreshCw className="size-4 mr-2 animate-spin" />
+   566→   566→                Creating...
+   567→   567→              </>
+   568→   568→            ) : (
+   569→   569→              <>
+   570→   570→                <Rocket className="size-4 mr-2" />
+   571→   571→                Create Project
+   572→   572→              </>
+   573→   573→            )}
+   574→   574→          </Button>
+   575→   575→        </DialogFooter>
+   576→   576→      </DialogContent>
+   577→   577→    </Dialog>
+   578→   578→  )
+   579→   579→}
+   580→   580→
+   581→   581→// ─── Build Logs Dialog ────────────────────────────────────────────
+   582→   582→
+   583→   583→function BuildLogsDialog({
+   584→   584→  open,
+   585→   585→  onClose,
+   586→   586→  logContent,
+   587→   587→  deployment,
+   588→   588→  project,
+   589→   589→  loading,
+   590→   590→}: {
+   591→   591→  open: boolean
+   592→   592→  onClose: () => void
+   593→   593→  logContent: string
+   594→   594→  deployment: Deployment | null
+   595→   595→  project: ProjectDetail | null
+   596→   596→  loading: boolean
+   597→   597→}) {
+   598→   598→  const scrollRef = useRef<HTMLDivElement>(null)
+   599→   599→
+   600→   600→  useEffect(() => {
+   601→   601→    if (open && scrollRef.current) {
+   602→   602→      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+   603→   603→    }
+   604→   604→  }, [open, logContent])
+   605→   605→
+   606→   606→  const displayLog = loading
+   607→   607→    ? 'Loading build logs...'
+   608→   608→    : logContent || (deployment && project ? generateSimulatedBuildLog(project, deployment) : 'No build logs available')
+   609→   609→
+   610→   610→  const isAnimating = deployment?.status === 'building' || deployment?.status === 'deploying'
+   611→   611→
+   612→   612→  return (
+   613→   613→    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+   614→   614→      <DialogContent className="sm:max-w-3xl max-h-[80vh]">
+   615→   615→        <DialogHeader>
+   616→   616→          <DialogTitle className="flex items-center gap-2">
+   617→   617→            <Terminal className="size-5 text-emerald-600" />
+   618→   618→            Build Logs
+   619→   619→            {isAnimating && (
+   620→   620→              <span className="flex items-center gap-1 text-sm text-emerald-600 ml-2">
+   621→   621→                <span className="relative flex size-2">
+   622→   622→                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+   623→   623→                  <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
+   624→   624→                </span>
+   625→   625→                Live
+   626→   626→              </span>
+   627→   627→            )}
+   628→   628→          </DialogTitle>
+   629→   629→          <DialogDescription>
+   630→   630→            {deployment ? (
+   631→   631→              <>
+   632→   632→                <span className="font-mono">{deployment.commit?.slice(0, 8) || 'Initial deploy'}</span>
+   633→   633→                {' on '}
+   634→   634→                <span className="font-mono">{deployment.branch}</span>
+   635→   635→              </>
+   636→   636→            ) : (
+   637→   637→              'Build output'
+   638→   638→            )}
+   639→   639→          </DialogDescription>
+   640→   640→        </DialogHeader>
+   641→   641→
+   642→   642→        <div className="rounded-lg bg-zinc-950 border border-zinc-800 overflow-hidden">
+   643→   643→          {/* Terminal header bar */}
+   644→   644→          <div className="flex items-center gap-2 px-4 py-2 bg-zinc-900 border-b border-zinc-800">
+   645→   645→            <div className="size-3 rounded-full bg-red-500/80" />
+   646→   646→            <div className="size-3 rounded-full bg-yellow-500/80" />
+   647→   647→            <div className="size-3 rounded-full bg-green-500/80" />
+   648→   648→            <span className="ml-2 text-xs text-zinc-500 font-mono">build log</span>
+   649→   649→          </div>
+   650→   650→
+   651→   651→          {/* Terminal content */}
+   652→   652→          <div
+   653→   653→            ref={scrollRef}
+   654→   654→            className="p-4 font-mono text-xs leading-relaxed max-h-[50vh] overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-zinc-700"
+   655→   655→          >
+   656→   656→            <pre className="whitespace-pre-wrap break-words">
+   657→   657→              {displayLog.split('\n').map((line, i) => (
+   658→   658→                <div key={i}>{colorizeLogLine(line)}</div>
+   659→   659→              ))}
+   660→   660→            </pre>
+   661→   661→          </div>
+   662→   662→        </div>
+   663→   663→
+   664→   664→        <DialogFooter>
+   665→   665→          <Button variant="outline" onClick={onClose}>
+   666→   666→            Close
+   667→   667→          </Button>
+   668→   668→        </DialogFooter>
+   669→   669→      </DialogContent>
+   670→   670→    </Dialog>
+   671→   671→  )
+   672→   672→}
+   673→   673→
+   674→   674→// ─── Project Detail View ─────────────────────────────────────────
+   675→   675→
+   676→   676→function ProjectDetailView({
+   677→   677→  projectId,
+   678→   678→  onBack,
+   679→   679→  onRefresh,
+   680→   680→}: {
+   681→   681→  projectId: string
+   682→   682→  onBack: () => void
+   683→   683→  onRefresh: () => void
+   684→   684→}) {
+   685→   685→  const [project, setProject] = useState<ProjectDetail | null>(null)
+   686→   686→  const [loading, setLoading] = useState(true)
+   687→   687→  const [deploying, setDeploying] = useState(false)
+   688→   688→  const [logsDialogOpen, setLogsDialogOpen] = useState(false)
+   689→   689→  const [selectedDeployment, setSelectedDeployment] = useState<Deployment | null>(null)
+   690→   690→  const [logContent, setLogContent] = useState('')
+   691→   691→  const [logLoading, setLogLoading] = useState(false)
+   692→   692→  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+   693→   693→  const [deleting, setDeleting] = useState(false)
+   694→   694→
+   695→   695→  // Settings state
+   696→   696→  const [settingsAutoDeploy, setSettingsAutoDeploy] = useState(false)
+   697→   697→  const [settingsSsl, setSettingsSsl] = useState(false)
+   698→   698→  const [settingsRepoUrl, setSettingsRepoUrl] = useState('')
+   699→   699→  const [settingsCustomDomain, setSettingsCustomDomain] = useState('')
+   700→   700→  const [savingSettings, setSavingSettings] = useState(false)
+   701→   701→
+   702→   702→  // Env vars state
+   703→   703→  const [envVars, setEnvVars] = useState<EnvVar[]>([])
+   704→   704→  const [envLoading, setEnvLoading] = useState(true)
+   705→   705→  const [envReveal, setEnvReveal] = useState(false)
+   706→   706→  const [envDialogOpen, setEnvDialogOpen] = useState(false)
+   707→   707→  const [envDialogMode, setEnvDialogMode] = useState<'create' | 'edit'>('create')
+   708→   708→  const [envEditId, setEnvEditId] = useState<string | null>(null)
+   709→   709→  const [envKey, setEnvKey] = useState('')
+   710→   710→  const [envValue, setEnvValue] = useState('')
+   711→   711→  const [envEncrypted, setEnvEncrypted] = useState(false)
+   712→   712→  const [envSaving, setEnvSaving] = useState(false)
+   713→   713→  const [envDeleteId, setEnvDeleteId] = useState<string | null>(null)
+   714→   714→  const [envDeleting, setEnvDeleting] = useState(false)
+   715→   715→
+   716→   716→  const fetchProject = useCallback(async () => {
+   717→   717→    try {
+   718→   718→      const res = await fetch(`/api/hosting/${projectId}`, {
+   719→   719→        headers: getAuthHeaders(),
+   720→   720→      })
+   721→   721→      const data = await res.json()
+   722→   722→      if (!res.ok) {
+   723→   723→        toast.error(data.error || 'Failed to load project')
+   724→   724→        onBack()
+   725→   725→        return
+   726→   726→      }
+   727→   727→      setProject(data.project)
+   728→   728→      // Initialize settings
+   729→   729→      setSettingsAutoDeploy(data.project.autoDeploy)
+   730→   730→      setSettingsSsl(data.project.sslEnabled)
+   731→   731→      setSettingsRepoUrl(data.project.repoUrl || '')
+   732→   732→      setSettingsCustomDomain(data.project.customDomain || '')
+   733→   733→    } catch {
+   734→   734→      toast.error('Network error')
+   735→   735→      onBack()
+   736→   736→    } finally {
+   737→   737→      setLoading(false)
+   738→   738→    }
+   739→   739→  }, [projectId, onBack])
+   740→   740→
+   741→   741→  const fetchEnvVars = useCallback(async () => {
+   742→   742→    setEnvLoading(true)
+   743→   743→    try {
+   744→   744→      const res = await fetch(`/api/hosting/${projectId}/env${envReveal ? '?reveal=true' : ''}`, {
+   745→   745→        headers: getAuthHeaders(),
+   746→   746→      })
+   747→   747→      const data = await res.json()
+   748→   748→      if (res.ok) {
+   749→   749→        setEnvVars(data.envVars || [])
+   750→   750→      } else {
+   751→   751→        toast.error(data.error || 'Failed to load env vars')
+   752→   752→      }
+   753→   753→    } catch {
+   754→   754→      toast.error('Failed to load env vars')
+   755→   755→    } finally {
+   756→   756→      setEnvLoading(false)
+   757→   757→    }
+   758→   758→  }, [projectId, envReveal])
+   759→   759→
+   760→   760→  useEffect(() => {
+   761→   761→    setLoading(true)
+   762→   762→    fetchProject()
+   763→   763→  }, [fetchProject])
+   764→   764→
+   765→   765→  useEffect(() => {
+   766→   766→    fetchEnvVars()
+   767→   767→  }, [fetchEnvVars])
+   768→   768→
+   769→   769→  const handleDeploy = async () => {
+   770→   770→    setDeploying(true)
+   771→   771→    try {
+   772→   772→      const res = await fetch(`/api/hosting/${projectId}/deploy`, {
+   773→   773→        method: 'POST',
+   774→   774→        headers: getAuthHeaders(),
+   775→   775→      })
+   776→   776→      const data = await res.json()
+   777→   777→      if (!res.ok) {
+   778→   778→        toast.error(data.error || 'Deploy failed')
+   779→   779→        return
+   780→   780→      }
+   781→   781→      toast.success('Deployment triggered!')
+   782→   782→      fetchProject()
+   783→   783→      onRefresh()
+   784→   784→    } catch {
+   785→   785→      toast.error('Network error')
+   786→   786→    } finally {
+   787→   787→      setDeploying(false)
+   788→   788→    }
+   789→   789→  }
+   790→   790→
+   791→   791→  const handleStop = async () => {
+   792→   792→    try {
+   793→   793→      const res = await fetch(`/api/hosting/${projectId}`, {
+   794→   794→        method: 'DELETE',
+   795→   795→        headers: getAuthHeaders(),
+   796→   796→      })
+   797→   797→      const data = await res.json()
+   798→   798→      if (!res.ok) {
+   799→   799→        toast.error(data.error || 'Failed to stop project')
+   800→   800→        return
+   801→   801→      }
+   802→   802→      toast.success('Project stopped')
+   803→   803→      fetchProject()
+   804→   804→      onRefresh()
+   805→   805→    } catch {
+   806→   806→      toast.error('Network error')
+   807→   807→    }
+   808→   808→  }
+   809→   809→
+   810→   810→  const handleViewLogs = async (dep: Deployment) => {
+   811→   811→    setSelectedDeployment(dep)
+   812→   812→    setLogsDialogOpen(true)
+   813→   813→    setLogLoading(true)
+   814→   814→    try {
+   815→   815→      const res = await fetch(`/api/deployments/${dep.id}/logs`, {
+   816→   816→        headers: getAuthHeaders(),
+   817→   817→      })
+   818→   818→      const data = await res.json()
+   819→   819→      if (res.ok) {
+   820→   820→        setLogContent(data.logs || '')
+   821→   821→      } else {
+   822→   822→        setLogContent('')
+   823→   823→      }
+   824→   824→    } catch {
+   825→   825→      setLogContent('')
+   826→   826→    } finally {
+   827→   827→      setLogLoading(false)
+   828→   828→    }
+   829→   829→  }
+   830→   830→
+   831→   831→  const handleSaveSettings = async () => {
+   832→   832→    setSavingSettings(true)
+   833→   833→    try {
+   834→   834→      const res = await fetch(`/api/hosting/${projectId}`, {
+   835→   835→        method: 'PATCH',
+   836→   836→        headers: getAuthHeaders(),
+   837→   837→        body: JSON.stringify({
+   838→   838→          autoDeploy: settingsAutoDeploy,
+   839→   839→          sslEnabled: settingsSsl,
+   840→   840→          repoUrl: settingsRepoUrl,
+   841→   841→          customDomain: settingsCustomDomain,
+   842→   842→        }),
+   843→   843→      })
+   844→   844→      const data = await res.json()
+   845→   845→      if (!res.ok) {
+   846→   846→        toast.error(data.error || 'Failed to save settings')
+   847→   847→        return
+   848→   848→      }
+   849→   849→      toast.success('Settings saved successfully!')
+   850→   850→      fetchProject()
+   851→   851→    } catch {
+   852→   852→      toast.error('Failed to save settings')
+   853→   853→    } finally {
+   854→   854→      setSavingSettings(false)
+   855→   855→    }
+   856→   856→  }
+   857→   857→
+   858→   858→  const handleOpenEnvDialog = (mode: 'create' | 'edit', envVar?: EnvVar) => {
+   859→   859→    setEnvDialogMode(mode)
+   860→   860→    if (mode === 'edit' && envVar) {
+   861→   861→      setEnvEditId(envVar.id)
+   862→   862→      setEnvKey(envVar.key)
+   863→   863→      setEnvValue('')
+   864→   864→      setEnvEncrypted(envVar.encrypted)
+   865→   865→    } else {
+   866→   866→      setEnvEditId(null)
+   867→   867→      setEnvKey('')
+   868→   868→      setEnvValue('')
+   869→   869→      setEnvEncrypted(false)
+   870→   870→    }
+   871→   871→    setEnvDialogOpen(true)
+   872→   872→  }
+   873→   873→
+   874→   874→  const handleSaveEnvVar = async () => {
+   875→   875→    if (!envKey.trim()) {
+   876→   876→      toast.error('Key is required')
+   877→   877→      return
+   878→   878→    }
+   879→   879→    if (envDialogMode === 'create' && !envValue) {
+   880→   880→      toast.error('Value is required')
+   881→   881→      return
+   882→   882→    }
+   883→   883→
+   884→   884→    setEnvSaving(true)
+   885→   885→    try {
+   886→   886→      if (envDialogMode === 'create') {
+   887→   887→        const res = await fetch(`/api/hosting/${projectId}/env`, {
+   888→   888→          method: 'POST',
+   889→   889→          headers: getAuthHeaders(),
+   890→   890→          body: JSON.stringify({ key: envKey.trim(), value: envValue, encrypted: envEncrypted }),
+   891→   891→        })
+   892→   892→        const data = await res.json()
+   893→   893→        if (!res.ok) {
+   894→   894→          toast.error(data.error || 'Failed to create env var')
+   895→   895→          return
+   896→   896→        }
+   897→   897→        toast.success('Environment variable added')
+   898→   898→      } else {
+   899→   899→        const body: Record<string, unknown> = {}
+   900→   900→        if (envKey.trim()) body.key = envKey.trim()
+   901→   901→        if (envValue) body.value = envValue
+   902→   902→        body.encrypted = envEncrypted
+   903→   903→
+   904→   904→        const res = await fetch(`/api/hosting/${projectId}/env/${envEditId}`, {
+   905→   905→          method: 'PATCH',
+   906→   906→          headers: getAuthHeaders(),
+   907→   907→          body: JSON.stringify(body),
+   908→   908→        })
+   909→   909→        const data = await res.json()
+   910→   910→        if (!res.ok) {
+   911→   911→          toast.error(data.error || 'Failed to update env var')
+   912→   912→          return
+   913→   913→        }
+   914→   914→        toast.success('Environment variable updated')
+   915→   915→      }
+   916→   916→      setEnvDialogOpen(false)
+   917→   917→      fetchEnvVars()
+   918→   918→    } catch {
+   919→   919→      toast.error('Network error')
+   920→   920→    } finally {
+   921→   921→      setEnvSaving(false)
+   922→   922→    }
+   923→   923→  }
+   924→   924→
+   925→   925→  const handleDeleteEnvVar = async () => {
+   926→   926→    if (!envDeleteId) return
+   927→   927→    setEnvDeleting(true)
+   928→   928→    try {
+   929→   929→      const res = await fetch(`/api/hosting/${projectId}/env/${envDeleteId}`, {
+   930→   930→        method: 'DELETE',
+   931→   931→        headers: getAuthHeaders(),
+   932→   932→      })
+   933→   933→      const data = await res.json()
+   934→   934→      if (!res.ok) {
+   935→   935→        toast.error(data.error || 'Failed to delete env var')
+   936→   936→        return
+   937→   937→      }
+   938→   938→      toast.success('Environment variable deleted')
+   939→   939→      setEnvDeleteId(null)
+   940→   940→      fetchEnvVars()
+   941→   941→    } catch {
+   942→   942→      toast.error('Network error')
+   943→   943→    } finally {
+   944→   944→      setEnvDeleting(false)
+   945→   945→    }
+   946→   946→  }
+   947→   947→
+   948→   948→  const handleDeleteProject = async () => {
+   949→   949→    setDeleting(true)
+   950→   950→    try {
+   951→   951→      const res = await fetch(`/api/hosting/${projectId}`, {
+   952→   952→        method: 'DELETE',
+   953→   953→        headers: getAuthHeaders(),
+   954→   954→      })
+   955→   955→      const data = await res.json()
+   956→   956→      if (!res.ok) {
+   957→   957→        toast.error(data.error || 'Failed to delete project')
+   958→   958→        return
+   959→   959→      }
+   960→   960→      toast.success('Project deleted')
+   961→   961→      onRefresh()
+   962→   962→      onBack()
+   963→   963→    } catch {
+   964→   964→      toast.error('Network error')
+   965→   965→    } finally {
+   966→   966→      setDeleting(false)
+   967→   967→      setDeleteDialogOpen(false)
+   968→   968→    }
+   969→   969→  }
+   970→   970→
+   971→   971→  if (loading) {
+   972→   972→    return (
+   973→   973→      <div className="space-y-4">
+   974→   974→        <Skeleton className="h-8 w-32" />
+   975→   975→        <Skeleton className="h-40 w-full" />
+   976→   976→        <Skeleton className="h-60 w-full" />
+   977→   977→      </div>
+   978→   978→    )
+   979→   979→  }
+   980→   980→
+   981→   981→  if (!project) return null
+   982→   982→
+   983→   983→  return (
+   984→   984→    <div className="space-y-6">
+   985→   985→      {/* Header */}
+   986→   986→      <div className="flex items-center gap-3">
+   987→   987→        <Button variant="ghost" size="sm" onClick={onBack}>
+   988→   988→          <ArrowLeft className="size-4 mr-1" />
+   989→   989→          Back
+   990→   990→        </Button>
+   991→   991→      </div>
+   992→   992→
+   993→   993→      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+   994→   994→        <div>
+   995→   995→          <div className="flex items-center gap-3">
+   996→   996→            {frameworkIcon(project.framework)}
+   997→   997→            <h2 className="text-2xl font-bold">{project.name}</h2>
+   998→   998→            <Badge variant="outline" className={statusColor(project.status)}>
+   999→   999→              {project.status}
+  1000→  1000→            </Badge>
+  1001→  1001→            <Badge variant="outline" className={frameworkColor(project.framework)}>
+  1002→  1002→              {frameworkLabel(project.framework)}
+  1003→  1003→            </Badge>
+  1004→  1004→          </div>
+  1005→  1005→          <div className="flex items-center gap-2 mt-1 text-sm text-muted-foreground">
+  1006→  1006→            <Globe className="size-3.5" />
+  1007→  1007→            <a
+  1008→  1008→              href={`https://${project.subdomain}`}
+  1009→  1009→              target="_blank"
+  1010→  1010→              rel="noopener noreferrer"
+  1011→  1011→              className="hover:text-emerald-600 transition-colors font-mono"
+  1012→  1012→            >
+  1013→  1013→              {project.subdomain}
+  1014→  1014→              <ExternalLink className="size-3 inline ml-1" />
+  1015→  1015→            </a>
+  1016→  1016→          </div>
+  1017→  1017→          {project.customDomain && (
+  1018→  1018→            <div className="flex items-center gap-2 mt-1 text-sm text-muted-foreground">
+  1019→  1019→              <Globe className="size-3.5" />
+  1020→  1020→              <span className="font-mono">{project.customDomain}</span>
+  1021→  1021→            </div>
+  1022→  1022→          )}
+  1023→  1023→        </div>
+  1024→  1024→
+  1025→  1025→        <div className="flex items-center gap-2 flex-wrap">
+  1026→  1026→          <Button
+  1027→  1027→            onClick={handleDeploy}
+  1028→  1028→            disabled={deploying || project.status !== 'running'}
+  1029→  1029→            className="bg-emerald-600 hover:bg-emerald-700 text-white"
+  1030→  1030→          >
+  1031→  1031→            {deploying ? (
+  1032→  1032→              <RefreshCw className="size-4 mr-2 animate-spin" />
+  1033→  1033→            ) : (
+  1034→  1034→              <Rocket className="size-4 mr-2" />
+  1035→  1035→            )}
+  1036→  1036→            Deploy
+  1037→  1037→          </Button>
+  1038→  1038→          <Button variant="outline" onClick={handleStop} disabled={project.status !== 'running'}>
+  1039→  1039→            <StopCircle className="size-4 mr-2" />
+  1040→  1040→            Stop
+  1041→  1041→          </Button>
+  1042→  1042→          <DropdownMenu>
+  1043→  1043→            <DropdownMenuTrigger asChild>
+  1044→  1044→              <Button variant="outline" size="icon">
+  1045→  1045→                <MoreVertical className="size-4" />
+  1046→  1046→              </Button>
+  1047→  1047→            </DropdownMenuTrigger>
+  1048→  1048→            <DropdownMenuContent align="end">
+  1049→  1049→              <DropdownMenuItem className="text-red-600 focus:text-red-600" onClick={() => setDeleteDialogOpen(true)}>
+  1050→  1050→                <Trash2 className="size-4 mr-2" />
+  1051→  1051→                Delete Project
+  1052→  1052→              </DropdownMenuItem>
+  1053→  1053→            </DropdownMenuContent>
+  1054→  1054→          </DropdownMenu>
+  1055→  1055→        </div>
+  1056→  1056→      </div>
+  1057→  1057→
+  1058→  1058→      <Separator />
+  1059→  1059→
+  1060→  1060→      {/* Info Cards */}
+  1061→  1061→      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+  1062→  1062→        <Card>
+  1063→  1063→          <CardHeader className="pb-2">
+  1064→  1064→            <CardDescription className="flex items-center gap-1.5">
+  1065→  1065→              <Server className="size-3.5" />
+  1066→  1066→              Server
+  1067→  1067→            </CardDescription>
+  1068→  1068→          </CardHeader>
+  1069→  1069→          <CardContent>
+  1070→  1070→            {project.server ? (
+  1071→  1071→              <div>
+  1072→  1072→                <div className="font-medium text-sm">{project.server.name}</div>
+  1073→  1073→                <div className="text-xs text-muted-foreground font-mono">{project.server.ip}</div>
+  1074→  1074→                <div className="text-xs text-muted-foreground">{project.server.region}</div>
+  1075→  1075→              </div>
+  1076→  1076→            ) : (
+  1077→  1077→              <div className="text-sm text-muted-foreground">No server assigned</div>
+  1078→  1078→            )}
+  1079→  1079→          </CardContent>
+  1080→  1080→        </Card>
+  1081→  1081→
+  1082→  1082→        <Card>
+  1083→  1083→          <CardHeader className="pb-2">
+  1084→  1084→            <CardDescription className="flex items-center gap-1.5">
+  1085→  1085→              <Shield className="size-3.5" />
+  1086→  1086→              Security
+  1087→  1087→            </CardDescription>
+  1088→  1088→          </CardHeader>
+  1089→  1089→          <CardContent>
+  1090→  1090→            <div className="text-sm">
+  1091→  1091→              <div className="flex items-center gap-2">
+  1092→  1092→                <div className={`size-2 rounded-full ${project.sslEnabled ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+  1093→  1093→                SSL {project.sslEnabled ? 'Enabled' : 'Disabled'}
+  1094→  1094→              </div>
+  1095→  1095→              <div className="flex items-center gap-2 mt-1">
+  1096→  1096→                <div className={`size-2 rounded-full ${project.autoDeploy ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+  1097→  1097→                Auto Deploy {project.autoDeploy ? 'On' : 'Off'}
+  1098→  1098→              </div>
+  1099→  1099→            </div>
+  1100→  1100→          </CardContent>
+  1101→  1101→        </Card>
+  1102→  1102→
+  1103→  1103→        <Card>
+  1104→  1104→          <CardHeader className="pb-2">
+  1105→  1105→            <CardDescription className="flex items-center gap-1.5">
+  1106→  1106→              <Globe className="size-3.5" />
+  1107→  1107→              Domains
+  1108→  1108→            </CardDescription>
+  1109→  1109→          </CardHeader>
+  1110→  1110→          <CardContent>
+  1111→  1111→            {project.domains.length > 0 ? (
+  1112→  1112→              <div className="space-y-1">
+  1113→  1113→                {project.domains.map((d) => (
+  1114→  1114→                  <div key={d.id} className="text-sm font-mono flex items-center gap-1.5">
+  1115→  1115→                    <div className={`size-1.5 rounded-full ${d.status === 'active' ? 'bg-emerald-500' : 'bg-yellow-500'}`} />
+  1116→  1116→                    {d.name}
+  1117→  1117→                  </div>
+  1118→  1118→                ))}
+  1119→  1119→              </div>
+  1120→  1120→            ) : (
+  1121→  1121→              <div className="text-sm text-muted-foreground">No custom domains</div>
+  1122→  1122→            )}
+  1123→  1123→          </CardContent>
+  1124→  1124→        </Card>
+  1125→  1125→
+  1126→  1126→        <Card>
+  1127→  1127→          <CardHeader className="pb-2">
+  1128→  1128→            <CardDescription className="flex items-center gap-1.5">
+  1129→  1129→              <Zap className="size-3.5" />
+  1130→  1130→              Quick Info
+  1131→  1131→            </CardDescription>
+  1132→  1132→          </CardHeader>
+  1133→  1133→          <CardContent>
+  1134→  1134→            <div className="text-sm space-y-1">
+  1135→  1135→              <div className="text-muted-foreground">Created: {formatDate(project.createdAt)}</div>
+  1136→  1136→              <div className="text-muted-foreground">Updated: {formatDate(project.updatedAt)}</div>
+  1137→  1137→              {project.repoUrl && (
+  1138→  1138→                <div className="text-muted-foreground truncate">Repo: {project.repoUrl}</div>
+  1139→  1139→              )}
+  1140→  1140→            </div>
+  1141→  1141→          </CardContent>
+  1142→  1142→        </Card>
+  1143→  1143→      </div>
+  1144→  1144→
+  1145→  1145→      {/* Deployment History */}
+  1146→  1146→      <Card>
+  1147→  1147→        <CardHeader>
+  1148→  1148→          <CardTitle className="text-lg flex items-center gap-2">
+  1149→  1149→            <Rocket className="size-5 text-emerald-600" />
+  1150→  1150→            Deployment History
+  1151→  1151→          </CardTitle>
+  1152→  1152→          <CardDescription>Recent deployments for this project</CardDescription>
+  1153→  1153→        </CardHeader>
+  1154→  1154→        <CardContent>
+  1155→  1155→          {project.deployments.length === 0 ? (
+  1156→  1156→            <div className="text-center py-8 text-muted-foreground">
+  1157→  1157→              <Rocket className="size-8 mx-auto mb-2 opacity-40" />
+  1158→  1158→              <p className="text-sm">No deployments yet</p>
+  1159→  1159→              <p className="text-xs mt-1">Click &ldquo;Deploy&rdquo; to trigger your first deployment</p>
+  1160→  1160→            </div>
+  1161→  1161→          ) : (
+  1162→  1162→            <div className="max-h-96 overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/20">
+  1163→  1163→              <Table>
+  1164→  1164→                <TableHeader>
+  1165→  1165→                  <TableRow>
+  1166→  1166→                    <TableHead>Status</TableHead>
+  1167→  1167→                    <TableHead>Commit</TableHead>
+  1168→  1168→                    <TableHead>Branch</TableHead>
+  1169→  1169→                    <TableHead>Duration</TableHead>
+  1170→  1170→                    <TableHead>Time</TableHead>
+  1171→  1171→                    <TableHead className="text-right">Actions</TableHead>
+  1172→  1172→                  </TableRow>
+  1173→  1173→                </TableHeader>
+  1174→  1174→                <TableBody>
+  1175→  1175→                  {project.deployments.map((dep) => (
+  1176→  1176→                    <TableRow key={dep.id} className="hover:bg-emerald-50/50 dark:hover:bg-emerald-950/20 transition-colors">
+  1177→  1177→                      <TableCell>
+  1178→  1178→                        <div className="flex items-center gap-2">
+  1179→  1179→                          {deployStatusIcon(dep.status)}
+  1180→  1180→                          <Badge variant="outline" className={statusColor(dep.status)}>
+  1181→  1181→                            {dep.status}
+  1182→  1182→                          </Badge>
+  1183→  1183→                        </div>
+  1184→  1184→                      </TableCell>
+  1185→  1185→                      <TableCell className="font-mono text-xs">
+  1186→  1186→                        {dep.commit ? dep.commit.substring(0, 8) : 'Initial deploy'}
+  1187→  1187→                      </TableCell>
+  1188→  1188→                      <TableCell>
+  1189→  1189→                        <div className="flex items-center gap-1 text-xs">
+  1190→  1190→                          <GitBranch className="size-3 text-muted-foreground" />
+  1191→  1191→                          {dep.branch}
+  1192→  1192→                        </div>
+  1193→  1193→                      </TableCell>
+  1194→  1194→                      <TableCell className="text-xs">
+  1195→  1195→                        {dep.duration ? `${dep.duration}s` : '—'}
+  1196→  1196→                      </TableCell>
+  1197→  1197→                      <TableCell className="text-xs text-muted-foreground">
+  1198→  1198→                        {timeAgo(dep.createdAt)}
+  1199→  1199→                      </TableCell>
+  1200→  1200→                      <TableCell className="text-right">
+  1201→  1201→                        <Button
+  1202→  1202→                          variant="ghost"
+  1203→  1203→                          size="sm"
+  1204→  1204→                          className="h-7 text-xs hover:text-emerald-600"
+  1205→  1205→                          onClick={() => handleViewLogs(dep)}
+  1206→  1206→                        >
+  1207→  1207→                          <Terminal className="size-3 mr-1" />
+  1208→  1208→                          View Logs
+  1209→  1209→                        </Button>
+  1210→  1210→                      </TableCell>
+  1211→  1211→                    </TableRow>
+  1212→  1212→                  ))}
+  1213→  1213→                </TableBody>
+  1214→  1214→              </Table>
+  1215→  1215→            </div>
+  1216→  1216→          )}
+  1217→  1217→        </CardContent>
+  1218→  1218→      </Card>
+  1219→  1219→
+  1220→  1220→      {/* Settings */}
+  1221→  1221→      <Card>
+  1222→  1222→        <CardHeader>
+  1223→  1223→          <CardTitle className="text-lg flex items-center gap-2">
+  1224→  1224→            <Settings className="size-5 text-emerald-600" />
+  1225→  1225→            Settings
+  1226→  1226→          </CardTitle>
+  1227→  1227→          <CardDescription>Configure your project settings</CardDescription>
+  1228→  1228→        </CardHeader>
+  1229→  1229→        <CardContent className="space-y-6">
+  1230→  1230→          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+  1231→  1231→            {/* Auto-deploy toggle */}
+  1232→  1232→            <div className="flex items-center justify-between rounded-lg border p-4">
+  1233→  1233→              <div className="space-y-0.5">
+  1234→  1234→                <Label className="text-base">Auto-deploy</Label>
+  1235→  1235→                <p className="text-xs text-muted-foreground">
+  1236→  1236→                  Automatically deploy when changes are pushed to the linked repository
+  1237→  1237→                </p>
+  1238→  1238→              </div>
+  1239→  1239→              <Switch
+  1240→  1240→                checked={settingsAutoDeploy}
+  1241→  1241→                onCheckedChange={setSettingsAutoDeploy}
+  1242→  1242→              />
+  1243→  1243→            </div>
+  1244→  1244→
+  1245→  1245→            {/* SSL toggle */}
+  1246→  1246→            <div className="flex items-center justify-between rounded-lg border p-4">
+  1247→  1247→              <div className="space-y-0.5">
+  1248→  1248→                <Label className="text-base">SSL</Label>
+  1249→  1249→                <p className="text-xs text-muted-foreground">
+  1250→  1250→                  Enable HTTPS with automatic SSL certificate provisioning
+  1251→  1251→                </p>
+  1252→  1252→              </div>
+  1253→  1253→              <Switch
+  1254→  1254→                checked={settingsSsl}
+  1255→  1255→                onCheckedChange={setSettingsSsl}
+  1256→  1256→              />
+  1257→  1257→            </div>
+  1258→  1258→          </div>
+  1259→  1259→
+  1260→  1260→          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+  1261→  1261→            {/* GitHub repo URL */}
+  1262→  1262→            <div className="space-y-2">
+  1263→  1263→              <Label htmlFor="repo-url">GitHub Repository URL</Label>
+  1264→  1264→              <Input
+  1265→  1265→                id="repo-url"
+  1266→  1266→                placeholder="https://github.com/user/repo"
+  1267→  1267→                value={settingsRepoUrl}
+  1268→  1268→                onChange={(e) => setSettingsRepoUrl(e.target.value)}
+  1269→  1269→                className="font-mono text-sm"
+  1270→  1270→              />
+  1271→  1271→            </div>
+  1272→  1272→
+  1273→  1273→            {/* Custom domain */}
+  1274→  1274→            <div className="space-y-2">
+  1275→  1275→              <Label htmlFor="custom-domain">Custom Domain</Label>
+  1276→  1276→              <Input
+  1277→  1277→                id="custom-domain"
+  1278→  1278→                placeholder="www.myapp.com"
+  1279→  1279→                value={settingsCustomDomain}
+  1280→  1280→                onChange={(e) => setSettingsCustomDomain(e.target.value)}
+  1281→  1281→                className="font-mono text-sm"
+  1282→  1282→              />
+  1283→  1283→            </div>
+  1284→  1284→          </div>
+  1285→  1285→
+  1286→  1286→          <div className="flex justify-end">
+  1287→  1287→            <Button
+  1288→  1288→              onClick={handleSaveSettings}
+  1289→  1289→              disabled={savingSettings}
+  1290→  1290→              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+  1291→  1291→            >
+  1292→  1292→              {savingSettings ? (
+  1293→  1293→                <>
+  1294→  1294→                  <Loader2 className="size-4 mr-2 animate-spin" />
+  1295→  1295→                  Saving...
+  1296→  1296→                </>
+  1297→  1297→              ) : (
+  1298→  1298→                <>
+  1299→  1299→                  <Save className="size-4 mr-2" />
+  1300→  1300→                  Save Changes
+  1301→  1301→                </>
+  1302→  1302→              )}
+  1303→  1303→            </Button>
+  1304→  1304→          </div>
+  1305→  1305→        </CardContent>
+  1306→  1306→      </Card>
+  1307→  1307→
+  1308→  1308→      {/* Environment Variables */}
+  1309→  1309→      <Card>
+  1310→  1310→        <CardHeader>
+  1311→  1311→          <div className="flex items-center justify-between">
+  1312→  1312→            <div>
+  1313→  1313→              <CardTitle className="text-lg flex items-center gap-2">
+  1314→  1314→                <Key className="size-5 text-emerald-600" />
+  1315→  1315→                Environment Variables
+  1316→  1316→              </CardTitle>
+  1317→  1317→              <CardDescription className="mt-1">
+  1318→  1318→                Manage environment variables for your project
+  1319→  1319→              </CardDescription>
+  1320→  1320→            </div>
+  1321→  1321→            <div className="flex items-center gap-2">
+  1322→  1322→              <Button
+  1323→  1323→                variant="outline"
+  1324→  1324→                size="sm"
+  1325→  1325→                onClick={() => setEnvReveal(!envReveal)}
+  1326→  1326→                className="h-8 text-xs"
+  1327→  1327→              >
+  1328→  1328→                {envReveal ? (
+  1329→  1329→                  <>
+  1330→  1330→                    <EyeOff className="size-3.5 mr-1" />
+  1331→  1331→                    Hide
+  1332→  1332→                  </>
+  1333→  1333→                ) : (
+  1334→  1334→                  <>
+  1335→  1335→                    <Eye className="size-3.5 mr-1" />
+  1336→  1336→                    Reveal
+  1337→  1337→                  </>
+  1338→  1338→                )}
+  1339→  1339→              </Button>
+  1340→  1340→              <Button
+  1341→  1341→                size="sm"
+  1342→  1342→                onClick={() => handleOpenEnvDialog('create')}
+  1343→  1343→                className="bg-emerald-600 hover:bg-emerald-700 text-white h-8 text-xs"
+  1344→  1344→              >
+  1345→  1345→                <Plus className="size-3.5 mr-1" />
+  1346→  1346→                Add Variable
+  1347→  1347→              </Button>
+  1348→  1348→            </div>
+  1349→  1349→          </div>
+  1350→  1350→        </CardHeader>
+  1351→  1351→        <CardContent>
+  1352→  1352→          {envLoading ? (
+  1353→  1353→            <div className="space-y-3">
+  1354→  1354→              <Skeleton className="h-10 w-full" />
+  1355→  1355→              <Skeleton className="h-10 w-full" />
+  1356→  1356→              <Skeleton className="h-10 w-full" />
+  1357→  1357→            </div>
+  1358→  1358→          ) : envVars.length === 0 ? (
+  1359→  1359→            <div className="text-center py-10 text-muted-foreground">
+  1360→  1360→              <Key className="size-10 mx-auto mb-3 opacity-30" />
+  1361→  1361→              <p className="text-sm font-medium">No environment variables</p>
+  1362→  1362→              <p className="text-xs mt-1">Add environment variables to configure your application</p>
+  1363→  1363→              <Button
+  1364→  1364→                size="sm"
+  1365→  1365→                onClick={() => handleOpenEnvDialog('create')}
+  1366→  1366→                className="mt-4 bg-emerald-600 hover:bg-emerald-700 text-white h-8 text-xs"
+  1367→  1367→              >
+  1368→  1368→                <Plus className="size-3.5 mr-1" />
+  1369→  1369→                Add Your First Variable
+  1370→  1370→              </Button>
+  1371→  1371→            </div>
+  1372→  1372→          ) : (
+  1373→  1373→            <div className="max-h-96 overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/20">
+  1374→  1374→              <Table>
+  1375→  1375→                <TableHeader>
+  1376→  1376→                  <TableRow>
+  1377→  1377→                    <TableHead>Key</TableHead>
+  1378→  1378→                    <TableHead>Value</TableHead>
+  1379→  1379→                    <TableHead>Type</TableHead>
+  1380→  1380→                    <TableHead className="text-right">Actions</TableHead>
+  1381→  1381→                  </TableRow>
+  1382→  1382→                </TableHeader>
+  1383→  1383→                <TableBody>
+  1384→  1384→                  {envVars.map((ev) => (
+  1385→  1385→                    <TableRow key={ev.id} className="hover:bg-emerald-50/50 dark:hover:bg-emerald-950/20 transition-colors">
+  1386→  1386→                      <TableCell>
+  1387→  1387→                        <div className="flex items-center gap-2">
+  1388→  1388→                          <Key className="size-3.5 text-muted-foreground" />
+  1389→  1389→                          <span className="font-mono text-sm font-medium">{ev.key}</span>
+  1390→  1390→                        </div>
+  1391→  1391→                      </TableCell>
+  1392→  1392→                      <TableCell>
+  1393→  1393→                        <span className="font-mono text-sm text-muted-foreground">
+  1394→  1394→                          {ev.value}
+  1395→  1395→                        </span>
+  1396→  1396→                      </TableCell>
+  1397→  1397→                      <TableCell>
+  1398→  1398→                        {ev.encrypted ? (
+  1399→  1399→                          <Badge variant="outline" className="bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400 text-xs">
+  1400→  1400→                            <Lock className="size-3 mr-1" />
+  1401→  1401→                            Encrypted
+  1402→  1402→                          </Badge>
+  1403→  1403→                        ) : (
+  1404→  1404→                          <Badge variant="outline" className="bg-gray-50 text-gray-600 dark:bg-gray-800/30 dark:text-gray-400 text-xs">
+  1405→  1405→                            Plain
+  1406→  1406→                          </Badge>
+  1407→  1407→                        )}
+  1408→  1408→                      </TableCell>
+  1409→  1409→                      <TableCell className="text-right">
+  1410→  1410→                        <div className="flex items-center justify-end gap-1">
+  1411→  1411→                          <Button
+  1412→  1412→                            variant="ghost"
+  1413→  1413→                            size="sm"
+  1414→  1414→                            className="h-7 text-xs hover:text-emerald-600"
+  1415→  1415→                            onClick={() => handleOpenEnvDialog('edit', ev)}
+  1416→  1416→                          >
+  1417→  1417→                            <Edit className="size-3 mr-1" />
+  1418→  1418→                            Edit
+  1419→  1419→                          </Button>
+  1420→  1420→                          <Button
+  1421→  1421→                            variant="ghost"
+  1422→  1422→                            size="sm"
+  1423→  1423→                            className="h-7 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/20"
+  1424→  1424→                            onClick={() => setEnvDeleteId(ev.id)}
+  1425→  1425→                          >
+  1426→  1426→                            <Trash2 className="size-3 mr-1" />
+  1427→  1427→                            Delete
+  1428→  1428→                          </Button>
+  1429→  1429→                        </div>
+  1430→  1430→                      </TableCell>
+  1431→  1431→                    </TableRow>
+  1432→  1432→                  ))}
+  1433→  1433→                </TableBody>
+  1434→  1434→              </Table>
+  1435→  1435→            </div>
+  1436→  1436→          )}
+  1437→  1437→        </CardContent>
+  1438→  1438→      </Card>
+  1439→  1439→
+  1440→  1440→      {/* Danger Zone */}
+  1441→  1441→      <Card className="border-red-200 dark:border-red-900/50">
+  1442→  1442→        <CardHeader>
+  1443→  1443→          <CardTitle className="text-lg flex items-center gap-2 text-red-600 dark:text-red-400">
+  1444→  1444→            <AlertTriangle className="size-5" />
+  1445→  1445→            Danger Zone
+  1446→  1446→          </CardTitle>
+  1447→  1447→          <CardDescription>
+  1448→  1448→            Irreversible and destructive actions
+  1449→  1449→          </CardDescription>
+  1450→  1450→        </CardHeader>
+  1451→  1451→        <CardContent>
+  1452→  1452→          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 rounded-lg border border-red-200 dark:border-red-900/50 p-4 bg-red-50/50 dark:bg-red-950/10">
+  1453→  1453→            <div>
+  1454→  1454→              <p className="font-medium text-sm">Delete this project</p>
+  1455→  1455→              <p className="text-xs text-muted-foreground mt-0.5">
+  1456→  1456→                Once you delete a project, there is no going back. All deployments and data will be permanently removed.
+  1457→  1457→              </p>
+  1458→  1458→            </div>
+  1459→  1459→            <Button
+  1460→  1460→              variant="destructive"
+  1461→  1461→              size="sm"
+  1462→  1462→              onClick={() => setDeleteDialogOpen(true)}
+  1463→  1463→            >
+  1464→  1464→              <Trash2 className="size-4 mr-2" />
+  1465→  1465→              Delete Project
+  1466→  1466→            </Button>
+  1467→  1467→          </div>
+  1468→  1468→        </CardContent>
+  1469→  1469→      </Card>
+  1470→  1470→
+  1471→  1471→      {/* Build Logs Dialog */}
+  1472→  1472→      <BuildLogsDialog
+  1473→  1473→        open={logsDialogOpen}
+  1474→  1474→        onClose={() => {
+  1475→  1475→          setLogsDialogOpen(false)
+  1476→  1476→          setSelectedDeployment(null)
+  1477→  1477→          setLogContent('')
+  1478→  1478→        }}
+  1479→  1479→        logContent={logContent}
+  1480→  1480→        deployment={selectedDeployment}
+  1481→  1481→        project={project}
+  1482→  1482→        loading={logLoading}
+  1483→  1483→      />
+  1484→  1484→
+  1485→  1485→      {/* Delete Confirmation Dialog */}
+  1486→  1486→      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+  1487→  1487→        <AlertDialogContent>
+  1488→  1488→          <AlertDialogHeader>
+  1489→  1489→            <AlertDialogTitle className="flex items-center gap-2">
+  1490→  1490→              <AlertTriangle className="size-5 text-red-500" />
+  1491→  1491→              Delete Project
+  1492→  1492→            </AlertDialogTitle>
+  1493→  1493→            <AlertDialogDescription>
+  1494→  1494→              Are you sure you want to delete <strong>{project.name}</strong>? This action cannot be undone. All deployments, domains, and associated data will be permanently removed.
+  1495→  1495→            </AlertDialogDescription>
+  1496→  1496→          </AlertDialogHeader>
+  1497→  1497→          <AlertDialogFooter>
+  1498→  1498→            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+  1499→  1499→            <AlertDialogAction
+  1500→  1500→              onClick={handleDeleteProject}
+  1501→  1501→              disabled={deleting}
+  1502→  1502→              className="bg-red-600 hover:bg-red-700 text-white"
+  1503→  1503→            >
+  1504→  1504→              {deleting ? (
+  1505→  1505→                <>
+  1506→  1506→                  <Loader2 className="size-4 mr-2 animate-spin" />
+  1507→  1507→                  Deleting...
+  1508→  1508→                </>
+  1509→  1509→              ) : (
+  1510→  1510→                <>
+  1511→  1511→                  <Trash2 className="size-4 mr-2" />
+  1512→  1512→                  Delete Project
+  1513→  1513→                </>
+  1514→  1514→              )}
+  1515→  1515→            </AlertDialogAction>
+  1516→  1516→          </AlertDialogFooter>
+  1517→  1517→        </AlertDialogContent>
+  1518→  1518→      </AlertDialog>
+  1519→  1519→
+  1520→  1520→      {/* Environment Variable Dialog */}
+  1521→  1521→      <Dialog open={envDialogOpen} onOpenChange={(v) => !v && setEnvDialogOpen(false)}>
+  1522→  1522→        <DialogContent className="sm:max-w-lg">
+  1523→  1523→          <DialogHeader>
+  1524→  1524→            <DialogTitle className="flex items-center gap-2">
+  1525→  1525→              <Key className="size-5 text-emerald-600" />
+  1526→  1526→              {envDialogMode === 'create' ? 'Add Environment Variable' : 'Edit Environment Variable'}
+  1527→  1527→            </DialogTitle>
+  1528→  1528→            <DialogDescription>
+  1529→  1529→              {envDialogMode === 'create'
+  1530→  1530→                ? 'Add a new environment variable to your project.'
+  1531→  1531→                : 'Update the environment variable. Leave value blank to keep the existing value.'}
+  1532→  1532→            </DialogDescription>
+  1533→  1533→          </DialogHeader>
+  1534→  1534→
+  1535→  1535→          <div className="grid gap-4 py-4">
+  1536→  1536→            <div className="grid gap-2">
+  1537→  1537→              <Label htmlFor="env-key">Key</Label>
+  1538→  1538→              <Input
+  1539→  1539→                id="env-key"
+  1540→  1540→                placeholder="DATABASE_URL"
+  1541→  1541→                value={envKey}
+  1542→  1542→                onChange={(e) => setEnvKey(e.target.value)}
+  1543→  1543→                className="font-mono text-sm"
+  1544→  1544→                disabled={envDialogMode === 'edit'}
+  1545→  1545→              />
+  1546→  1546→              {envDialogMode === 'edit' && (
+  1547→  1547→                <p className="text-xs text-muted-foreground">Key cannot be changed when editing</p>
+  1548→  1548→              )}
+  1549→  1549→            </div>
+  1550→  1550→
+  1551→  1551→            <div className="grid gap-2">
+  1552→  1552→              <Label htmlFor="env-value">Value</Label>
+  1553→  1553→              <Input
+  1554→  1554→                id="env-value"
+  1555→  1555→                type="password"
+  1556→  1556→                placeholder={envDialogMode === 'edit' ? 'Leave blank to keep current value' : 'Enter value'}
+  1557→  1557→                value={envValue}
+  1558→  1558→                onChange={(e) => setEnvValue(e.target.value)}
+  1559→  1559→                className="font-mono text-sm"
+  1560→  1560→              />
+  1561→  1561→            </div>
+  1562→  1562→
+  1563→  1563→            <div className="flex items-center justify-between rounded-lg border p-4">
+  1564→  1564→              <div className="space-y-0.5">
+  1565→  1565→                <Label className="text-base flex items-center gap-2">
+  1566→  1566→                  <Lock className="size-4 text-amber-600" />
+  1567→  1567→                  Encrypted
+  1568→  1568→                </Label>
+  1569→  1569→                <p className="text-xs text-muted-foreground">
+  1570→  1570→                  Encrypt this variable at rest for enhanced security
+  1571→  1571→                </p>
+  1572→  1572→              </div>
+  1573→  1573→              <Switch
+  1574→  1574→                checked={envEncrypted}
+  1575→  1575→                onCheckedChange={setEnvEncrypted}
+  1576→  1576→              />
+  1577→  1577→            </div>
+  1578→  1578→          </div>
+  1579→  1579→
+  1580→  1580→          <DialogFooter>
+  1581→  1581→            <Button variant="outline" onClick={() => setEnvDialogOpen(false)} disabled={envSaving}>
+  1582→  1582→              Cancel
+  1583→  1583→            </Button>
+  1584→  1584→            <Button
+  1585→  1585→              onClick={handleSaveEnvVar}
+  1586→  1586→              disabled={envSaving || !envKey.trim()}
+  1587→  1587→              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+  1588→  1588→            >
+  1589→  1589→              {envSaving ? (
+  1590→  1590→                <>
+  1591→  1591→                  <Loader2 className="size-4 mr-2 animate-spin" />
+  1592→  1592→                  Saving...
+  1593→  1593→                </>
+  1594→  1594→              ) : (
+  1595→  1595→                <>
+  1596→  1596→                  <Save className="size-4 mr-2" />
+  1597→  1597→                  {envDialogMode === 'create' ? 'Add Variable' : 'Save Changes'}
+  1598→  1598→                </>
+  1599→  1599→              )}
+  1600→  1600→            </Button>
+  1601→  1601→          </DialogFooter>
+  1602→  1602→        </DialogContent>
+  1603→  1603→      </Dialog>
+  1604→  1604→
+  1605→  1605→      {/* Env Var Delete Confirmation Dialog */}
+  1606→  1606→      <AlertDialog open={!!envDeleteId} onOpenChange={(v) => !v && setEnvDeleteId(null)}>
+  1607→  1607→        <AlertDialogContent>
+  1608→  1608→          <AlertDialogHeader>
+  1609→  1609→            <AlertDialogTitle className="flex items-center gap-2">
+  1610→  1610→              <AlertTriangle className="size-5 text-red-500" />
+  1611→  1611→              Delete Environment Variable
+  1612→  1612→            </AlertDialogTitle>
+  1613→  1613→            <AlertDialogDescription>
+  1614→  1614→              Are you sure you want to delete this environment variable? This action cannot be undone and your application may stop working if it depends on this variable.
+  1615→  1615→            </AlertDialogDescription>
+  1616→  1616→          </AlertDialogHeader>
+  1617→  1617→          <AlertDialogFooter>
+  1618→  1618→            <AlertDialogCancel disabled={envDeleting}>Cancel</AlertDialogCancel>
+  1619→  1619→            <AlertDialogAction
+  1620→  1620→              onClick={handleDeleteEnvVar}
+  1621→  1621→              disabled={envDeleting}
+  1622→  1622→              className="bg-red-600 hover:bg-red-700 text-white"
+  1623→  1623→            >
+  1624→  1624→              {envDeleting ? (
+  1625→  1625→                <>
+  1626→  1626→                  <Loader2 className="size-4 mr-2 animate-spin" />
+  1627→  1627→                  Deleting...
+  1628→  1628→                </>
+  1629→  1629→              ) : (
+  1630→  1630→                <>
+  1631→  1631→                  <Trash2 className="size-4 mr-2" />
+  1632→  1632→                  Delete Variable
+  1633→  1633→                </>
+  1634→  1634→              )}
+  1635→  1635→            </AlertDialogAction>
+  1636→  1636→          </AlertDialogFooter>
+  1637→  1637→        </AlertDialogContent>
+  1638→  1638→      </AlertDialog>
+  1639→  1639→    </div>
+  1640→  1640→  )
+  1641→  1641→}
+  1642→  1642→
+  1643→  1643→// ─── Main Component ─────────────────────────────────────────────
+  1644→  1644→
+  1645→  1645→export default function HostingPanel() {
+  1646→  1646→  const [projects, setProjects] = useState<Project[]>([])
+  1647→  1647→  const [loading, setLoading] = useState(true)
+  1648→  1648→  const [showCreate, setShowCreate] = useState(false)
+  1649→  1649→  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
+  1650→  1650→
+  1651→  1651→  const fetchProjects = useCallback(async () => {
+  1652→  1652→    try {
+  1653→  1653→      const res = await fetch('/api/hosting', {
+  1654→  1654→        headers: getAuthHeaders(),
+  1655→  1655→      })
+  1656→  1656→      const data = await res.json()
+  1657→  1657→      if (res.ok) {
+  1658→  1658→        setProjects(data.projects || [])
+  1659→  1659→      } else {
+  1660→  1660→        toast.error(data.error || 'Failed to load projects')
+  1661→  1661→      }
+  1662→  1662→    } catch {
+  1663→  1663→      toast.error('Network error. Please try again.')
+  1664→  1664→    } finally {
+  1665→  1665→      setLoading(false)
+  1666→  1666→    }
+  1667→  1667→  }, [])
+  1668→  1668→
+  1669→  1669→  useEffect(() => {
+  1670→  1670→    fetchProjects()
+  1671→  1671→  }, [fetchProjects])
+  1672→  1672→
+  1673→  1673→  // Detail View
+  1674→  1674→  if (selectedProjectId) {
+  1675→  1675→    return (
+  1676→  1676→      <div>
+  1677→  1677→        <ProjectDetailView
+  1678→  1678→          projectId={selectedProjectId}
+  1679→  1679→          onBack={() => setSelectedProjectId(null)}
+  1680→  1680→          onRefresh={fetchProjects}
+  1681→  1681→        />
+  1682→  1682→      </div>
+  1683→  1683→    )
+  1684→  1684→  }
+  1685→  1685→
+  1686→  1686→  // List View
+  1687→  1687→  return (
+  1688→  1688→    <div className="space-y-6">
+  1689→  1689→      {/* Header */}
+  1690→  1690→      <div className="flex items-center justify-between">
+  1691→  1691→        <div>
+  1692→  1692→          <h2 className="text-2xl font-bold">Hosting Projects</h2>
+  1693→  1693→          <p className="text-sm text-muted-foreground mt-1">
+  1694→  1694→            Manage your deployed applications and services
+  1695→  1695→          </p>
+  1696→  1696→        </div>
+  1697→  1697→        <Button
+  1698→  1698→          onClick={() => setShowCreate(true)}
+  1699→  1699→          className="bg-emerald-600 hover:bg-emerald-700 text-white"
+  1700→  1700→        >
+  1701→  1701→          <Plus className="size-4 mr-2" />
+  1702→  1702→          New Project
+  1703→  1703→        </Button>
+  1704→  1704→      </div>
+  1705→  1705→
+  1706→  1706→      {/* Project Grid */}
+  1707→  1707→      {loading ? (
+  1708→  1708→        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+  1709→  1709→          <ProjectCardSkeleton />
+  1710→  1710→          <ProjectCardSkeleton />
+  1711→  1711→          <ProjectCardSkeleton />
+  1712→  1712→          <ProjectCardSkeleton />
+  1713→  1713→        </div>
+  1714→  1714→      ) : projects.length === 0 ? (
+  1715→  1715→        <Card className="border-dashed">
+  1716→  1716→          <CardContent className="flex flex-col items-center justify-center py-16">
+  1717→  1717→            <Rocket className="size-12 text-muted-foreground/40 mb-4" />
+  1718→  1718→            <h3 className="text-lg font-semibold mb-1">No projects yet</h3>
+  1719→  1719→            <p className="text-sm text-muted-foreground mb-4">
+  1720→  1720→              Create your first hosting project to get started
+  1721→  1721→            </p>
+  1722→  1722→            <Button
+  1723→  1723→              onClick={() => setShowCreate(true)}
+  1724→  1724→              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+  1725→  1725→            >
+  1726→  1726→              <Plus className="size-4 mr-2" />
+  1727→  1727→              Create Project
+  1728→  1728→            </Button>
+  1729→  1729→          </CardContent>
+  1730→  1730→        </Card>
+  1731→  1731→      ) : (
+  1732→  1732→        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+  1733→  1733→          {projects.map((project) => (
+  1734→  1734→            <ProjectCard
+  1735→  1735→              key={project.id}
+  1736→  1736→              project={project}
+  1737→  1737→              onClick={() => setSelectedProjectId(project.id)}
+  1738→  1738→            />
+  1739→  1739→          ))}
+  1740→  1740→        </div>
+  1741→  1741→      )}
+  1742→  1742→
+  1743→  1743→      <CreateProjectDialog
+  1744→  1744→        open={showCreate}
+  1745→  1745→        onClose={() => setShowCreate(false)}
+  1746→  1746→        onCreated={fetchProjects}
+  1747→  1747→      />
+  1748→  1748→    </div>
+  1749→  1749→  )
+  1750→  1750→}
+  1751→  1751→

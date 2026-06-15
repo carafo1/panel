@@ -1,0 +1,821 @@
+     1→'use client'
+     2→
+     3→import { useState, useEffect, useCallback, useRef } from 'react'
+     4→import {
+     5→  joinDeploymentRoom,
+     6→  leaveDeploymentRoom,
+     7→  type DeploymentLogData,
+     8→  type DeploymentStatusData,
+     9→} from '@/lib/socket'
+    10→import {
+    11→  Card,
+    12→  CardHeader,
+    13→  CardTitle,
+    14→  CardDescription,
+    15→  CardContent,
+    16→  CardFooter,
+    17→} from '@/components/ui/card'
+    18→import { Button } from '@/components/ui/button'
+    19→import { Badge } from '@/components/ui/badge'
+    20→import {
+    21→  Table,
+    22→  TableHeader,
+    23→  TableBody,
+    24→  TableHead,
+    25→  TableRow,
+    26→  TableCell,
+    27→} from '@/components/ui/table'
+    28→import { Skeleton } from '@/components/ui/skeleton'
+    29→import { ScrollArea } from '@/components/ui/scroll-area'
+    30→import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+    31→import {
+    32→  GitBranch,
+    33→  Clock,
+    34→  ArrowLeft,
+    35→  RotateCcw,
+    36→  ExternalLink,
+    37→  Loader2,
+    38→  Rocket,
+    39→  Terminal,
+    40→  User,
+    41→  Webhook,
+    42→  Bot,
+    43→  CheckCircle2,
+    44→  XCircle,
+    45→  Filter,
+    46→  Globe,
+    47→  Wifi,
+    48→  WifiOff,
+    49→} from 'lucide-react'
+    50→import { toast } from 'sonner'
+    51→
+    52→// ── Types ──────────────────────────────────────────────────────────────
+    53→interface Deployment {
+    54→  id: string
+    55→  projectId: string
+    56→  commit: string | null
+    57→  branch: string
+    58→  status: string
+    59→  deployUrl: string | null
+    60→  duration: number | null
+    61→  triggeredBy: string
+    62→  createdAt: string
+    63→  updatedAt: string
+    64→  project: {
+    65→    id: string
+    66→    name: string
+    67→    slug: string
+    68→    subdomain: string
+    69→    framework?: string
+    70→  }
+    71→}
+    72→
+    73→interface DeploymentDetail extends Deployment {
+    74→  buildLog: string | null
+    75→}
+    76→
+    77→// ── API helper ─────────────────────────────────────────────────────────
+    78→async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
+    79→  const token = localStorage.getItem('deployhub_token')
+    80→  const res = await fetch(`/api${path}`, {
+    81→    ...options,
+    82→    headers: {
+    83→      'Content-Type': 'application/json',
+    84→      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    85→      ...options?.headers,
+    86→    },
+    87→  })
+    88→  if (!res.ok) {
+    89→    const data = await res.json().catch(() => ({ error: 'Request failed' }))
+    90→    throw new Error(data.error || `Request failed with status ${res.status}`)
+    91→  }
+    92→  return res.json()
+    93→}
+    94→
+    95→// ── Status badge ───────────────────────────────────────────────────────
+    96→const STATUS_CONFIG: Record<string, { className: string; label: string }> = {
+    97→  queued: { className: 'bg-yellow-100 text-yellow-700 border-yellow-200', label: 'Queued' },
+    98→  building: { className: 'bg-blue-100 text-blue-700 border-blue-200', label: 'Building' },
+    99→  deploying: { className: 'bg-purple-100 text-purple-700 border-purple-200', label: 'Deploying' },
+   100→  live: { className: 'bg-emerald-100 text-emerald-700 border-emerald-200', label: 'Live' },
+   101→  failed: { className: 'bg-red-100 text-red-700 border-red-200', label: 'Failed' },
+   102→  rolled_back: { className: 'bg-gray-100 text-gray-600 border-gray-200', label: 'Rolled Back' },
+   103→}
+   104→
+   105→function DeployStatusBadge({ status }: { status: string }) {
+   106→  const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.queued
+   107→  const isAnimating = status === 'building' || status === 'deploying'
+   108→  return (
+   109→    <Badge variant="outline" className={`${cfg.className} ${isAnimating ? 'animate-pulse' : ''}`}>
+   110→      {isAnimating && <Loader2 className="size-3 animate-spin mr-1" />}
+   111→      {cfg.label}
+   112→    </Badge>
+   113→  )
+   114→}
+   115→
+   116→// ── Time helpers ───────────────────────────────────────────────────────
+   117→function timeAgo(date: string): string {
+   118→  const seconds = Math.floor((Date.now() - new Date(date).getTime()) / 1000)
+   119→  if (seconds < 60) return 'just now'
+   120→  const minutes = Math.floor(seconds / 60)
+   121→  if (minutes < 60) return `${minutes}m ago`
+   122→  const hours = Math.floor(minutes / 60)
+   123→  if (hours < 24) return `${hours}h ago`
+   124→  const days = Math.floor(hours / 24)
+   125→  return `${days}d ago`
+   126→}
+   127→
+   128→function formatDuration(seconds: number | null): string {
+   129→  if (!seconds) return '—'
+   130→  if (seconds < 60) return `${seconds}s`
+   131→  const m = Math.floor(seconds / 60)
+   132→  const s = seconds % 60
+   133→  return `${m}m ${s}s`
+   134→}
+   135→
+   136→function triggeredByIcon(trigger: string) {
+   137→  switch (trigger) {
+   138→    case 'user':
+   139→      return <User className="size-3.5" />
+   140→    case 'webhook':
+   141→      return <Webhook className="size-3.5" />
+   142→    case 'auto':
+   143→      return <Bot className="size-3.5" />
+   144→    default:
+   145→      return <User className="size-3.5" />
+   146→  }
+   147→}
+   148→
+   149→// ── Simulated build logs ───────────────────────────────────────────────
+   150→function generateSimulatedBuildLog(deployment: DeploymentDetail): string {
+   151→  const isFailed = deployment.status === 'failed'
+   152→  const isBuilding = deployment.status === 'building' || deployment.status === 'deploying'
+   153→  const fw = deployment.project?.framework === 'nextjs' ? 'next' : (deployment.project?.framework || 'node')
+   154→  const now = new Date(deployment.createdAt)
+   155→  const pad = (n: number) => String(n).padStart(2, '0')
+   156→  const ts = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`
+   157→
+   158→  if (isFailed) {
+   159→    return `${ts} > Cloning repository...
+   160→${ts} ✓ Repository cloned successfully
+   161→${ts} > Installing dependencies...
+   162→${ts} > npm install --production
+   163→${ts} ✓ Dependencies installed (1.2s)
+   164→${ts} > Building application...
+   165→${ts} > ${fw} build
+   166→${ts} ✗ Type error: Property 'fetchData' does not exist on type 'never'.
+   167→${ts} ✗ Build failed with 1 error
+   168→${ts} > Error: Build process exited with code 1
+   169→${ts} > Deployment failed!`
+   170→  }
+   171→
+   172→  if (isBuilding) {
+   173→    return `${ts} > Cloning repository...
+   174→${ts} ✓ Repository cloned successfully
+   175→${ts} > Installing dependencies...
+   176→${ts} > npm install --production
+   177→${ts} ✓ Dependencies installed (1.2s)
+   178→${ts} > Building application...
+   179→${ts} > ${fw} build
+   180→${ts} ⠹ Compiling...`
+   181→  }
+   182→
+   183→  return `${ts} > Cloning repository...
+   184→${ts} ✓ Repository cloned successfully
+   185→${ts} > Installing dependencies...
+   186→${ts} > npm install --production
+   187→${ts} ✓ Dependencies installed (1.2s)
+   188→${ts} > Building application...
+   189→${ts} > ${fw} build
+   190→${ts} ✓ Compiled successfully
+   191→${ts} ✓ Linting and checking validity of types
+   192→${ts} ✓ Collecting page data
+   193→${ts} ✓ Generating static pages
+   194→${ts} ✓ Finalizing page optimization
+   195→${ts} > Deploying to server...
+   196→${ts} ✓ Deployment successful!
+   197→${ts} > Live at https://${deployment.project?.subdomain || 'myapp'}.deployhub.io`
+   198→}
+   199→
+   200→function colorizeLogLine(line: string): React.ReactNode {
+   201→  if (line.includes('✓') || line.includes('successful') || line.includes('Live at')) {
+   202→    return <span className="text-emerald-400">{line}</span>
+   203→  }
+   204→  if (line.includes('✗') || line.includes('Error') || line.includes('failed')) {
+   205→    return <span className="text-red-400">{line}</span>
+   206→  }
+   207→  if (line.includes('Warning') || line.includes('warn') || line.includes('⠹') || line.includes('⠋') || line.includes('⠼')) {
+   208→    return <span className="text-yellow-400">{line}</span>
+   209→  }
+   210→  if (line.startsWith('>')) {
+   211→    return <span className="text-zinc-400">{line}</span>
+   212→  }
+   213→  return <span className="text-zinc-200">{line}</span>
+   214→}
+   215→
+   216→// ── Component ──────────────────────────────────────────────────────────
+   217→export function DeploymentsPanel() {
+   218→  const [deployments, setDeployments] = useState<Deployment[]>([])
+   219→  const [selectedId, setSelectedId] = useState<string | null>(null)
+   220→  const [detail, setDetail] = useState<DeploymentDetail | null>(null)
+   221→  const [logs, setLogs] = useState<string>('')
+   222→  const [loading, setLoading] = useState(true)
+   223→  const [detailLoading, setDetailLoading] = useState(false)
+   224→  const [rollbackLoading, setRollbackLoading] = useState(false)
+   225→  const [activeFilter, setActiveFilter] = useState('all')
+   226→  const autoRefreshRef = useRef<NodeJS.Timeout | null>(null)
+   227→
+   228→  // Real-time WebSocket state
+   229→  const [liveLogs, setLiveLogs] = useState<string[]>([])
+   230→  const [liveStatus, setLiveStatus] = useState<string | null>(null)
+   231→  const [isLiveConnected, setIsLiveConnected] = useState(false)
+   232→  const logEndRef = useRef<HTMLDivElement>(null)
+   233→
+   234→  const fetchDeployments = useCallback(async () => {
+   235→    try {
+   236→      const data = await apiFetch<{ deployments: Deployment[] }>('/deployments')
+   237→      setDeployments(data.deployments)
+   238→    } catch {
+   239→      toast.error('Failed to load deployments')
+   240→    } finally {
+   241→      setLoading(false)
+   242→    }
+   243→  }, [])
+   244→
+   245→  useEffect(() => {
+   246→    fetchDeployments()
+   247→  }, [fetchDeployments])
+   248→
+   249→  // Auto-refresh when there are active deployments
+   250→  useEffect(() => {
+   251→    const hasActiveDeployments = deployments.some(
+   252→      (d) => d.status === 'building' || d.status === 'deploying' || d.status === 'queued'
+   253→    )
+   254→
+   255→    if (hasActiveDeployments) {
+   256→      autoRefreshRef.current = setInterval(() => {
+   257→        fetchDeployments()
+   258→      }, 3000)
+   259→    }
+   260→
+   261→    return () => {
+   262→      if (autoRefreshRef.current) {
+   263→        clearInterval(autoRefreshRef.current)
+   264→        autoRefreshRef.current = null
+   265→      }
+   266→    }
+   267→  }, [deployments, fetchDeployments])
+   268→
+   269→  // ── WebSocket real-time log streaming with SSE fallback ────────────────
+   270→  useEffect(() => {
+   271→    if (!selectedId) return
+   272→
+   273→    const isActive = detail?.status === 'building' || detail?.status === 'deploying' || detail?.status === 'queued' || liveStatus === 'building' || liveStatus === 'deploying' || liveStatus === 'queued'
+   274→
+   275→    if (!isActive) return
+   276→
+   277→    // Clear previous live logs when connecting to a new deployment
+   278→    setLiveLogs([])
+   279→    setIsLiveConnected(true)
+   280→
+   281→    let cleanupFn: (() => void) | null = null
+   282→
+   283→    // Try WebSocket first, fallback to SSE
+   284→    try {
+   285→      const handleLog = (data: DeploymentLogData) => {
+   286→        if (data.deploymentId === selectedId) {
+   287→          setLiveLogs((prev) => [...prev, data.line])
+   288→        }
+   289→      }
+   290→
+   291→      const handleStatus = (data: DeploymentStatusData) => {
+   292→        if (data.deploymentId === selectedId) {
+   293→          setLiveStatus(data.status)
+   294→
+   295→          if (data.status === 'live' || data.status === 'failed' || data.status === 'rolled_back') {
+   296→            setDetail((prev) => prev ? { ...prev, status: data.status, deployUrl: data.url || prev.deployUrl } : prev)
+   297→            setIsLiveConnected(false)
+   298→            fetchDeployments()
+   299→            if (data.status === 'live') {
+   300→              toast.success('Deployment is now live!')
+   301→            }
+   302→          }
+   303→        }
+   304→      }
+   305→
+   306→      joinDeploymentRoom(selectedId, handleLog, handleStatus)
+   307→      cleanupFn = () => {
+   308→        leaveDeploymentRoom(selectedId)
+   309→      }
+   310→    } catch {
+   311→      // WebSocket not available, use SSE fallback
+   312→      const token = localStorage.getItem('deployhub_token')
+   313→      const eventSource = new EventSource(`/api/deployments/${selectedId}/events?token=${token}`)
+   314→
+   315→      eventSource.onmessage = (event) => {
+   316→        try {
+   317→          const data = JSON.parse(event.data)
+   318→          if (data.status) {
+   319→            setLiveStatus(data.status)
+   320→          }
+   321→          if (data.buildLog) {
+   322→            const lines = data.buildLog.split('\n').filter(Boolean)
+   323→            setLiveLogs(lines)
+   324→          }
+   325→          if (data.status === 'live' || data.status === 'failed' || data.status === 'rolled_back') {
+   326→            setDetail((prev) => prev ? { ...prev, status: data.status, deployUrl: data.deployUrl || prev.deployUrl, duration: data.duration || prev.duration } : prev)
+   327→            setIsLiveConnected(false)
+   328→            eventSource.close()
+   329→            fetchDeployments()
+   330→            if (data.status === 'live') {
+   331→              toast.success('Deployment is now live!')
+   332→            }
+   333→          }
+   334→        } catch {
+   335→          // Ignore parse errors
+   336→        }
+   337→      }
+   338→
+   339→      eventSource.onerror = () => {
+   340→        eventSource.close()
+   341→        setIsLiveConnected(false)
+   342→      }
+   343→
+   344→      cleanupFn = () => {
+   345→        eventSource.close()
+   346→      }
+   347→    }
+   348→
+   349→    return () => {
+   350→      if (cleanupFn) cleanupFn()
+   351→      setIsLiveConnected(false)
+   352→      setLiveStatus(null)
+   353→    }
+   354→  }, [selectedId, detail?.status, liveStatus, fetchDeployments])
+   355→
+   356→  // Auto-scroll to bottom when new live logs arrive
+   357→  useEffect(() => {
+   358→    if (logEndRef.current && liveLogs.length > 0) {
+   359→      logEndRef.current.scrollIntoView({ behavior: 'smooth' })
+   360→    }
+   361→  }, [liveLogs])
+   362→
+   363→  // Clean up live logs when deselecting
+   364→  useEffect(() => {
+   365→    if (!selectedId) {
+   366→      setLiveLogs([])
+   367→      setLiveStatus(null)
+   368→      setIsLiveConnected(false)
+   369→    }
+   370→  }, [selectedId])
+   371→
+   372→  const fetchDetail = useCallback(async (id: string) => {
+   373→    setDetailLoading(true)
+   374→    try {
+   375→      const data = await apiFetch<{
+   376→        deployment: DeploymentDetail
+   377→        logs: string
+   378→      }>(`/deployments/${id}/logs`)
+   379→      setDetail(data.deployment)
+   380→      setLogs(data.logs)
+   381→    } catch {
+   382→      toast.error('Failed to load deployment logs')
+   383→    } finally {
+   384→      setDetailLoading(false)
+   385→    }
+   386→  }, [])
+   387→
+   388→  useEffect(() => {
+   389→    if (selectedId) {
+   390→      fetchDetail(selectedId)
+   391→    }
+   392→  }, [selectedId, fetchDetail])
+   393→
+   394→  const handleRollback = async (id: string) => {
+   395→    setRollbackLoading(true)
+   396→    try {
+   397→      await apiFetch(`/deployments/${id}/rollback`, { method: 'POST' })
+   398→      toast.success('Deployment rolled back successfully')
+   399→      setSelectedId(null)
+   400→      setDetail(null)
+   401→      await fetchDeployments()
+   402→    } catch (err) {
+   403→      toast.error(err instanceof Error ? err.message : 'Rollback failed')
+   404→    } finally {
+   405→      setRollbackLoading(false)
+   406→    }
+   407→  }
+   408→
+   409→  // Filter deployments
+   410→  const filteredDeployments = deployments.filter((d) => {
+   411→    if (activeFilter === 'all') return true
+   412→    if (activeFilter === 'live') return d.status === 'live'
+   413→    if (activeFilter === 'building') return d.status === 'building' || d.status === 'deploying' || d.status === 'queued'
+   414→    if (activeFilter === 'failed') return d.status === 'failed' || d.status === 'rolled_back'
+   415→    return true
+   416→  })
+   417→
+   418→  // Count for tabs
+   419→  const counts = {
+   420→    all: deployments.length,
+   421→    live: deployments.filter((d) => d.status === 'live').length,
+   422→    building: deployments.filter((d) => d.status === 'building' || d.status === 'deploying' || d.status === 'queued').length,
+   423→    failed: deployments.filter((d) => d.status === 'failed' || d.status === 'rolled_back').length,
+   424→  }
+   425→
+   426→  // ── Loading skeleton ────────────────────────────────────────────────
+   427→  if (loading) {
+   428→    return (
+   429→      <div className="space-y-4">
+   430→        <Skeleton className="h-10 w-full rounded-lg" />
+   431→        <Skeleton className="h-96 w-full rounded-xl" />
+   432→      </div>
+   433→    )
+   434→  }
+   435→
+   436→  // ── Detail View ─────────────────────────────────────────────────────
+   437→  if (selectedId && detail) {
+   438→    // Use liveStatus from WebSocket if available, otherwise fall back to detail.status
+   439→    const currentStatus = liveStatus || detail.status
+   440→    const isLive = currentStatus === 'live'
+   441→    const isFailed = currentStatus === 'failed' || currentStatus === 'rolled_back'
+   442→    const isAnimating = currentStatus === 'building' || currentStatus === 'deploying' || currentStatus === 'queued'
+   443→
+   444→    // For active deployments, use live logs if available; for completed ones, use static logs
+   445→    const useLiveLogs = isAnimating && liveLogs.length > 0
+   446→    const displayLog = useLiveLogs ? liveLogs.join('\n') : (logs || generateSimulatedBuildLog(detail))
+   447→
+   448→    return (
+   449→      <div className="space-y-4">
+   450→        <Button
+   451→          variant="ghost"
+   452→          size="sm"
+   453→          onClick={() => {
+   454→            setSelectedId(null)
+   455→            setDetail(null)
+   456→          }}
+   457→          className="mb-2"
+   458→        >
+   459→          <ArrowLeft className="size-4 mr-1" />
+   460→          Back to deployments
+   461→        </Button>
+   462→
+   463→        {/* Header */}
+   464→        <Card>
+   465→          <CardHeader>
+   466→            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+   467→              <div className="space-y-1">
+   468→                <CardTitle className="flex items-center gap-2">
+   469→                  <Rocket className="size-5 text-emerald-600" />
+   470→                  {detail.project.name}
+   471→                  {/* Live status indicator */}
+   472→                  {isAnimating && (
+   473→                    <span className="flex items-center gap-1 text-sm text-emerald-600 ml-1">
+   474→                      <span className="relative flex size-2">
+   475→                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+   476→                        <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
+   477→                      </span>
+   478→                      Active
+   479→                    </span>
+   480→                  )}
+   481→                  {isLive && (
+   482→                    <span className="flex items-center gap-1 text-sm text-emerald-600 ml-1">
+   483→                      <span className="relative flex size-2">
+   484→                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+   485→                        <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
+   486→                      </span>
+   487→                      Live
+   488→                    </span>
+   489→                  )}
+   490→                </CardTitle>
+   491→                <CardDescription className="flex flex-wrap items-center gap-3">
+   492→                  <span className="flex items-center gap-1">
+   493→                    <GitBranch className="size-3.5" />
+   494→                    {detail.branch}
+   495→                  </span>
+   496→                  <span className="font-mono text-xs">
+   497→                    {(detail.commit || 'Initial deploy').slice(0, 7)}
+   498→                  </span>
+   499→                  <span className="flex items-center gap-1">
+   500→                    <Clock className="size-3.5" />
+   501→                    {formatDuration(detail.duration)}
+   502→                  </span>
+   503→                </CardDescription>
+   504→              </div>
+   505→              <div className="flex items-center gap-2 flex-wrap">
+   506→                <DeployStatusBadge status={detail.status} />
+   507→                {isLive && detail.deployUrl && (
+   508→                  <Button variant="outline" size="sm" asChild>
+   509→                    <a href={detail.deployUrl} target="_blank" rel="noopener noreferrer">
+   510→                      <Globe className="size-4 mr-1" />
+   511→                      Visit Site
+   512→                    </a>
+   513→                  </Button>
+   514→                )}
+   515→                {(isLive || isFailed) && (
+   516→                  <Button
+   517→                    variant={isLive ? 'destructive' : 'outline'}
+   518→                    size="sm"
+   519→                    disabled={rollbackLoading}
+   520→                    onClick={() => handleRollback(detail.id)}
+   521→                  >
+   522→                    {rollbackLoading ? (
+   523→                      <Loader2 className="size-4 animate-spin mr-1" />
+   524→                    ) : (
+   525→                      <RotateCcw className="size-4 mr-1" />
+   526→                    )}
+   527→                    Rollback
+   528→                  </Button>
+   529→                )}
+   530→              </div>
+   531→            </div>
+   532→          </CardHeader>
+   533→        </Card>
+   534→
+   535→        {/* Deployment Metadata */}
+   536→        <Card>
+   537→          <CardHeader className="pb-3">
+   538→            <CardTitle className="text-base">Deployment Metadata</CardTitle>
+   539→          </CardHeader>
+   540→          <CardContent>
+   541→            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+   542→              <div className="space-y-1">
+   543→                <p className="text-xs text-muted-foreground">Triggered By</p>
+   544→                <div className="flex items-center gap-1.5 text-sm font-medium capitalize">
+   545→                  {triggeredByIcon(detail.triggeredBy)}
+   546→                  {detail.triggeredBy}
+   547→                </div>
+   548→              </div>
+   549→              <div className="space-y-1">
+   550→                <p className="text-xs text-muted-foreground">Branch</p>
+   551→                <div className="flex items-center gap-1.5 text-sm font-medium">
+   552→                  <GitBranch className="size-3.5 text-muted-foreground" />
+   553→                  {detail.branch}
+   554→                </div>
+   555→              </div>
+   556→              <div className="space-y-1">
+   557→                <p className="text-xs text-muted-foreground">Commit</p>
+   558→                <p className="text-sm font-mono font-medium">
+   559→                  {detail.commit ? detail.commit.slice(0, 7) : '—'}
+   560→                </p>
+   561→              </div>
+   562→              <div className="space-y-1">
+   563→                <p className="text-xs text-muted-foreground">Duration</p>
+   564→                <p className="text-sm font-medium">{formatDuration(detail.duration)}</p>
+   565→              </div>
+   566→              <div className="space-y-1">
+   567→                <p className="text-xs text-muted-foreground">Created</p>
+   568→                <p className="text-sm">{new Date(detail.createdAt).toLocaleString()}</p>
+   569→              </div>
+   570→              <div className="space-y-1">
+   571→                <p className="text-xs text-muted-foreground">Updated</p>
+   572→                <p className="text-sm">{new Date(detail.updatedAt).toLocaleString()}</p>
+   573→              </div>
+   574→              {detail.deployUrl && (
+   575→                <div className="space-y-1 col-span-2">
+   576→                  <p className="text-xs text-muted-foreground">Deploy URL</p>
+   577→                  <a
+   578→                    href={detail.deployUrl}
+   579→                    target="_blank"
+   580→                    rel="noopener noreferrer"
+   581→                    className="text-sm font-mono text-emerald-600 hover:underline flex items-center gap-1"
+   582→                  >
+   583→                    {detail.deployUrl}
+   584→                    <ExternalLink className="size-3" />
+   585→                  </a>
+   586→                </div>
+   587→              )}
+   588→            </div>
+   589→          </CardContent>
+   590→        </Card>
+   591→
+   592→        {/* Build Logs */}
+   593→        <Card>
+   594→          <CardHeader className="pb-3">
+   595→            <CardTitle className="flex items-center gap-2 text-base">
+   596→              <Terminal className="size-4 text-emerald-600" />
+   597→              Build Logs
+   598→              {isAnimating && (
+   599→                <span className="flex items-center gap-1 text-sm text-emerald-600 ml-2">
+   600→                  <span className="relative flex size-2">
+   601→                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+   602→                    <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
+   603→                  </span>
+   604→                  Live
+   605→                </span>
+   606→              )}
+   607→              {/* WebSocket connection indicator */}
+   608→              {isAnimating && (
+   609→                <span className={`flex items-center gap-1 text-xs ml-auto px-2 py-0.5 rounded-full ${isLiveConnected ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400'}`}>
+   610→                  {isLiveConnected ? (
+   611→                    <>
+   612→                      <Wifi className="size-3" />
+   613→                      Streaming
+   614→                    </>
+   615→                  ) : (
+   616→                    <>
+   617→                      <WifiOff className="size-3" />
+   618→                      Connecting...
+   619→                    </>
+   620→                  )}
+   621→                </span>
+   622→              )}
+   623→            </CardTitle>
+   624→          </CardHeader>
+   625→          <CardContent>
+   626→            <div className="rounded-lg bg-zinc-950 border border-zinc-800 overflow-hidden">
+   627→              {/* Terminal header bar */}
+   628→              <div className="flex items-center gap-2 px-4 py-2 bg-zinc-900 border-b border-zinc-800">
+   629→                <div className="size-3 rounded-full bg-red-500/80" />
+   630→                <div className="size-3 rounded-full bg-yellow-500/80" />
+   631→                <div className="size-3 rounded-full bg-green-500/80" />
+   632→                <span className="ml-2 text-xs text-zinc-500 font-mono">build log — {detail.project.name}</span>
+   633→                {useLiveLogs && (
+   634→                  <span className="ml-auto text-xs text-emerald-400 font-mono flex items-center gap-1">
+   635→                    <span className="relative flex size-1.5">
+   636→                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+   637→                      <span className="relative inline-flex size-1.5 rounded-full bg-emerald-500" />
+   638→                    </span>
+   639→                    {liveLogs.length} lines
+   640→                  </span>
+   641→                )}
+   642→              </div>
+   643→              {/* Terminal content */}
+   644→              <div className="p-4 font-mono text-xs leading-relaxed max-h-96 overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-zinc-700">
+   645→                <pre className="whitespace-pre-wrap break-words">
+   646→                  {detailLoading
+   647→                    ? 'Loading logs...'
+   648→                    : displayLog.split('\n').map((line, i) => (
+   649→                        <div key={i}>{colorizeLogLine(line)}</div>
+   650→                      ))
+   651→                  }
+   652→                  {/* Auto-scroll anchor */}
+   653→                  <div ref={logEndRef} />
+   654→                </pre>
+   655→              </div>
+   656→            </div>
+   657→          </CardContent>
+   658→          <CardFooter className="text-xs text-muted-foreground gap-4">
+   659→            <span>Created: {new Date(detail.createdAt).toLocaleString()}</span>
+   660→            <span>Updated: {new Date(detail.updatedAt).toLocaleString()}</span>
+   661→            {useLiveLogs && (
+   662→              <span className="ml-auto text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+   663→                <Wifi className="size-3" />
+   664→                Real-time
+   665→              </span>
+   666→            )}
+   667→          </CardFooter>
+   668→        </Card>
+   669→      </div>
+   670→    )
+   671→  }
+   672→
+   673→  // ── Detail loading ──────────────────────────────────────────────────
+   674→  if (selectedId && detailLoading) {
+   675→    return (
+   676→      <div className="space-y-4">
+   677→        <Button variant="ghost" size="sm" className="mb-2" disabled>
+   678→          <ArrowLeft className="size-4 mr-1" />
+   679→          Back to deployments
+   680→        </Button>
+   681→        <Skeleton className="h-24 w-full rounded-xl" />
+   682→        <Skeleton className="h-96 w-full rounded-xl" />
+   683→      </div>
+   684→    )
+   685→  }
+   686→
+   687→  // ── List View ───────────────────────────────────────────────────────
+   688→  return (
+   689→    <div className="space-y-4">
+   690→      <div className="flex items-center justify-between">
+   691→        <h2 className="text-xl font-semibold">Recent Deployments</h2>
+   692→        <Button variant="outline" size="sm" onClick={fetchDeployments}>
+   693→          <RotateCcw className="size-4 mr-1" />
+   694→          Refresh
+   695→        </Button>
+   696→      </div>
+   697→
+   698→      {deployments.length === 0 ? (
+   699→        <Card>
+   700→          <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+   701→            <Rocket className="size-10 text-muted-foreground mb-3" />
+   702→            <p className="text-muted-foreground">No deployments yet</p>
+   703→            <p className="text-xs text-muted-foreground mt-1">
+   704→              Deploy a project to see it here
+   705→            </p>
+   706→          </CardContent>
+   707→        </Card>
+   708→      ) : (
+   709→        <>
+   710→          {/* Filter Tabs */}
+   711→          <Tabs value={activeFilter} onValueChange={setActiveFilter}>
+   712→            <TabsList>
+   713→              <TabsTrigger value="all" className="gap-1">
+   714→                <Filter className="size-3.5" />
+   715→                All
+   716→                <Badge variant="secondary" className="ml-1 h-5 min-w-5 text-[10px] px-1.5">
+   717→                  {counts.all}
+   718→                </Badge>
+   719→              </TabsTrigger>
+   720→              <TabsTrigger value="live" className="gap-1">
+   721→                <CheckCircle2 className="size-3.5 text-emerald-500" />
+   722→                Live
+   723→                {counts.live > 0 && (
+   724→                  <Badge variant="secondary" className="ml-1 h-5 min-w-5 text-[10px] px-1.5 bg-emerald-100 text-emerald-700">
+   725→                    {counts.live}
+   726→                  </Badge>
+   727→                )}
+   728→              </TabsTrigger>
+   729→              <TabsTrigger value="building" className="gap-1">
+   730→                <Loader2 className="size-3.5 text-blue-500" />
+   731→                Building
+   732→                {counts.building > 0 && (
+   733→                  <Badge variant="secondary" className="ml-1 h-5 min-w-5 text-[10px] px-1.5 bg-blue-100 text-blue-700">
+   734→                    {counts.building}
+   735→                  </Badge>
+   736→                )}
+   737→              </TabsTrigger>
+   738→              <TabsTrigger value="failed" className="gap-1">
+   739→                <XCircle className="size-3.5 text-red-500" />
+   740→                Failed
+   741→                {counts.failed > 0 && (
+   742→                  <Badge variant="secondary" className="ml-1 h-5 min-w-5 text-[10px] px-1.5 bg-red-100 text-red-700">
+   743→                    {counts.failed}
+   744→                  </Badge>
+   745→                )}
+   746→              </TabsTrigger>
+   747→            </TabsList>
+   748→
+   749→            <TabsContent value={activeFilter} className="mt-4">
+   750→              {filteredDeployments.length === 0 ? (
+   751→                <Card>
+   752→                  <CardContent className="flex flex-col items-center justify-center py-8 text-center">
+   753→                    <p className="text-muted-foreground text-sm">No deployments matching this filter</p>
+   754→                  </CardContent>
+   755→                </Card>
+   756→              ) : (
+   757→                <Card>
+   758→                  <CardContent className="p-0">
+   759→                    <div className="max-h-[500px] overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/20">
+   760→                      <Table>
+   761→                        <TableHeader>
+   762→                          <TableRow>
+   763→                            <TableHead>Project</TableHead>
+   764→                            <TableHead>Branch</TableHead>
+   765→                            <TableHead>Commit</TableHead>
+   766→                            <TableHead>Status</TableHead>
+   767→                            <TableHead>Triggered By</TableHead>
+   768→                            <TableHead>Duration</TableHead>
+   769→                            <TableHead>Time</TableHead>
+   770→                          </TableRow>
+   771→                        </TableHeader>
+   772→                        <TableBody>
+   773→                          {filteredDeployments.map((d) => (
+   774→                            <TableRow
+   775→                              key={d.id}
+   776→                              className="cursor-pointer hover:bg-emerald-50/50 dark:hover:bg-emerald-950/20 transition-colors"
+   777→                              onClick={() => setSelectedId(d.id)}
+   778→                            >
+   779→                              <TableCell className="font-medium">
+   780→                                {d.project.name}
+   781→                              </TableCell>
+   782→                              <TableCell>
+   783→                                <span className="flex items-center gap-1 text-muted-foreground">
+   784→                                  <GitBranch className="size-3.5" />
+   785→                                  {d.branch}
+   786→                                </span>
+   787→                              </TableCell>
+   788→                              <TableCell className="font-mono text-xs text-muted-foreground">
+   789→                                {(d.commit || '—').slice(0, 7)}
+   790→                              </TableCell>
+   791→                              <TableCell>
+   792→                                <DeployStatusBadge status={d.status} />
+   793→                              </TableCell>
+   794→                              <TableCell>
+   795→                                <span className="flex items-center gap-1 text-muted-foreground capitalize text-sm">
+   796→                                  {triggeredByIcon(d.triggeredBy)}
+   797→                                  {d.triggeredBy}
+   798→                                </span>
+   799→                              </TableCell>
+   800→                              <TableCell className="text-muted-foreground">
+   801→                                {formatDuration(d.duration)}
+   802→                              </TableCell>
+   803→                              <TableCell className="text-muted-foreground text-xs">
+   804→                                {timeAgo(d.createdAt)}
+   805→                              </TableCell>
+   806→                            </TableRow>
+   807→                          ))}
+   808→                        </TableBody>
+   809→                      </Table>
+   810→                    </div>
+   811→                  </CardContent>
+   812→                </Card>
+   813→              )}
+   814→            </TabsContent>
+   815→          </Tabs>
+   816→        </>
+   817→      )}
+   818→    </div>
+   819→  )
+   820→}
+   821→

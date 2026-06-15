@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { hashPassword, generateToken } from '@/lib/auth'
+import { hashPassword } from '@/lib/auth'
+import { sendWelcomeEmail } from '@/lib/email'
+import { logAudit } from '@/lib/audit'
+import crypto from 'crypto'
 
 export async function POST(request: Request) {
   try {
@@ -33,6 +36,9 @@ export async function POST(request: Request) {
     // Hash password
     const hashedPassword = await hashPassword(password)
 
+    // Generate email verification token
+    const verificationToken = crypto.randomBytes(32).toString('hex')
+
     // Create user
     const user = await db.user.create({
       data: {
@@ -40,26 +46,52 @@ export async function POST(request: Request) {
         email,
         password: hashedPassword,
         role: 'user',
+        emailVerified: false,
+        emailVerificationToken: verificationToken,
       },
     })
 
-    // Generate JWT
-    const token = generateToken({
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+    const verificationUrl = `${appUrl}?verify_token=${verificationToken}`
+
+    // Demo log kept for local development visibility (also logged by email service in demo mode)
+    console.log(`[email] Welcome email + verification for ${user.email}`)
+    console.log(`[email] Verification link: ${verificationUrl}`)
+
+    // Send the real welcome + verification email.
+    // In demo mode (no SMTP env vars) this simply logs to console.
+    await sendWelcomeEmail(user.email, user.name, verificationUrl)
+
+    // Create welcome notification
+    await db.notification.create({
+      data: {
+        userId: user.id,
+        title: 'Welcome to DeployHub!',
+        message: 'Your account has been created. Please verify your email address to get started.',
+        type: 'info',
+      },
+    })
+
+    // Audit successful registration
+    await logAudit({
       userId: user.id,
-      email: user.email,
-      role: user.role,
+      action: 'user.register',
+      resource: 'user',
+      resourceId: user.id,
+      req: request,
+      metadata: { email: user.email, name: user.name },
     })
 
-    return NextResponse.json({
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        createdAt: user.createdAt,
+    // Security: do NOT return the verification token or a session JWT.
+    // The user must click the link in the email to verify their account,
+    // then sign in normally.
+    return NextResponse.json(
+      {
+        message:
+          'Registration successful. Check your email for verification link.',
       },
-      token,
-    }, { status: 201 })
+      { status: 201 }
+    )
   } catch (error) {
     console.error('Registration error:', error)
     return NextResponse.json(

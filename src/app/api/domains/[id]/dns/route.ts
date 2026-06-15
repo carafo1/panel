@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
+import { setDnsRecords } from '@/lib/dynadot'
+import { logAudit } from '@/lib/audit'
 
 export async function PUT(
   request: Request,
@@ -30,6 +32,7 @@ export async function PUT(
     // Verify domain ownership
     const domain = await db.domain.findFirst({
       where: { id, userId: decoded.userId },
+      include: { dnsRecords: true },
     })
 
     if (!domain) {
@@ -75,9 +78,58 @@ export async function PUT(
       createdRecords.push(dnsRecord)
     }
 
+    // ─── Push to Dynadot if this is a Dynadot-managed domain ─────
+    // Local DB remains the source of truth - Dynadot is synced best-effort.
+    let dynadotSync: { success: boolean; message?: string } | null = null
+    if (domain.provider === 'dynadot' && createdRecords.length > 0) {
+      try {
+        // Build the full set of records (existing + newly created) so Dynadot
+        // gets a complete picture. We push at most the first 10 records.
+        const allRecords = [...domain.dnsRecords, ...createdRecords]
+          .slice(0, 10)
+          .map((r) => ({
+            type: r.type,
+            name: r.name,
+            value: r.value,
+            ttl: r.ttl,
+          }))
+
+        const result = await setDnsRecords(domain.name, allRecords)
+        dynadotSync = {
+          success: result.success,
+          message: result.success
+            ? 'Pushed to Dynadot'
+            : 'Failed to push to Dynadot',
+        }
+      } catch (err) {
+        console.error('[dns] Dynadot sync error:', err)
+        dynadotSync = {
+          success: false,
+          message:
+            err instanceof Error
+              ? err.message
+              : 'Unknown Dynadot sync error',
+        }
+      }
+
+      await logAudit({
+        userId: decoded.userId,
+        action: 'domain.dns.dynadot_sync',
+        resource: 'domain',
+        resourceId: domain.id,
+        req: request,
+        metadata: {
+          addedCount: createdRecords.length,
+          success: dynadotSync.success,
+          message: dynadotSync.message,
+        },
+      })
+    }
+
     return NextResponse.json({
       message: `${createdRecords.length} DNS records added`,
       records: createdRecords,
+      dynadotSync,
     }, { status: 201 })
   } catch (error) {
     console.error('Update DNS error:', error)

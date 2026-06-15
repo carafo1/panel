@@ -1,0 +1,696 @@
+     1→'use client'
+     2→
+     3→import { useState, useEffect, useRef } from 'react'
+     4→import {
+     5→  Globe,
+     6→  Zap,
+     7→  Shield,
+     8→  Lock,
+     9→  RefreshCw,
+    10→  BarChart3,
+    11→  ArrowRight,
+    12→  Check,
+    13→  Play,
+    14→  Menu,
+    15→  X,
+    16→  Star,
+    17→  Quote,
+    18→} from 'lucide-react'
+    19→import { ThemeToggle } from '@/components/ui/theme-toggle'
+    20→import { Button } from '@/components/ui/button'
+    21→import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+    22→import { Badge } from '@/components/ui/badge'
+    23→
+    24→interface LandingPageProps {
+    25→  onGetStarted: () => void
+    26→  onLogin: () => void
+    27→}
+    28→
+    29→/* ─── Counter animation hook ─── */
+    30→function useCountUp(end: number, duration = 2000, suffix = '') {
+    31→  const [count, setCount] = useState(0)
+    32→  const ref = useRef<HTMLDivElement>(null)
+    33→  const hasAnimated = useRef(false)
+    34→
+    35→  useEffect(() => {
+    36→    const observer = new IntersectionObserver(
+    37→      ([entry]) => {
+    38→        if (entry.isIntersecting && !hasAnimated.current) {
+    39→          hasAnimated.current = true
+    40→          const startTime = performance.now()
+    41→          const animate = (currentTime: number) => {
+    42→            const elapsed = currentTime - startTime
+    43→            const progress = Math.min(elapsed / duration, 1)
+    44→            // Ease out cubic
+    45→            const eased = 1 - Math.pow(1 - progress, 3)
+    46→            setCount(Math.round(eased * end))
+    47→            if (progress < 1) {
+    48→              requestAnimationFrame(animate)
+    49→            }
+    50→          }
+    51→          requestAnimationFrame(animate)
+    52→        }
+    53→      },
+    54→      { threshold: 0.3 }
+    55→    )
+    56→    if (ref.current) observer.observe(ref.current)
+    57→    return () => observer.disconnect()
+    58→  }, [end, duration])
+    59→
+    60→  return { count: count + suffix, ref }
+    61→}
+    62→
+    63→/* ─── data ─── */
+    64→const features = [
+    65→  {
+    66→    icon: Zap,
+    67→    title: 'Instant Provisioning',
+    68→    description: 'Servers provisioned in under 30 seconds',
+    69→  },
+    70→  {
+    71→    icon: Globe,
+    72→    title: 'Domain Registration',
+    73→    description: 'Search, buy, and connect domains automatically',
+    74→  },
+    75→  {
+    76→    icon: Lock,
+    77→    title: 'Auto SSL',
+    78→    description: 'Free SSL certificates for every domain',
+    79→  },
+    80→  {
+    81→    icon: RefreshCw,
+    82→    title: 'Auto Deploy',
+    83→    description: 'Push to GitHub, deploy automatically',
+    84→  },
+    85→  {
+    86→    icon: BarChart3,
+    87→    title: 'Real-time Monitoring',
+    88→    description: 'Live logs, metrics, and alerts',
+    89→  },
+    90→  {
+    91→    icon: Shield,
+    92→    title: 'DDoS Protection',
+    93→    description: 'Enterprise-grade security included',
+    94→  },
+    95→]
+    96→
+    97→const stats = [
+    98→  { value: 10000, suffix: '+', label: 'Deployments' },
+    99→  { value: 5000, suffix: '+', label: 'Domains Registered' },
+   100→  { value: 99, suffix: '.9%', label: 'Uptime' },
+   101→  { value: 50, suffix: '+', label: 'Countries' },
+   102→]
+   103→
+   104→const steps = [
+   105→  {
+   106→    step: 1,
+   107→    title: 'Choose Your Plan',
+   108→    description: 'Select a hosting plan that fits your needs',
+   109→  },
+   110→  {
+   111→    step: 2,
+   112→    title: 'Connect Your Domain',
+   113→    description: 'Buy a new domain or connect an existing one',
+   114→  },
+   115→  {
+   116→    step: 3,
+   117→    title: 'Deploy & Go Live',
+   118→    description: 'Push your code and watch it go live instantly',
+   119→  },
+   120→]
+   121→
+   122→const testimonials = [
+   123→  {
+   124→    quote: 'DeployHub made deploying our SaaS app dead simple. We went from code to live in under a minute.',
+   125→    name: 'Sarah Chen',
+   126→    role: 'CTO at TechFlow',
+   127→    initials: 'SC',
+   128→    stars: 5,
+   129→  },
+   130→  {
+   131→    quote: 'The domain automation is incredible. No more manual DNS configuration!',
+   132→    name: 'Marcus Johnson',
+   133→    role: 'Founder at DevStudio',
+   134→    initials: 'MJ',
+   135→    stars: 5,
+   136→  },
+   137→  {
+   138→    quote: 'We migrated 50+ sites to DeployHub and haven\'t looked back. The team features are outstanding.',
+   139→    name: 'Elena Rodriguez',
+   140→    role: 'Lead Dev at ScaleUp',
+   141→    initials: 'ER',
+   142→    stars: 5,
+   143→  },
+   144→]
+   145→
+   146→const pricingPlans = [
+   147→  {
+   148→    name: 'Starter',
+   149→    price: 9,
+   150→    description: 'Perfect for side projects',
+   151→    features: ['1GB RAM', '1 vCPU', '10GB Storage', '1 Project', 'Free SSL'],
+   152→    popular: false,
+   153→  },
+   154→  {
+   155→    name: 'Pro',
+   156→    price: 29,
+   157→    description: 'For growing teams and businesses',
+   158→    features: [
+   159→      '4GB RAM',
+   160→      '2 vCPU',
+   161→      '50GB Storage',
+   162→      '5 Projects',
+   163→      'Free SSL',
+   164→      'Custom Domains',
+   165→    ],
+   166→    popular: true,
+   167→  },
+   168→  {
+   169→    name: 'Business',
+   170→    price: 79,
+   171→    description: 'For large-scale operations',
+   172→    features: [
+   173→      '16GB RAM',
+   174→      '4 vCPU',
+   175→      '200GB Storage',
+   176→      'Unlimited Projects',
+   177→      'Free SSL',
+   178→      'Custom Domains',
+   179→      'Priority Support',
+   180→    ],
+   181→    popular: false,
+   182→  },
+   183→]
+   184→
+   185→const footerLinks = {
+   186→  Product: ['Features', 'Pricing', 'Changelog', 'Roadmap'],
+   187→  Resources: ['Documentation', 'API Reference', 'Guides', 'Blog'],
+   188→  Company: ['About', 'Careers', 'Press', 'Contact'],
+   189→  Legal: ['Privacy', 'Terms', 'Security', 'GDPR'],
+   190→}
+   191→
+   192→/* ─── StaggerCard wrapper ─── */
+   193→function StaggerCard({ children, index, className = '' }: { children: React.ReactNode; index: number; className?: string }) {
+   194→  return (
+   195→    <div
+   196→      className={`animate-stagger-in ${className}`}
+   197→      style={{ animationDelay: `${index * 0.1}s` }}
+   198→    >
+   199→      {children}
+   200→    </div>
+   201→  )
+   202→}
+   203→
+   204→/* ─── main component ─── */
+   205→export default function LandingPage({ onGetStarted, onLogin }: LandingPageProps) {
+   206→  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+   207→
+   208→  // Stat counter hooks
+   209→  const stat0 = useCountUp(stats[0].value, 2000, stats[0].suffix)
+   210→  const stat1 = useCountUp(stats[1].value, 2000, stats[1].suffix)
+   211→  const stat2 = useCountUp(stats[2].value, 2000, stats[2].suffix)
+   212→  const stat3 = useCountUp(stats[3].value, 2000, stats[3].suffix)
+   213→  const statRefs = [stat0, stat1, stat2, stat3]
+   214→
+   215→  return (
+   216→    <div className="min-h-screen flex flex-col bg-background text-foreground overflow-x-hidden">
+   217→      {/* ─── NAVBAR ─── */}
+   218→      <nav className="sticky top-0 z-50 border-b bg-background/80 backdrop-blur-md">
+   219→        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+   220→          <div className="flex h-16 items-center justify-between">
+   221→            {/* Logo */}
+   222→            <div className="flex items-center gap-2">
+   223→              <Globe className="size-7 text-emerald-500" />
+   224→              <span className="text-xl font-bold tracking-tight">DeployHub</span>
+   225→            </div>
+   226→
+   227→            {/* Desktop Nav */}
+   228→            <div className="hidden md:flex items-center gap-8">
+   229→              <a
+   230→                href="#features"
+   231→                className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+   232→              >
+   233→                Features
+   234→              </a>
+   235→              <a
+   236→                href="#pricing"
+   237→                className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+   238→              >
+   239→                Pricing
+   240→              </a>
+   241→              <a
+   242→                href="#"
+   243→                className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+   244→              >
+   245→                Docs
+   246→              </a>
+   247→            </div>
+   248→
+   249→            {/* Desktop CTA */}
+   250→            <div className="hidden md:flex items-center gap-3">
+   251→              <ThemeToggle />
+   252→              <Button variant="ghost" size="sm" onClick={onLogin}>
+   253→                Login
+   254→              </Button>
+   255→              <Button
+   256→                size="sm"
+   257→                className="bg-emerald-500 hover:bg-emerald-600 text-white"
+   258→                onClick={onGetStarted}
+   259→              >
+   260→                Get Started
+   261→              </Button>
+   262→            </div>
+   263→
+   264→            {/* Mobile menu toggle */}
+   265→            <button
+   266→              className="md:hidden p-2 text-muted-foreground hover:text-foreground"
+   267→              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+   268→              aria-label="Toggle menu"
+   269→            >
+   270→              {mobileMenuOpen ? <X className="size-5" /> : <Menu className="size-5" />}
+   271→            </button>
+   272→          </div>
+   273→
+   274→          {/* Mobile Menu */}
+   275→          {mobileMenuOpen && (
+   276→            <div
+   277→              className="md:hidden border-t py-4 space-y-3 animate-fade-in-up"
+   278→            >
+   279→              <a href="#features" className="block text-sm font-medium text-muted-foreground hover:text-foreground px-2 py-1">
+   280→                Features
+   281→              </a>
+   282→              <a href="#pricing" className="block text-sm font-medium text-muted-foreground hover:text-foreground px-2 py-1">
+   283→                Pricing
+   284→              </a>
+   285→              <a href="#" className="block text-sm font-medium text-muted-foreground hover:text-foreground px-2 py-1">
+   286→                Docs
+   287→              </a>
+   288→              <div className="flex gap-3 pt-2 px-2 items-center">
+   289→                <ThemeToggle />
+   290→                <Button variant="ghost" size="sm" onClick={onLogin} className="flex-1">
+   291→                  Login
+   292→                </Button>
+   293→                <Button
+   294→                  size="sm"
+   295→                  className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white"
+   296→                  onClick={onGetStarted}
+   297→                >
+   298→                  Get Started
+   299→                </Button>
+   300→              </div>
+   301→            </div>
+   302→          )}
+   303→        </div>
+   304→      </nav>
+   305→
+   306→      <main className="flex-1">
+   307→        {/* ─── HERO ─── */}
+   308→        <section className="relative overflow-hidden bg-[#0a0a0a] text-white">
+   309→          {/* Animated gradient orbs */}
+   310→          <div className="absolute inset-0 overflow-hidden pointer-events-none">
+   311→            <div
+   312→              className="absolute -top-40 -left-40 w-[500px] h-[500px] rounded-full opacity-20 blur-[120px] animate-float"
+   313→              style={{
+   314→                background:
+   315→                  'radial-gradient(circle, #10b981 0%, transparent 70%)',
+   316→              }}
+   317→            />
+   318→            <div
+   319→              className="absolute top-20 right-[-10%] w-[400px] h-[400px] rounded-full opacity-15 blur-[100px] animate-float"
+   320→              style={{
+   321→                background:
+   322→                  'radial-gradient(circle, #059669 0%, transparent 70%)',
+   323→                animationDelay: '2s',
+   324→              }}
+   325→            />
+   326→            <div
+   327→              className="absolute bottom-0 left-1/3 w-[600px] h-[300px] rounded-full opacity-10 blur-[140px] animate-float"
+   328→              style={{
+   329→                background:
+   330→                  'radial-gradient(circle, #34d399 0%, transparent 70%)',
+   331→                animationDelay: '4s',
+   332→              }}
+   333→            />
+   334→          </div>
+   335→
+   336→          {/* Grid pattern background */}
+   337→          <div className="absolute inset-0 animate-grid-bg opacity-60" />
+   338→
+   339→          {/* Rotating gradient overlay */}
+   340→          <div
+   341→            className="absolute inset-0 animate-gradient opacity-[0.07]"
+   342→            style={{
+   343→              background: 'linear-gradient(45deg, #10b981, #059669, #34d399, #10b981)',
+   344→              backgroundSize: '400% 400%',
+   345→            }}
+   346→          />
+   347→
+   348→          <div className="relative mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-24 sm:py-32 lg:py-40 text-center">
+   349→            <div className="animate-fade-in-up">
+   350→              <Badge
+   351→                variant="secondary"
+   352→                className="mb-6 bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20 text-sm px-4 py-1"
+   353→              >
+   354→                🚀 Now with automatic SSL &amp; DNS
+   355→              </Badge>
+   356→            </div>
+   357→
+   358→            <h1 className="text-4xl sm:text-5xl lg:text-7xl font-extrabold tracking-tight leading-[1.1] mb-6 animate-fade-in-up" style={{ animationDelay: '0.15s' }}>
+   359→              Deploy in Seconds,{' '}
+   360→              <span className="bg-gradient-to-r from-emerald-400 to-emerald-600 bg-clip-text text-transparent">
+   361→                Scale Without Limits
+   362→              </span>
+   363→            </h1>
+   364→
+   365→            <p className="mx-auto max-w-2xl text-lg sm:text-xl text-zinc-400 mb-10 leading-relaxed animate-fade-in-up" style={{ animationDelay: '0.3s' }}>
+   366→              The all-in-one platform for hosting, domains, and deployments. Buy a domain, get
+   367→              hosting, and launch your site — automatically.
+   368→            </p>
+   369→
+   370→            <div className="flex flex-col sm:flex-row items-center justify-center gap-4 animate-fade-in-up" style={{ animationDelay: '0.45s' }}>
+   371→              <div className="relative">
+   372→                {/* Pulsing glow behind CTA button */}
+   373→                <div className="absolute inset-0 rounded-md animate-pulse-glow" />
+   374→                <Button
+   375→                  size="lg"
+   376→                  className="relative bg-emerald-500 hover:bg-emerald-600 text-white px-8 h-12 text-base"
+   377→                  onClick={onGetStarted}
+   378→                >
+   379→                  Start Deploying
+   380→                  <ArrowRight className="size-4 ml-1" />
+   381→                </Button>
+   382→              </div>
+   383→              <Button
+   384→                variant="outline"
+   385→                size="lg"
+   386→                className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white px-8 h-12 text-base"
+   387→              >
+   388→                <Play className="size-4 mr-1" />
+   389→                Watch Demo
+   390→              </Button>
+   391→            </div>
+   392→          </div>
+   393→        </section>
+   394→
+   395→        {/* ─── STATS BAR ─── */}
+   396→        <section className="border-b bg-muted/30">
+   397→          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-10 sm:py-14">
+   398→            <div className="grid grid-cols-2 md:grid-cols-4 gap-8 text-center">
+   399→              {stats.map((stat, i) => (
+   400→                <div key={stat.label} ref={statRefs[i].ref} className="space-y-1">
+   401→                  <p className="text-3xl sm:text-4xl font-bold text-emerald-500">
+   402→                    {statRefs[i].count}
+   403→                  </p>
+   404→                  <p className="text-sm text-muted-foreground">{stat.label}</p>
+   405→                </div>
+   406→              ))}
+   407→            </div>
+   408→          </div>
+   409→        </section>
+   410→
+   411→        {/* ─── FEATURES ─── */}
+   412→        <section id="features" className="py-20 sm:py-28">
+   413→          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+   414→            <div className="text-center mb-16 animate-fade-in-up">
+   415→              <Badge variant="secondary" className="mb-4">
+   416→                Features
+   417→              </Badge>
+   418→              <h2 className="text-3xl sm:text-4xl font-bold tracking-tight">
+   419→                Everything you need to{' '}
+   420→                <span className="text-emerald-500">ship faster</span>
+   421→              </h2>
+   422→              <p className="mt-4 text-muted-foreground max-w-xl mx-auto text-lg">
+   423→                From domains to deployments, we handle it all so you can focus on building.
+   424→              </p>
+   425→            </div>
+   426→
+   427→            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+   428→              {features.map((feature, i) => (
+   429→                <StaggerCard key={feature.title} index={i}>
+   430→                  <Card className="group relative overflow-hidden border hover:border-emerald-500/50 hover:shadow-lg hover:shadow-emerald-500/10 transition-all duration-300 h-full hover:scale-[1.02]">
+   431→                    {/* Hover emerald glow */}
+   432→                    <div className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" style={{ boxShadow: '0 0 30px rgba(16, 185, 129, 0.1)' }} />
+   433→                    <CardHeader>
+   434→                      <div className="mb-2 flex size-11 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-500 group-hover:bg-emerald-500/20 group-hover:scale-110 transition-all duration-300">
+   435→                        <feature.icon className="size-5" />
+   436→                      </div>
+   437→                      <CardTitle className="text-lg">{feature.title}</CardTitle>
+   438→                      <CardDescription className="text-sm">
+   439→                        {feature.description}
+   440→                      </CardDescription>
+   441→                    </CardHeader>
+   442→                  </Card>
+   443→                </StaggerCard>
+   444→              ))}
+   445→            </div>
+   446→          </div>
+   447→        </section>
+   448→
+   449→        {/* ─── HOW IT WORKS ─── */}
+   450→        <section className="py-20 sm:py-28 bg-muted/30">
+   451→          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+   452→            <div className="text-center mb-16 animate-fade-in-up">
+   453→              <Badge variant="secondary" className="mb-4">
+   454→                How It Works
+   455→              </Badge>
+   456→              <h2 className="text-3xl sm:text-4xl font-bold tracking-tight">
+   457→                Go live in <span className="text-emerald-500">three simple steps</span>
+   458→              </h2>
+   459→              <p className="mt-4 text-muted-foreground max-w-xl mx-auto text-lg">
+   460→                No complex setups. No tedious configurations. Just deploy.
+   461→              </p>
+   462→            </div>
+   463→
+   464→            <div className="relative grid grid-cols-1 md:grid-cols-3 gap-8 lg:gap-12">
+   465→              {/* Connecting dotted lines (desktop) */}
+   466→              <div className="hidden md:block absolute top-[52px] left-[calc(16.67%+24px)] right-[calc(16.67%+24px)] h-0 border-t-2 border-dashed border-emerald-500/30" />
+   467→
+   468→              {steps.map((step, i) => (
+   469→                <StaggerCard key={step.step} index={i} className="flex flex-col items-center text-center">
+   470→                  {/* Pulsing step number */}
+   471→                  <div className="relative z-10 mb-6">
+   472→                    <div className="absolute inset-0 rounded-full animate-pulse-glow" />
+   473→                    <div className="relative flex size-[52px] items-center justify-center rounded-full bg-emerald-500 text-white font-bold text-lg shadow-lg shadow-emerald-500/25">
+   474→                      {step.step}
+   475→                    </div>
+   476→                  </div>
+   477→                  <h3 className="text-xl font-semibold mb-2">{step.title}</h3>
+   478→                  <p className="text-muted-foreground max-w-xs">{step.description}</p>
+   479→                </StaggerCard>
+   480→              ))}
+   481→            </div>
+   482→          </div>
+   483→        </section>
+   484→
+   485→        {/* ─── TESTIMONIALS ─── */}
+   486→        <section className="py-20 sm:py-28">
+   487→          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+   488→            <div className="text-center mb-16 animate-fade-in-up">
+   489→              <Badge variant="secondary" className="mb-4">
+   490→                Testimonials
+   491→              </Badge>
+   492→              <h2 className="text-3xl sm:text-4xl font-bold tracking-tight">
+   493→                Loved by <span className="text-emerald-500">developers worldwide</span>
+   494→              </h2>
+   495→              <p className="mt-4 text-muted-foreground max-w-xl mx-auto text-lg">
+   496→                See what our users are saying about DeployHub.
+   497→              </p>
+   498→            </div>
+   499→
+   500→            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+   501→              {testimonials.map((testimonial, i) => (
+   502→                <StaggerCard key={testimonial.name} index={i}>
+   503→                  <Card className="relative border hover:border-emerald-500/30 transition-all duration-300 hover:shadow-lg hover:shadow-emerald-500/5 h-full">
+   504→                    <CardContent className="p-6">
+   505→                      {/* Quote icon */}
+   506→                      <Quote className="size-8 text-emerald-500/20 mb-4" />
+   507→
+   508→                      {/* Stars */}
+   509→                      <div className="flex gap-0.5 mb-4">
+   510→                        {Array.from({ length: testimonial.stars }).map((_, si) => (
+   511→                          <Star key={si} className="size-4 fill-amber-400 text-amber-400" />
+   512→                        ))}
+   513→                      </div>
+   514→
+   515→                      {/* Quote text */}
+   516→                      <p className="text-sm leading-relaxed text-foreground mb-6">
+   517→                        &ldquo;{testimonial.quote}&rdquo;
+   518→                      </p>
+   519→
+   520→                      {/* Author */}
+   521→                      <div className="flex items-center gap-3">
+   522→                        <div className="flex size-10 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-600 font-semibold text-sm">
+   523→                          {testimonial.initials}
+   524→                        </div>
+   525→                        <div>
+   526→                          <p className="font-semibold text-sm">{testimonial.name}</p>
+   527→                          <p className="text-xs text-muted-foreground">{testimonial.role}</p>
+   528→                        </div>
+   529→                      </div>
+   530→                    </CardContent>
+   531→                  </Card>
+   532→                </StaggerCard>
+   533→              ))}
+   534→            </div>
+   535→          </div>
+   536→        </section>
+   537→
+   538→        {/* ─── PRICING ─── */}
+   539→        <section id="pricing" className="py-20 sm:py-28 bg-muted/30">
+   540→          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+   541→            <div className="text-center mb-16 animate-fade-in-up">
+   542→              <Badge variant="secondary" className="mb-4">
+   543→                Pricing
+   544→              </Badge>
+   545→              <h2 className="text-3xl sm:text-4xl font-bold tracking-tight">
+   546→                Simple, transparent{' '}
+   547→                <span className="text-emerald-500">pricing</span>
+   548→              </h2>
+   549→              <p className="mt-4 text-muted-foreground max-w-xl mx-auto text-lg">
+   550→                No hidden fees. No surprises. Pick a plan and start deploying.
+   551→              </p>
+   552→            </div>
+   553→
+   554→            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 lg:gap-8 max-w-5xl mx-auto">
+   555→              {pricingPlans.map((plan, i) => (
+   556→                <StaggerCard key={plan.name} index={i}>
+   557→                  <Card
+   558→                    className={`relative flex flex-col h-full transition-all duration-300 hover:shadow-lg hover:scale-[1.02] ${
+   559→                      plan.popular
+   560→                        ? 'border-emerald-500 shadow-lg shadow-emerald-500/10 scale-[1.02]'
+   561→                        : 'hover:border-emerald-500/30'
+   562→                    }`}
+   563→                  >
+   564→                    {plan.popular && (
+   565→                      <div className="absolute -top-3 left-1/2 -translate-x-1/2">
+   566→                        <Badge className="bg-emerald-500 text-white border-0 px-4 py-0.5 shadow-md shadow-emerald-500/25">
+   567→                          POPULAR
+   568→                        </Badge>
+   569→                      </div>
+   570→                    )}
+   571→                    <CardHeader className="pb-0">
+   572→                      <CardTitle className="text-xl">{plan.name}</CardTitle>
+   573→                      <CardDescription>{plan.description}</CardDescription>
+   574→                    </CardHeader>
+   575→                    <CardContent className="flex-1 flex flex-col">
+   576→                      <div className="mb-6">
+   577→                        <span className="text-4xl font-extrabold">${plan.price}</span>
+   578→                        <span className="text-muted-foreground ml-1">/mo</span>
+   579→                      </div>
+   580→                      <ul className="space-y-3 mb-8 flex-1">
+   581→                        {plan.features.map((feature) => (
+   582→                          <li key={feature} className="flex items-center gap-2 text-sm">
+   583→                            <Check className="size-4 text-emerald-500 shrink-0" />
+   584→                            {feature}
+   585→                          </li>
+   586→                        ))}
+   587→                      </ul>
+   588→                      <Button
+   589→                        className={`w-full ${
+   590→                          plan.popular
+   591→                            ? 'bg-emerald-500 hover:bg-emerald-600 text-white'
+   592→                            : ''
+   593→                        }`}
+   594→                        variant={plan.popular ? 'default' : 'outline'}
+   595→                        onClick={onGetStarted}
+   596→                      >
+   597→                        Get Started
+   598→                      </Button>
+   599→                    </CardContent>
+   600→                  </Card>
+   601→                </StaggerCard>
+   602→              ))}
+   603→            </div>
+   604→          </div>
+   605→        </section>
+   606→
+   607→        {/* ─── CTA ─── */}
+   608→        <section className="relative overflow-hidden bg-[#0a0a0a] text-white py-20 sm:py-28">
+   609→          {/* Background glow */}
+   610→          <div className="absolute inset-0 pointer-events-none overflow-hidden">
+   611→            <div
+   612→              className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[400px] rounded-full opacity-20 blur-[160px]"
+   613→              style={{
+   614→                background:
+   615→                  'radial-gradient(circle, #10b981 0%, transparent 70%)',
+   616→              }}
+   617→            />
+   618→          </div>
+   619→
+   620→          <div className="relative mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 text-center">
+   621→            <div className="animate-fade-in-up">
+   622→              {/* Animated gradient border card */}
+   623→              <div className="relative rounded-2xl p-[2px] animate-gradient-border" style={{ background: 'linear-gradient(90deg, #10b981, #059669, #34d399, #10b981)', backgroundSize: '300% 300%' }}>
+   624→                <div className="rounded-2xl bg-[#0a0a0a] px-8 py-14 sm:px-16 sm:py-16">
+   625→                  <h2 className="text-3xl sm:text-5xl font-extrabold tracking-tight mb-4">
+   626→                    Ready to Deploy?
+   627→                  </h2>
+   628→                  <p className="text-zinc-400 text-lg mb-8 max-w-lg mx-auto">
+   629→                    Start building and deploying today. No credit card required.
+   630→                  </p>
+   631→                  <div className="relative inline-block">
+   632→                    <div className="absolute inset-0 rounded-md animate-pulse-glow" />
+   633→                    <Button
+   634→                      size="lg"
+   635→                      className="relative bg-emerald-500 hover:bg-emerald-600 text-white px-10 h-12 text-base"
+   636→                      onClick={onGetStarted}
+   637→                    >
+   638→                      Get Started Free
+   639→                      <ArrowRight className="size-4 ml-1" />
+   640→                    </Button>
+   641→                  </div>
+   642→                </div>
+   643→              </div>
+   644→            </div>
+   645→          </div>
+   646→        </section>
+   647→      </main>
+   648→
+   649→      {/* ─── FOOTER ─── */}
+   650→      <footer className="mt-auto" style={{ borderTop: '1px solid transparent', borderImage: 'linear-gradient(to right, transparent, #10b981, transparent) 1' }}>
+   651→        <div className="bg-muted/30">
+   652→          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-12 sm:py-16">
+   653→            <div className="grid grid-cols-2 md:grid-cols-5 gap-8">
+   654→              {/* Brand */}
+   655→              <div className="col-span-2 md:col-span-1">
+   656→                <div className="flex items-center gap-2 mb-3">
+   657→                  <Globe className="size-5 text-emerald-500" />
+   658→                  <span className="font-bold text-lg">DeployHub</span>
+   659→                </div>
+   660→                <p className="text-sm text-muted-foreground max-w-[200px]">
+   661→                  The modern deployment platform for teams of all sizes.
+   662→                </p>
+   663→              </div>
+   664→
+   665→              {/* Link groups */}
+   666→              {Object.entries(footerLinks).map(([heading, links]) => (
+   667→                <div key={heading}>
+   668→                  <h4 className="font-semibold text-sm mb-3">{heading}</h4>
+   669→                  <ul className="space-y-2">
+   670→                    {links.map((link) => (
+   671→                      <li key={link}>
+   672→                        <a
+   673→                          href="#"
+   674→                          className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+   675→                        >
+   676→                          {link}
+   677→                        </a>
+   678→                      </li>
+   679→                    ))}
+   680→                  </ul>
+   681→                </div>
+   682→              ))}
+   683→            </div>
+   684→
+   685→            <div className="mt-12 pt-8 border-t text-center">
+   686→              <p className="text-sm text-muted-foreground">
+   687→                © 2024 DeployHub. All rights reserved.
+   688→              </p>
+   689→            </div>
+   690→          </div>
+   691→        </div>
+   692→      </footer>
+   693→    </div>
+   694→  )
+   695→}
+   696→

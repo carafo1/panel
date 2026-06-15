@@ -1,4 +1,7 @@
 import { db } from '@/lib/db'
+import { createNotification } from '@/lib/notifications'
+import { slugify } from '@/lib/utils'
+import { getApplicationStatus } from '@/lib/coolify'
 
 export type EventType =
   | 'payment_success'
@@ -18,6 +21,7 @@ export type ActionType =
   | 'setup_dns'
   | 'link_domain'
   | 'rollback_deployment'
+  | 'deployment_status_check'
 
 export interface AutomationEvent {
   type: EventType
@@ -94,15 +98,6 @@ function getActionsForEvent(event: AutomationEvent): ActionDef[] {
   }
 }
 
-// Helper: generate a slug from a name
-function slugify(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
-    .slice(0, 40)
-}
-
 // Create a job in the JobQueue
 export async function createJob(type: string, payload: Record<string, unknown>) {
   const job = await db.jobQueue.create({
@@ -128,6 +123,12 @@ async function executeAction(
 
   switch (action.type) {
     case 'create_user_workspace': {
+      await createNotification({
+        userId: event.userId,
+        title: 'Project Created',
+        message: 'Your project workspace has been created successfully.',
+        type: 'success',
+      })
       return { workspaceId: `ws-${Date.now()}`, status: 'created' }
     }
 
@@ -177,11 +178,18 @@ async function executeAction(
           data: { sslEnabled: true },
         })
       }
+      await createNotification({
+        userId: event.userId,
+        title: 'SSL Enabled',
+        message: 'SSL certificate has been enabled for your project.',
+        type: 'success',
+      })
       return { sslEnabled: true, certificateArn: `cert-${Date.now()}`, status: 'enabled' }
     }
 
     case 'deploy_template': {
       const projectId = payload.projectId as string | undefined
+      let deployed = true
       if (projectId) {
         const project = await db.project.findUnique({ where: { id: projectId } })
         if (project) {
@@ -189,9 +197,27 @@ async function executeAction(
             where: { id: projectId },
             data: { status: 'running' },
           })
+        } else {
+          deployed = false
         }
       }
-      return { deploymentId: `dep-${Date.now()}`, status: 'deployed', url: `https://${slugify((payload.projectName as string) || 'app')}.deployhub.io` }
+      if (deployed) {
+        await createNotification({
+          userId: event.userId,
+          title: 'Deployment Successful',
+          message: `Your project has been deployed successfully.`,
+          type: 'success',
+          link: projectId ? `/hosting/${projectId}` : undefined,
+        })
+      } else {
+        await createNotification({
+          userId: event.userId,
+          title: 'Deployment Failed',
+          message: 'Your project deployment failed. Please try again.',
+          type: 'error',
+        })
+      }
+      return { deploymentId: `dep-${Date.now()}`, status: deployed ? 'deployed' : 'failed', url: deployed ? `https://${slugify((payload.projectName as string) || 'app')}.deployhub.io` : undefined }
     }
 
     case 'register_domain': {
@@ -206,6 +232,14 @@ async function executeAction(
           },
         })
       }
+      await createNotification({
+        userId: event.userId,
+        title: 'Domain Registered',
+        message: domainId
+          ? 'Your domain has been registered successfully.'
+          : 'Domain registration processed.',
+        type: 'success',
+      })
       return { domainId: domainId || `dom-${Date.now()}`, status: 'registered', registrar: 'openprovider' }
     }
 
@@ -261,6 +295,12 @@ async function executeAction(
           }
         }
       }
+      await createNotification({
+        userId: event.userId,
+        title: 'DNS Configured',
+        message: `${recordsCreated} DNS record(s) have been configured for your domain.`,
+        type: 'info',
+      })
       return { dnsConfigured: true, recordsCreated, status: 'configured' }
     }
 
@@ -282,11 +322,218 @@ async function executeAction(
           })
         }
       }
+      await createNotification({
+        userId: event.userId,
+        title: 'Domain Linked',
+        message: 'Your domain has been linked to your project successfully.',
+        type: 'success',
+      })
       return { domainLinked: true, status: 'linked' }
     }
 
     case 'rollback_deployment': {
       return { rolledBack: true, previousVersion: `v-${Date.now() - 1000}`, status: 'rolled_back' }
+    }
+
+    case 'deployment_status_check': {
+      // Poll Coolify (or demo mode) for the live status of a deployment and
+      // mirror it onto the Deployment row. If the deployment is still
+      // in-flight, we schedule a follow-up check job so the worker picks it
+      // up again ~15s later. Once the deployment reaches a terminal state
+      // (live/failed), no follow-up is queued.
+      const deploymentId = payload.deploymentId as string | undefined
+      const projectId = payload.projectId as string | undefined
+      const userId = event.userId || (payload.userId as string | undefined) || ''
+
+      if (!deploymentId || !projectId) {
+        return { status: 'skipped', reason: 'missing_deployment_or_project' }
+      }
+
+      const deployment = await db.deployment.findUnique({
+        where: { id: deploymentId },
+        include: { project: true },
+      })
+      if (!deployment || !deployment.project) {
+        return { status: 'skipped', reason: 'deployment_not_found' }
+      }
+
+      // Terminal deployments don't need further polling.
+      const terminalStatuses = ['live', 'failed', 'rolled_back']
+      if (terminalStatuses.includes(deployment.status)) {
+        return {
+          status: 'already_terminal',
+          deploymentId,
+          deploymentStatus: deployment.status,
+        }
+      }
+
+      const coolifyAppId = deployment.project.coolifyId
+      if (!coolifyAppId) {
+        // No Coolify app yet - nothing to poll. Mark deployment as live in
+        // demo mode so the UI doesn't hang forever.
+        await db.deployment.update({
+          where: { id: deploymentId },
+          data: {
+            status: 'live',
+            deployUrl: `https://${deployment.project.subdomain}`,
+            duration: Math.floor((Date.now() - deployment.createdAt.getTime()) / 1000) || 1,
+          },
+        })
+        return { status: 'no_coolify_id_marked_live', deploymentId }
+      }
+
+      let coolifyStatus: { status: string; url?: string } = {
+        status: 'unknown',
+      }
+      try {
+        coolifyStatus = await getApplicationStatus(coolifyAppId)
+      } catch (err) {
+        console.error(
+          '[automation] deployment_status_check: getApplicationStatus failed',
+          err instanceof Error ? err.message : err
+        )
+        // Re-queue and try again — but only up to a sane limit.
+        const attempts = (payload.attempt as number | undefined) || 0
+        if (attempts < 10) {
+          await db.jobQueue.create({
+            data: {
+              type: 'deployment_status_check',
+              payload: JSON.stringify({
+                deploymentId,
+                projectId,
+                userId,
+                attempt: attempts + 1,
+              }),
+              status: 'queued',
+              attempts: 0,
+              maxAttempts: 3,
+              runAt: new Date(Date.now() + 15_000),
+            },
+          })
+        }
+        return { status: 'poll_failed_will_retry', deploymentId, error: err instanceof Error ? err.message : 'unknown' }
+      }
+
+      // Map Coolify's vocabulary onto our Deployment.status vocabulary.
+      const raw = (coolifyStatus.status || '').toLowerCase()
+      let mapped: string
+      if (raw === 'running' || raw === 'healthy' || raw === 'ready') {
+        mapped = 'live'
+      } else if (raw.includes('error') || raw === 'exited' || raw === 'failed') {
+        mapped = 'failed'
+      } else if (raw === 'building' || raw === 'deploying' || raw === 'in_progress' || raw === 'queued') {
+        mapped = raw === 'queued' ? 'building' : raw
+      } else if (raw === 'stopped' || raw === 'paused') {
+        mapped = 'failed'
+      } else {
+        // Unknown - keep the existing status so we don't downgrade.
+        mapped = deployment.status
+      }
+
+      const nowIso = new Date().toISOString()
+      const elapsedSec = Math.max(
+        1,
+        Math.floor((Date.now() - deployment.createdAt.getTime()) / 1000)
+      )
+
+      // Append a short status line to the build log so the live log view
+      // shows polling activity.
+      const logLine = `[${nowIso}] Coolify status: ${raw || 'unknown'} → ${mapped}`
+      const existingLog = deployment.buildLog || ''
+      const newBuildLog = existingLog
+        ? `${existingLog}\n${logLine}`
+        : logLine
+
+      if (mapped === 'live') {
+        const finalUrl =
+          coolifyStatus.url || `https://${deployment.project.subdomain}`
+        await db.deployment.update({
+          where: { id: deploymentId },
+          data: {
+            status: 'live',
+            deployUrl: finalUrl,
+            duration: elapsedSec,
+            buildLog: `${newBuildLog}\n✅ Deployment live at ${finalUrl} (after ${elapsedSec}s)`,
+          },
+        })
+        // Also bump the project status to running.
+        await db.project.update({
+          where: { id: projectId },
+          data: { status: 'running' },
+        })
+        if (userId) {
+          await createNotification({
+            userId,
+            title: 'Deployment Live',
+            message: `Your deployment is now live at ${finalUrl}`,
+            type: 'success',
+            link: `/deployments/${deploymentId}`,
+          })
+        }
+        return {
+          status: 'live',
+          deploymentId,
+          coolifyStatus: raw,
+          url: finalUrl,
+        }
+      }
+
+      if (mapped === 'failed') {
+        await db.deployment.update({
+          where: { id: deploymentId },
+          data: {
+            status: 'failed',
+            duration: elapsedSec,
+            buildLog: `${newBuildLog}\n❌ Deployment failed (Coolify status: ${raw})`,
+          },
+        })
+        if (userId) {
+          await createNotification({
+            userId,
+            title: 'Deployment Failed',
+            message: `Deployment ${deploymentId.slice(0, 8)} failed during build/deploy.`,
+            type: 'error',
+            link: `/deployments/${deploymentId}`,
+          })
+        }
+        return { status: 'failed', deploymentId, coolifyStatus: raw }
+      }
+
+      // Still in-flight. Update the row's status + log, then schedule the
+      // next status check ~15s out so the worker picks it up again.
+      await db.deployment.update({
+        where: { id: deploymentId },
+        data: {
+          status: mapped,
+          buildLog: newBuildLog,
+        },
+      })
+
+      const attempts = (payload.attempt as number | undefined) || 0
+      if (attempts < 30) {
+        await db.jobQueue.create({
+          data: {
+            type: 'deployment_status_check',
+            payload: JSON.stringify({
+              deploymentId,
+              projectId,
+              userId,
+              attempt: attempts + 1,
+            }),
+            status: 'queued',
+            attempts: 0,
+            maxAttempts: 3,
+            runAt: new Date(Date.now() + 15_000),
+          },
+        })
+      }
+      return {
+        status: 'in_progress',
+        deploymentId,
+        coolifyStatus: raw,
+        mapped,
+        attempt: attempts + 1,
+      }
     }
 
     default:

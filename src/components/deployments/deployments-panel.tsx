@@ -2,6 +2,12 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
+  joinDeploymentRoom,
+  leaveDeploymentRoom,
+  type DeploymentLogData,
+  type DeploymentStatusData,
+} from '@/lib/socket'
+import {
   Card,
   CardHeader,
   CardTitle,
@@ -11,6 +17,7 @@ import {
 } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
 import {
   Table,
   TableHeader,
@@ -38,6 +45,10 @@ import {
   XCircle,
   Filter,
   Globe,
+  Wifi,
+  WifiOff,
+  Search,
+  X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -215,7 +226,15 @@ export function DeploymentsPanel() {
   const [detailLoading, setDetailLoading] = useState(false)
   const [rollbackLoading, setRollbackLoading] = useState(false)
   const [activeFilter, setActiveFilter] = useState('all')
+  const [searchInput, setSearchInput] = useState('')
+  const [searchQuery, setSearchQuery] = useState('') // debounced
   const autoRefreshRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Real-time WebSocket state
+  const [liveLogs, setLiveLogs] = useState<string[]>([])
+  const [liveStatus, setLiveStatus] = useState<string | null>(null)
+  const [isLiveConnected, setIsLiveConnected] = useState(false)
+  const logEndRef = useRef<HTMLDivElement>(null)
 
   const fetchDeployments = useCallback(async () => {
     try {
@@ -231,6 +250,12 @@ export function DeploymentsPanel() {
   useEffect(() => {
     fetchDeployments()
   }, [fetchDeployments])
+
+  // ── Debounce search input (300ms) ─────────────────────────────────
+  useEffect(() => {
+    const t = setTimeout(() => setSearchQuery(searchInput.trim().toLowerCase()), 300)
+    return () => clearTimeout(t)
+  }, [searchInput])
 
   // Auto-refresh when there are active deployments
   useEffect(() => {
@@ -252,24 +277,108 @@ export function DeploymentsPanel() {
     }
   }, [deployments, fetchDeployments])
 
-  // Auto-refresh detail when it's in active state
+  // ── WebSocket real-time log streaming with SSE fallback ────────────────
   useEffect(() => {
-    if (selectedId && detail && (detail.status === 'building' || detail.status === 'deploying' || detail.status === 'queued')) {
-      const interval = setInterval(async () => {
-        try {
-          const data = await apiFetch<{
-            deployment: DeploymentDetail
-            logs: string
-          }>(`/deployments/${selectedId}/logs`)
-          setDetail(data.deployment)
-          setLogs(data.logs)
-        } catch {
-          // Silently fail on auto-refresh
+    if (!selectedId) return
+
+    const isActive = detail?.status === 'building' || detail?.status === 'deploying' || detail?.status === 'queued' || liveStatus === 'building' || liveStatus === 'deploying' || liveStatus === 'queued'
+
+    if (!isActive) return
+
+    // Clear previous live logs when connecting to a new deployment
+    setLiveLogs([])
+    setIsLiveConnected(true)
+
+    let cleanupFn: (() => void) | null = null
+
+    // Try WebSocket first, fallback to SSE
+    try {
+      const handleLog = (data: DeploymentLogData) => {
+        if (data.deploymentId === selectedId) {
+          setLiveLogs((prev) => [...prev, data.line])
         }
-      }, 3000)
-      return () => clearInterval(interval)
+      }
+
+      const handleStatus = (data: DeploymentStatusData) => {
+        if (data.deploymentId === selectedId) {
+          setLiveStatus(data.status)
+
+          if (data.status === 'live' || data.status === 'failed' || data.status === 'rolled_back') {
+            setDetail((prev) => prev ? { ...prev, status: data.status, deployUrl: data.url || prev.deployUrl } : prev)
+            setIsLiveConnected(false)
+            fetchDeployments()
+            if (data.status === 'live') {
+              toast.success('Deployment is now live!')
+            }
+          }
+        }
+      }
+
+      joinDeploymentRoom(selectedId, handleLog, handleStatus)
+      cleanupFn = () => {
+        leaveDeploymentRoom(selectedId)
+      }
+    } catch {
+      // WebSocket not available, use SSE fallback
+      const token = localStorage.getItem('deployhub_token')
+      const eventSource = new EventSource(`/api/deployments/${selectedId}/events?token=${token}`)
+
+      eventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data)
+          if (data.status) {
+            setLiveStatus(data.status)
+          }
+          if (data.buildLog) {
+            const lines = data.buildLog.split('\n').filter(Boolean)
+            setLiveLogs(lines)
+          }
+          if (data.status === 'live' || data.status === 'failed' || data.status === 'rolled_back') {
+            setDetail((prev) => prev ? { ...prev, status: data.status, deployUrl: data.deployUrl || prev.deployUrl, duration: data.duration || prev.duration } : prev)
+            setIsLiveConnected(false)
+            eventSource.close()
+            fetchDeployments()
+            if (data.status === 'live') {
+              toast.success('Deployment is now live!')
+            }
+          }
+        } catch {
+          // Ignore parse errors
+        }
+      }
+
+      eventSource.onerror = () => {
+        eventSource.close()
+        setIsLiveConnected(false)
+      }
+
+      cleanupFn = () => {
+        eventSource.close()
+      }
     }
-  }, [selectedId, detail?.status])
+
+    return () => {
+      if (cleanupFn) cleanupFn()
+      setIsLiveConnected(false)
+      setLiveStatus(null)
+    }
+  }, [selectedId, detail?.status, liveStatus, fetchDeployments])
+
+  // Auto-scroll to bottom when new live logs arrive
+  useEffect(() => {
+    if (logEndRef.current && liveLogs.length > 0) {
+      logEndRef.current.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [liveLogs])
+
+  // Clean up live logs when deselecting
+  useEffect(() => {
+    if (!selectedId) {
+      setLiveLogs([])
+      setLiveStatus(null)
+      setIsLiveConnected(false)
+    }
+  }, [selectedId])
 
   const fetchDetail = useCallback(async (id: string) => {
     setDetailLoading(true)
@@ -308,21 +417,45 @@ export function DeploymentsPanel() {
     }
   }
 
-  // Filter deployments
+  // Filter deployments by status tab + search query
   const filteredDeployments = deployments.filter((d) => {
-    if (activeFilter === 'all') return true
-    if (activeFilter === 'live') return d.status === 'live'
-    if (activeFilter === 'building') return d.status === 'building' || d.status === 'deploying' || d.status === 'queued'
-    if (activeFilter === 'failed') return d.status === 'failed' || d.status === 'rolled_back'
+    // Status filter
+    if (activeFilter === 'live' && d.status !== 'live') return false
+    if (
+      activeFilter === 'building' &&
+      !['building', 'deploying', 'queued'].includes(d.status)
+    )
+      return false
+    if (
+      activeFilter === 'failed' &&
+      !['failed', 'rolled_back'].includes(d.status)
+    )
+      return false
+
+    // Search filter (by project name, branch, or commit)
+    if (searchQuery) {
+      const haystack = `${d.project.name} ${d.branch} ${d.commit || ''} ${d.project.subdomain} ${d.project.slug} ${d.triggeredBy}`.toLowerCase()
+      if (!haystack.includes(searchQuery)) return false
+    }
     return true
   })
 
-  // Count for tabs
+  // Count for tabs (apply search to counts too so the user sees how many
+  // matches exist in each bucket)
+  const searchFiltered = deployments.filter((d) => {
+    if (!searchQuery) return true
+    const haystack = `${d.project.name} ${d.branch} ${d.commit || ''} ${d.project.subdomain} ${d.project.slug} ${d.triggeredBy}`.toLowerCase()
+    return haystack.includes(searchQuery)
+  })
   const counts = {
-    all: deployments.length,
-    live: deployments.filter((d) => d.status === 'live').length,
-    building: deployments.filter((d) => d.status === 'building' || d.status === 'deploying' || d.status === 'queued').length,
-    failed: deployments.filter((d) => d.status === 'failed' || d.status === 'rolled_back').length,
+    all: searchFiltered.length,
+    live: searchFiltered.filter((d) => d.status === 'live').length,
+    building: searchFiltered.filter((d) =>
+      ['building', 'deploying', 'queued'].includes(d.status)
+    ).length,
+    failed: searchFiltered.filter((d) =>
+      ['failed', 'rolled_back'].includes(d.status)
+    ).length,
   }
 
   // ── Loading skeleton ────────────────────────────────────────────────
@@ -337,11 +470,15 @@ export function DeploymentsPanel() {
 
   // ── Detail View ─────────────────────────────────────────────────────
   if (selectedId && detail) {
-    const isLive = detail.status === 'live'
-    const isFailed = detail.status === 'failed' || detail.status === 'rolled_back'
-    const isAnimating = detail.status === 'building' || detail.status === 'deploying'
+    // Use liveStatus from WebSocket if available, otherwise fall back to detail.status
+    const currentStatus = liveStatus || detail.status
+    const isLive = currentStatus === 'live'
+    const isFailed = currentStatus === 'failed' || currentStatus === 'rolled_back'
+    const isAnimating = currentStatus === 'building' || currentStatus === 'deploying' || currentStatus === 'queued'
 
-    const displayLog = logs || generateSimulatedBuildLog(detail)
+    // For active deployments, use live logs if available; for completed ones, use static logs
+    const useLiveLogs = isAnimating && liveLogs.length > 0
+    const displayLog = useLiveLogs ? liveLogs.join('\n') : (logs || generateSimulatedBuildLog(detail))
 
     return (
       <div className="space-y-4">
@@ -502,6 +639,22 @@ export function DeploymentsPanel() {
                   Live
                 </span>
               )}
+              {/* WebSocket connection indicator */}
+              {isAnimating && (
+                <span className={`flex items-center gap-1 text-xs ml-auto px-2 py-0.5 rounded-full ${isLiveConnected ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400'}`}>
+                  {isLiveConnected ? (
+                    <>
+                      <Wifi className="size-3" />
+                      Streaming
+                    </>
+                  ) : (
+                    <>
+                      <WifiOff className="size-3" />
+                      Connecting...
+                    </>
+                  )}
+                </span>
+              )}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -512,6 +665,15 @@ export function DeploymentsPanel() {
                 <div className="size-3 rounded-full bg-yellow-500/80" />
                 <div className="size-3 rounded-full bg-green-500/80" />
                 <span className="ml-2 text-xs text-zinc-500 font-mono">build log — {detail.project.name}</span>
+                {useLiveLogs && (
+                  <span className="ml-auto text-xs text-emerald-400 font-mono flex items-center gap-1">
+                    <span className="relative flex size-1.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                      <span className="relative inline-flex size-1.5 rounded-full bg-emerald-500" />
+                    </span>
+                    {liveLogs.length} lines
+                  </span>
+                )}
               </div>
               {/* Terminal content */}
               <div className="p-4 font-mono text-xs leading-relaxed max-h-96 overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-zinc-700">
@@ -522,6 +684,8 @@ export function DeploymentsPanel() {
                         <div key={i}>{colorizeLogLine(line)}</div>
                       ))
                   }
+                  {/* Auto-scroll anchor */}
+                  <div ref={logEndRef} />
                 </pre>
               </div>
             </div>
@@ -529,6 +693,12 @@ export function DeploymentsPanel() {
           <CardFooter className="text-xs text-muted-foreground gap-4">
             <span>Created: {new Date(detail.createdAt).toLocaleString()}</span>
             <span>Updated: {new Date(detail.updatedAt).toLocaleString()}</span>
+            {useLiveLogs && (
+              <span className="ml-auto text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                <Wifi className="size-3" />
+                Real-time
+              </span>
+            )}
           </CardFooter>
         </Card>
       </div>
@@ -552,12 +722,34 @@ export function DeploymentsPanel() {
   // ── List View ───────────────────────────────────────────────────────
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <h2 className="text-xl font-semibold">Recent Deployments</h2>
-        <Button variant="outline" size="sm" onClick={fetchDeployments}>
-          <RotateCcw className="size-4 mr-1" />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+            <Input
+              type="search"
+              placeholder="Search by project, branch, commit..."
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              className="pl-9 pr-8 h-9 w-48 sm:w-64"
+            />
+            {searchInput && (
+              <button
+                type="button"
+                onClick={() => setSearchInput('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                aria-label="Clear search"
+              >
+                <X className="size-3.5" />
+              </button>
+            )}
+          </div>
+          <Button variant="outline" size="sm" onClick={fetchDeployments}>
+            <RotateCcw className="size-4 mr-1" />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {deployments.length === 0 ? (
@@ -572,7 +764,7 @@ export function DeploymentsPanel() {
         </Card>
       ) : (
         <>
-          {/* Filter Tabs */}
+          {/* Filter Tabs + Search */}
           <Tabs value={activeFilter} onValueChange={setActiveFilter}>
             <TabsList>
               <TabsTrigger value="all" className="gap-1">
@@ -615,7 +807,22 @@ export function DeploymentsPanel() {
               {filteredDeployments.length === 0 ? (
                 <Card>
                   <CardContent className="flex flex-col items-center justify-center py-8 text-center">
-                    <p className="text-muted-foreground text-sm">No deployments matching this filter</p>
+                    <p className="text-muted-foreground text-sm">
+                      {searchQuery
+                        ? `No deployments matching "${searchInput}"`
+                        : 'No deployments matching this filter'}
+                    </p>
+                    {searchQuery && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setSearchInput('')}
+                        className="mt-3"
+                      >
+                        <X className="size-3.5 mr-1" />
+                        Clear search
+                      </Button>
+                    )}
                   </CardContent>
                 </Card>
               ) : (

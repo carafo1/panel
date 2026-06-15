@@ -1,0 +1,166 @@
+import { NextResponse, NextRequest } from 'next/server'
+import { jwtVerify } from 'jose'
+
+// ─── Configuration ───────────────────────────────────────────────────────────
+
+const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET || 'deployhub-secret-key-2024')
+
+// Routes that don't require authentication
+const PUBLIC_ROUTES = [
+  '/api/auth/login',
+  '/api/auth/register',
+  '/api/auth/verify-email',
+  '/api/auth/resend-verification',
+  '/api/auth/forgot-password',
+  '/api/auth/reset-password',
+  '/api/billing/webhook',
+  '/api/seed',
+]
+
+// ─── Rate Limiting ───────────────────────────────────────────────────────────
+
+interface RateLimitEntry {
+  count: number
+  resetAt: number
+}
+
+const rateLimitStore = new Map<string, Map<string, RateLimitEntry>>()
+let lastCleanup = Date.now()
+const CLEANUP_INTERVAL = 5 * 60 * 1000
+
+function getRouteType(pathname: string): { type: string; limit: number; windowMs: number } {
+  if (pathname === '/api/auth/login' || pathname === '/api/auth/register') {
+    return { type: 'auth', limit: 5, windowMs: 60 * 1000 }
+  }
+  if (pathname === '/api/domains/search') {
+    return { type: 'search', limit: 20, windowMs: 60 * 1000 }
+  }
+  return { type: 'api', limit: 60, windowMs: 60 * 1000 }
+}
+
+function checkRateLimit(ip: string, pathname: string): { allowed: boolean; retryAfter?: number } {
+  const now = Date.now()
+  if (now - lastCleanup > CLEANUP_INTERVAL) {
+    for (const [key, store] of rateLimitStore.entries()) {
+      for (const [type, entry] of store.entries()) {
+        if (now > entry.resetAt) store.delete(type)
+      }
+      if (store.size === 0) rateLimitStore.delete(key)
+    }
+    lastCleanup = now
+  }
+
+  const { type, limit, windowMs } = getRouteType(pathname)
+  const ipStore = rateLimitStore.get(ip) || new Map<string, RateLimitEntry>()
+  if (!rateLimitStore.has(ip)) rateLimitStore.set(ip, ipStore)
+
+  const entry = ipStore.get(type)
+  if (!entry || now > entry.resetAt) {
+    ipStore.set(type, { count: 1, resetAt: now + windowMs })
+    return { allowed: true }
+  }
+
+  entry.count++
+  if (entry.count > limit) {
+    return { allowed: false, retryAfter: Math.ceil((entry.resetAt - now) / 1000) }
+  }
+  return { allowed: true }
+}
+
+// ─── JWT Verification (Edge-compatible) ────────────────────────────────────────
+
+async function verifyJwtToken(token: string): Promise<{ userId: string; email: string; role: string } | null> {
+  try {
+    const { payload } = await jwtVerify(token, JWT_SECRET)
+    return payload as { userId: string; email: string; role: string }
+  } catch {
+    return null
+  }
+}
+
+// ─── Main Middleware ─────────────────────────────────────────────────────────
+
+export async function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl
+
+  // Only handle /api/ routes
+  if (!pathname.startsWith('/api/')) {
+    return NextResponse.next()
+  }
+
+  // Handle CORS preflight
+  if (request.method === 'OPTIONS') {
+    const response = NextResponse.next()
+    response.headers.set('Access-Control-Allow-Origin', '*')
+    response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS')
+    response.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-API-Key')
+    response.headers.set('Access-Control-Max-Age', '86400')
+    return response
+  }
+
+  // Rate limiting
+  const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+             request.headers.get('x-real-ip') || 'unknown'
+  const rateLimit = checkRateLimit(ip, pathname)
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { error: 'Too many requests. Please try again later.' },
+      { status: 429, headers: { 'Retry-After': String(rateLimit.retryAfter || 60) } }
+    )
+  }
+
+  // Public routes skip auth
+  if (PUBLIC_ROUTES.some(route => pathname === route || pathname.startsWith(route + '/'))) {
+    return NextResponse.next()
+  }
+
+  // JWT authentication
+  let user: { userId: string; email: string; role: string } | null = null
+  const authHeader = request.headers.get('Authorization')
+  if (authHeader) {
+    const parts = authHeader.split(' ')
+    if (parts.length === 2 && parts[0] === 'Bearer') {
+      user = await verifyJwtToken(parts[1])
+    }
+  }
+
+  // API Key passthrough (route handlers do the actual lookup)
+  const apiKeyHeader = request.headers.get('X-API-Key')
+  if (!user && apiKeyHeader) {
+    const headers = new Headers(request.headers)
+    headers.set('x-api-key-needs-lookup', 'true')
+    headers.set('x-api-key-value', apiKeyHeader)
+    return NextResponse.next({ request: { headers } })
+  }
+
+  if (!user) {
+    return NextResponse.json(
+      { error: 'Authentication required. Provide a valid Authorization header or X-API-Key.' },
+      { status: 401 }
+    )
+  }
+
+  // Admin route protection
+  if (pathname.startsWith('/api/admin/') && user.role !== 'admin') {
+    return NextResponse.json(
+      { error: 'Forbidden. Admin access required.' },
+      { status: 403 }
+    )
+  }
+
+  // Attach user info to headers
+  const headers = new Headers(request.headers)
+  headers.set('x-user-id', user.userId)
+  headers.set('x-user-email', user.email)
+  headers.set('x-user-role', user.role)
+
+  const response = NextResponse.next({ request: { headers } })
+  response.headers.set('Access-Control-Allow-Origin', '*')
+  response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS')
+  response.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-API-Key')
+  return response
+}
+
+export const config = {
+  matcher: ['/api/:path*'],
+}

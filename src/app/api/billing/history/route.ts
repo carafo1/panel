@@ -33,17 +33,26 @@ export async function GET(request: Request) {
     })
 
     return NextResponse.json({
-      payments: payments.map((p) => ({
-        id: p.id,
-        amount: p.amount,
-        currency: p.currency,
-        status: p.status,
-        type: p.type,
-        stripePaymentId: p.stripePaymentId,
-        metadata: p.metadata ? JSON.parse(p.metadata) : null,
-        createdAt: p.createdAt,
-        plan: p.subscription?.plan || null,
-      })),
+      payments: payments.map((p) => {
+        let metadata: Record<string, unknown> | null = null
+        try {
+          metadata = p.metadata ? JSON.parse(p.metadata) : null
+        } catch {
+          metadata = null
+        }
+        return {
+          id: p.id,
+          amount: p.amount,
+          currency: p.currency,
+          status: p.status, // pending, completed, failed, refunded
+          type: p.type,
+          stripePaymentId: p.stripePaymentId,
+          stripeInvoiceId: p.stripeInvoiceId,
+          metadata,
+          createdAt: p.createdAt,
+          plan: p.subscription?.plan || null,
+        }
+      }),
     })
   } catch (error) {
     console.error('Payment history error:', error)

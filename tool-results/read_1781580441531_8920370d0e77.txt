@@ -1,0 +1,686 @@
+     1→     1→'use client'
+     2→     2→
+     3→     3→import { useState, useEffect, useCallback, useRef } from 'react'
+     4→     4→import {
+     5→     5→  Card,
+     6→     6→  CardHeader,
+     7→     7→  CardTitle,
+     8→     8→  CardDescription,
+     9→     9→  CardContent,
+    10→    10→  CardFooter,
+    11→    11→} from '@/components/ui/card'
+    12→    12→import { Button } from '@/components/ui/button'
+    13→    13→import { Badge } from '@/components/ui/badge'
+    14→    14→import {
+    15→    15→  Table,
+    16→    16→  TableHeader,
+    17→    17→  TableBody,
+    18→    18→  TableHead,
+    19→    19→  TableRow,
+    20→    20→  TableCell,
+    21→    21→} from '@/components/ui/table'
+    22→    22→import { Skeleton } from '@/components/ui/skeleton'
+    23→    23→import { ScrollArea } from '@/components/ui/scroll-area'
+    24→    24→import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+    25→    25→import {
+    26→    26→  GitBranch,
+    27→    27→  Clock,
+    28→    28→  ArrowLeft,
+    29→    29→  RotateCcw,
+    30→    30→  ExternalLink,
+    31→    31→  Loader2,
+    32→    32→  Rocket,
+    33→    33→  Terminal,
+    34→    34→  User,
+    35→    35→  Webhook,
+    36→    36→  Bot,
+    37→    37→  CheckCircle2,
+    38→    38→  XCircle,
+    39→    39→  Filter,
+    40→    40→  Globe,
+    41→    41→} from 'lucide-react'
+    42→    42→import { toast } from 'sonner'
+    43→    43→
+    44→    44→// ── Types ──────────────────────────────────────────────────────────────
+    45→    45→interface Deployment {
+    46→    46→  id: string
+    47→    47→  projectId: string
+    48→    48→  commit: string | null
+    49→    49→  branch: string
+    50→    50→  status: string
+    51→    51→  deployUrl: string | null
+    52→    52→  duration: number | null
+    53→    53→  triggeredBy: string
+    54→    54→  createdAt: string
+    55→    55→  updatedAt: string
+    56→    56→  project: {
+    57→    57→    id: string
+    58→    58→    name: string
+    59→    59→    slug: string
+    60→    60→    subdomain: string
+    61→    61→    framework?: string
+    62→    62→  }
+    63→    63→}
+    64→    64→
+    65→    65→interface DeploymentDetail extends Deployment {
+    66→    66→  buildLog: string | null
+    67→    67→}
+    68→    68→
+    69→    69→// ── API helper ─────────────────────────────────────────────────────────
+    70→    70→async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
+    71→    71→  const token = localStorage.getItem('deployhub_token')
+    72→    72→  const res = await fetch(`/api${path}`, {
+    73→    73→    ...options,
+    74→    74→    headers: {
+    75→    75→      'Content-Type': 'application/json',
+    76→    76→      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    77→    77→      ...options?.headers,
+    78→    78→    },
+    79→    79→  })
+    80→    80→  if (!res.ok) {
+    81→    81→    const data = await res.json().catch(() => ({ error: 'Request failed' }))
+    82→    82→    throw new Error(data.error || `Request failed with status ${res.status}`)
+    83→    83→  }
+    84→    84→  return res.json()
+    85→    85→}
+    86→    86→
+    87→    87→// ── Status badge ───────────────────────────────────────────────────────
+    88→    88→const STATUS_CONFIG: Record<string, { className: string; label: string }> = {
+    89→    89→  queued: { className: 'bg-yellow-100 text-yellow-700 border-yellow-200', label: 'Queued' },
+    90→    90→  building: { className: 'bg-blue-100 text-blue-700 border-blue-200', label: 'Building' },
+    91→    91→  deploying: { className: 'bg-purple-100 text-purple-700 border-purple-200', label: 'Deploying' },
+    92→    92→  live: { className: 'bg-emerald-100 text-emerald-700 border-emerald-200', label: 'Live' },
+    93→    93→  failed: { className: 'bg-red-100 text-red-700 border-red-200', label: 'Failed' },
+    94→    94→  rolled_back: { className: 'bg-gray-100 text-gray-600 border-gray-200', label: 'Rolled Back' },
+    95→    95→}
+    96→    96→
+    97→    97→function DeployStatusBadge({ status }: { status: string }) {
+    98→    98→  const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.queued
+    99→    99→  const isAnimating = status === 'building' || status === 'deploying'
+   100→   100→  return (
+   101→   101→    <Badge variant="outline" className={`${cfg.className} ${isAnimating ? 'animate-pulse' : ''}`}>
+   102→   102→      {isAnimating && <Loader2 className="size-3 animate-spin mr-1" />}
+   103→   103→      {cfg.label}
+   104→   104→    </Badge>
+   105→   105→  )
+   106→   106→}
+   107→   107→
+   108→   108→// ── Time helpers ───────────────────────────────────────────────────────
+   109→   109→function timeAgo(date: string): string {
+   110→   110→  const seconds = Math.floor((Date.now() - new Date(date).getTime()) / 1000)
+   111→   111→  if (seconds < 60) return 'just now'
+   112→   112→  const minutes = Math.floor(seconds / 60)
+   113→   113→  if (minutes < 60) return `${minutes}m ago`
+   114→   114→  const hours = Math.floor(minutes / 60)
+   115→   115→  if (hours < 24) return `${hours}h ago`
+   116→   116→  const days = Math.floor(hours / 24)
+   117→   117→  return `${days}d ago`
+   118→   118→}
+   119→   119→
+   120→   120→function formatDuration(seconds: number | null): string {
+   121→   121→  if (!seconds) return '—'
+   122→   122→  if (seconds < 60) return `${seconds}s`
+   123→   123→  const m = Math.floor(seconds / 60)
+   124→   124→  const s = seconds % 60
+   125→   125→  return `${m}m ${s}s`
+   126→   126→}
+   127→   127→
+   128→   128→function triggeredByIcon(trigger: string) {
+   129→   129→  switch (trigger) {
+   130→   130→    case 'user':
+   131→   131→      return <User className="size-3.5" />
+   132→   132→    case 'webhook':
+   133→   133→      return <Webhook className="size-3.5" />
+   134→   134→    case 'auto':
+   135→   135→      return <Bot className="size-3.5" />
+   136→   136→    default:
+   137→   137→      return <User className="size-3.5" />
+   138→   138→  }
+   139→   139→}
+   140→   140→
+   141→   141→// ── Simulated build logs ───────────────────────────────────────────────
+   142→   142→function generateSimulatedBuildLog(deployment: DeploymentDetail): string {
+   143→   143→  const isFailed = deployment.status === 'failed'
+   144→   144→  const isBuilding = deployment.status === 'building' || deployment.status === 'deploying'
+   145→   145→  const fw = deployment.project?.framework === 'nextjs' ? 'next' : (deployment.project?.framework || 'node')
+   146→   146→  const now = new Date(deployment.createdAt)
+   147→   147→  const pad = (n: number) => String(n).padStart(2, '0')
+   148→   148→  const ts = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`
+   149→   149→
+   150→   150→  if (isFailed) {
+   151→   151→    return `${ts} > Cloning repository...
+   152→   152→${ts} ✓ Repository cloned successfully
+   153→   153→${ts} > Installing dependencies...
+   154→   154→${ts} > npm install --production
+   155→   155→${ts} ✓ Dependencies installed (1.2s)
+   156→   156→${ts} > Building application...
+   157→   157→${ts} > ${fw} build
+   158→   158→${ts} ✗ Type error: Property 'fetchData' does not exist on type 'never'.
+   159→   159→${ts} ✗ Build failed with 1 error
+   160→   160→${ts} > Error: Build process exited with code 1
+   161→   161→${ts} > Deployment failed!`
+   162→   162→  }
+   163→   163→
+   164→   164→  if (isBuilding) {
+   165→   165→    return `${ts} > Cloning repository...
+   166→   166→${ts} ✓ Repository cloned successfully
+   167→   167→${ts} > Installing dependencies...
+   168→   168→${ts} > npm install --production
+   169→   169→${ts} ✓ Dependencies installed (1.2s)
+   170→   170→${ts} > Building application...
+   171→   171→${ts} > ${fw} build
+   172→   172→${ts} ⠹ Compiling...`
+   173→   173→  }
+   174→   174→
+   175→   175→  return `${ts} > Cloning repository...
+   176→   176→${ts} ✓ Repository cloned successfully
+   177→   177→${ts} > Installing dependencies...
+   178→   178→${ts} > npm install --production
+   179→   179→${ts} ✓ Dependencies installed (1.2s)
+   180→   180→${ts} > Building application...
+   181→   181→${ts} > ${fw} build
+   182→   182→${ts} ✓ Compiled successfully
+   183→   183→${ts} ✓ Linting and checking validity of types
+   184→   184→${ts} ✓ Collecting page data
+   185→   185→${ts} ✓ Generating static pages
+   186→   186→${ts} ✓ Finalizing page optimization
+   187→   187→${ts} > Deploying to server...
+   188→   188→${ts} ✓ Deployment successful!
+   189→   189→${ts} > Live at https://${deployment.project?.subdomain || 'myapp'}.deployhub.io`
+   190→   190→}
+   191→   191→
+   192→   192→function colorizeLogLine(line: string): React.ReactNode {
+   193→   193→  if (line.includes('✓') || line.includes('successful') || line.includes('Live at')) {
+   194→   194→    return <span className="text-emerald-400">{line}</span>
+   195→   195→  }
+   196→   196→  if (line.includes('✗') || line.includes('Error') || line.includes('failed')) {
+   197→   197→    return <span className="text-red-400">{line}</span>
+   198→   198→  }
+   199→   199→  if (line.includes('Warning') || line.includes('warn') || line.includes('⠹') || line.includes('⠋') || line.includes('⠼')) {
+   200→   200→    return <span className="text-yellow-400">{line}</span>
+   201→   201→  }
+   202→   202→  if (line.startsWith('>')) {
+   203→   203→    return <span className="text-zinc-400">{line}</span>
+   204→   204→  }
+   205→   205→  return <span className="text-zinc-200">{line}</span>
+   206→   206→}
+   207→   207→
+   208→   208→// ── Component ──────────────────────────────────────────────────────────
+   209→   209→export function DeploymentsPanel() {
+   210→   210→  const [deployments, setDeployments] = useState<Deployment[]>([])
+   211→   211→  const [selectedId, setSelectedId] = useState<string | null>(null)
+   212→   212→  const [detail, setDetail] = useState<DeploymentDetail | null>(null)
+   213→   213→  const [logs, setLogs] = useState<string>('')
+   214→   214→  const [loading, setLoading] = useState(true)
+   215→   215→  const [detailLoading, setDetailLoading] = useState(false)
+   216→   216→  const [rollbackLoading, setRollbackLoading] = useState(false)
+   217→   217→  const [activeFilter, setActiveFilter] = useState('all')
+   218→   218→  const autoRefreshRef = useRef<NodeJS.Timeout | null>(null)
+   219→   219→
+   220→   220→  const fetchDeployments = useCallback(async () => {
+   221→   221→    try {
+   222→   222→      const data = await apiFetch<{ deployments: Deployment[] }>('/deployments')
+   223→   223→      setDeployments(data.deployments)
+   224→   224→    } catch {
+   225→   225→      toast.error('Failed to load deployments')
+   226→   226→    } finally {
+   227→   227→      setLoading(false)
+   228→   228→    }
+   229→   229→  }, [])
+   230→   230→
+   231→   231→  useEffect(() => {
+   232→   232→    fetchDeployments()
+   233→   233→  }, [fetchDeployments])
+   234→   234→
+   235→   235→  // Auto-refresh when there are active deployments
+   236→   236→  useEffect(() => {
+   237→   237→    const hasActiveDeployments = deployments.some(
+   238→   238→      (d) => d.status === 'building' || d.status === 'deploying' || d.status === 'queued'
+   239→   239→    )
+   240→   240→
+   241→   241→    if (hasActiveDeployments) {
+   242→   242→      autoRefreshRef.current = setInterval(() => {
+   243→   243→        fetchDeployments()
+   244→   244→      }, 3000)
+   245→   245→    }
+   246→   246→
+   247→   247→    return () => {
+   248→   248→      if (autoRefreshRef.current) {
+   249→   249→        clearInterval(autoRefreshRef.current)
+   250→   250→        autoRefreshRef.current = null
+   251→   251→      }
+   252→   252→    }
+   253→   253→  }, [deployments, fetchDeployments])
+   254→   254→
+   255→   255→  // Auto-refresh detail when it's in active state
+   256→   256→  useEffect(() => {
+   257→   257→    if (selectedId && detail && (detail.status === 'building' || detail.status === 'deploying' || detail.status === 'queued')) {
+   258→   258→      const interval = setInterval(async () => {
+   259→   259→        try {
+   260→   260→          const data = await apiFetch<{
+   261→   261→            deployment: DeploymentDetail
+   262→   262→            logs: string
+   263→   263→          }>(`/deployments/${selectedId}/logs`)
+   264→   264→          setDetail(data.deployment)
+   265→   265→          setLogs(data.logs)
+   266→   266→        } catch {
+   267→   267→          // Silently fail on auto-refresh
+   268→   268→        }
+   269→   269→      }, 3000)
+   270→   270→      return () => clearInterval(interval)
+   271→   271→    }
+   272→   272→  }, [selectedId, detail?.status])
+   273→   273→
+   274→   274→  const fetchDetail = useCallback(async (id: string) => {
+   275→   275→    setDetailLoading(true)
+   276→   276→    try {
+   277→   277→      const data = await apiFetch<{
+   278→   278→        deployment: DeploymentDetail
+   279→   279→        logs: string
+   280→   280→      }>(`/deployments/${id}/logs`)
+   281→   281→      setDetail(data.deployment)
+   282→   282→      setLogs(data.logs)
+   283→   283→    } catch {
+   284→   284→      toast.error('Failed to load deployment logs')
+   285→   285→    } finally {
+   286→   286→      setDetailLoading(false)
+   287→   287→    }
+   288→   288→  }, [])
+   289→   289→
+   290→   290→  useEffect(() => {
+   291→   291→    if (selectedId) {
+   292→   292→      fetchDetail(selectedId)
+   293→   293→    }
+   294→   294→  }, [selectedId, fetchDetail])
+   295→   295→
+   296→   296→  const handleRollback = async (id: string) => {
+   297→   297→    setRollbackLoading(true)
+   298→   298→    try {
+   299→   299→      await apiFetch(`/deployments/${id}/rollback`, { method: 'POST' })
+   300→   300→      toast.success('Deployment rolled back successfully')
+   301→   301→      setSelectedId(null)
+   302→   302→      setDetail(null)
+   303→   303→      await fetchDeployments()
+   304→   304→    } catch (err) {
+   305→   305→      toast.error(err instanceof Error ? err.message : 'Rollback failed')
+   306→   306→    } finally {
+   307→   307→      setRollbackLoading(false)
+   308→   308→    }
+   309→   309→  }
+   310→   310→
+   311→   311→  // Filter deployments
+   312→   312→  const filteredDeployments = deployments.filter((d) => {
+   313→   313→    if (activeFilter === 'all') return true
+   314→   314→    if (activeFilter === 'live') return d.status === 'live'
+   315→   315→    if (activeFilter === 'building') return d.status === 'building' || d.status === 'deploying' || d.status === 'queued'
+   316→   316→    if (activeFilter === 'failed') return d.status === 'failed' || d.status === 'rolled_back'
+   317→   317→    return true
+   318→   318→  })
+   319→   319→
+   320→   320→  // Count for tabs
+   321→   321→  const counts = {
+   322→   322→    all: deployments.length,
+   323→   323→    live: deployments.filter((d) => d.status === 'live').length,
+   324→   324→    building: deployments.filter((d) => d.status === 'building' || d.status === 'deploying' || d.status === 'queued').length,
+   325→   325→    failed: deployments.filter((d) => d.status === 'failed' || d.status === 'rolled_back').length,
+   326→   326→  }
+   327→   327→
+   328→   328→  // ── Loading skeleton ────────────────────────────────────────────────
+   329→   329→  if (loading) {
+   330→   330→    return (
+   331→   331→      <div className="space-y-4">
+   332→   332→        <Skeleton className="h-10 w-full rounded-lg" />
+   333→   333→        <Skeleton className="h-96 w-full rounded-xl" />
+   334→   334→      </div>
+   335→   335→    )
+   336→   336→  }
+   337→   337→
+   338→   338→  // ── Detail View ─────────────────────────────────────────────────────
+   339→   339→  if (selectedId && detail) {
+   340→   340→    const isLive = detail.status === 'live'
+   341→   341→    const isFailed = detail.status === 'failed' || detail.status === 'rolled_back'
+   342→   342→    const isAnimating = detail.status === 'building' || detail.status === 'deploying'
+   343→   343→
+   344→   344→    const displayLog = logs || generateSimulatedBuildLog(detail)
+   345→   345→
+   346→   346→    return (
+   347→   347→      <div className="space-y-4">
+   348→   348→        <Button
+   349→   349→          variant="ghost"
+   350→   350→          size="sm"
+   351→   351→          onClick={() => {
+   352→   352→            setSelectedId(null)
+   353→   353→            setDetail(null)
+   354→   354→          }}
+   355→   355→          className="mb-2"
+   356→   356→        >
+   357→   357→          <ArrowLeft className="size-4 mr-1" />
+   358→   358→          Back to deployments
+   359→   359→        </Button>
+   360→   360→
+   361→   361→        {/* Header */}
+   362→   362→        <Card>
+   363→   363→          <CardHeader>
+   364→   364→            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+   365→   365→              <div className="space-y-1">
+   366→   366→                <CardTitle className="flex items-center gap-2">
+   367→   367→                  <Rocket className="size-5 text-emerald-600" />
+   368→   368→                  {detail.project.name}
+   369→   369→                  {/* Live status indicator */}
+   370→   370→                  {isAnimating && (
+   371→   371→                    <span className="flex items-center gap-1 text-sm text-emerald-600 ml-1">
+   372→   372→                      <span className="relative flex size-2">
+   373→   373→                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+   374→   374→                        <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
+   375→   375→                      </span>
+   376→   376→                      Active
+   377→   377→                    </span>
+   378→   378→                  )}
+   379→   379→                  {isLive && (
+   380→   380→                    <span className="flex items-center gap-1 text-sm text-emerald-600 ml-1">
+   381→   381→                      <span className="relative flex size-2">
+   382→   382→                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+   383→   383→                        <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
+   384→   384→                      </span>
+   385→   385→                      Live
+   386→   386→                    </span>
+   387→   387→                  )}
+   388→   388→                </CardTitle>
+   389→   389→                <CardDescription className="flex flex-wrap items-center gap-3">
+   390→   390→                  <span className="flex items-center gap-1">
+   391→   391→                    <GitBranch className="size-3.5" />
+   392→   392→                    {detail.branch}
+   393→   393→                  </span>
+   394→   394→                  <span className="font-mono text-xs">
+   395→   395→                    {(detail.commit || 'Initial deploy').slice(0, 7)}
+   396→   396→                  </span>
+   397→   397→                  <span className="flex items-center gap-1">
+   398→   398→                    <Clock className="size-3.5" />
+   399→   399→                    {formatDuration(detail.duration)}
+   400→   400→                  </span>
+   401→   401→                </CardDescription>
+   402→   402→              </div>
+   403→   403→              <div className="flex items-center gap-2 flex-wrap">
+   404→   404→                <DeployStatusBadge status={detail.status} />
+   405→   405→                {isLive && detail.deployUrl && (
+   406→   406→                  <Button variant="outline" size="sm" asChild>
+   407→   407→                    <a href={detail.deployUrl} target="_blank" rel="noopener noreferrer">
+   408→   408→                      <Globe className="size-4 mr-1" />
+   409→   409→                      Visit Site
+   410→   410→                    </a>
+   411→   411→                  </Button>
+   412→   412→                )}
+   413→   413→                {(isLive || isFailed) && (
+   414→   414→                  <Button
+   415→   415→                    variant={isLive ? 'destructive' : 'outline'}
+   416→   416→                    size="sm"
+   417→   417→                    disabled={rollbackLoading}
+   418→   418→                    onClick={() => handleRollback(detail.id)}
+   419→   419→                  >
+   420→   420→                    {rollbackLoading ? (
+   421→   421→                      <Loader2 className="size-4 animate-spin mr-1" />
+   422→   422→                    ) : (
+   423→   423→                      <RotateCcw className="size-4 mr-1" />
+   424→   424→                    )}
+   425→   425→                    Rollback
+   426→   426→                  </Button>
+   427→   427→                )}
+   428→   428→              </div>
+   429→   429→            </div>
+   430→   430→          </CardHeader>
+   431→   431→        </Card>
+   432→   432→
+   433→   433→        {/* Deployment Metadata */}
+   434→   434→        <Card>
+   435→   435→          <CardHeader className="pb-3">
+   436→   436→            <CardTitle className="text-base">Deployment Metadata</CardTitle>
+   437→   437→          </CardHeader>
+   438→   438→          <CardContent>
+   439→   439→            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+   440→   440→              <div className="space-y-1">
+   441→   441→                <p className="text-xs text-muted-foreground">Triggered By</p>
+   442→   442→                <div className="flex items-center gap-1.5 text-sm font-medium capitalize">
+   443→   443→                  {triggeredByIcon(detail.triggeredBy)}
+   444→   444→                  {detail.triggeredBy}
+   445→   445→                </div>
+   446→   446→              </div>
+   447→   447→              <div className="space-y-1">
+   448→   448→                <p className="text-xs text-muted-foreground">Branch</p>
+   449→   449→                <div className="flex items-center gap-1.5 text-sm font-medium">
+   450→   450→                  <GitBranch className="size-3.5 text-muted-foreground" />
+   451→   451→                  {detail.branch}
+   452→   452→                </div>
+   453→   453→              </div>
+   454→   454→              <div className="space-y-1">
+   455→   455→                <p className="text-xs text-muted-foreground">Commit</p>
+   456→   456→                <p className="text-sm font-mono font-medium">
+   457→   457→                  {detail.commit ? detail.commit.slice(0, 7) : '—'}
+   458→   458→                </p>
+   459→   459→              </div>
+   460→   460→              <div className="space-y-1">
+   461→   461→                <p className="text-xs text-muted-foreground">Duration</p>
+   462→   462→                <p className="text-sm font-medium">{formatDuration(detail.duration)}</p>
+   463→   463→              </div>
+   464→   464→              <div className="space-y-1">
+   465→   465→                <p className="text-xs text-muted-foreground">Created</p>
+   466→   466→                <p className="text-sm">{new Date(detail.createdAt).toLocaleString()}</p>
+   467→   467→              </div>
+   468→   468→              <div className="space-y-1">
+   469→   469→                <p className="text-xs text-muted-foreground">Updated</p>
+   470→   470→                <p className="text-sm">{new Date(detail.updatedAt).toLocaleString()}</p>
+   471→   471→              </div>
+   472→   472→              {detail.deployUrl && (
+   473→   473→                <div className="space-y-1 col-span-2">
+   474→   474→                  <p className="text-xs text-muted-foreground">Deploy URL</p>
+   475→   475→                  <a
+   476→   476→                    href={detail.deployUrl}
+   477→   477→                    target="_blank"
+   478→   478→                    rel="noopener noreferrer"
+   479→   479→                    className="text-sm font-mono text-emerald-600 hover:underline flex items-center gap-1"
+   480→   480→                  >
+   481→   481→                    {detail.deployUrl}
+   482→   482→                    <ExternalLink className="size-3" />
+   483→   483→                  </a>
+   484→   484→                </div>
+   485→   485→              )}
+   486→   486→            </div>
+   487→   487→          </CardContent>
+   488→   488→        </Card>
+   489→   489→
+   490→   490→        {/* Build Logs */}
+   491→   491→        <Card>
+   492→   492→          <CardHeader className="pb-3">
+   493→   493→            <CardTitle className="flex items-center gap-2 text-base">
+   494→   494→              <Terminal className="size-4 text-emerald-600" />
+   495→   495→              Build Logs
+   496→   496→              {isAnimating && (
+   497→   497→                <span className="flex items-center gap-1 text-sm text-emerald-600 ml-2">
+   498→   498→                  <span className="relative flex size-2">
+   499→   499→                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+   500→   500→                    <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
+   501→   501→                  </span>
+   502→   502→                  Live
+   503→   503→                </span>
+   504→   504→              )}
+   505→   505→            </CardTitle>
+   506→   506→          </CardHeader>
+   507→   507→          <CardContent>
+   508→   508→            <div className="rounded-lg bg-zinc-950 border border-zinc-800 overflow-hidden">
+   509→   509→              {/* Terminal header bar */}
+   510→   510→              <div className="flex items-center gap-2 px-4 py-2 bg-zinc-900 border-b border-zinc-800">
+   511→   511→                <div className="size-3 rounded-full bg-red-500/80" />
+   512→   512→                <div className="size-3 rounded-full bg-yellow-500/80" />
+   513→   513→                <div className="size-3 rounded-full bg-green-500/80" />
+   514→   514→                <span className="ml-2 text-xs text-zinc-500 font-mono">build log — {detail.project.name}</span>
+   515→   515→              </div>
+   516→   516→              {/* Terminal content */}
+   517→   517→              <div className="p-4 font-mono text-xs leading-relaxed max-h-96 overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-zinc-700">
+   518→   518→                <pre className="whitespace-pre-wrap break-words">
+   519→   519→                  {detailLoading
+   520→   520→                    ? 'Loading logs...'
+   521→   521→                    : displayLog.split('\n').map((line, i) => (
+   522→   522→                        <div key={i}>{colorizeLogLine(line)}</div>
+   523→   523→                      ))
+   524→   524→                  }
+   525→   525→                </pre>
+   526→   526→              </div>
+   527→   527→            </div>
+   528→   528→          </CardContent>
+   529→   529→          <CardFooter className="text-xs text-muted-foreground gap-4">
+   530→   530→            <span>Created: {new Date(detail.createdAt).toLocaleString()}</span>
+   531→   531→            <span>Updated: {new Date(detail.updatedAt).toLocaleString()}</span>
+   532→   532→          </CardFooter>
+   533→   533→        </Card>
+   534→   534→      </div>
+   535→   535→    )
+   536→   536→  }
+   537→   537→
+   538→   538→  // ── Detail loading ──────────────────────────────────────────────────
+   539→   539→  if (selectedId && detailLoading) {
+   540→   540→    return (
+   541→   541→      <div className="space-y-4">
+   542→   542→        <Button variant="ghost" size="sm" className="mb-2" disabled>
+   543→   543→          <ArrowLeft className="size-4 mr-1" />
+   544→   544→          Back to deployments
+   545→   545→        </Button>
+   546→   546→        <Skeleton className="h-24 w-full rounded-xl" />
+   547→   547→        <Skeleton className="h-96 w-full rounded-xl" />
+   548→   548→      </div>
+   549→   549→    )
+   550→   550→  }
+   551→   551→
+   552→   552→  // ── List View ───────────────────────────────────────────────────────
+   553→   553→  return (
+   554→   554→    <div className="space-y-4">
+   555→   555→      <div className="flex items-center justify-between">
+   556→   556→        <h2 className="text-xl font-semibold">Recent Deployments</h2>
+   557→   557→        <Button variant="outline" size="sm" onClick={fetchDeployments}>
+   558→   558→          <RotateCcw className="size-4 mr-1" />
+   559→   559→          Refresh
+   560→   560→        </Button>
+   561→   561→      </div>
+   562→   562→
+   563→   563→      {deployments.length === 0 ? (
+   564→   564→        <Card>
+   565→   565→          <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+   566→   566→            <Rocket className="size-10 text-muted-foreground mb-3" />
+   567→   567→            <p className="text-muted-foreground">No deployments yet</p>
+   568→   568→            <p className="text-xs text-muted-foreground mt-1">
+   569→   569→              Deploy a project to see it here
+   570→   570→            </p>
+   571→   571→          </CardContent>
+   572→   572→        </Card>
+   573→   573→      ) : (
+   574→   574→        <>
+   575→   575→          {/* Filter Tabs */}
+   576→   576→          <Tabs value={activeFilter} onValueChange={setActiveFilter}>
+   577→   577→            <TabsList>
+   578→   578→              <TabsTrigger value="all" className="gap-1">
+   579→   579→                <Filter className="size-3.5" />
+   580→   580→                All
+   581→   581→                <Badge variant="secondary" className="ml-1 h-5 min-w-5 text-[10px] px-1.5">
+   582→   582→                  {counts.all}
+   583→   583→                </Badge>
+   584→   584→              </TabsTrigger>
+   585→   585→              <TabsTrigger value="live" className="gap-1">
+   586→   586→                <CheckCircle2 className="size-3.5 text-emerald-500" />
+   587→   587→                Live
+   588→   588→                {counts.live > 0 && (
+   589→   589→                  <Badge variant="secondary" className="ml-1 h-5 min-w-5 text-[10px] px-1.5 bg-emerald-100 text-emerald-700">
+   590→   590→                    {counts.live}
+   591→   591→                  </Badge>
+   592→   592→                )}
+   593→   593→              </TabsTrigger>
+   594→   594→              <TabsTrigger value="building" className="gap-1">
+   595→   595→                <Loader2 className="size-3.5 text-blue-500" />
+   596→   596→                Building
+   597→   597→                {counts.building > 0 && (
+   598→   598→                  <Badge variant="secondary" className="ml-1 h-5 min-w-5 text-[10px] px-1.5 bg-blue-100 text-blue-700">
+   599→   599→                    {counts.building}
+   600→   600→                  </Badge>
+   601→   601→                )}
+   602→   602→              </TabsTrigger>
+   603→   603→              <TabsTrigger value="failed" className="gap-1">
+   604→   604→                <XCircle className="size-3.5 text-red-500" />
+   605→   605→                Failed
+   606→   606→                {counts.failed > 0 && (
+   607→   607→                  <Badge variant="secondary" className="ml-1 h-5 min-w-5 text-[10px] px-1.5 bg-red-100 text-red-700">
+   608→   608→                    {counts.failed}
+   609→   609→                  </Badge>
+   610→   610→                )}
+   611→   611→              </TabsTrigger>
+   612→   612→            </TabsList>
+   613→   613→
+   614→   614→            <TabsContent value={activeFilter} className="mt-4">
+   615→   615→              {filteredDeployments.length === 0 ? (
+   616→   616→                <Card>
+   617→   617→                  <CardContent className="flex flex-col items-center justify-center py-8 text-center">
+   618→   618→                    <p className="text-muted-foreground text-sm">No deployments matching this filter</p>
+   619→   619→                  </CardContent>
+   620→   620→                </Card>
+   621→   621→              ) : (
+   622→   622→                <Card>
+   623→   623→                  <CardContent className="p-0">
+   624→   624→                    <div className="max-h-[500px] overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/20">
+   625→   625→                      <Table>
+   626→   626→                        <TableHeader>
+   627→   627→                          <TableRow>
+   628→   628→                            <TableHead>Project</TableHead>
+   629→   629→                            <TableHead>Branch</TableHead>
+   630→   630→                            <TableHead>Commit</TableHead>
+   631→   631→                            <TableHead>Status</TableHead>
+   632→   632→                            <TableHead>Triggered By</TableHead>
+   633→   633→                            <TableHead>Duration</TableHead>
+   634→   634→                            <TableHead>Time</TableHead>
+   635→   635→                          </TableRow>
+   636→   636→                        </TableHeader>
+   637→   637→                        <TableBody>
+   638→   638→                          {filteredDeployments.map((d) => (
+   639→   639→                            <TableRow
+   640→   640→                              key={d.id}
+   641→   641→                              className="cursor-pointer hover:bg-emerald-50/50 dark:hover:bg-emerald-950/20 transition-colors"
+   642→   642→                              onClick={() => setSelectedId(d.id)}
+   643→   643→                            >
+   644→   644→                              <TableCell className="font-medium">
+   645→   645→                                {d.project.name}
+   646→   646→                              </TableCell>
+   647→   647→                              <TableCell>
+   648→   648→                                <span className="flex items-center gap-1 text-muted-foreground">
+   649→   649→                                  <GitBranch className="size-3.5" />
+   650→   650→                                  {d.branch}
+   651→   651→                                </span>
+   652→   652→                              </TableCell>
+   653→   653→                              <TableCell className="font-mono text-xs text-muted-foreground">
+   654→   654→                                {(d.commit || '—').slice(0, 7)}
+   655→   655→                              </TableCell>
+   656→   656→                              <TableCell>
+   657→   657→                                <DeployStatusBadge status={d.status} />
+   658→   658→                              </TableCell>
+   659→   659→                              <TableCell>
+   660→   660→                                <span className="flex items-center gap-1 text-muted-foreground capitalize text-sm">
+   661→   661→                                  {triggeredByIcon(d.triggeredBy)}
+   662→   662→                                  {d.triggeredBy}
+   663→   663→                                </span>
+   664→   664→                              </TableCell>
+   665→   665→                              <TableCell className="text-muted-foreground">
+   666→   666→                                {formatDuration(d.duration)}
+   667→   667→                              </TableCell>
+   668→   668→                              <TableCell className="text-muted-foreground text-xs">
+   669→   669→                                {timeAgo(d.createdAt)}
+   670→   670→                              </TableCell>
+   671→   671→                            </TableRow>
+   672→   672→                          ))}
+   673→   673→                        </TableBody>
+   674→   674→                      </Table>
+   675→   675→                    </div>
+   676→   676→                  </CardContent>
+   677→   677→                </Card>
+   678→   678→              )}
+   679→   679→            </TabsContent>
+   680→   680→          </Tabs>
+   681→   681→        </>
+   682→   682→      )}
+   683→   683→    </div>
+   684→   684→  )
+   685→   685→}
+   686→   686→

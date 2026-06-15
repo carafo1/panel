@@ -1,0 +1,2002 @@
+     1→'use client'
+     2→
+     3→import React, { useState, useEffect, useCallback } from 'react'
+     4→import { apiFetch } from '@/store/auth-store'
+     5→import { toast } from 'sonner'
+     6→import {
+     7→  DndContext,
+     8→  closestCenter,
+     9→  PointerSensor,
+    10→  useSensor,
+    11→  useSensors,
+    12→  DragEndEvent,
+    13→  DragOverlay,
+    14→  DragStartEvent,
+    15→} from '@dnd-kit/core'
+    16→import {
+    17→  SortableContext,
+    18→  useSortable,
+    19→  horizontalListSortingStrategy,
+    20→  arrayMove,
+    21→} from '@dnd-kit/sortable'
+    22→import { CSS } from '@dnd-kit/utilities'
+    23→import {
+    24→  GitMerge,
+    25→  Play,
+    26→  Pause,
+    27→  Trash2,
+    28→  Plus,
+    29→  ArrowLeft,
+    30→  ArrowRight,
+    31→  CheckCircle2,
+    32→  XCircle,
+    33→  Clock,
+    34→  Loader2,
+    35→  MoreVertical,
+    36→  ChevronRight,
+    37→  Settings,
+    38→  Settings2,
+    39→  Eye,
+    40→  Copy,
+    41→  Hammer,
+    42→  TestTube,
+    43→  Rocket,
+    44→  Package,
+    45→  Search,
+    46→  Mail,
+    47→  Puzzle,
+    48→  GitBranch,
+    49→  Zap,
+    50→  GripVertical,
+    51→  RotateCcw,
+    52→} from 'lucide-react'
+    53→import {
+    54→  Card,
+    55→  CardContent,
+    56→  CardHeader,
+    57→  CardTitle,
+    58→  CardDescription,
+    59→} from '@/components/ui/card'
+    60→import { Button } from '@/components/ui/button'
+    61→import { Input } from '@/components/ui/input'
+    62→import { Label } from '@/components/ui/label'
+    63→import { Badge } from '@/components/ui/badge'
+    64→import { Skeleton } from '@/components/ui/skeleton'
+    65→import { Separator } from '@/components/ui/separator'
+    66→import { ScrollArea } from '@/components/ui/scroll-area'
+    67→import { Textarea } from '@/components/ui/textarea'
+    68→import { Switch } from '@/components/ui/switch'
+    69→import {
+    70→  Dialog,
+    71→  DialogContent,
+    72→  DialogDescription,
+    73→  DialogFooter,
+    74→  DialogHeader,
+    75→  DialogTitle,
+    76→} from '@/components/ui/dialog'
+    77→import {
+    78→  AlertDialog,
+    79→  AlertDialogAction,
+    80→  AlertDialogCancel,
+    81→  AlertDialogContent,
+    82→  AlertDialogDescription,
+    83→  AlertDialogFooter,
+    84→  AlertDialogHeader,
+    85→  AlertDialogTitle,
+    86→} from '@/components/ui/alert-dialog'
+    87→import {
+    88→  Select,
+    89→  SelectContent,
+    90→  SelectItem,
+    91→  SelectTrigger,
+    92→  SelectValue,
+    93→} from '@/components/ui/select'
+    94→import {
+    95→  DropdownMenu,
+    96→  DropdownMenuContent,
+    97→  DropdownMenuItem,
+    98→  DropdownMenuTrigger,
+    99→} from '@/components/ui/dropdown-menu'
+   100→import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+   101→import {
+   102→  Tooltip,
+   103→  TooltipTrigger,
+   104→  TooltipContent,
+   105→} from '@/components/ui/tooltip'
+   106→
+   107→// ── Types ────────────────────────────────────────────────────────────
+   108→
+   109→interface PipelineStage {
+   110→  id: string
+   111→  name: string
+   112→  type: 'build' | 'test' | 'deploy' | 'package' | 'lint' | 'notify' | 'custom'
+   113→  command: string
+   114→  workingDir: string
+   115→  env: Record<string, string>
+   116→  timeout: number
+   117→  continueOnError: boolean
+   118→  order: number
+   119→}
+   120→
+   121→interface StageResult {
+   122→  name: string
+   123→  type: string
+   124→  status: string
+   125→  duration: number
+   126→  output: string
+   127→}
+   128→
+   129→interface PipelineProject {
+   130→  id: string
+   131→  name: string
+   132→  slug: string
+   133→  framework?: string
+   134→  status?: string
+   135→}
+   136→
+   137→interface PipelineRun {
+   138→  id: string
+   139→  pipelineId: string
+   140→  status: string
+   141→  trigger: string
+   142→  commit?: string | null
+   143→  branch?: string | null
+   144→  stages: string
+   145→  stageResults?: StageResult[]
+   146→  startedAt: string
+   147→  completedAt?: string | null
+   148→  duration?: number | null
+   149→  pipeline?: {
+   150→    id: string
+   151→    name: string
+   152→    status: string
+   153→    triggerBranch: string
+   154→  }
+   155→}
+   156→
+   157→interface Pipeline {
+   158→  id: string
+   159→  name: string
+   160→  description?: string | null
+   161→  projectId: string
+   162→  stages: string
+   163→  status: string
+   164→  triggerBranch: string
+   165→  triggerEvents: string
+   166→  lastRunAt?: string | null
+   167→  lastRunStatus?: string | null
+   168→  project: PipelineProject
+   169→  lastRun?: {
+   170→    id: string
+   171→    status: string
+   172→    trigger: string
+   173→    startedAt: string
+   174→    duration: number
+   175→  } | null
+   176→  runs?: PipelineRun[]
+   177→  createdAt: string
+   178→  updatedAt: string
+   179→}
+   180→
+   181→interface Project {
+   182→  id: string
+   183→  name: string
+   184→  subdomain: string
+   185→  status: string
+   186→}
+   187→
+   188→// ── Stage Type Definitions ───────────────────────────────────────────
+   189→
+   190→const STAGE_TYPES: {
+   191→  type: PipelineStage['type']
+   192→  label: string
+   193→  emoji: string
+   194→  icon: typeof Hammer
+   195→  defaultCommand: string
+   196→  color: string
+   197→  accent: string
+   198→  border: string
+   199→  bg: string
+   200→}[] = [
+   201→  {
+   202→    type: 'build',
+   203→    label: 'Build',
+   204→    emoji: '🏗️',
+   205→    icon: Hammer,
+   206→    defaultCommand: 'npm run build',
+   207→    color: 'text-amber-600 dark:text-amber-400',
+   208→    accent: 'border-amber-400 dark:border-amber-600',
+   209→    border: 'border-amber-300 dark:border-amber-700',
+   210→    bg: 'bg-amber-50 dark:bg-amber-950/30',
+   211→  },
+   212→  {
+   213→    type: 'test',
+   214→    label: 'Test',
+   215→    emoji: '🧪',
+   216→    icon: TestTube,
+   217→    defaultCommand: 'npm test',
+   218→    color: 'text-sky-600 dark:text-sky-400',
+   219→    accent: 'border-sky-400 dark:border-sky-600',
+   220→    border: 'border-sky-300 dark:border-sky-700',
+   221→    bg: 'bg-sky-50 dark:bg-sky-950/30',
+   222→  },
+   223→  {
+   224→    type: 'deploy',
+   225→    label: 'Deploy',
+   226→    emoji: '🚀',
+   227→    icon: Rocket,
+   228→    defaultCommand: 'npm run deploy',
+   229→    color: 'text-emerald-600 dark:text-emerald-400',
+   230→    accent: 'border-emerald-400 dark:border-emerald-600',
+   231→    border: 'border-emerald-300 dark:border-emerald-700',
+   232→    bg: 'bg-emerald-50 dark:bg-emerald-950/30',
+   233→  },
+   234→  {
+   235→    type: 'package',
+   236→    label: 'Package',
+   237→    emoji: '📦',
+   238→    icon: Package,
+   239→    defaultCommand: 'docker build -t app .',
+   240→    color: 'text-orange-600 dark:text-orange-400',
+   241→    accent: 'border-orange-400 dark:border-orange-600',
+   242→    border: 'border-orange-300 dark:border-orange-700',
+   243→    bg: 'bg-orange-50 dark:bg-orange-950/30',
+   244→  },
+   245→  {
+   246→    type: 'lint',
+   247→    label: 'Lint',
+   248→    emoji: '🔍',
+   249→    icon: Search,
+   250→    defaultCommand: 'npx eslint .',
+   251→    color: 'text-violet-600 dark:text-violet-400',
+   252→    accent: 'border-violet-400 dark:border-violet-600',
+   253→    border: 'border-violet-300 dark:border-violet-700',
+   254→    bg: 'bg-violet-50 dark:bg-violet-950/30',
+   255→  },
+   256→  {
+   257→    type: 'notify',
+   258→    label: 'Notify',
+   259→    emoji: '📧',
+   260→    icon: Mail,
+   261→    defaultCommand: 'curl -X POST $WEBHOOK_URL',
+   262→    color: 'text-pink-600 dark:text-pink-400',
+   263→    accent: 'border-pink-400 dark:border-pink-600',
+   264→    border: 'border-pink-300 dark:border-pink-700',
+   265→    bg: 'bg-pink-50 dark:bg-pink-950/30',
+   266→  },
+   267→  {
+   268→    type: 'custom',
+   269→    label: 'Custom',
+   270→    emoji: '⚙️',
+   271→    icon: Settings2,
+   272→    defaultCommand: 'echo "Hello"',
+   273→    color: 'text-gray-600 dark:text-gray-400',
+   274→    accent: 'border-gray-400 dark:border-gray-600',
+   275→    border: 'border-gray-300 dark:border-gray-700',
+   276→    bg: 'bg-gray-50 dark:bg-gray-950/30',
+   277→  },
+   278→]
+   279→
+   280→function getStageTypeDef(type: string) {
+   281→  return STAGE_TYPES.find((s) => s.type === type) || STAGE_TYPES[STAGE_TYPES.length - 1]
+   282→}
+   283→
+   284→// ── Helpers ──────────────────────────────────────────────────────────
+   285→
+   286→function generateStageId(): string {
+   287→  return `stage_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+   288→}
+   289→
+   290→function createDefaultStage(type: PipelineStage['type'], order: number): PipelineStage {
+   291→  const def = getStageTypeDef(type)
+   292→  return {
+   293→    id: generateStageId(),
+   294→    name: def.label,
+   295→    type,
+   296→    command: def.defaultCommand,
+   297→    workingDir: '/',
+   298→    env: {},
+   299→    timeout: 300,
+   300→    continueOnError: false,
+   301→    order,
+   302→  }
+   303→}
+   304→
+   305→/** Migrate old-style stages (no id, command as config.command) to new format */
+   306→function migrateStages(raw: unknown[]): PipelineStage[] {
+   307→  return raw.map((s: Record<string, unknown>, i: number) => ({
+   308→    id: (s.id as string) || generateStageId(),
+   309→    name: (s.name as string) || `Stage ${i + 1}`,
+   310→    type: (s.type as PipelineStage['type']) || 'custom',
+   311→    command: (s.command as string) || (s.config && typeof s.config === 'object' ? String((s.config as Record<string, unknown>).command || '') : '') || '',
+   312→    workingDir: (s.workingDir as string) || '/',
+   313→    env: (s.env as Record<string, string>) || {},
+   314→    timeout: (s.timeout as number) ?? 300,
+   315→    continueOnError: (s.continueOnError as boolean) ?? false,
+   316→    order: (s.order as number) ?? i,
+   317→  }))
+   318→}
+   319→
+   320→function parseStages(raw: string): PipelineStage[] {
+   321→  try {
+   322→    const parsed = JSON.parse(raw)
+   323→    if (!Array.isArray(parsed)) return []
+   324→    return migrateStages(parsed)
+   325→  } catch {
+   326→    return []
+   327→  }
+   328→}
+   329→
+   330→function parseTriggerEvents(raw: string): string[] {
+   331→  try {
+   332→    const parsed = JSON.parse(raw)
+   333→    return Array.isArray(parsed) ? parsed : []
+   334→  } catch {
+   335→    return []
+   336→  }
+   337→}
+   338→
+   339→function formatDate(dateStr: string): string {
+   340→  const d = new Date(dateStr)
+   341→  return d.toLocaleDateString('en-US', {
+   342→    month: 'short',
+   343→    day: 'numeric',
+   344→    year: 'numeric',
+   345→  })
+   346→}
+   347→
+   348→function formatTime(dateStr: string): string {
+   349→  const d = new Date(dateStr)
+   350→  return d.toLocaleTimeString('en-US', {
+   351→    hour: '2-digit',
+   352→    minute: '2-digit',
+   353→  })
+   354→}
+   355→
+   356→function formatDuration(seconds: number | null | undefined): string {
+   357→  if (seconds == null) return '—'
+   358→  if (seconds < 60) return `${seconds}s`
+   359→  const mins = Math.floor(seconds / 60)
+   360→  const secs = seconds % 60
+   361→  return `${mins}m ${secs}s`
+   362→}
+   363→
+   364→function getStatusColor(status: string): string {
+   365→  switch (status) {
+   366→    case 'success':
+   367→      return 'bg-emerald-500'
+   368→    case 'failed':
+   369→      return 'bg-red-500'
+   370→    case 'running':
+   371→      return 'bg-amber-500'
+   372→    case 'cancelled':
+   373→      return 'bg-gray-400'
+   374→    case 'active':
+   375→      return 'bg-emerald-500'
+   376→    case 'paused':
+   377→      return 'bg-amber-500'
+   378→    case 'draft':
+   379→      return 'bg-gray-400'
+   380→    default:
+   381→      return 'bg-gray-400'
+   382→  }
+   383→}
+   384→
+   385→function getStatusBadgeVariant(status: string): 'default' | 'secondary' | 'destructive' | 'outline' {
+   386→  switch (status) {
+   387→    case 'success':
+   388→    case 'active':
+   389→      return 'default'
+   390→    case 'failed':
+   391→      return 'destructive'
+   392→    case 'running':
+   393→      return 'secondary'
+   394→    default:
+   395→      return 'outline'
+   396→  }
+   397→}
+   398→
+   399→function getStageIcon(type: string) {
+   400→  const def = getStageTypeDef(type)
+   401→  return def.icon
+   402→}
+   403→
+   404→function getTriggerLabel(trigger: string): string {
+   405→  switch (trigger) {
+   406→    case 'manual':
+   407→      return 'Manual'
+   408→    case 'push':
+   409→      return 'Push'
+   410→    case 'pull_request':
+   411→      return 'PR'
+   412→    case 'schedule':
+   413→      return 'Schedule'
+   414→    default:
+   415→      return trigger
+   416→  }
+   417→}
+   418→
+   419→// ── Stage Type Icon Component ────────────────────────────────────────
+   420→
+   421→function StageTypeIcon({ type, className }: { type: string; className?: string }) {
+   422→  const iconType = getStageIcon(type)
+   423→  return React.createElement(iconType, { className: className || 'size-4' })
+   424→}
+   425→
+   426→// ── Pipeline Status Badge ────────────────────────────────────────────
+   427→
+   428→function PipelineStatusBadge({ status }: { status: string }) {
+   429→  const config: Record<string, { label: string; className: string }> = {
+   430→    draft: { label: 'Draft', className: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300 border-gray-200 dark:border-gray-700' },
+   431→    active: { label: 'Active', className: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' },
+   432→    paused: { label: 'Paused', className: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 border-amber-200 dark:border-amber-800' },
+   433→  }
+   434→  const c = config[status] || config.draft
+   435→  return (
+   436→    <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full border ${c.className}`}>
+   437→      <span className={`size-1.5 rounded-full ${getStatusColor(status)}`} />
+   438→      {c.label}
+   439→    </span>
+   440→  )
+   441→}
+   442→
+   443→// ── Run Status Badge ─────────────────────────────────────────────────
+   444→
+   445→function RunStatusBadge({ status }: { status: string }) {
+   446→  const config: Record<string, { label: string; icon: React.ReactNode; className: string }> = {
+   447→    success: {
+   448→      label: 'Success',
+   449→      icon: <CheckCircle2 className="size-3" />,
+   450→      className: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
+   451→    },
+   452→    failed: {
+   453→      label: 'Failed',
+   454→      icon: <XCircle className="size-3" />,
+   455→      className: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300',
+   456→    },
+   457→    running: {
+   458→      label: 'Running',
+   459→      icon: <Loader2 className="size-3 animate-spin" />,
+   460→      className: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
+   461→    },
+   462→    cancelled: {
+   463→      label: 'Cancelled',
+   464→      icon: <Clock className="size-3" />,
+   465→      className: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400',
+   466→    },
+   467→  }
+   468→  const c = config[status] || config.running
+   469→  return (
+   470→    <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full ${c.className}`}>
+   471→      {c.icon}
+   472→      {c.label}
+   473→    </span>
+   474→  )
+   475→}
+   476→
+   477→// ── Stage Picker Dialog ──────────────────────────────────────────────
+   478→
+   479→function StagePickerDialog({
+   480→  open,
+   481→  onOpenChange,
+   482→  onSelect,
+   483→}: {
+   484→  open: boolean
+   485→  onOpenChange: (open: boolean) => void
+   486→  onSelect: (type: PipelineStage['type']) => void
+   487→}) {
+   488→  return (
+   489→    <Dialog open={open} onOpenChange={onOpenChange}>
+   490→      <DialogContent className="sm:max-w-lg">
+   491→        <DialogHeader>
+   492→          <DialogTitle className="flex items-center gap-2">
+   493→            <Plus className="size-5 text-emerald-600" />
+   494→            Add Stage
+   495→          </DialogTitle>
+   496→          <DialogDescription>
+   497→            Choose a stage type to add to your pipeline.
+   498→          </DialogDescription>
+   499→        </DialogHeader>
+   500→        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 py-2">
+   501→          {STAGE_TYPES.map((st) => {
+   502→            const Icon = st.icon
+   503→            return (
+   504→              <button
+   505→                key={st.type}
+   506→                type="button"
+   507→                onClick={() => {
+   508→                  onSelect(st.type)
+   509→                  onOpenChange(false)
+   510→                }}
+   511→                className={`flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all hover:shadow-md hover:scale-[1.02] active:scale-[0.98] ${st.border} ${st.bg} hover:${st.accent}`}
+   512→              >
+   513→                <span className="text-2xl">{st.emoji}</span>
+   514→                <span className={`text-sm font-semibold ${st.color}`}>{st.label}</span>
+   515→                <span className="text-[10px] text-muted-foreground font-mono truncate w-full text-center">
+   516→                  {st.defaultCommand}
+   517→                </span>
+   518→              </button>
+   519→            )
+   520→          })}
+   521→        </div>
+   522→      </DialogContent>
+   523→    </Dialog>
+   524→  )
+   525→}
+   526→
+   527→// ── Stage Config Dialog ──────────────────────────────────────────────
+   528→
+   529→function StageConfigDialog({
+   530→  open,
+   531→  onOpenChange,
+   532→  stage,
+   533→  onSave,
+   534→}: {
+   535→  open: boolean
+   536→  onOpenChange: (open: boolean) => void
+   537→  stage: PipelineStage | null
+   538→  onSave: (updated: PipelineStage) => void
+   539→}) {
+   540→  if (!stage) return null
+   541→
+   542→  return (
+   543→    <StageConfigDialogInner
+   544→      key={stage.id}
+   545→      open={open}
+   546→      onOpenChange={onOpenChange}
+   547→      stage={stage}
+   548→      onSave={onSave}
+   549→    />
+   550→  )
+   551→}
+   552→
+   553→function StageConfigDialogInner({
+   554→  open,
+   555→  onOpenChange,
+   556→  stage,
+   557→  onSave,
+   558→}: {
+   559→  open: boolean
+   560→  onOpenChange: (open: boolean) => void
+   561→  stage: PipelineStage
+   562→  onSave: (updated: PipelineStage) => void
+   563→}) {
+   564→  const [edit, setEdit] = useState<PipelineStage>({ ...stage })
+   565→
+   566→  const def = getStageTypeDef(edit.type)
+   567→
+   568→  const handleSave = () => {
+   569→    onSave(edit)
+   570→    onOpenChange(false)
+   571→  }
+   572→
+   573→  return (
+   574→    <Dialog open={open} onOpenChange={onOpenChange}>
+   575→      <DialogContent className="sm:max-w-xl">
+   576→        <DialogHeader>
+   577→          <DialogTitle className="flex items-center gap-2">
+   578→            <span className="text-xl">{def.emoji}</span>
+   579→            Configure Stage: {edit.name}
+   580→          </DialogTitle>
+   581→          <DialogDescription>
+   582→            Configure the command, environment, and behavior for this stage.
+   583→          </DialogDescription>
+   584→        </DialogHeader>
+   585→        <div className="space-y-4 py-2 max-h-[60vh] overflow-y-auto pr-1">
+   586→          {/* Name */}
+   587→          <div className="space-y-2">
+   588→            <Label>Stage Name</Label>
+   589→            <Input
+   590→              value={edit.name}
+   591→              onChange={(e) => setEdit({ ...edit, name: e.target.value })}
+   592→              placeholder="e.g. Build Application"
+   593→            />
+   594→          </div>
+   595→
+   596→          {/* Type */}
+   597→          <div className="space-y-2">
+   598→            <Label>Stage Type</Label>
+   599→            <Select
+   600→              value={edit.type}
+   601→              onValueChange={(val) => setEdit({ ...edit, type: val as PipelineStage['type'] })}
+   602→            >
+   603→              <SelectTrigger>
+   604→                <SelectValue />
+   605→              </SelectTrigger>
+   606→              <SelectContent>
+   607→                {STAGE_TYPES.map((st) => (
+   608→                  <SelectItem key={st.type} value={st.type}>
+   609→                    <span className="flex items-center gap-2">
+   610→                      <span>{st.emoji}</span>
+   611→                      {st.label}
+   612→                    </span>
+   613→                  </SelectItem>
+   614→                ))}
+   615→              </SelectContent>
+   616→            </Select>
+   617→          </div>
+   618→
+   619→          {/* Command */}
+   620→          <div className="space-y-2">
+   621→            <Label>Command</Label>
+   622→            <Textarea
+   623→              value={edit.command}
+   624→              onChange={(e) => setEdit({ ...edit, command: e.target.value })}
+   625→              placeholder="e.g. npm run build"
+   626→              className="font-mono text-sm min-h-20"
+   627→            />
+   628→          </div>
+   629→
+   630→          {/* Working Directory */}
+   631→          <div className="space-y-2">
+   632→            <Label>Working Directory</Label>
+   633→            <Input
+   634→              value={edit.workingDir}
+   635→              onChange={(e) => setEdit({ ...edit, workingDir: e.target.value })}
+   636→              placeholder="/"
+   637→              className="font-mono"
+   638→            />
+   639→          </div>
+   640→
+   641→          {/* Timeout */}
+   642→          <div className="space-y-2">
+   643→            <Label>Timeout (seconds)</Label>
+   644→            <Input
+   645→              type="number"
+   646→              value={edit.timeout}
+   647→              onChange={(e) => setEdit({ ...edit, timeout: parseInt(e.target.value) || 300 })}
+   648→              min={1}
+   649→              max={3600}
+   650→            />
+   651→          </div>
+   652→
+   653→          {/* Continue on Error */}
+   654→          <div className="flex items-center justify-between">
+   655→            <div className="space-y-0.5">
+   656→              <Label>Continue on Error</Label>
+   657→              <p className="text-xs text-muted-foreground">
+   658→                Allow the pipeline to continue even if this stage fails
+   659→              </p>
+   660→            </div>
+   661→            <Switch
+   662→              checked={edit.continueOnError}
+   663→              onCheckedChange={(checked) => setEdit({ ...edit, continueOnError: checked })}
+   664→            />
+   665→          </div>
+   666→
+   667→          {/* Environment Variables */}
+   668→          <div className="space-y-2">
+   669→            <Label>Environment Variables</Label>
+   670→            <Textarea
+   671→              value={Object.entries(edit.env)
+   672→                .map(([k, v]) => `${k}=${v}`)
+   673→                .join('\n')}
+   674→              onChange={(e) => {
+   675→                const env: Record<string, string> = {}
+   676→                e.target.value.split('\n').forEach((line) => {
+   677→                  const idx = line.indexOf('=')
+   678→                  if (idx > 0) {
+   679→                    env[line.slice(0, idx).trim()] = line.slice(idx + 1).trim()
+   680→                  }
+   681→                })
+   682→                setEdit({ ...edit, env })
+   683→              }}
+   684→              placeholder="KEY=value&#10;ANOTHER_KEY=another_value"
+   685→              className="font-mono text-sm min-h-20"
+   686→            />
+   687→            <p className="text-xs text-muted-foreground">
+   688→              One variable per line, in KEY=value format
+   689→            </p>
+   690→          </div>
+   691→        </div>
+   692→        <DialogFooter>
+   693→          <Button variant="outline" onClick={() => onOpenChange(false)}>
+   694→            Cancel
+   695→          </Button>
+   696→          <Button onClick={handleSave} className="bg-emerald-600 hover:bg-emerald-700">
+   697→            Save Configuration
+   698→          </Button>
+   699→        </DialogFooter>
+   700→      </DialogContent>
+   701→    </Dialog>
+   702→  )
+   703→}
+   704→
+   705→// ── Sortable Stage Card ──────────────────────────────────────────────
+   706→
+   707→function SortableStageCard({
+   708→  stage,
+   709→  index,
+   710→  readOnly,
+   711→  onRemove,
+   712→  onEdit,
+   713→}: {
+   714→  stage: PipelineStage
+   715→  index: number
+   716→  readOnly: boolean
+   717→  onRemove: () => void
+   718→  onEdit: () => void
+   719→}) {
+   720→  const {
+   721→    attributes,
+   722→    listeners,
+   723→    setNodeRef,
+   724→    transform,
+   725→    transition,
+   726→    isDragging,
+   727→  } = useSortable({ id: stage.id })
+   728→
+   729→  const style = {
+   730→    transform: CSS.Transform.toString(transform),
+   731→    transition,
+   732→    opacity: isDragging ? 0.5 : 1,
+   733→    zIndex: isDragging ? 50 : undefined,
+   734→  }
+   735→
+   736→  const def = getStageTypeDef(stage.type)
+   737→  const Icon = def.icon
+   738→
+   739→  return (
+   740→    <div ref={setNodeRef} style={style} className="flex items-start">
+   741→      {/* Stage Card */}
+   742→      <div
+   743→        className={`relative w-56 rounded-xl border-2 p-4 transition-all hover:shadow-md group ${def.border} ${def.bg}`}
+   744→      >
+   745→        {/* Drag handle + order badge */}
+   746→        <div className="absolute -top-2 -left-2 flex items-center gap-0.5">
+   747→          <div className="size-5 rounded-full bg-background border-2 flex items-center justify-center text-[10px] font-bold text-muted-foreground" style={{ borderColor: 'var(--border)' }}>
+   748→            {index + 1}
+   749→          </div>
+   750→          {!readOnly && (
+   751→            <div
+   752→              {...attributes}
+   753→              {...listeners}
+   754→              className="size-5 rounded-full bg-background border-2 flex items-center justify-center cursor-grab active:cursor-grabbing hover:bg-muted transition-colors"
+   755→              style={{ borderColor: 'var(--border)' }}
+   756→            >
+   757→              <GripVertical className="size-3 text-muted-foreground" />
+   758→            </div>
+   759→          )}
+   760→        </div>
+   761→
+   762→        {/* Stage header */}
+   763→        <div className="flex items-center justify-between mb-2 mt-1">
+   764→          <div className="flex items-center gap-1.5 min-w-0">
+   765→            <Icon className={`size-4 shrink-0 ${def.color}`} />
+   766→            <span className="text-sm font-semibold truncate">{stage.name}</span>
+   767→          </div>
+   768→          {!readOnly && (
+   769→            <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+   770→              <Tooltip>
+   771→                <TooltipTrigger asChild>
+   772→                  <Button
+   773→                    variant="ghost"
+   774→                    size="icon"
+   775→                    className="size-6"
+   776→                    onClick={onEdit}
+   777→                  >
+   778→                    <Settings2 className="size-3" />
+   779→                  </Button>
+   780→                </TooltipTrigger>
+   781→                <TooltipContent>Configure stage</TooltipContent>
+   782→              </Tooltip>
+   783→              <Tooltip>
+   784→                <TooltipTrigger asChild>
+   785→                  <Button
+   786→                    variant="ghost"
+   787→                    size="icon"
+   788→                    className="size-6 text-red-500 hover:text-red-600"
+   789→                    onClick={onRemove}
+   790→                  >
+   791→                    <Trash2 className="size-3" />
+   792→                  </Button>
+   793→                </TooltipTrigger>
+   794→                <TooltipContent>Remove stage</TooltipContent>
+   795→              </Tooltip>
+   796→            </div>
+   797→          )}
+   798→        </div>
+   799→
+   800→        {/* Stage type badge */}
+   801→        <Badge variant="outline" className={`text-[10px] h-5 ${def.color} border-current/20`}>
+   802→          {def.emoji} {def.label}
+   803→        </Badge>
+   804→
+   805→        {/* Command preview */}
+   806→        <div className="mt-2 text-[11px] text-muted-foreground font-mono truncate">
+   807→          {stage.command || 'No command configured'}
+   808→        </div>
+   809→
+   810→        {/* Quick config pills */}
+   811→        <div className="flex flex-wrap gap-1 mt-2">
+   812→          {stage.timeout !== 300 && (
+   813→            <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">
+   814→              {stage.timeout}s timeout
+   815→            </span>
+   816→          )}
+   817→          {stage.continueOnError && (
+   818→            <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+   819→              continue on error
+   820→            </span>
+   821→          )}
+   822→          {Object.keys(stage.env).length > 0 && (
+   823→            <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">
+   824→              {Object.keys(stage.env).length} env var{Object.keys(stage.env).length > 1 ? 's' : ''}
+   825→            </span>
+   826→          )}
+   827→          {stage.workingDir !== '/' && (
+   828→            <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">
+   829→              📁 {stage.workingDir}
+   830→            </span>
+   831→          )}
+   832→        </div>
+   833→      </div>
+   834→    </div>
+   835→  )
+   836→}
+   837→
+   838→// ── Visual Stage Editor (dnd-kit powered) ────────────────────────────
+   839→
+   840→function VisualStageEditor({
+   841→  stages,
+   842→  onUpdateStages,
+   843→  readOnly,
+   844→}: {
+   845→  stages: PipelineStage[]
+   846→  onUpdateStages: (stages: PipelineStage[]) => void
+   847→  readOnly?: boolean
+   848→}) {
+   849→  const [pickerOpen, setPickerOpen] = useState(false)
+   850→  const [configOpen, setConfigOpen] = useState(false)
+   851→  const [editingStage, setEditingStage] = useState<PipelineStage | null>(null)
+   852→  const [activeId, setActiveId] = useState<string | null>(null)
+   853→
+   854→  const sensors = useSensors(
+   855→    useSensor(PointerSensor, {
+   856→      activationConstraint: { distance: 5 },
+   857→    })
+   858→  )
+   859→
+   860→  const handleDragStart = (event: DragStartEvent) => {
+   861→    setActiveId(String(event.active.id))
+   862→  }
+   863→
+   864→  const handleDragEnd = (event: DragEndEvent) => {
+   865→    setActiveId(null)
+   866→    const { active, over } = event
+   867→    if (!over || active.id === over.id) return
+   868→
+   869→    const oldIndex = stages.findIndex((s) => s.id === active.id)
+   870→    const newIndex = stages.findIndex((s) => s.id === over.id)
+   871→    if (oldIndex === -1 || newIndex === -1) return
+   872→
+   873→    const reordered = arrayMove(stages, oldIndex, newIndex).map((s, i) => ({
+   874→      ...s,
+   875→      order: i,
+   876→    }))
+   877→    onUpdateStages(reordered)
+   878→  }
+   879→
+   880→  const handleAddStage = (type: PipelineStage['type']) => {
+   881→    const newStage = createDefaultStage(type, stages.length)
+   882→    onUpdateStages([...stages, newStage])
+   883→  }
+   884→
+   885→  const removeStage = (id: string) => {
+   886→    const updated = stages.filter((s) => s.id !== id).map((s, i) => ({ ...s, order: i }))
+   887→    onUpdateStages(updated)
+   888→  }
+   889→
+   890→  const updateStage = (id: string, updates: Partial<PipelineStage>) => {
+   891→    const updated = stages.map((s) => (s.id === id ? { ...s, ...updates } : s))
+   892→    onUpdateStages(updated)
+   893→  }
+   894→
+   895→  const openConfig = (stage: PipelineStage) => {
+   896→    setEditingStage(stage)
+   897→    setConfigOpen(true)
+   898→  }
+   899→
+   900→  const handleConfigSave = (updated: PipelineStage) => {
+   901→    updateStage(updated.id, updated)
+   902→  }
+   903→
+   904→  const activeStage = activeId ? stages.find((s) => s.id === activeId) : null
+   905→
+   906→  return (
+   907→    <div className="space-y-4">
+   908→      <div className="flex items-center justify-between">
+   909→        <Label className="text-sm font-medium">Pipeline Stages</Label>
+   910→        {!readOnly && (
+   911→          <Button variant="outline" size="sm" onClick={() => setPickerOpen(true)} className="h-7 text-xs">
+   912→            <Plus className="size-3 mr-1" />
+   913→            Add Stage
+   914→          </Button>
+   915→        )}
+   916→      </div>
+   917→
+   918→      {stages.length === 0 ? (
+   919→        <div className="flex flex-col items-center justify-center py-12 border-2 border-dashed rounded-xl">
+   920→          <GitMerge className="size-10 text-muted-foreground/40 mb-3" />
+   921→          <p className="text-sm text-muted-foreground mb-1">No stages configured</p>
+   922→          <p className="text-xs text-muted-foreground/60 mb-4">
+   923→            Add stages to define your pipeline workflow
+   924→          </p>
+   925→          {!readOnly && (
+   926→            <Button variant="outline" size="sm" onClick={() => setPickerOpen(true)}>
+   927→              <Plus className="size-3.5 mr-1" />
+   928→              Add First Stage
+   929→            </Button>
+   930→          )}
+   931→        </div>
+   932→      ) : (
+   933→        <div className="overflow-x-auto pb-2">
+   934→          <DndContext
+   935→            sensors={sensors}
+   936→            collisionDetection={closestCenter}
+   937→            onDragStart={handleDragStart}
+   938→            onDragEnd={handleDragEnd}
+   939→          >
+   940→            <SortableContext
+   941→              items={stages.map((s) => s.id)}
+   942→              strategy={horizontalListSortingStrategy}
+   943→            >
+   944→              <div className="flex items-start gap-0 min-w-max">
+   945→                {stages.map((stage, index) => (
+   946→                  <div key={stage.id} className="flex items-start">
+   947→                    <SortableStageCard
+   948→                      stage={stage}
+   949→                      index={index}
+   950→                      readOnly={!!readOnly}
+   951→                      onRemove={() => removeStage(stage.id)}
+   952→                      onEdit={() => openConfig(stage)}
+   953→                    />
+   954→                    {/* Connector Arrow */}
+   955→                    {index < stages.length - 1 && (
+   956→                      <div className="flex items-center h-36 px-1">
+   957→                        <div className="flex items-center">
+   958→                          <div className="w-6 h-0.5 bg-border" />
+   959→                          <ArrowRight className="size-4 text-muted-foreground -ml-0.5" />
+   960→                        </div>
+   961→                      </div>
+   962→                    )}
+   963→                  </div>
+   964→                ))}
+   965→
+   966→                {/* Add stage button at the end */}
+   967→                {!readOnly && stages.length > 0 && (
+   968→                  <div className="flex items-center h-36 pl-2">
+   969→                    <Tooltip>
+   970→                      <TooltipTrigger asChild>
+   971→                        <Button
+   972→                          variant="outline"
+   973→                          size="icon"
+   974→                          className="size-8 rounded-full border-dashed"
+   975→                          onClick={() => setPickerOpen(true)}
+   976→                        >
+   977→                          <Plus className="size-4" />
+   978→                        </Button>
+   979→                      </TooltipTrigger>
+   980→                      <TooltipContent>Add stage</TooltipContent>
+   981→                    </Tooltip>
+   982→                  </div>
+   983→                )}
+   984→              </div>
+   985→            </SortableContext>
+   986→
+   987→            {/* Drag overlay */}
+   988→            <DragOverlay>
+   989→              {activeStage ? (
+   990→                <div className="w-56 rounded-xl border-2 p-4 shadow-xl bg-background opacity-90">
+   991→                  <div className="flex items-center gap-1.5 mb-2">
+   992→                    {React.createElement(getStageIcon(activeStage.type), {
+   993→                      className: `size-4 ${getStageTypeDef(activeStage.type).color}`,
+   994→                    })}
+   995→                    <span className="text-sm font-semibold">{activeStage.name}</span>
+   996→                  </div>
+   997→                  <div className="text-[11px] text-muted-foreground font-mono truncate">
+   998→                    {activeStage.command || 'No command'}
+   999→                  </div>
+  1000→                </div>
+  1001→              ) : null}
+  1002→            </DragOverlay>
+  1003→          </DndContext>
+  1004→        </div>
+  1005→      )}
+  1006→
+  1007→      {/* Stage Picker Dialog */}
+  1008→      <StagePickerDialog
+  1009→        open={pickerOpen}
+  1010→        onOpenChange={setPickerOpen}
+  1011→        onSelect={handleAddStage}
+  1012→      />
+  1013→
+  1014→      {/* Stage Config Dialog */}
+  1015→      <StageConfigDialog
+  1016→        open={configOpen}
+  1017→        onOpenChange={setConfigOpen}
+  1018→        stage={editingStage}
+  1019→        onSave={handleConfigSave}
+  1020→      />
+  1021→    </div>
+  1022→  )
+  1023→}
+  1024→
+  1025→// ── Horizontal Run Progress ──────────────────────────────────────────
+  1026→
+  1027→function HorizontalRunProgress({
+  1028→  stageResults,
+  1029→  stages,
+  1030→  selectedStage,
+  1031→  onSelectStage,
+  1032→}: {
+  1033→  stageResults: StageResult[]
+  1034→  stages: PipelineStage[]
+  1035→  selectedStage: number | null
+  1036→  onSelectStage: (index: number | null) => void
+  1037→}) {
+  1038→  if (stageResults.length === 0 && stages.length === 0) {
+  1039→    return (
+  1040→      <div className="text-sm text-muted-foreground text-center py-8">
+  1041→        No stage data available
+  1042→      </div>
+  1043→    )
+  1044→  }
+  1045→
+  1046→  const displayStages = stageResults.length > 0
+  1047→    ? stageResults.map((sr, i) => ({
+  1048→        name: sr.name,
+  1049→        type: sr.type,
+  1050→        status: sr.status,
+  1051→        duration: sr.duration,
+  1052→        output: sr.output,
+  1053→        index: i,
+  1054→      }))
+  1055→    : stages.map((s, i) => ({
+  1056→        name: s.name,
+  1057→        type: s.type,
+  1058→        status: 'pending',
+  1059→        duration: 0,
+  1060→        output: '',
+  1061→        index: i,
+  1062→      }))
+  1063→
+  1064→  return (
+  1065→    <div className="overflow-x-auto pb-2">
+  1066→      <div className="flex items-start gap-0 min-w-max">
+  1067→        {displayStages.map((stage, index) => {
+  1068→          const def = getStageTypeDef(stage.type)
+  1069→          const Icon = def.icon
+  1070→
+  1071→          const statusStyles: Record<string, { border: string; bg: string; dot: string; glow: string }> = {
+  1072→            pending: {
+  1073→              border: 'border-gray-300 dark:border-gray-700',
+  1074→              bg: 'bg-gray-50 dark:bg-gray-900/30',
+  1075→              dot: 'bg-gray-400',
+  1076→              glow: '',
+  1077→            },
+  1078→            running: {
+  1079→              border: 'border-sky-400 dark:border-sky-600',
+  1080→              bg: 'bg-sky-50 dark:bg-sky-950/30',
+  1081→              dot: 'bg-sky-500',
+  1082→              glow: 'ring-2 ring-sky-400/30',
+  1083→            },
+  1084→            success: {
+  1085→              border: 'border-emerald-400 dark:border-emerald-600',
+  1086→              bg: 'bg-emerald-50 dark:bg-emerald-950/30',
+  1087→              dot: 'bg-emerald-500',
+  1088→              glow: '',
+  1089→            },
+  1090→            failed: {
+  1091→              border: 'border-red-400 dark:border-red-600',
+  1092→              bg: 'bg-red-50 dark:bg-red-950/30',
+  1093→              dot: 'bg-red-500',
+  1094→              glow: '',
+  1095→            },
+  1096→            skipped: {
+  1097→              border: 'border-yellow-400 dark:border-yellow-600',
+  1098→              bg: 'bg-yellow-50 dark:bg-yellow-950/30',
+  1099→              dot: 'bg-yellow-500',
+  1100→              glow: '',
+  1101→            },
+  1102→          }
+  1103→
+  1104→          const st = statusStyles[stage.status] || statusStyles.pending
+  1105→          const isSelected = selectedStage === index
+  1106→
+  1107→          const statusIcon =
+  1108→            stage.status === 'success' ? (
+  1109→              <CheckCircle2 className="size-4 text-emerald-500" />
+  1110→            ) : stage.status === 'failed' ? (
+  1111→              <XCircle className="size-4 text-red-500" />
+  1112→            ) : stage.status === 'running' ? (
+  1113→              <Loader2 className="size-4 text-sky-500 animate-spin" />
+  1114→            ) : stage.status === 'skipped' ? (
+  1115→              <Clock className="size-4 text-yellow-500" />
+  1116→            ) : (
+  1117→              <Clock className="size-4 text-gray-400" />
+  1118→            )
+  1119→
+  1120→          return (
+  1121→            <div key={index} className="flex items-start">
+  1122→              <button
+  1123→                type="button"
+  1124→                onClick={() => onSelectStage(isSelected ? null : index)}
+  1125→                className={`relative w-48 rounded-xl border-2 p-3 transition-all hover:shadow-md text-left ${st.border} ${st.bg} ${st.glow} ${isSelected ? 'ring-2 ring-emerald-500/50 shadow-lg' : ''}`}
+  1126→              >
+  1127→                {/* Status indicator */}
+  1128→                <div className="absolute -top-1.5 -left-1.5">
+  1129→                  {statusIcon}
+  1130→                </div>
+  1131→
+  1132→                {/* Stage name + type */}
+  1133→                <div className="flex items-center gap-1.5 mb-1 mt-1">
+  1134→                  <Icon className={`size-3.5 ${def.color}`} />
+  1135→                  <span className="text-sm font-semibold truncate">{stage.name}</span>
+  1136→                </div>
+  1137→
+  1138→                <Badge variant="outline" className={`text-[9px] h-4 px-1.5 ${def.color}`}>
+  1139→                  {def.emoji} {def.label}
+  1140→                </Badge>
+  1141→
+  1142→                {/* Duration */}
+  1143→                {stage.duration > 0 && (
+  1144→                  <div className="mt-1.5 text-[10px] font-mono text-muted-foreground">
+  1145→                    {formatDuration(stage.duration)}
+  1146→                  </div>
+  1147→                )}
+  1148→
+  1149→                {/* Status text */}
+  1150→                <div className="mt-1 text-[10px] font-medium capitalize" style={{
+  1151→                  color: stage.status === 'success' ? '#059669' :
+  1152→                    stage.status === 'failed' ? '#dc2626' :
+  1153→                    stage.status === 'running' ? '#0284c7' :
+  1154→                    stage.status === 'skipped' ? '#ca8a04' :
+  1155→                    '#9ca3af'
+  1156→                }}>
+  1157→                  {stage.status}
+  1158→                </div>
+  1159→              </button>
+  1160→
+  1161→              {/* Connector Arrow */}
+  1162→              {index < displayStages.length - 1 && (
+  1163→                <div className="flex items-center h-28 px-0.5">
+  1164→                  <div className="flex items-center">
+  1165→                    <div className={`w-5 h-0.5 ${
+  1166→                      stage.status === 'success' ? 'bg-emerald-300 dark:bg-emerald-700' :
+  1167→                      stage.status === 'running' ? 'bg-sky-300 dark:bg-sky-700' :
+  1168→                      'bg-border'
+  1169→                    }`} />
+  1170→                    <ArrowRight className={`size-3 -ml-0.5 ${
+  1171→                      stage.status === 'success' ? 'text-emerald-400' :
+  1172→                      stage.status === 'running' ? 'text-sky-400' :
+  1173→                      'text-muted-foreground'
+  1174→                    }`} />
+  1175→                  </div>
+  1176→                </div>
+  1177→              )}
+  1178→            </div>
+  1179→          )
+  1180→        })}
+  1181→      </div>
+  1182→    </div>
+  1183→  )
+  1184→}
+  1185→
+  1186→// ── Run Timeline (vertical, with logs) ───────────────────────────────
+  1187→
+  1188→function RunTimeline({
+  1189→  stageResults,
+  1190→  expandedStage,
+  1191→  onToggleStage,
+  1192→}: {
+  1193→  stageResults: StageResult[]
+  1194→  expandedStage: number | null
+  1195→  onToggleStage: (index: number) => void
+  1196→}) {
+  1197→  if (stageResults.length === 0) {
+  1198→    return (
+  1199→      <div className="text-sm text-muted-foreground text-center py-8">
+  1200→        No stage results available
+  1201→      </div>
+  1202→    )
+  1203→  }
+  1204→
+  1205→  return (
+  1206→    <div className="space-y-0">
+  1207→      {stageResults.map((stage, index) => {
+  1208→        const statusIcon =
+  1209→          stage.status === 'success' ? (
+  1210→            <CheckCircle2 className="size-5 text-emerald-500" />
+  1211→          ) : stage.status === 'failed' ? (
+  1212→            <XCircle className="size-5 text-red-500" />
+  1213→          ) : stage.status === 'running' ? (
+  1214→            <Loader2 className="size-5 text-sky-500 animate-spin" />
+  1215→          ) : stage.status === 'skipped' ? (
+  1216→            <Clock className="size-5 text-yellow-500" />
+  1217→          ) : (
+  1218→            <Clock className="size-5 text-gray-400" />
+  1219→          )
+  1220→
+  1221→        const statusBg =
+  1222→          stage.status === 'success'
+  1223→            ? 'bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800'
+  1224→            : stage.status === 'failed'
+  1225→              ? 'bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-800'
+  1226→              : stage.status === 'running'
+  1227→                ? 'bg-sky-50 dark:bg-sky-950/20 border-sky-200 dark:border-sky-800'
+  1228→                : 'bg-gray-50 dark:bg-gray-900/20 border-gray-200 dark:border-gray-800'
+  1229→
+  1230→        const isExpanded = expandedStage === index
+  1231→
+  1232→        return (
+  1233→          <div key={index} className="flex gap-4">
+  1234→            {/* Timeline line + dot */}
+  1235→            <div className="flex flex-col items-center">
+  1236→              <button type="button" onClick={() => onToggleStage(index)} className="shrink-0 mt-1 hover:scale-110 transition-transform">
+  1237→                {statusIcon}
+  1238→              </button>
+  1239→              {index < stageResults.length - 1 && (
+  1240→                <div className={`w-px flex-1 min-h-[24px] my-1 ${
+  1241→                  stage.status === 'success' ? 'bg-emerald-300 dark:bg-emerald-700' :
+  1242→                  stage.status === 'failed' ? 'bg-red-300 dark:bg-red-700' :
+  1243→                  'bg-border'
+  1244→                }`} />
+  1245→              )}
+  1246→            </div>
+  1247→
+  1248→            {/* Stage content */}
+  1249→            <div className={`flex-1 rounded-lg border p-3 mb-2 cursor-pointer transition-all ${statusBg} ${isExpanded ? 'shadow-md' : ''}`} onClick={() => onToggleStage(index)}>
+  1250→              <div className="flex items-center justify-between mb-1">
+  1251→                <div className="flex items-center gap-2">
+  1252→                  <StageTypeIcon type={stage.type} className="size-3.5 text-muted-foreground" />
+  1253→                  <span className="text-sm font-medium">{stage.name}</span>
+  1254→                  <Badge variant="outline" className="text-[10px] h-4 px-1.5">
+  1255→                    {stage.type}
+  1256→                  </Badge>
+  1257→                  <Badge variant="outline" className="text-[10px] h-4 px-1.5 capitalize">
+  1258→                    {stage.status}
+  1259→                  </Badge>
+  1260→                </div>
+  1261→                <div className="flex items-center gap-2">
+  1262→                  <span className="text-xs text-muted-foreground font-mono">
+  1263→                    {formatDuration(stage.duration)}
+  1264→                  </span>
+  1265→                  <ChevronRight className={`size-3.5 text-muted-foreground transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+  1266→                </div>
+  1267→              </div>
+  1268→              {isExpanded && stage.output && (
+  1269→                <pre className="text-xs font-mono text-muted-foreground bg-white/60 dark:bg-black/20 rounded p-2 mt-1.5 whitespace-pre-wrap overflow-x-auto max-h-48 overflow-y-auto">
+  1270→                  {stage.output}
+  1271→                </pre>
+  1272→              )}
+  1273→              {isExpanded && !stage.output && (
+  1274→                <p className="text-xs text-muted-foreground/60 mt-1.5 italic">No output available</p>
+  1275→              )}
+  1276→            </div>
+  1277→          </div>
+  1278→        )
+  1279→      })}
+  1280→    </div>
+  1281→  )
+  1282→}
+  1283→
+  1284→// ── Pipeline Flowchart (read-only visual) ────────────────────────────
+  1285→
+  1286→function PipelineFlowchart({ stages }: { stages: PipelineStage[] }) {
+  1287→  if (stages.length === 0) {
+  1288→    return (
+  1289→      <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+  1290→        <GitMerge className="size-10 mb-3 opacity-40" />
+  1291→        <p className="text-sm">No stages configured</p>
+  1292→      </div>
+  1293→    )
+  1294→  }
+  1295→
+  1296→  return (
+  1297→    <div className="overflow-x-auto pb-2">
+  1298→      <div className="flex items-center gap-0 min-w-max">
+  1299→        {/* Start node */}
+  1300→        <div className="flex items-center">
+  1301→          <div className="w-10 h-10 rounded-full bg-emerald-100 dark:bg-emerald-900/40 border-2 border-emerald-400 dark:border-emerald-600 flex items-center justify-center">
+  1302→            <Play className="size-4 text-emerald-600 dark:text-emerald-400" />
+  1303→          </div>
+  1304→          <div className="w-8 h-0.5 bg-emerald-300 dark:bg-emerald-700" />
+  1305→          <ArrowRight className="size-4 text-emerald-400 -ml-0.5" />
+  1306→        </div>
+  1307→
+  1308→        {stages.map((stage, index) => {
+  1309→          const def = getStageTypeDef(stage.type)
+  1310→          const Icon = def.icon
+  1311→
+  1312→          return (
+  1313→            <div key={stage.id} className="flex items-center">
+  1314→              <div className={`w-52 rounded-xl border-2 p-3 ${def.border} ${def.bg}`}>
+  1315→                <div className="flex items-center gap-1.5 mb-1">
+  1316→                  <Icon className={`size-4 ${def.color}`} />
+  1317→                  <span className="text-sm font-semibold truncate">{stage.name}</span>
+  1318→                </div>
+  1319→                <Badge variant="outline" className={`text-[9px] h-4 px-1.5 ${def.color} border-current/20`}>
+  1320→                  {def.emoji} {def.label}
+  1321→                </Badge>
+  1322→                <div className="mt-1 text-[10px] text-muted-foreground font-mono truncate">
+  1323→                  {stage.command || 'No command'}
+  1324→                </div>
+  1325→              </div>
+  1326→
+  1327→              {index < stages.length - 1 && (
+  1328→                <div className="flex items-center px-0.5">
+  1329→                  <div className="w-6 h-0.5 bg-border" />
+  1330→                  <ArrowRight className="size-3.5 text-muted-foreground -ml-0.5" />
+  1331→                </div>
+  1332→              )}
+  1333→            </div>
+  1334→          )
+  1335→        })}
+  1336→
+  1337→        {/* End node */}
+  1338→        <div className="flex items-center">
+  1339→          <div className="w-6 h-0.5 bg-border" />
+  1340→          <ArrowRight className="size-3.5 text-muted-foreground -ml-0.5" />
+  1341→          <div className="w-10 h-10 rounded-full bg-gray-100 dark:bg-gray-900/40 border-2 border-gray-400 dark:border-gray-600 flex items-center justify-center">
+  1342→            <CheckCircle2 className="size-4 text-gray-600 dark:text-gray-400" />
+  1343→          </div>
+  1344→        </div>
+  1345→      </div>
+  1346→    </div>
+  1347→  )
+  1348→}
+  1349→
+  1350→// ── Main Pipelines Panel ─────────────────────────────────────────────
+  1351→
+  1352→type ViewMode = 'list' | 'detail' | 'run'
+  1353→
+  1354→export default function PipelinesPanel() {
+  1355→  const [view, setView] = useState<ViewMode>('list')
+  1356→  const [pipelines, setPipelines] = useState<Pipeline[]>([])
+  1357→  const [selectedPipeline, setSelectedPipeline] = useState<Pipeline | null>(null)
+  1358→  const [selectedRun, setSelectedRun] = useState<PipelineRun | null>(null)
+  1359→  const [projects, setProjects] = useState<Project[]>([])
+  1360→  const [loading, setLoading] = useState(true)
+  1361→  const [detailLoading, setDetailLoading] = useState(false)
+  1362→  const [runLoading, setRunLoading] = useState(false)
+  1363→  const [triggeringRun, setTriggeringRun] = useState(false)
+  1364→
+  1365→  // Create dialog state
+  1366→  const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  1367→  const [newPipelineName, setNewPipelineName] = useState('')
+  1368→  const [newPipelineProjectId, setNewPipelineProjectId] = useState('')
+  1369→  const [newPipelineDescription, setNewPipelineDescription] = useState('')
+  1370→  const [creating, setCreating] = useState(false)
+  1371→
+  1372→  // Delete dialog state
+  1373→  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  1374→  const [pipelineToDelete, setPipelineToDelete] = useState<Pipeline | null>(null)
+  1375→  const [deleting, setDeleting] = useState(false)
+  1376→
+  1377→  // Stage editor state
+  1378→  const [editStages, setEditStages] = useState<PipelineStage[]>([])
+  1379→  const [savingStages, setSavingStages] = useState(false)
+  1380→
+  1381→  // Run visualization state
+  1382→  const [selectedRunStage, setSelectedRunStage] = useState<number | null>(null)
+  1383→  const [expandedTimelineStage, setExpandedTimelineStage] = useState<number | null>(null)
+  1384→
+  1385→  // ── Fetch pipelines ────────────────────────────────────────────────
+  1386→  const fetchPipelines = useCallback(async () => {
+  1387→    setLoading(true)
+  1388→    try {
+  1389→      const data = await apiFetch('/pipelines')
+  1390→      setPipelines(data.pipelines || [])
+  1391→    } catch (err) {
+  1392→      toast.error('Failed to load pipelines', {
+  1393→        description: err instanceof Error ? err.message : 'Unknown error',
+  1394→      })
+  1395→    } finally {
+  1396→      setLoading(false)
+  1397→    }
+  1398→  }, [])
+  1399→
+  1400→  // ── Fetch projects (for create dialog) ─────────────────────────────
+  1401→  const fetchProjects = useCallback(async () => {
+  1402→    try {
+  1403→      const data = await apiFetch('/hosting')
+  1404→      setProjects(data.projects || [])
+  1405→    } catch {
+  1406→      // Silently handle — projects are only needed for create dialog
+  1407→    }
+  1408→  }, [])
+  1409→
+  1410→  useEffect(() => {
+  1411→    fetchPipelines()
+  1412→    fetchProjects()
+  1413→  }, [fetchPipelines, fetchProjects])
+  1414→
+  1415→  // ── Fetch pipeline detail ──────────────────────────────────────────
+  1416→  const fetchPipelineDetail = useCallback(async (pipelineId: string) => {
+  1417→    setDetailLoading(true)
+  1418→    try {
+  1419→      const data = await apiFetch(`/pipelines/${pipelineId}`)
+  1420→      const pipeline = data.pipeline
+  1421→      setSelectedPipeline(pipeline)
+  1422→      setEditStages(parseStages(pipeline.stages))
+  1423→    } catch (err) {
+  1424→      toast.error('Failed to load pipeline', {
+  1425→        description: err instanceof Error ? err.message : 'Unknown error',
+  1426→      })
+  1427→      setView('list')
+  1428→    } finally {
+  1429→      setDetailLoading(false)
+  1430→    }
+  1431→  }, [])
+  1432→
+  1433→  // ── Fetch run detail ───────────────────────────────────────────────
+  1434→  const fetchRunDetail = useCallback(async (pipelineId: string, runId: string) => {
+  1435→    setRunLoading(true)
+  1436→    try {
+  1437→      const data = await apiFetch(`/pipelines/${pipelineId}/runs/${runId}`)
+  1438→      setSelectedRun(data.run)
+  1439→    } catch (err) {
+  1440→      toast.error('Failed to load run details', {
+  1441→        description: err instanceof Error ? err.message : 'Unknown error',
+  1442→      })
+  1443→      setView('detail')
+  1444→    } finally {
+  1445→      setRunLoading(false)
+  1446→    }
+  1447→  }, [])
+  1448→
+  1449→  // ── Navigate to pipeline detail ────────────────────────────────────
+  1450→  const openPipeline = (pipeline: Pipeline) => {
+  1451→    setView('detail')
+  1452→    fetchPipelineDetail(pipeline.id)
+  1453→  }
+  1454→
+  1455→  // ── Navigate to run detail ─────────────────────────────────────────
+  1456→  const openRun = (run: PipelineRun) => {
+  1457→    if (!selectedPipeline) return
+  1458→    setView('run')
+  1459→    setSelectedRunStage(null)
+  1460→    setExpandedTimelineStage(null)
+  1461→    fetchRunDetail(selectedPipeline.id, run.id)
+  1462→  }
+  1463→
+  1464→  // ── Navigate back ──────────────────────────────────────────────────
+  1465→  const goBack = () => {
+  1466→    if (view === 'run') {
+  1467→      setView('detail')
+  1468→      setSelectedRun(null)
+  1469→      setSelectedRunStage(null)
+  1470→      setExpandedTimelineStage(null)
+  1471→    } else if (view === 'detail') {
+  1472→      setView('list')
+  1473→      setSelectedPipeline(null)
+  1474→      setEditStages([])
+  1475→    }
+  1476→  }
+  1477→
+  1478→  // ── Create pipeline ────────────────────────────────────────────────
+  1479→  const handleCreatePipeline = async () => {
+  1480→    if (!newPipelineName.trim()) {
+  1481→      toast.error('Pipeline name is required')
+  1482→      return
+  1483→    }
+  1484→    if (!newPipelineProjectId) {
+  1485→      toast.error('Please select a project')
+  1486→      return
+  1487→    }
+  1488→    setCreating(true)
+  1489→    try {
+  1490→      const data = await apiFetch('/pipelines', {
+  1491→        method: 'POST',
+  1492→        body: JSON.stringify({
+  1493→          name: newPipelineName.trim(),
+  1494→          projectId: newPipelineProjectId,
+  1495→          description: newPipelineDescription.trim() || undefined,
+  1496→        }),
+  1497→      })
+  1498→      toast.success('Pipeline created', {
+  1499→        description: `"${data.pipeline.name}" has been created as a draft.`,
+  1500→      })
+  1501→      setCreateDialogOpen(false)
+  1502→      setNewPipelineName('')
+  1503→      setNewPipelineProjectId('')
+  1504→      setNewPipelineDescription('')
+  1505→      fetchPipelines()
+  1506→    } catch (err) {
+  1507→      toast.error('Failed to create pipeline', {
+  1508→        description: err instanceof Error ? err.message : 'Unknown error',
+  1509→      })
+  1510→    } finally {
+  1511→      setCreating(false)
+  1512→    }
+  1513→  }
+  1514→
+  1515→  // ── Delete pipeline ────────────────────────────────────────────────
+  1516→  const handleDeletePipeline = async () => {
+  1517→    if (!pipelineToDelete) return
+  1518→    setDeleting(true)
+  1519→    try {
+  1520→      await apiFetch(`/pipelines/${pipelineToDelete.id}`, { method: 'DELETE' })
+  1521→      toast.success('Pipeline deleted', {
+  1522→        description: `"${pipelineToDelete.name}" has been deleted.`,
+  1523→      })
+  1524→      setDeleteDialogOpen(false)
+  1525→      setPipelineToDelete(null)
+  1526→      if (selectedPipeline?.id === pipelineToDelete.id) {
+  1527→        setView('list')
+  1528→        setSelectedPipeline(null)
+  1529→      }
+  1530→      fetchPipelines()
+  1531→    } catch (err) {
+  1532→      toast.error('Failed to delete pipeline', {
+  1533→        description: err instanceof Error ? err.message : 'Unknown error',
+  1534→      })
+  1535→    } finally {
+  1536→      setDeleting(false)
+  1537→    }
+  1538→  }
+  1539→
+  1540→  // ── Update pipeline status ─────────────────────────────────────────
+  1541→  const handleStatusChange = async (pipeline: Pipeline, newStatus: string) => {
+  1542→    try {
+  1543→      await apiFetch(`/pipelines/${pipeline.id}`, {
+  1544→        method: 'PATCH',
+  1545→        body: JSON.stringify({ status: newStatus }),
+  1546→      })
+  1547→      toast.success(`Pipeline ${newStatus}`, {
+  1548→        description: `"${pipeline.name}" is now ${newStatus}.`,
+  1549→      })
+  1550→      fetchPipelineDetail(pipeline.id)
+  1551→      fetchPipelines()
+  1552→    } catch (err) {
+  1553→      toast.error('Failed to update pipeline', {
+  1554→        description: err instanceof Error ? err.message : 'Unknown error',
+  1555→      })
+  1556→    }
+  1557→  }
+  1558→
+  1559→  // ── Save stages ────────────────────────────────────────────────────
+  1560→  const handleSaveStages = async () => {
+  1561→    if (!selectedPipeline) return
+  1562→    setSavingStages(true)
+  1563→    try {
+  1564→      await apiFetch(`/pipelines/${selectedPipeline.id}`, {
+  1565→        method: 'PATCH',
+  1566→        body: JSON.stringify({ stages: editStages }),
+  1567→      })
+  1568→      toast.success('Stages saved', {
+  1569→        description: 'Pipeline configuration has been updated.',
+  1570→      })
+  1571→      fetchPipelineDetail(selectedPipeline.id)
+  1572→    } catch (err) {
+  1573→      toast.error('Failed to save stages', {
+  1574→        description: err instanceof Error ? err.message : 'Unknown error',
+  1575→      })
+  1576→    } finally {
+  1577→      setSavingStages(false)
+  1578→    }
+  1579→  }
+  1580→
+  1581→  // ── Trigger manual run ─────────────────────────────────────────────
+  1582→  const handleTriggerRun = async (pipeline: Pipeline) => {
+  1583→    if (pipeline.status !== 'active') {
+  1584→      toast.error('Pipeline must be active to trigger a run')
+  1585→      return
+  1586→    }
+  1587→    setTriggeringRun(true)
+  1588→    try {
+  1589→      const data = await apiFetch(`/pipelines/${pipeline.id}/runs`, {
+  1590→        method: 'POST',
+  1591→        body: JSON.stringify({ trigger: 'manual' }),
+  1592→      })
+  1593→      toast.success('Pipeline run triggered', {
+  1594→        description: `Run #${data.run.id.slice(-6)} has started.`,
+  1595→      })
+  1596→      fetchPipelineDetail(pipeline.id)
+  1597→      fetchPipelines()
+  1598→    } catch (err) {
+  1599→      toast.error('Failed to trigger run', {
+  1600→        description: err instanceof Error ? err.message : 'Unknown error',
+  1601→      })
+  1602→    } finally {
+  1603→      setTriggeringRun(false)
+  1604→    }
+  1605→  }
+  1606→
+  1607→  // ── Duplicate pipeline ─────────────────────────────────────────────
+  1608→  const handleDuplicatePipeline = async (pipeline: Pipeline) => {
+  1609→    try {
+  1610→      const data = await apiFetch('/pipelines', {
+  1611→        method: 'POST',
+  1612→        body: JSON.stringify({
+  1613→          name: `${pipeline.name} (Copy)`,
+  1614→          projectId: pipeline.projectId,
+  1615→          description: pipeline.description || undefined,
+  1616→          stages: parseStages(pipeline.stages),
+  1617→          triggerBranch: pipeline.triggerBranch,
+  1618→          triggerEvents: parseTriggerEvents(pipeline.triggerEvents),
+  1619→        }),
+  1620→      })
+  1621→      toast.success('Pipeline duplicated', {
+  1622→        description: `"${data.pipeline.name}" has been created.`,
+  1623→      })
+  1624→      fetchPipelines()
+  1625→    } catch (err) {
+  1626→      toast.error('Failed to duplicate pipeline', {
+  1627→        description: err instanceof Error ? err.message : 'Unknown error',
+  1628→      })
+  1629→    }
+  1630→  }
+  1631→
+  1632→  // ── Render: Loading Skeletons ──────────────────────────────────────
+  1633→
+  1634→  const renderLoadingSkeletons = () => (
+  1635→    <div className="space-y-4">
+  1636→      <div className="flex justify-between items-center">
+  1637→        <Skeleton className="h-8 w-32" />
+  1638→        <Skeleton className="h-9 w-36" />
+  1639→      </div>
+  1640→      {Array.from({ length: 3 }).map((_, i) => (
+  1641→        <Card key={i}>
+  1642→          <CardContent className="p-5">
+  1643→            <div className="flex items-center justify-between">
+  1644→              <div className="space-y-2 flex-1">
+  1645→                <Skeleton className="h-5 w-48" />
+  1646→                <Skeleton className="h-4 w-32" />
+  1647→              </div>
+  1648→              <Skeleton className="h-6 w-20" />
+  1649→            </div>
+  1650→            <div className="flex items-center gap-4 mt-4">
+  1651→              <Skeleton className="h-4 w-24" />
+  1652→              <Skeleton className="h-4 w-24" />
+  1653→              <Skeleton className="h-4 w-24" />
+  1654→            </div>
+  1655→          </CardContent>
+  1656→        </Card>
+  1657→      ))}
+  1658→    </div>
+  1659→  )
+  1660→
+  1661→  // ── Render: List View ──────────────────────────────────────────────
+  1662→
+  1663→  const renderListView = () => {
+  1664→    if (loading) return renderLoadingSkeletons()
+  1665→
+  1666→    return (
+  1667→      <div className="space-y-6">
+  1668→        {/* Header */}
+  1669→        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+  1670→          <div>
+  1671→            <h2 className="text-2xl font-bold">Pipelines</h2>
+  1672→            <p className="text-sm text-muted-foreground mt-1">
+  1673→              Manage CI/CD pipelines for your projects
+  1674→            </p>
+  1675→          </div>
+  1676→          <Button
+  1677→            onClick={() => setCreateDialogOpen(true)}
+  1678→            className="bg-emerald-600 hover:bg-emerald-700"
+  1679→          >
+  1680→            <Plus className="size-4 mr-1.5" />
+  1681→            New Pipeline
+  1682→          </Button>
+  1683→        </div>
+  1684→
+  1685→        {/* Empty State */}
+  1686→        {pipelines.length === 0 && (
+  1687→          <Card className="border-dashed">
+  1688→            <CardContent className="flex flex-col items-center justify-center py-16">
+  1689→              <GitMerge className="size-12 text-muted-foreground/40 mb-4" />
+  1690→              <h3 className="text-lg font-semibold mb-1">No pipelines yet</h3>
+  1691→              <p className="text-sm text-muted-foreground mb-4 text-center max-w-sm">
+  1692→                Create your first pipeline to automate builds, tests, and deployments for your projects.
+  1693→              </p>
+  1694→              <Button
+  1695→                onClick={() => setCreateDialogOpen(true)}
+  1696→                className="bg-emerald-600 hover:bg-emerald-700"
+  1697→              >
+  1698→                <Plus className="size-4 mr-1.5" />
+  1699→                Create Pipeline
+  1700→              </Button>
+  1701→            </CardContent>
+  1702→          </Card>
+  1703→        )}
+  1704→
+  1705→        {/* Pipeline Cards */}
+  1706→        <div className="space-y-3">
+  1707→          {pipelines.map((pipeline) => {
+  1708→            const stages = parseStages(pipeline.stages)
+  1709→            const events = parseTriggerEvents(pipeline.triggerEvents)
+  1710→
+  1711→            return (
+  1712→              <Card
+  1713→                key={pipeline.id}
+  1714→                className="hover:shadow-md transition-shadow cursor-pointer group"
+  1715→                onClick={() => openPipeline(pipeline)}
+  1716→              >
+  1717→                <CardContent className="p-5">
+  1718→                  <div className="flex items-start justify-between gap-3">
+  1719→                    <div className="flex-1 min-w-0">
+  1720→                      <div className="flex items-center gap-2 mb-1">
+  1721→                        <GitMerge className="size-4 text-emerald-600 shrink-0" />
+  1722→                        <h3 className="font-semibold truncate">{pipeline.name}</h3>
+  1723→                        <PipelineStatusBadge status={pipeline.status} />
+  1724→                      </div>
+  1725→                      {pipeline.description && (
+  1726→                        <p className="text-sm text-muted-foreground mb-2 line-clamp-1">
+  1727→                          {pipeline.description}
+  1728→                        </p>
+  1729→                      )}
+  1730→                      <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+  1731→                        <span className="flex items-center gap-1">
+  1732→                          <span className="font-medium text-foreground">{pipeline.project?.name || 'Unknown'}</span>
+  1733→                        </span>
+  1734→                        <span className="flex items-center gap-1">
+  1735→                          <GitBranch className="size-3" />
+  1736→                          {pipeline.triggerBranch}
+  1737→                        </span>
+  1738→                        <span className="flex items-center gap-1">
+  1739→                          <Zap className="size-3" />
+  1740→                          {events.join(', ')}
+  1741→                        </span>
+  1742→                        <span className="flex items-center gap-1">
+  1743→                          <Clock className="size-3" />
+  1744→                          {stages.length} stage{stages.length !== 1 ? 's' : ''}
+  1745→                        </span>
+  1746→                      </div>
+  1747→                    </div>
+  1748→
+  1749→                    <div className="flex items-center gap-2 shrink-0">
+  1750→                      {/* Last run status */}
+  1751→                      {pipeline.lastRun ? (
+  1752→                        <div className="text-right hidden sm:block">
+  1753→                          <RunStatusBadge status={pipeline.lastRun.status} />
+  1754→                          <p className="text-[10px] text-muted-foreground mt-0.5">
+  1755→                            {formatDuration(pipeline.lastRun.duration)} ago
+  1756→                          </p>
+  1757→                        </div>
+  1758→                      ) : (
+  1759→                        <span className="text-xs text-muted-foreground hidden sm:inline">No runs yet</span>
+  1760→                      )}
+  1761→
+  1762→                      {/* Actions dropdown */}
+  1763→                      <DropdownMenu>
+  1764→                        <DropdownMenuTrigger asChild>
+  1765→                          <Button
+  1766→                            variant="ghost"
+  1767→                            size="icon"
+  1768→                            className="size-8 opacity-0 group-hover:opacity-100 transition-opacity"
+  1769→                            onClick={(e) => e.stopPropagation()}
+  1770→                          >
+  1771→                            <MoreVertical className="size-4" />
+  1772→                          </Button>
+  1773→                        </DropdownMenuTrigger>
+  1774→                        <DropdownMenuContent align="end">
+  1775→                          <DropdownMenuItem
+  1776→                            onClick={(e) => {
+  1777→                              e.stopPropagation()
+  1778→                              openPipeline(pipeline)
+  1779→                            }}
+  1780→                          >
+  1781→                            <Eye className="size-3.5 mr-2" />
+  1782→                            View Details
+  1783→                          </DropdownMenuItem>
+  1784→                          {pipeline.status === 'active' && (
+  1785→                            <DropdownMenuItem
+  1786→                              onClick={(e) => {
+  1787→                                e.stopPropagation()
+  1788→                                handleTriggerRun(pipeline)
+  1789→                              }}
+  1790→                            >
+  1791→                              <Play className="size-3.5 mr-2" />
+  1792→                              Trigger Run
+  1793→                            </DropdownMenuItem>
+  1794→                          )}
+  1795→                          {pipeline.status === 'draft' && (
+  1796→                            <DropdownMenuItem
+  1797→                              onClick={(e) => {
+  1798→                                e.stopPropagation()
+  1799→                                handleStatusChange(pipeline, 'active')
+  1800→                              }}
+  1801→                            >
+  1802→                              <Play className="size-3.5 mr-2" />
+  1803→                              Activate
+  1804→                            </DropdownMenuItem>
+  1805→                          )}
+  1806→                          {pipeline.status === 'active' && (
+  1807→                            <DropdownMenuItem
+  1808→                              onClick={(e) => {
+  1809→                                e.stopPropagation()
+  1810→                                handleStatusChange(pipeline, 'paused')
+  1811→                              }}
+  1812→                            >
+  1813→                              <Pause className="size-3.5 mr-2" />
+  1814→                              Pause
+  1815→                            </DropdownMenuItem>
+  1816→                          )}
+  1817→                          {pipeline.status === 'paused' && (
+  1818→                            <DropdownMenuItem
+  1819→                              onClick={(e) => {
+  1820→                                e.stopPropagation()
+  1821→                                handleStatusChange(pipeline, 'active')
+  1822→                              }}
+  1823→                            >
+  1824→                              <Play className="size-3.5 mr-2" />
+  1825→                              Resume
+  1826→                            </DropdownMenuItem>
+  1827→                          )}
+  1828→                          <DropdownMenuItem
+  1829→                            onClick={(e) => {
+  1830→                              e.stopPropagation()
+  1831→                              handleDuplicatePipeline(pipeline)
+  1832→                            }}
+  1833→                          >
+  1834→                            <Copy className="size-3.5 mr-2" />
+  1835→                            Duplicate
+  1836→                          </DropdownMenuItem>
+  1837→                          <DropdownMenuItem
+  1838→                            className="text-red-600 focus:text-red-600"
+  1839→                            onClick={(e) => {
+  1840→                              e.stopPropagation()
+  1841→                              setPipelineToDelete(pipeline)
+  1842→                              setDeleteDialogOpen(true)
+  1843→                            }}
+  1844→                          >
+  1845→                            <Trash2 className="size-3.5 mr-2" />
+  1846→                            Delete
+  1847→                          </DropdownMenuItem>
+  1848→                        </DropdownMenuContent>
+  1849→                      </DropdownMenu>
+  1850→                    </div>
+  1851→                  </div>
+  1852→
+  1853→                  {/* Stage mini-preview with flowchart style */}
+  1854→                  {stages.length > 0 && (
+  1855→                    <div className="flex items-center gap-0.5 mt-3 overflow-x-auto">
+  1856→                      {stages.map((stage, idx) => {
+  1857→                        const def = getStageTypeDef(stage.type)
+  1858→                        return (
+  1859→                          <div key={stage.id} className="flex items-center">
+  1860→                            <div className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] ${def.bg} ${def.border} border ${def.color} font-medium`}>
+  1861→                              {React.createElement(def.icon, { className: 'size-2.5' })}
+  1862→                              <span className="whitespace-nowrap">{stage.name}</span>
+  1863→                            </div>
+  1864→                            {idx < stages.length - 1 && (
+  1865→                              <ArrowRight className="size-2.5 text-muted-foreground/40 mx-0.5 shrink-0" />
+  1866→                            )}
+  1867→                          </div>
+  1868→                        )
+  1869→                      })}
+  1870→                    </div>
+  1871→                  )}
+  1872→                </CardContent>
+  1873→              </Card>
+  1874→            )
+  1875→          })}
+  1876→        </div>
+  1877→      </div>
+  1878→    )
+  1879→  }
+  1880→
+  1881→  // ── Render: Detail View ────────────────────────────────────────────
+  1882→
+  1883→  const renderDetailView = () => {
+  1884→    if (detailLoading) {
+  1885→      return (
+  1886→        <div className="space-y-6">
+  1887→          <div className="flex items-center gap-2">
+  1888→            <Skeleton className="size-8" />
+  1889→            <Skeleton className="h-6 w-48" />
+  1890→          </div>
+  1891→          <Card>
+  1892→            <CardContent className="p-5 space-y-4">
+  1893→              <Skeleton className="h-5 w-64" />
+  1894→              <Skeleton className="h-32 w-full" />
+  1895→            </CardContent>
+  1896→          </Card>
+  1897→          <Card>
+  1898→            <CardContent className="p-5 space-y-3">
+  1899→              {Array.from({ length: 3 }).map((_, i) => (
+  1900→                <Skeleton key={i} className="h-12 w-full" />
+  1901→              ))}
+  1902→            </CardContent>
+  1903→          </Card>
+  1904→        </div>
+  1905→      )
+  1906→    }
+  1907→
+  1908→    if (!selectedPipeline) return null
+  1909→
+  1910→    const stages = parseStages(selectedPipeline.stages)
+  1911→    const events = parseTriggerEvents(selectedPipeline.triggerEvents)
+  1912→    const runs = selectedPipeline.runs || []
+  1913→
+  1914→    return (
+  1915→      <div className="space-y-6">
+  1916→        {/* Header */}
+  1917→        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+  1918→          <div className="flex items-center gap-3">
+  1919→            <Button variant="ghost" size="icon" className="size-8" onClick={goBack}>
+  1920→              <ArrowLeft className="size-4" />
+  1921→            </Button>
+  1922→            <div>
+  1923→              <div className="flex items-center gap-2">
+  1924→                <h2 className="text-xl font-bold">{selectedPipeline.name}</h2>
+  1925→                <PipelineStatusBadge status={selectedPipeline.status} />
+  1926→              </div>
+  1927→              <p className="text-sm text-muted-foreground">
+  1928→                {selectedPipeline.project?.name} &middot; {selectedPipeline.triggerBranch}
+  1929→              </p>
+  1930→            </div>
+  1931→          </div>
+  1932→          <div className="flex items-center gap-2 flex-wrap">
+  1933→            {selectedPipeline.status === 'draft' && (
+  1934→              <Button
+  1935→                size="sm"
+  1936→                onClick={() => handleStatusChange(selectedPipeline, 'active')}
+  1937→                className="bg-emerald-600 hover:bg-emerald-700 h-8"
+  1938→              >
+  1939→                <Play className="size-3.5 mr-1" />
+  1940→                Activate
+  1941→              </Button>
+  1942→            )}
+  1943→            {selectedPipeline.status === 'active' && (
+  1944→              <>
+  1945→                <Button
+  1946→                  size="sm"
+  1947→                  onClick={() => handleTriggerRun(selectedPipeline)}
+  1948→                  disabled={triggeringRun}
+  1949→                  className="bg-emerald-600 hover:bg-emerald-700 h-8"
+  1950→                >
+  1951→                  {triggeringRun ? (
+  1952→                    <Loader2 className="size-3.5 mr-1 animate-spin" />
+  1953→                  ) : (
+  1954→                    <Play className="size-3.5 mr-1" />
+  1955→                  )}
+  1956→                  Run Now
+  1957→                </Button>
+  1958→                <Button
+  1959→                  variant="outline"
+  1960→                  size="sm"
+  1961→                  onClick={() => handleStatusChange(selectedPipeline, 'paused')}
+  1962→                  className="h-8"
+  1963→                >
+  1964→                  <Pause className="size-3.5 mr-1" />
+  1965→                  Pause
+  1966→                </Button>
+  1967→              </>
+  1968→            )}
+  1969→            {selectedPipeline.status === 'paused' && (
+  1970→              <Button
+  1971→                size="sm"
+  1972→                onClick={() => handleStatusChange(selectedPipeline, 'active')}
+  1973→                className="bg-emerald-600 hover:bg-emerald-700 h-8"
+  1974→              >
+  1975→                <Play className="size-3.5 mr-1" />
+  1976→                Resume
+  1977→              </Button>
+  1978→            )}
+  1979→            <DropdownMenu>
+  1980→              <DropdownMenuTrigger asChild>
+  1981→                <Button variant="outline" size="icon" className="size-8">
+  1982→                  <MoreVertical className="size-4" />
+  1983→                </Button>
+  1984→              </DropdownMenuTrigger>
+  1985→              <DropdownMenuContent align="end">
+  1986→                <DropdownMenuItem onClick={() => handleDuplicatePipeline(selectedPipeline)}>
+  1987→                  <Copy className="size-3.5 mr-2" />
+  1988→                  Duplicate
+  1989→                </DropdownMenuItem>
+  1990→                <DropdownMenuItem
+  1991→                  className="text-red-600 focus:text-red-600"
+  1992→                  onClick={() => {
+  1993→                    setPipelineToDelete(selectedPipeline)
+  1994→                    setDeleteDialogOpen(true)
+  1995→                  }}
+  1996→                >
+  1997→                  <Trash2 className="size-3.5 mr-2" />
+  1998→                  Delete
+  1999→                </DropdownMenuItem>
+  2000→              </DropdownMenuContent>
+
+[showing lines 1-2000 of 2662; use offset=2001 with limit to continue reading]

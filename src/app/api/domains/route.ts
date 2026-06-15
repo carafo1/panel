@@ -1,20 +1,10 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
+import { authenticateRequest } from '@/lib/auth'
 
 export async function GET(request: Request) {
   try {
-    const authHeader = request.headers.get('Authorization')
-    const token = extractTokenFromHeader(authHeader)
-
-    if (!token) {
-      return NextResponse.json(
-        { error: 'Authorization token required' },
-        { status: 401 }
-      )
-    }
-
-    const decoded = verifyToken(token)
+    const decoded = await authenticateRequest(request)
     if (!decoded) {
       return NextResponse.json(
         { error: 'Invalid or expired token' },
@@ -36,6 +26,7 @@ export async function GET(request: Request) {
             subdomain: true,
           },
         },
+        verification: true,
       },
       orderBy: { createdAt: 'desc' },
     })
@@ -46,6 +37,8 @@ export async function GET(request: Request) {
         name: d.name,
         status: d.status,
         registrar: d.registrar,
+        provider: d.provider,
+        externalId: d.externalId,
         registeredAt: d.registeredAt,
         expiresAt: d.expiresAt,
         autoRenew: d.autoRenew,
@@ -53,6 +46,13 @@ export async function GET(request: Request) {
         nameservers: d.nameservers ? JSON.parse(d.nameservers) : [],
         project: d.project,
         dnsRecords: d.dnsRecords,
+        verification: d.verification
+          ? {
+              verified: d.verification.verified,
+              verifiedAt: d.verification.verifiedAt,
+              code: d.verification.verificationCode,
+            }
+          : null,
         createdAt: d.createdAt,
         updatedAt: d.updatedAt,
       })),

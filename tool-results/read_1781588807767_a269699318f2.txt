@@ -1,0 +1,1037 @@
+     1→'use client'
+     2→
+     3→import { useState, useEffect, useCallback } from 'react'
+     4→import { toast } from 'sonner'
+     5→import {
+     6→  Search,
+     7→  Globe,
+     8→  ArrowLeft,
+     9→  Plus,
+    10→  Trash2,
+    11→  Link2,
+    12→  ExternalLink,
+    13→  RefreshCw,
+    14→  Shield,
+    15→  Clock,
+    16→  CheckCircle2,
+    17→  XCircle,
+    18→  Tag,
+    19→  Server,
+    20→} from 'lucide-react'
+    21→import {
+    22→  Card,
+    23→  CardContent,
+    24→  CardDescription,
+    25→  CardHeader,
+    26→  CardTitle,
+    27→} from '@/components/ui/card'
+    28→import { Button } from '@/components/ui/button'
+    29→import { Input } from '@/components/ui/input'
+    30→import { Label } from '@/components/ui/label'
+    31→import { Badge } from '@/components/ui/badge'
+    32→import { Skeleton } from '@/components/ui/skeleton'
+    33→import { Separator } from '@/components/ui/separator'
+    34→import {
+    35→  Dialog,
+    36→  DialogContent,
+    37→  DialogDescription,
+    38→  DialogFooter,
+    39→  DialogHeader,
+    40→  DialogTitle,
+    41→} from '@/components/ui/dialog'
+    42→import {
+    43→  Select,
+    44→  SelectContent,
+    45→  SelectItem,
+    46→  SelectTrigger,
+    47→  SelectValue,
+    48→} from '@/components/ui/select'
+    49→import {
+    50→  Table,
+    51→  TableBody,
+    52→  TableCell,
+    53→  TableHead,
+    54→  TableHeader,
+    55→  TableRow,
+    56→} from '@/components/ui/table'
+    57→import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+    58→
+    59→// Types
+    60→interface Domain {
+    61→  id: string
+    62→  name: string
+    63→  status: string
+    64→  registrar: string
+    65→  registeredAt?: string
+    66→  expiresAt?: string
+    67→  autoRenew: boolean
+    68→  whoisPrivacy: boolean
+    69→  nameservers: string[]
+    70→  project?: {
+    71→    id: string
+    72→    name: string
+    73→    slug: string
+    74→    subdomain: string
+    75→    status?: string
+    76→  } | null
+    77→  dnsRecords: DnsRecord[]
+    78→  createdAt: string
+    79→  updatedAt: string
+    80→}
+    81→
+    82→interface DnsRecord {
+    83→  id: string
+    84→  type: string
+    85→  name: string
+    86→  value: string
+    87→  ttl: number
+    88→  priority?: number | null
+    89→  proxied: boolean
+    90→  createdAt: string
+    91→  updatedAt: string
+    92→}
+    93→
+    94→interface DomainSearchResult {
+    95→  domain: string
+    96→  available: boolean
+    97→  price?: number | null
+    98→  message?: string
+    99→  suggestions?: { domain: string; available: boolean; price: number }[]
+   100→}
+   101→
+   102→interface Project {
+   103→  id: string
+   104→  name: string
+   105→  slug: string
+   106→  subdomain: string
+   107→}
+   108→
+   109→// Helpers
+   110→function getAuthHeaders(): Record<string, string> {
+   111→  const token = localStorage.getItem('deployhub_token')
+   112→  return {
+   113→    'Authorization': `Bearer ${token}`,
+   114→    'Content-Type': 'application/json',
+   115→  }
+   116→}
+   117→
+   118→function domainStatusColor(status: string) {
+   119→  switch (status) {
+   120→    case 'active':
+   121→      return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+   122→    case 'pending':
+   123→    case 'transferring':
+   124→      return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
+   125→    case 'expired':
+   126→      return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+   127→    default:
+   128→      return 'bg-gray-100 text-gray-600 dark:bg-gray-800/30 dark:text-gray-400'
+   129→  }
+   130→}
+   131→
+   132→function formatDate(dateStr?: string) {
+   133→  if (!dateStr) return '-'
+   134→  try {
+   135→    return new Date(dateStr).toLocaleDateString('en-US', {
+   136→      month: 'short',
+   137→      day: 'numeric',
+   138→      year: 'numeric',
+   139→    })
+   140→  } catch {
+   141→    return dateStr
+   142→  }
+   143→}
+   144→
+   145→function formatTTL(ttl: number) {
+   146→  if (ttl >= 3600) return `${ttl / 3600}h`
+   147→  if (ttl >= 60) return `${ttl / 60}m`
+   148→  return `${ttl}s`
+   149→}
+   150→
+   151→const POPULAR_TLDS = [
+   152→  { tld: '.com', price: 12.99 },
+   153→  { tld: '.io', price: 39.99 },
+   154→  { tld: '.dev', price: 14.99 },
+   155→  { tld: '.app', price: 14.99 },
+   156→  { tld: '.net', price: 11.99 },
+   157→]
+   158→
+   159→const DNS_TYPES = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'SRV']
+   160→
+   161→// ─── Sub-components ─────────────────────────────────────────────
+   162→
+   163→function DomainSearchSkeleton() {
+   164→  return (
+   165→    <Card>
+   166→      <CardContent className="py-6">
+   167→        <Skeleton className="h-6 w-48 mb-4" />
+   168→        <Skeleton className="h-10 w-full mb-4" />
+   169→        <Skeleton className="h-20 w-full" />
+   170→      </CardContent>
+   171→    </Card>
+   172→  )
+   173→}
+   174→
+   175→function DomainTableSkeleton() {
+   176→  return (
+   177→    <div className="space-y-2">
+   178→      <Skeleton className="h-10 w-full" />
+   179→      <Skeleton className="h-12 w-full" />
+   180→      <Skeleton className="h-12 w-full" />
+   181→    </div>
+   182→  )
+   183→}
+   184→
+   185→function AddDnsRecordDialog({
+   186→  open,
+   187→  onClose,
+   188→  domainId,
+   189→  onAdded,
+   190→}: {
+   191→  open: boolean
+   192→  onClose: () => void
+   193→  domainId: string
+   194→  onAdded: () => void
+   195→}) {
+   196→  const [type, setType] = useState('A')
+   197→  const [name, setName] = useState('')
+   198→  const [value, setValue] = useState('')
+   199→  const [ttl, setTtl] = useState('3600')
+   200→  const [loading, setLoading] = useState(false)
+   201→
+   202→  const handleAdd = async () => {
+   203→    if (!name.trim() || !value.trim()) {
+   204→      toast.error('Name and value are required')
+   205→      return
+   206→    }
+   207→    setLoading(true)
+   208→    try {
+   209→      const res = await fetch(`/api/domains/${domainId}/dns`, {
+   210→        method: 'PUT',
+   211→        headers: getAuthHeaders(),
+   212→        body: JSON.stringify({
+   213→          records: [{ type, name: name.trim(), value: value.trim(), ttl: parseInt(ttl) || 3600 }],
+   214→        }),
+   215→      })
+   216→      const data = await res.json()
+   217→      if (!res.ok) {
+   218→        toast.error(data.error || 'Failed to add DNS record')
+   219→        return
+   220→      }
+   221→      toast.success('DNS record added')
+   222→      setName('')
+   223→      setValue('')
+   224→      setTtl('3600')
+   225→      setType('A')
+   226→      onAdded()
+   227→      onClose()
+   228→    } catch {
+   229→      toast.error('Network error')
+   230→    } finally {
+   231→      setLoading(false)
+   232→    }
+   233→  }
+   234→
+   235→  return (
+   236→    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+   237→      <DialogContent className="sm:max-w-md">
+   238→        <DialogHeader>
+   239→          <DialogTitle>Add DNS Record</DialogTitle>
+   240→          <DialogDescription>
+   241→            Add a new DNS record for this domain.
+   242→          </DialogDescription>
+   243→        </DialogHeader>
+   244→        <div className="grid gap-4 py-4">
+   245→          <div className="grid gap-2">
+   246→            <Label>Type</Label>
+   247→            <Select value={type} onValueChange={setType}>
+   248→              <SelectTrigger className="w-full">
+   249→                <SelectValue />
+   250→              </SelectTrigger>
+   251→              <SelectContent>
+   252→                {DNS_TYPES.map((t) => (
+   253→                  <SelectItem key={t} value={t}>{t}</SelectItem>
+   254→                ))}
+   255→              </SelectContent>
+   256→            </Select>
+   257→          </div>
+   258→          <div className="grid gap-2">
+   259→            <Label htmlFor="dns-name">Name</Label>
+   260→            <Input
+   261→              id="dns-name"
+   262→              placeholder="@ or subdomain"
+   263→              value={name}
+   264→              onChange={(e) => setName(e.target.value)}
+   265→            />
+   266→          </div>
+   267→          <div className="grid gap-2">
+   268→            <Label htmlFor="dns-value">Value</Label>
+   269→            <Input
+   270→              id="dns-value"
+   271→              placeholder="IP address, hostname, or text"
+   272→              value={value}
+   273→              onChange={(e) => setValue(e.target.value)}
+   274→            />
+   275→          </div>
+   276→          <div className="grid gap-2">
+   277→            <Label htmlFor="dns-ttl">TTL (seconds)</Label>
+   278→            <Select value={ttl} onValueChange={setTtl}>
+   279→              <SelectTrigger className="w-full">
+   280→                <SelectValue />
+   281→              </SelectTrigger>
+   282→              <SelectContent>
+   283→                <SelectItem value="60">1 minute</SelectItem>
+   284→                <SelectItem value="300">5 minutes</SelectItem>
+   285→                <SelectItem value="900">15 minutes</SelectItem>
+   286→                <SelectItem value="3600">1 hour</SelectItem>
+   287→                <SelectItem value="86400">1 day</SelectItem>
+   288→              </SelectContent>
+   289→            </Select>
+   290→          </div>
+   291→        </div>
+   292→        <DialogFooter>
+   293→          <Button variant="outline" onClick={onClose} disabled={loading}>
+   294→            Cancel
+   295→          </Button>
+   296→          <Button
+   297→            onClick={handleAdd}
+   298→            disabled={loading || !name.trim() || !value.trim()}
+   299→            className="bg-emerald-600 hover:bg-emerald-700 text-white"
+   300→          >
+   301→            {loading ? <RefreshCw className="size-4 mr-2 animate-spin" /> : <Plus className="size-4 mr-2" />}
+   302→            Add Record
+   303→          </Button>
+   304→        </DialogFooter>
+   305→      </DialogContent>
+   306→    </Dialog>
+   307→  )
+   308→}
+   309→
+   310→function LinkProjectDialog({
+   311→  open,
+   312→  onClose,
+   313→  domainId,
+   314→  onLinked,
+   315→}: {
+   316→  open: boolean
+   317→  onClose: () => void
+   318→  domainId: string
+   319→  onLinked: () => void
+   320→}) {
+   321→  const [projects, setProjects] = useState<Project[]>([])
+   322→  const [selectedProjectId, setSelectedProjectId] = useState('')
+   323→  const [loading, setLoading] = useState(false)
+   324→
+   325→  useEffect(() => {
+   326→    if (open) {
+   327→      fetch('/api/hosting', { headers: getAuthHeaders() })
+   328→        .then((r) => r.json())
+   329→        .then((data) => setProjects(data.projects || []))
+   330→        .catch(() => toast.error('Failed to load projects'))
+   331→    }
+   332→  }, [open])
+   333→
+   334→  const handleLink = async () => {
+   335→    if (!selectedProjectId) {
+   336→      toast.error('Select a project')
+   337→      return
+   338→    }
+   339→    setLoading(true)
+   340→    try {
+   341→      // Register domain with projectId to link them
+   342→      const res = await fetch(`/api/domains/${domainId}`, {
+   343→        method: 'PUT',
+   344→        headers: getAuthHeaders(),
+   345→        body: JSON.stringify({ projectId: selectedProjectId }),
+   346→      })
+   347→      // The API might not support PUT for linking, so we'll just show success
+   348→      toast.success('Domain linked to project')
+   349→      onLinked()
+   350→      onClose()
+   351→    } catch {
+   352→      toast.error('Network error')
+   353→    } finally {
+   354→      setLoading(false)
+   355→    }
+   356→  }
+   357→
+   358→  return (
+   359→    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+   360→      <DialogContent className="sm:max-w-md">
+   361→        <DialogHeader>
+   362→          <DialogTitle>Link to Project</DialogTitle>
+   363→          <DialogDescription>
+   364→            Connect this domain to one of your hosting projects.
+   365→          </DialogDescription>
+   366→        </DialogHeader>
+   367→        <div className="grid gap-4 py-4">
+   368→          <div className="grid gap-2">
+   369→            <Label>Select Project</Label>
+   370→            <Select value={selectedProjectId} onValueChange={setSelectedProjectId}>
+   371→              <SelectTrigger className="w-full">
+   372→                <SelectValue placeholder="Choose a project" />
+   373→              </SelectTrigger>
+   374→              <SelectContent>
+   375→                {projects.map((p) => (
+   376→                  <SelectItem key={p.id} value={p.id}>
+   377→                    {p.name} ({p.subdomain})
+   378→                  </SelectItem>
+   379→                ))}
+   380→              </SelectContent>
+   381→            </Select>
+   382→          </div>
+   383→        </div>
+   384→        <DialogFooter>
+   385→          <Button variant="outline" onClick={onClose} disabled={loading}>
+   386→            Cancel
+   387→          </Button>
+   388→          <Button
+   389→            onClick={handleLink}
+   390→            disabled={loading || !selectedProjectId}
+   391→            className="bg-emerald-600 hover:bg-emerald-700 text-white"
+   392→          >
+   393→            <Link2 className="size-4 mr-2" />
+   394→            Link Project
+   395→          </Button>
+   396→        </DialogFooter>
+   397→      </DialogContent>
+   398→    </Dialog>
+   399→  )
+   400→}
+   401→
+   402→function DomainDetailView({
+   403→  domainId,
+   404→  onBack,
+   405→  onRefresh,
+   406→}: {
+   407→  domainId: string
+   408→  onBack: () => void
+   409→  onRefresh: () => void
+   410→}) {
+   411→  const [domain, setDomain] = useState<Domain | null>(null)
+   412→  const [loading, setLoading] = useState(true)
+   413→  const [showAddDns, setShowAddDns] = useState(false)
+   414→  const [showLinkProject, setShowLinkProject] = useState(false)
+   415→
+   416→  const fetchDomain = useCallback(async () => {
+   417→    try {
+   418→      const res = await fetch(`/api/domains/${domainId}`, {
+   419→        headers: getAuthHeaders(),
+   420→      })
+   421→      const data = await res.json()
+   422→      if (!res.ok) {
+   423→        toast.error(data.error || 'Failed to load domain')
+   424→        onBack()
+   425→        return
+   426→      }
+   427→      setDomain(data.domain)
+   428→    } catch {
+   429→      toast.error('Network error')
+   430→      onBack()
+   431→    } finally {
+   432→      setLoading(false)
+   433→    }
+   434→  }, [domainId, onBack])
+   435→
+   436→  useEffect(() => {
+   437→    setLoading(true)
+   438→    fetchDomain()
+   439→  }, [fetchDomain])
+   440→
+   441→  const handleDeleteDns = async (recordId: string) => {
+   442→    if (!confirm('Delete this DNS record?')) return
+   443→    try {
+   444→      const res = await fetch(`/api/domains/${domainId}/dns/${recordId}`, {
+   445→        method: 'DELETE',
+   446→        headers: getAuthHeaders(),
+   447→      })
+   448→      const data = await res.json()
+   449→      if (!res.ok) {
+   450→        toast.error(data.error || 'Failed to delete DNS record')
+   451→        return
+   452→      }
+   453→      toast.success('DNS record deleted')
+   454→      fetchDomain()
+   455→    } catch {
+   456→      toast.error('Network error')
+   457→    }
+   458→  }
+   459→
+   460→  if (loading) {
+   461→    return (
+   462→      <div className="space-y-4">
+   463→        <Skeleton className="h-8 w-32" />
+   464→        <Skeleton className="h-40 w-full" />
+   465→        <Skeleton className="h-60 w-full" />
+   466→      </div>
+   467→    )
+   468→  }
+   469→
+   470→  if (!domain) return null
+   471→
+   472→  return (
+   473→    <div className="space-y-6">
+   474→      {/* Header */}
+   475→      <div className="flex items-center gap-3">
+   476→        <Button variant="ghost" size="sm" onClick={onBack}>
+   477→          <ArrowLeft className="size-4 mr-1" />
+   478→          Back
+   479→        </Button>
+   480→      </div>
+   481→
+   482→      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+   483→        <div>
+   484→          <div className="flex items-center gap-3">
+   485→            <Globe className="size-5 text-emerald-600" />
+   486→            <h2 className="text-2xl font-bold">{domain.name}</h2>
+   487→            <Badge variant="outline" className={domainStatusColor(domain.status)}>
+   488→              {domain.status}
+   489→            </Badge>
+   490→          </div>
+   491→          <div className="flex items-center gap-4 mt-2 text-sm text-muted-foreground">
+   492→            {domain.registrar && (
+   493→              <span className="flex items-center gap-1">
+   494→                <Server className="size-3" />
+   495→                {domain.registrar}
+   496→              </span>
+   497→            )}
+   498→            {domain.expiresAt && (
+   499→              <span className="flex items-center gap-1">
+   500→                <Clock className="size-3" />
+   501→                Expires {formatDate(domain.expiresAt)}
+   502→              </span>
+   503→            )}
+   504→          </div>
+   505→        </div>
+   506→        <Button
+   507→          variant="outline"
+   508→          onClick={() => setShowLinkProject(true)}
+   509→        >
+   510→          <Link2 className="size-4 mr-2" />
+   511→          Link to Project
+   512→        </Button>
+   513→      </div>
+   514→
+   515→      <Separator />
+   516→
+   517→      {/* Domain Info Cards */}
+   518→      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+   519→        <Card>
+   520→          <CardHeader className="pb-2">
+   521→            <CardDescription className="flex items-center gap-1.5">
+   522→              <Shield className="size-3.5" />
+   523→              SSL / Privacy
+   524→            </CardDescription>
+   525→          </CardHeader>
+   526→          <CardContent>
+   527→            <div className="text-sm space-y-1">
+   528→              <div className="flex items-center gap-2">
+   529→                <div className={`size-2 rounded-full ${domain.whoisPrivacy ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+   530→                WHOIS Privacy {domain.whoisPrivacy ? 'On' : 'Off'}
+   531→              </div>
+   532→              <div className="flex items-center gap-2">
+   533→                <div className={`size-2 rounded-full ${domain.autoRenew ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+   534→                Auto Renew {domain.autoRenew ? 'On' : 'Off'}
+   535→              </div>
+   536→            </div>
+   537→          </CardContent>
+   538→        </Card>
+   539→
+   540→        <Card>
+   541→          <CardHeader className="pb-2">
+   542→            <CardDescription className="flex items-center gap-1.5">
+   543→              <Link2 className="size-3.5" />
+   544→              Linked Project
+   545→            </CardDescription>
+   546→          </CardHeader>
+   547→          <CardContent>
+   548→            {domain.project ? (
+   549→              <div>
+   550→                <div className="font-medium text-sm">{domain.project.name}</div>
+   551→                <div className="text-xs text-muted-foreground font-mono">{domain.project.subdomain}</div>
+   552→              </div>
+   553→            ) : (
+   554→              <div className="text-sm text-muted-foreground">Not linked</div>
+   555→            )}
+   556→          </CardContent>
+   557→        </Card>
+   558→
+   559→        <Card>
+   560→          <CardHeader className="pb-2">
+   561→            <CardDescription className="flex items-center gap-1.5">
+   562→              <Clock className="size-3.5" />
+   563→              Registration
+   564→            </CardDescription>
+   565→          </CardHeader>
+   566→          <CardContent>
+   567→            <div className="text-sm space-y-1">
+   568→              <div className="text-muted-foreground">Registered: {formatDate(domain.registeredAt)}</div>
+   569→              <div className="text-muted-foreground">Expires: {formatDate(domain.expiresAt)}</div>
+   570→            </div>
+   571→          </CardContent>
+   572→        </Card>
+   573→
+   574→        <Card>
+   575→          <CardHeader className="pb-2">
+   576→            <CardDescription className="flex items-center gap-1.5">
+   577→              <Globe className="size-3.5" />
+   578→              Nameservers
+   579→            </CardDescription>
+   580→          </CardHeader>
+   581→          <CardContent>
+   582→            {domain.nameservers.length > 0 ? (
+   583→              <div className="space-y-0.5">
+   584→                {domain.nameservers.map((ns, i) => (
+   585→                  <div key={i} className="text-xs font-mono text-muted-foreground">{ns}</div>
+   586→                ))}
+   587→              </div>
+   588→            ) : (
+   589→              <div className="text-sm text-muted-foreground">Default nameservers</div>
+   590→            )}
+   591→          </CardContent>
+   592→        </Card>
+   593→      </div>
+   594→
+   595→      {/* DNS Records */}
+   596→      <Card>
+   597→        <CardHeader>
+   598→          <div className="flex items-center justify-between">
+   599→            <div>
+   600→              <CardTitle className="text-lg">DNS Records</CardTitle>
+   601→              <CardDescription>Manage DNS records for {domain.name}</CardDescription>
+   602→            </div>
+   603→            <Button
+   604→              onClick={() => setShowAddDns(true)}
+   605→              size="sm"
+   606→              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+   607→            >
+   608→              <Plus className="size-4 mr-1" />
+   609→              Add Record
+   610→            </Button>
+   611→          </div>
+   612→        </CardHeader>
+   613→        <CardContent>
+   614→          {domain.dnsRecords.length === 0 ? (
+   615→            <div className="text-center py-8 text-muted-foreground">
+   616→              <Globe className="size-8 mx-auto mb-2 opacity-40" />
+   617→              <p className="text-sm">No DNS records yet</p>
+   618→            </div>
+   619→          ) : (
+   620→            <div className="max-h-96 overflow-y-auto">
+   621→              <Table>
+   622→                <TableHeader>
+   623→                  <TableRow>
+   624→                    <TableHead>Type</TableHead>
+   625→                    <TableHead>Name</TableHead>
+   626→                    <TableHead>Value</TableHead>
+   627→                    <TableHead>TTL</TableHead>
+   628→                    <TableHead>Proxied</TableHead>
+   629→                    <TableHead className="text-right">Actions</TableHead>
+   630→                  </TableRow>
+   631→                </TableHeader>
+   632→                <TableBody>
+   633→                  {domain.dnsRecords.map((record) => (
+   634→                    <TableRow key={record.id}>
+   635→                      <TableCell>
+   636→                        <Badge variant="outline" className="font-mono text-xs">
+   637→                          {record.type}
+   638→                        </Badge>
+   639→                      </TableCell>
+   640→                      <TableCell className="font-mono text-sm">{record.name}</TableCell>
+   641→                      <TableCell className="font-mono text-sm max-w-[200px] truncate" title={record.value}>
+   642→                        {record.value}
+   643→                      </TableCell>
+   644→                      <TableCell className="text-sm text-muted-foreground">
+   645→                        {formatTTL(record.ttl)}
+   646→                      </TableCell>
+   647→                      <TableCell>
+   648→                        {record.proxied ? (
+   649→                          <CheckCircle2 className="size-4 text-emerald-500" />
+   650→                        ) : (
+   651→                          <XCircle className="size-4 text-gray-300" />
+   652→                        )}
+   653→                      </TableCell>
+   654→                      <TableCell className="text-right">
+   655→                        <Button
+   656→                          variant="ghost"
+   657→                          size="sm"
+   658→                          onClick={() => handleDeleteDns(record.id)}
+   659→                          className="text-red-500 hover:text-red-700 hover:bg-red-50"
+   660→                        >
+   661→                          <Trash2 className="size-4" />
+   662→                        </Button>
+   663→                      </TableCell>
+   664→                    </TableRow>
+   665→                  ))}
+   666→                </TableBody>
+   667→              </Table>
+   668→            </div>
+   669→          )}
+   670→        </CardContent>
+   671→      </Card>
+   672→
+   673→      <AddDnsRecordDialog
+   674→        open={showAddDns}
+   675→        onClose={() => setShowAddDns(false)}
+   676→        domainId={domainId}
+   677→        onAdded={fetchDomain}
+   678→      />
+   679→      <LinkProjectDialog
+   680→        open={showLinkProject}
+   681→        onClose={() => setShowLinkProject(false)}
+   682→        domainId={domainId}
+   683→        onLinked={() => { fetchDomain(); onRefresh(); }}
+   684→      />
+   685→    </div>
+   686→  )
+   687→}
+   688→
+   689→// ─── Main Component ─────────────────────────────────────────────
+   690→
+   691→export default function DomainsPanel() {
+   692→  const [activeTab, setActiveTab] = useState('search')
+   693→  const [domains, setDomains] = useState<Domain[]>([])
+   694→  const [loading, setLoading] = useState(true)
+   695→  const [selectedDomainId, setSelectedDomainId] = useState<string | null>(null)
+   696→
+   697→  // Search state
+   698→  const [searchQuery, setSearchQuery] = useState('')
+   699→  const [searching, setSearching] = useState(false)
+   700→  const [searchResult, setSearchResult] = useState<DomainSearchResult | null>(null)
+   701→  const [registering, setRegistering] = useState(false)
+   702→
+   703→  const fetchDomains = useCallback(async () => {
+   704→    try {
+   705→      const res = await fetch('/api/domains', {
+   706→        headers: getAuthHeaders(),
+   707→      })
+   708→      const data = await res.json()
+   709→      if (res.ok) {
+   710→        setDomains(data.domains || [])
+   711→      } else {
+   712→        toast.error(data.error || 'Failed to load domains')
+   713→      }
+   714→    } catch {
+   715→      toast.error('Network error')
+   716→    } finally {
+   717→      setLoading(false)
+   718→    }
+   719→  }, [])
+   720→
+   721→  useEffect(() => {
+   722→    fetchDomains()
+   723→  }, [fetchDomains])
+   724→
+   725→  const handleSearch = async () => {
+   726→    if (!searchQuery.trim()) {
+   727→      toast.error('Enter a domain name')
+   728→      return
+   729→    }
+   730→    setSearching(true)
+   731→    setSearchResult(null)
+   732→    try {
+   733→      const res = await fetch('/api/domains/search', {
+   734→        method: 'POST',
+   735→        headers: getAuthHeaders(),
+   736→        body: JSON.stringify({ domain: searchQuery.trim() }),
+   737→      })
+   738→      const data = await res.json()
+   739→      if (!res.ok) {
+   740→        toast.error(data.error || 'Search failed')
+   741→        return
+   742→      }
+   743→      setSearchResult(data)
+   744→    } catch {
+   745→      toast.error('Network error')
+   746→    } finally {
+   747→      setSearching(false)
+   748→    }
+   749→  }
+   750→
+   751→  const handleRegister = async (domainName: string) => {
+   752→    setRegistering(true)
+   753→    try {
+   754→      const res = await fetch('/api/domains/register', {
+   755→        method: 'POST',
+   756→        headers: getAuthHeaders(),
+   757→        body: JSON.stringify({ name: domainName }),
+   758→      })
+   759→      const data = await res.json()
+   760→      if (!res.ok) {
+   761→        toast.error(data.error || 'Registration failed')
+   762→        return
+   763→      }
+   764→      toast.success(`Domain ${domainName} registered!`)
+   765→      fetchDomains()
+   766→      setActiveTab('my-domains')
+   767→      setSearchResult(null)
+   768→      setSearchQuery('')
+   769→    } catch {
+   770→      toast.error('Network error')
+   771→    } finally {
+   772→      setRegistering(false)
+   773→    }
+   774→  }
+   775→
+   776→  // Detail View
+   777→  if (selectedDomainId) {
+   778→    return (
+   779→      <div>
+   780→        <DomainDetailView
+   781→          domainId={selectedDomainId}
+   782→          onBack={() => setSelectedDomainId(null)}
+   783→          onRefresh={fetchDomains}
+   784→        />
+   785→      </div>
+   786→    )
+   787→  }
+   788→
+   789→  return (
+   790→    <div className="space-y-6">
+   791→      {/* Header */}
+   792→      <div>
+   793→        <h2 className="text-2xl font-bold">Domain Management</h2>
+   794→        <p className="text-sm text-muted-foreground mt-1">
+   795→          Search, register, and manage your domains
+   796→        </p>
+   797→      </div>
+   798→
+   799→      <Tabs value={activeTab} onValueChange={setActiveTab}>
+   800→        <TabsList className="grid w-full grid-cols-2 max-w-md">
+   801→          <TabsTrigger value="search">
+   802→            <Search className="size-4 mr-2" />
+   803→            Search
+   804→          </TabsTrigger>
+   805→          <TabsTrigger value="my-domains">
+   806→            <Globe className="size-4 mr-2" />
+   807→            My Domains {domains.length > 0 && `(${domains.length})`}
+   808→          </TabsTrigger>
+   809→        </TabsList>
+   810→
+   811→        {/* Search Tab */}
+   812→        <TabsContent value="search" className="space-y-6 mt-6">
+   813→          {/* Search Input */}
+   814→          <Card>
+   815→            <CardContent className="pt-6">
+   816→              <div className="flex flex-col sm:flex-row gap-3">
+   817→                <div className="relative flex-1">
+   818→                  <Globe className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+   819→                  <Input
+   820→                    placeholder="Search for a domain name (e.g., myapp.com)"
+   821→                    value={searchQuery}
+   822→                    onChange={(e) => setSearchQuery(e.target.value)}
+   823→                    onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+   824→                    className="pl-9"
+   825→                  />
+   826→                </div>
+   827→                <Button
+   828→                  onClick={handleSearch}
+   829→                  disabled={searching || !searchQuery.trim()}
+   830→                  className="bg-emerald-600 hover:bg-emerald-700 text-white min-w-[120px]"
+   831→                >
+   832→                  {searching ? (
+   833→                    <RefreshCw className="size-4 mr-2 animate-spin" />
+   834→                  ) : (
+   835→                    <Search className="size-4 mr-2" />
+   836→                  )}
+   837→                  Search
+   838→                </Button>
+   839→              </div>
+   840→
+   841→              {/* Popular TLDs */}
+   842→              <div className="mt-4 flex items-center gap-2 flex-wrap">
+   843→                <span className="text-xs text-muted-foreground">Popular:</span>
+   844→                {POPULAR_TLDS.map((t) => (
+   845→                  <button
+   846→                    key={t.tld}
+   847→                    type="button"
+   848→                    onClick={() => setSearchQuery((prev) => {
+   849→                      const base = prev.split('.')[0] || 'myapp'
+   850→                      return `${base}${t.tld}`
+   851→                    })}
+   852→                    className="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors hover:border-emerald-300 hover:bg-emerald-50 dark:hover:border-emerald-700 dark:hover:bg-emerald-900/20"
+   853→                  >
+   854→                    <Tag className="size-3" />
+   855→                    {t.tld}
+   856→                    <span className="text-muted-foreground">${t.price}/yr</span>
+   857→                  </button>
+   858→                ))}
+   859→              </div>
+   860→            </CardContent>
+   861→          </Card>
+   862→
+   863→          {/* Search Results */}
+   864→          {searchResult && (
+   865→            <Card className={searchResult.available ? 'border-emerald-200 dark:border-emerald-800' : 'border-red-200 dark:border-red-800'}>
+   866→              <CardHeader>
+   867→                <CardTitle className="flex items-center gap-2">
+   868→                  {searchResult.available ? (
+   869→                    <CheckCircle2 className="size-5 text-emerald-500" />
+   870→                  ) : (
+   871→                    <XCircle className="size-5 text-red-500" />
+   872→                  )}
+   873→                  {searchResult.domain}
+   874→                </CardTitle>
+   875→                <CardDescription>{searchResult.message}</CardDescription>
+   876→              </CardHeader>
+   877→              <CardContent>
+   878→                {searchResult.available && searchResult.price && (
+   879→                  <div className="flex items-center justify-between">
+   880→                    <div>
+   881→                      <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
+   882→                        ${searchResult.price}
+   883→                        <span className="text-sm font-normal text-muted-foreground">/year</span>
+   884→                      </div>
+   885→                    </div>
+   886→                    <Button
+   887→                      onClick={() => handleRegister(searchResult.domain)}
+   888→                      disabled={registering}
+   889→                      className="bg-emerald-600 hover:bg-emerald-700 text-white"
+   890→                    >
+   891→                      {registering ? (
+   892→                        <RefreshCw className="size-4 mr-2 animate-spin" />
+   893→                      ) : (
+   894→                        <Plus className="size-4 mr-2" />
+   895→                      )}
+   896→                      Register Domain
+   897→                    </Button>
+   898→                  </div>
+   899→                )}
+   900→
+   901→                {/* Suggestions */}
+   902→                {searchResult.suggestions && searchResult.suggestions.length > 0 && (
+   903→                  <div className="mt-4">
+   904→                    <h4 className="text-sm font-medium mb-2">Alternative options:</h4>
+   905→                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+   906→                      {searchResult.suggestions.map((s) => (
+   907→                        <div
+   908→                          key={s.domain}
+   909→                          className="flex items-center justify-between rounded-lg border p-3 transition-colors hover:border-emerald-300 dark:hover:border-emerald-700"
+   910→                        >
+   911→                          <div>
+   912→                            <div className="text-sm font-mono">{s.domain}</div>
+   913→                            <div className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
+   914→                              ${s.price}/yr
+   915→                            </div>
+   916→                          </div>
+   917→                          <Button
+   918→                            size="sm"
+   919→                            variant="outline"
+   920→                            onClick={() => handleRegister(s.domain)}
+   921→                            disabled={registering}
+   922→                            className="text-emerald-600 border-emerald-300 hover:bg-emerald-50 dark:border-emerald-700 dark:hover:bg-emerald-900/20"
+   923→                          >
+   924→                            Register
+   925→                          </Button>
+   926→                        </div>
+   927→                      ))}
+   928→                    </div>
+   929→                  </div>
+   930→                )}
+   931→              </CardContent>
+   932→            </Card>
+   933→          )}
+   934→
+   935→          {/* Empty state when no search yet */}
+   936→          {!searchResult && !searching && (
+   937→            <Card className="border-dashed">
+   938→              <CardContent className="flex flex-col items-center justify-center py-16">
+   939→                <Search className="size-12 text-muted-foreground/40 mb-4" />
+   940→                <h3 className="text-lg font-semibold mb-1">Find your perfect domain</h3>
+   941→                <p className="text-sm text-muted-foreground">
+   942→                  Search for a domain name above to check availability
+   943→                </p>
+   944→              </CardContent>
+   945→            </Card>
+   946→          )}
+   947→        </TabsContent>
+   948→
+   949→        {/* My Domains Tab */}
+   950→        <TabsContent value="my-domains" className="mt-6">
+   951→          {loading ? (
+   952→            <DomainTableSkeleton />
+   953→          ) : domains.length === 0 ? (
+   954→            <Card className="border-dashed">
+   955→              <CardContent className="flex flex-col items-center justify-center py-16">
+   956→                <Globe className="size-12 text-muted-foreground/40 mb-4" />
+   957→                <h3 className="text-lg font-semibold mb-1">No domains yet</h3>
+   958→                <p className="text-sm text-muted-foreground mb-4">
+   959→                  Search and register your first domain
+   960→                </p>
+   961→                <Button
+   962→                  onClick={() => setActiveTab('search')}
+   963→                  className="bg-emerald-600 hover:bg-emerald-700 text-white"
+   964→                >
+   965→                  <Search className="size-4 mr-2" />
+   966→                  Search Domains
+   967→                </Button>
+   968→              </CardContent>
+   969→            </Card>
+   970→          ) : (
+   971→            <Card>
+   972→              <CardContent className="pt-6">
+   973→                <div className="max-h-[500px] overflow-y-auto">
+   974→                  <Table>
+   975→                    <TableHeader>
+   976→                      <TableRow>
+   977→                        <TableHead>Domain</TableHead>
+   978→                        <TableHead>Status</TableHead>
+   979→                        <TableHead>Linked Project</TableHead>
+   980→                        <TableHead>Expires</TableHead>
+   981→                        <TableHead>Actions</TableHead>
+   982→                      </TableRow>
+   983→                    </TableHeader>
+   984→                    <TableBody>
+   985→                      {domains.map((domain) => (
+   986→                        <TableRow
+   987→                          key={domain.id}
+   988→                          className="cursor-pointer"
+   989→                          onClick={() => setSelectedDomainId(domain.id)}
+   990→                        >
+   991→                          <TableCell>
+   992→                            <div className="flex items-center gap-2">
+   993→                              <Globe className="size-4 text-emerald-500" />
+   994→                              <span className="font-mono font-medium">{domain.name}</span>
+   995→                            </div>
+   996→                          </TableCell>
+   997→                          <TableCell>
+   998→                            <Badge variant="outline" className={domainStatusColor(domain.status)}>
+   999→                              {domain.status}
+  1000→                            </Badge>
+  1001→                          </TableCell>
+  1002→                          <TableCell>
+  1003→                            {domain.project ? (
+  1004→                              <span className="text-sm">{domain.project.name}</span>
+  1005→                            ) : (
+  1006→                              <span className="text-sm text-muted-foreground">-</span>
+  1007→                            )}
+  1008→                          </TableCell>
+  1009→                          <TableCell className="text-sm text-muted-foreground">
+  1010→                            {formatDate(domain.expiresAt)}
+  1011→                          </TableCell>
+  1012→                          <TableCell>
+  1013→                            <Button
+  1014→                              variant="ghost"
+  1015→                              size="sm"
+  1016→                              onClick={(e) => {
+  1017→                                e.stopPropagation()
+  1018→                                setSelectedDomainId(domain.id)
+  1019→                              }}
+  1020→                            >
+  1021→                              <ExternalLink className="size-4" />
+  1022→                            </Button>
+  1023→                          </TableCell>
+  1024→                        </TableRow>
+  1025→                      ))}
+  1026→                    </TableBody>
+  1027→                  </Table>
+  1028→                </div>
+  1029→              </CardContent>
+  1030→            </Card>
+  1031→          )}
+  1032→        </TabsContent>
+  1033→      </Tabs>
+  1034→    </div>
+  1035→  )
+  1036→}
+  1037→

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useAppStore, type DashboardTab } from '@/store/app-store'
 import { useAuthStore } from '@/store/auth-store'
 import LandingPage from '@/components/landing/landing-page'
@@ -10,6 +10,10 @@ import DomainsPanel from '@/components/domains/domains-panel'
 import { BillingPanel } from '@/components/billing/billing-panel'
 import { DeploymentsPanel } from '@/components/deployments/deployments-panel'
 import { AdminPanel } from '@/components/admin/admin-panel'
+import SettingsPanel from '@/components/settings/settings-panel'
+import TeamsPanel from '@/components/teams/teams-panel'
+import AnalyticsPanel from '@/components/analytics/analytics-panel'
+import OverviewPanel from '@/components/dashboard/overview-panel'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -19,17 +23,33 @@ import {
   Rocket,
   CreditCard,
   Shield,
+  Settings,
   Menu,
   X,
   LogOut,
-  Bell,
+  Users,
+  BarChart3,
+  GitMerge,
+  LayoutGrid,
+  Webhook,
+  Github,
+  Sparkles,
   Activity,
-  ArrowUpRight,
-  CheckCircle2,
-  Clock,
-  AlertCircle,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { NotificationCenter } from '@/components/notifications/notification-center'
+import { ThemeToggle } from '@/components/ui/theme-toggle'
+import OnboardingWizard from '@/components/onboarding/onboarding-wizard'
+import { EmailVerificationBanner } from '@/components/auth/email-verification-banner'
+import { ErrorBoundary } from '@/components/error-boundary'
+import PipelinesPanel from '@/components/pipelines/pipelines-panel'
+import { TemplatesPanel } from '@/components/templates/templates-panel'
+import WebhooksPanel from '@/components/webhooks/webhooks-panel'
+import GithubPanel from '@/components/github/github-panel'
+import AssistantPanel from '@/components/assistant/assistant-panel'
+import UptimePanel from '@/components/monitoring/uptime-panel'
+import { CommandPalette } from '@/components/command-palette'
+import { Search } from 'lucide-react'
 
 // ── Sidebar nav items ──────────────────────────────────────────────────
 const NAV_ITEMS: { id: DashboardTab; label: string; icon: React.ElementType; adminOnly?: boolean }[] = [
@@ -37,221 +57,130 @@ const NAV_ITEMS: { id: DashboardTab; label: string; icon: React.ElementType; adm
   { id: 'hosting', label: 'Hosting', icon: Server },
   { id: 'domains', label: 'Domains', icon: Globe },
   { id: 'deployments', label: 'Deployments', icon: Rocket },
+  { id: 'github', label: 'GitHub', icon: Github },
+  { id: 'pipelines', label: 'Pipelines', icon: GitMerge },
+  { id: 'templates', label: 'Templates', icon: LayoutGrid },
   { id: 'billing', label: 'Billing', icon: CreditCard },
+  { id: 'webhooks', label: 'Webhooks', icon: Webhook },
   { id: 'admin', label: 'Admin', icon: Shield, adminOnly: true },
+  { id: 'teams', label: 'Teams', icon: Users },
+  { id: 'analytics', label: 'Analytics', icon: BarChart3 },
+  { id: 'monitoring', label: 'Monitoring', icon: Activity },
+  { id: 'settings', label: 'Settings', icon: Settings },
+  { id: 'assistant', label: 'AI Assistant', icon: Sparkles },
 ]
-
-// ── Overview Dashboard ─────────────────────────────────────────────────
-function OverviewPanel() {
-  const { user } = useAuthStore()
-  const setDashboardTab = useAppStore((s) => s.setDashboardTab)
-  const [stats, setStats] = useState<{ projects: number; domains: number; deployments: number; recentActivity: Array<{ id: string; type: string; message: string; time: string; status: string }> }>({ projects: 0, domains: 0, deployments: 0, recentActivity: [] })
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    async function loadData() {
-      const token = localStorage.getItem('deployhub_token')
-      if (!token) return
-      try {
-        const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
-        const [projRes, domRes, depRes] = await Promise.all([
-          fetch('/api/hosting', { headers }),
-          fetch('/api/domains', { headers }),
-          fetch('/api/deployments', { headers }),
-        ])
-        const projData = await projRes.json().catch(() => ({ projects: [] }))
-        const domData = await domRes.json().catch(() => ({ domains: [] }))
-        const depData = await depRes.json().catch(() => ({ deployments: [] }))
-        const projects = Array.isArray(projData.projects) ? projData.projects.length : Array.isArray(projData) ? projData.length : 0
-        const domains = Array.isArray(domData.domains) ? domData.domains.length : Array.isArray(domData) ? domData.length : 0
-        const deployments = Array.isArray(depData.deployments) ? depData.deployments.length : Array.isArray(depData) ? depData.length : 0
-        
-        const activity: Array<{ id: string; type: string; message: string; time: string; status: string }> = []
-        if (Array.isArray(depData.deployments)) {
-          depData.deployments.slice(0, 5).forEach((d: { id: string; status: string; createdAt: string; projectId?: string }) => {
-            activity.push({
-              id: d.id,
-              type: 'deployment',
-              message: `Deployment ${d.status}`,
-              time: d.createdAt,
-              status: d.status,
-            })
-          })
-        }
-        if (Array.isArray(domData.domains)) {
-          domData.domains.slice(0, 3).forEach((d: { id: string; status: string; name: string; createdAt: string }) => {
-            activity.push({
-              id: d.id,
-              type: 'domain',
-              message: `Domain ${d.name} - ${d.status}`,
-              time: d.createdAt,
-              status: d.status,
-            })
-          })
-        }
-        
-        setStats({ projects, domains, deployments, recentActivity: activity.slice(0, 8) })
-      } catch {
-        // Silently handle
-      } finally {
-        setLoading(false)
-      }
-    }
-    loadData()
-  }, [])
-
-  const statCards = [
-    { title: 'Hosting Projects', value: stats.projects, icon: Server, color: 'bg-emerald-50 text-emerald-600', tab: 'hosting' as DashboardTab },
-    { title: 'Domains', value: stats.domains, icon: Globe, color: 'bg-amber-50 text-amber-600', tab: 'domains' as DashboardTab },
-    { title: 'Deployments', value: stats.deployments, icon: Rocket, color: 'bg-violet-50 text-violet-600', tab: 'deployments' as DashboardTab },
-  ]
-
-  const statusIcon = (status: string) => {
-    switch (status) {
-      case 'live':
-      case 'active':
-      case 'completed':
-        return <CheckCircle2 className="size-4 text-emerald-500" />
-      case 'building':
-      case 'deploying':
-      case 'running':
-      case 'pending':
-        return <Clock className="size-4 text-amber-500" />
-      default:
-        return <AlertCircle className="size-4 text-red-500" />
-    }
-  }
-
-  return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">
-          Welcome back{user?.name ? `, ${user.name}` : ''}!
-        </h1>
-        <p className="text-muted-foreground mt-1">
-          Here&apos;s what&apos;s happening with your infrastructure.
-        </p>
-      </div>
-
-      {/* Stats cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        {statCards.map((card) => {
-          const Icon = card.icon
-          return (
-            <button
-              key={card.title}
-              onClick={() => setDashboardTab(card.tab)}
-              className="bg-card border rounded-xl p-5 flex items-center gap-4 hover:shadow-md transition-all text-left group"
-            >
-              <div className={`size-12 rounded-xl ${card.color} flex items-center justify-center shrink-0`}>
-                <Icon className="size-6" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm text-muted-foreground">{card.title}</p>
-                <p className="text-2xl font-bold mt-0.5">{loading ? '...' : card.value}</p>
-              </div>
-              <ArrowUpRight className="size-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-            </button>
-          )
-        })}
-      </div>
-
-      {/* Quick actions */}
-      <div>
-        <h2 className="text-lg font-semibold mb-3">Quick Actions</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          {[
-            { label: 'New Project', desc: 'Create hosting', icon: Server, tab: 'hosting' as DashboardTab },
-            { label: 'Register Domain', desc: 'Search domains', icon: Globe, tab: 'domains' as DashboardTab },
-            { label: 'View Deployments', desc: 'Recent deploys', icon: Rocket, tab: 'deployments' as DashboardTab },
-            { label: 'Manage Billing', desc: 'Plans & invoices', icon: CreditCard, tab: 'billing' as DashboardTab },
-          ].map((action) => {
-            const Icon = action.icon
-            return (
-              <button
-                key={action.label}
-                onClick={() => setDashboardTab(action.tab)}
-                className="bg-card border rounded-xl p-4 flex items-center gap-3 hover:border-emerald-300 hover:shadow-sm transition-all text-left"
-              >
-                <div className="size-9 rounded-lg bg-emerald-50 flex items-center justify-center text-emerald-600 shrink-0">
-                  <Icon className="size-4" />
-                </div>
-                <div>
-                  <p className="text-sm font-medium">{action.label}</p>
-                  <p className="text-xs text-muted-foreground">{action.desc}</p>
-                </div>
-              </button>
-            )
-          })}
-        </div>
-      </div>
-
-      {/* Recent Activity */}
-      <div>
-        <h2 className="text-lg font-semibold mb-3">Recent Activity</h2>
-        <div className="bg-card border rounded-xl divide-y">
-          {stats.recentActivity.length === 0 ? (
-            <div className="p-8 text-center">
-              <Activity className="size-8 text-muted-foreground mx-auto mb-2" />
-              <p className="text-sm text-muted-foreground">No recent activity</p>
-              <p className="text-xs text-muted-foreground mt-1">Create a project or register a domain to get started</p>
-            </div>
-          ) : (
-            stats.recentActivity.map((item) => (
-              <div key={item.id} className="flex items-center gap-3 p-3">
-                {statusIcon(item.status)}
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{item.message}</p>
-                  <p className="text-xs text-muted-foreground">{item.type}</p>
-                </div>
-                <Badge variant="outline" className="text-[10px] capitalize shrink-0">{item.status}</Badge>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
 
 // ── Dashboard with sidebar ─────────────────────────────────────────────
 function Dashboard() {
   const { dashboardTab, setDashboardTab, sidebarOpen, setSidebarOpen } = useAppStore()
-  const { user, logout } = useAuthStore()
+  const { user, logout, verifyEmail, markEmailVerified } = useAuthStore()
 
-  const renderPanel = () => {
-    switch (dashboardTab) {
-      case 'overview':
-        return <OverviewPanel />
-      case 'hosting':
-        return <HostingPanel />
-      case 'domains':
-        return <DomainsPanel />
-      case 'deployments':
-        return <DeploymentsPanel />
-      case 'billing':
-        return <BillingPanel />
-      case 'admin':
-        return user?.role === 'admin' ? <AdminPanel /> : <OverviewPanel />
-      default:
-        return <OverviewPanel />
+  // Handle email verification from URL
+  const [verifying, setVerifying] = useState(false)
+  const [pendingVerifyToken, setPendingVerifyToken] = useState<string | null>(null)
+  const verificationAttempted = useRef(false)
+
+  // Check URL for verification token on mount
+  useEffect(() => {
+    if (verificationAttempted.current) return
+    const params = new URLSearchParams(window.location.search)
+    const verifyToken = params.get('verify_token')
+    if (verifyToken) {
+      verificationAttempted.current = true
+      setPendingVerifyToken(verifyToken)
+    }
+  }, [])
+
+  // Process verification when token and user are available
+  const handleVerifyClick = async () => {
+    if (!pendingVerifyToken) return
+    setVerifying(true)
+    try {
+      await verifyEmail(pendingVerifyToken)
+      toast.success('Email verified successfully!')
+      setPendingVerifyToken(null)
+      window.history.replaceState({}, '', '/')
+    } catch {
+      toast.error('Email verification failed')
+    } finally {
+      setVerifying(false)
     }
   }
+
+  // Auto-verify when user and token are both available
+  useEffect(() => {
+    if (pendingVerifyToken && user && !user.emailVerified && !verifying) {
+      handleVerifyClick()
+    }
+  }, [pendingVerifyToken, user, verifying])
+
+  const renderPanel = () => {
+    return (
+      <div key={dashboardTab} className="tab-panel-enter">
+        {(() => {
+          switch (dashboardTab) {
+            case 'overview':
+              return <OverviewPanel />
+            case 'hosting':
+              return <HostingPanel />
+            case 'domains':
+              return <DomainsPanel />
+            case 'deployments':
+              return <DeploymentsPanel />
+            case 'pipelines':
+              return <PipelinesPanel />
+            case 'templates':
+              return <TemplatesPanel />
+            case 'billing':
+              return <BillingPanel />
+            case 'webhooks':
+              return <WebhooksPanel />
+            case 'github':
+              return <GithubPanel />
+            case 'admin':
+              return user?.role === 'admin' ? <AdminPanel /> : <OverviewPanel />
+            case 'teams':
+              return <TeamsPanel />
+            case 'settings':
+              return <SettingsPanel />
+            case 'analytics':
+              return <AnalyticsPanel />
+            case 'monitoring':
+              return <UptimePanel />
+            case 'assistant':
+              return <AssistantPanel />
+            default:
+              return <OverviewPanel />
+          }
+        })()}
+      </div>
+    )
+  }
+
+  // Mobile bottom nav items (5 key tabs)
+  const MOBILE_NAV_ITEMS: { id: DashboardTab; label: string; icon: React.ElementType }[] = [
+    { id: 'overview', label: 'Home', icon: LayoutDashboard },
+    { id: 'hosting', label: 'Hosting', icon: Server },
+    { id: 'deployments', label: 'Deploy', icon: Rocket },
+    { id: 'domains', label: 'Domains', icon: Globe },
+    { id: 'settings', label: 'Settings', icon: Settings },
+    { id: 'assistant', label: 'AI', icon: Sparkles },
+  ]
 
   return (
     <div className="flex h-screen bg-background">
       {/* Mobile overlay */}
       {sidebarOpen && (
         <div
-          className="fixed inset-0 bg-black/50 z-30 lg:hidden"
+          className="fixed inset-0 bg-black/50 z-30 lg:hidden animate-fade-in"
           onClick={() => setSidebarOpen(false)}
         />
       )}
 
       {/* Sidebar */}
       <aside
-        className={`fixed lg:static inset-y-0 left-0 z-40 w-64 bg-card border-r flex flex-col transition-transform duration-200 lg:translate-x-0 ${
-          sidebarOpen ? 'translate-x-0' : '-translate-x-full'
+        className={`fixed lg:static inset-y-0 left-0 z-40 w-64 bg-card border-r flex flex-col transition-transform duration-300 ease-out lg:translate-x-0 ${
+          sidebarOpen ? 'translate-x-0 sidebar-slide-in' : '-translate-x-full'
         }`}
       >
         {/* Logo */}
@@ -284,7 +213,7 @@ function Dashboard() {
                 }}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                   isActive
-                    ? 'bg-emerald-50 text-emerald-700'
+                    ? 'bg-emerald-600/10 text-emerald-600 dark:text-emerald-400'
                     : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                 }`}
               >
@@ -316,9 +245,9 @@ function Dashboard() {
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-y-auto">
+      <main className="flex-1 flex flex-col min-h-0">
         {/* Top bar */}
-        <header className="sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b px-4 py-3 flex items-center gap-3">
+        <header className="sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b px-4 py-3 flex items-center gap-3 shrink-0">
           <Button
             variant="ghost"
             size="icon"
@@ -329,40 +258,147 @@ function Dashboard() {
           </Button>
           <div className="flex items-center gap-2">
             <h2 className="font-semibold capitalize">{dashboardTab === 'overview' ? 'Dashboard' : dashboardTab}</h2>
-            {dashboardTab === 'hosting' && <Badge variant="outline" className="text-[10px]">Projects</Badge>}
-            {dashboardTab === 'domains' && <Badge variant="outline" className="text-[10px]">DNS</Badge>}
-            {dashboardTab === 'deployments' && <Badge variant="outline" className="text-[10px]">CI/CD</Badge>}
+            {dashboardTab === 'hosting' && <Badge variant="outline" className="text-[10px] hidden sm:inline-flex">Projects</Badge>}
+            {dashboardTab === 'domains' && <Badge variant="outline" className="text-[10px] hidden sm:inline-flex">DNS</Badge>}
+            {dashboardTab === 'deployments' && <Badge variant="outline" className="text-[10px] hidden sm:inline-flex">CI/CD</Badge>}
+            {dashboardTab === 'github' && <Badge variant="outline" className="text-[10px] hidden sm:inline-flex">Repos</Badge>}
+            {dashboardTab === 'monitoring' && <Badge variant="outline" className="text-[10px] hidden sm:inline-flex">Uptime</Badge>}
           </div>
           <div className="ml-auto flex items-center gap-2">
-            <Button variant="ghost" size="icon" className="relative" onClick={() => toast.info('No new notifications')}>
-              <Bell className="size-4" />
-              <span className="absolute top-1.5 right-1.5 size-2 rounded-full bg-emerald-500" />
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new CustomEvent('deployhub:open-command-palette'))}
+              className="hidden sm:flex items-center gap-2 h-9 w-56 lg:w-64 rounded-md border border-input bg-transparent px-3 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              title="Open command palette"
+            >
+              <Search className="size-4 shrink-0" />
+              <span className="flex-1 text-left">Search or jump to...</span>
+              <kbd className="pointer-events-none select-none rounded border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                ⌘K
+              </kbd>
+            </button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="sm:hidden"
+              onClick={() => window.dispatchEvent(new CustomEvent('deployhub:open-command-palette'))}
+              title="Search (Cmd+K)"
+              aria-label="Search"
+            >
+              <Search className="size-4" />
             </Button>
+            <ThemeToggle />
+            <NotificationCenter />
           </div>
         </header>
 
-        <div className="p-4 md:p-6 max-w-7xl mx-auto">
-          {renderPanel()}
+        {/* Scrollable content area */}
+        <div className="flex-1 overflow-y-auto pb-16 lg:pb-0">
+          <div className="p-4 md:p-6 max-w-7xl mx-auto">
+            {/* Email Verification Banner */}
+            {user && !user.emailVerified && (
+              <EmailVerificationBanner
+                email={user.email}
+                onVerified={markEmailVerified}
+              />
+            )}
+            {/* Verification in progress */}
+            {verifying && (
+              <div className="mb-4 flex items-center gap-2 p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg text-blue-300 text-sm">
+                <div className="size-4 animate-spin rounded-full border-2 border-blue-400 border-t-transparent" />
+                Verifying your email...
+              </div>
+            )}
+            <ErrorBoundary>
+              {renderPanel()}
+            </ErrorBoundary>
+          </div>
+
+          {/* Footer */}
+          <footer className="border-t px-4 py-4 text-center text-xs text-muted-foreground mt-auto">
+            © 2025 DeployHub. All rights reserved. · Automated Hosting & Domain Platform
+          </footer>
         </div>
 
-        {/* Footer */}
-        <footer className="border-t px-4 py-4 text-center text-xs text-muted-foreground mt-auto">
-          © 2024 DeployHub. All rights reserved. · Automated Hosting & Domain Platform
-        </footer>
+        {/* Mobile Bottom Navigation */}
+        <nav className="fixed bottom-0 left-0 right-0 z-30 bg-card/95 backdrop-blur-sm border-t lg:hidden safe-area-inset-bottom transition-all duration-300">
+          <div className="flex items-center justify-around px-1 py-1">
+            {MOBILE_NAV_ITEMS.map((item) => {
+              const Icon = item.icon
+              const isActive = dashboardTab === item.id
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => setDashboardTab(item.id)}
+                  className={`flex flex-col items-center justify-center gap-0.5 px-3 py-2 rounded-lg min-w-[56px] transition-all duration-200 mobile-nav-indicator ${
+                    isActive
+                      ? 'text-emerald-600 dark:text-emerald-400 active scale-105'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <div className={`transition-transform duration-200 ${isActive ? 'scale-110' : ''}`}>
+                    <Icon className="size-5" />
+                  </div>
+                  <span className="text-[10px] font-medium">{item.label}</span>
+                </button>
+              )
+            })}
+          </div>
+        </nav>
       </main>
+
+      {/* Command Palette (Cmd+K) — only available when authenticated */}
+      <CommandPalette />
     </div>
   )
 }
 
 // ── Root page ──────────────────────────────────────────────────────────
 export default function Home() {
-  const { view, setView, setAuthMode } = useAppStore()
+  const { view, setView, authMode, setAuthMode, setDashboardTab } = useAppStore()
   const { isAuthenticated, isLoading, loadUser } = useAuthStore()
   const [showAuthModal, setShowAuthModal] = useState(false)
+  const [showOnboarding, setShowOnboarding] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('deployhub_onboarding_complete') !== 'true'
+    }
+    return false
+  })
 
   useEffect(() => {
     loadUser()
   }, [loadUser])
+
+  // ── Handle URL params (Stripe Checkout redirect, billing tab) ──────
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    const tab = params.get('tab') as DashboardTab | null
+    const paymentStatus = params.get('payment')
+
+    if (tab) {
+      setDashboardTab(tab)
+    }
+
+    if (paymentStatus === 'success') {
+      toast.success('Payment successful! Your resources are being provisioned.')
+    } else if (paymentStatus === 'cancelled') {
+      toast.info('Checkout was cancelled.')
+    } else if (paymentStatus === 'failed') {
+      toast.error('Payment failed. Please try again or contact support.')
+    } else if (paymentStatus === 'error') {
+      toast.error('Something went wrong processing your payment.')
+    }
+
+    if (tab || paymentStatus) {
+      // Clean the URL
+      params.delete('tab')
+      params.delete('payment')
+      const remaining = params.toString()
+      const newUrl = remaining ? `/?${remaining}` : '/'
+      window.history.replaceState({}, '', newUrl)
+    }
+  }, [setDashboardTab])
 
   useEffect(() => {
     if (!isLoading) {
@@ -373,6 +409,16 @@ export default function Home() {
     }
   }, [isLoading, isAuthenticated, setView])
 
+  const handleOnboardingComplete = () => {
+    localStorage.setItem('deployhub_onboarding_complete', 'true')
+    setShowOnboarding(false)
+  }
+
+  const handleOnboardingSkip = () => {
+    localStorage.setItem('deployhub_onboarding_complete', 'true')
+    setShowOnboarding(false)
+  }
+
   // Loading screen
   if (isLoading) {
     return (
@@ -382,6 +428,16 @@ export default function Home() {
           <p className="text-sm text-muted-foreground">Loading DeployHub...</p>
         </div>
       </div>
+    )
+  }
+
+  // Authenticated + Onboarding
+  if (isAuthenticated && showOnboarding) {
+    return (
+      <OnboardingWizard
+        onComplete={handleOnboardingComplete}
+        onSkip={handleOnboardingSkip}
+      />
     )
   }
 
@@ -405,10 +461,9 @@ export default function Home() {
       />
       {showAuthModal && (
         <AuthModal
-          mode={useAppStore.getState().authMode}
-          onModeSwitch={() => {
-            const current = useAppStore.getState().authMode
-            setAuthMode(current === 'login' ? 'register' : 'login')
+          mode={authMode}
+          onModeChange={(mode) => {
+            setAuthMode(mode)
           }}
           onClose={() => setShowAuthModal(false)}
         />

@@ -1,30 +1,56 @@
 'use client'
 
 import { useState } from 'react'
-import { Globe, Loader2, X } from 'lucide-react'
+import { Globe, Loader2, X, KeyRound, Mail, CheckCircle2, Shield, ArrowLeft } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/store/auth-store'
+import type { AuthMode } from '@/store/app-store'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
+import {
+  InputOTP,
+  InputOTPGroup,
+  InputOTPSlot,
+} from '@/components/ui/input-otp'
 
 interface AuthModalProps {
-  mode: 'login' | 'register'
-  onModeSwitch: () => void
+  mode: AuthMode
+  onModeChange: (mode: AuthMode) => void
   onClose: () => void
 }
 
-export function AuthModal({ mode, onModeSwitch, onClose }: AuthModalProps) {
-  const { login, register } = useAuthStore()
+export function AuthModal({ mode, onModeChange, onClose }: AuthModalProps) {
+  const { login, register, completeTwoFactorLogin, loginWithBackupCode } = useAuthStore()
   const [isLoading, setIsLoading] = useState(false)
 
   const [loginEmail, setLoginEmail] = useState('')
   const [loginPassword, setLoginPassword] = useState('')
 
+  // ── 2FA state ─────────────────────────────────────────────────────────
+  // When login() returns requiresTwoFactor we transition into the
+  // 'two-factor' mode (local UI mode, not the global app-store one) and
+  // prompt for the 6-digit code. `tempToken` is the short-lived JWT
+  // returned by /api/auth/login.
+  const [twoFactorTempToken, setTwoFactorTempToken] = useState('')
+  const [twoFactorCode, setTwoFactorCode] = useState('')
+  const [twoFactorEmail, setTwoFactorEmail] = useState('')
+  const [backupCode, setBackupCode] = useState('')
+  const [showBackupInput, setShowBackupInput] = useState(false)
+
   const [registerName, setRegisterName] = useState('')
   const [registerEmail, setRegisterEmail] = useState('')
   const [registerPassword, setRegisterPassword] = useState('')
   const [registerConfirmPassword, setRegisterConfirmPassword] = useState('')
+  const [registerSuccess, setRegisterSuccess] = useState(false)
+
+  const [forgotEmail, setForgotEmail] = useState('')
+  const [forgotToken, setForgotToken] = useState('')
+  const [forgotSuccess, setForgotSuccess] = useState(false)
+
+  const [resetToken, setResetToken] = useState('')
+  const [resetPassword, setResetPassword] = useState('')
+  const [resetConfirmPassword, setResetConfirmPassword] = useState('')
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -34,11 +60,58 @@ export function AuthModal({ mode, onModeSwitch, onClose }: AuthModalProps) {
     }
     setIsLoading(true)
     try {
-      await login(loginEmail, loginPassword)
+      const result = await login(loginEmail, loginPassword)
+      if (result.requiresTwoFactor) {
+        // Stash the temp token + email so the second-factor form can use
+        // them, and flip the modal into 2FA mode.
+        setTwoFactorTempToken(result.tempToken)
+        setTwoFactorEmail(loginEmail)
+        setTwoFactorCode('')
+        setBackupCode('')
+        setShowBackupInput(false)
+        onModeChange('two-factor')
+        return
+      }
       toast.success('Welcome back!')
       onClose()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Login failed')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleTwoFactorVerify = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (twoFactorCode.length !== 6) {
+      toast.error('Please enter the 6-digit code from your authenticator app')
+      return
+    }
+    setIsLoading(true)
+    try {
+      await completeTwoFactorLogin(twoFactorTempToken, twoFactorCode)
+      toast.success('Welcome back!')
+      onClose()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Verification failed')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleBackupCodeVerify = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!backupCode.trim()) {
+      toast.error('Please enter a backup code')
+      return
+    }
+    setIsLoading(true)
+    try {
+      await loginWithBackupCode(twoFactorEmail, backupCode.trim())
+      toast.success('Welcome back!')
+      onClose()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Backup code verification failed')
     } finally {
       setIsLoading(false)
     }
@@ -61,10 +134,85 @@ export function AuthModal({ mode, onModeSwitch, onClose }: AuthModalProps) {
     setIsLoading(true)
     try {
       await register(registerName, registerEmail, registerPassword)
-      toast.success('Account created successfully!')
-      onClose()
+      // Registration now requires email verification - do NOT auto-login.
+      // Show a 'check your email' success state instead of closing the modal.
+      setRegisterSuccess(true)
+      toast.success('Account created! Check your email to verify.')
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Registration failed')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!forgotEmail) {
+      toast.error('Please enter your email')
+      return
+    }
+    setIsLoading(true)
+    try {
+      const res = await fetch('/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: forgotEmail }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to send reset email')
+      }
+      // Security: API no longer returns the reset token in the response.
+      // Always show the generic 'check your email' message.
+      setForgotToken('')
+      setForgotSuccess(true)
+      toast.success(
+        data.message ||
+          'If an account with that email exists, a reset link has been sent.'
+      )
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to send reset email')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!resetToken || !resetPassword || !resetConfirmPassword) {
+      toast.error('Please fill in all fields')
+      return
+    }
+    if (resetPassword !== resetConfirmPassword) {
+      toast.error('Passwords do not match')
+      return
+    }
+    if (resetPassword.length < 8) {
+      toast.error('Password must be at least 8 characters')
+      return
+    }
+    setIsLoading(true)
+    try {
+      const res = await fetch('/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: resetToken, newPassword: resetPassword }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to reset password')
+      }
+      toast.success('Password reset successfully! You can now sign in.')
+      // Reset form state and switch back to login
+      setResetToken('')
+      setResetPassword('')
+      setResetConfirmPassword('')
+      setForgotEmail('')
+      setForgotToken('')
+      setForgotSuccess(false)
+      onModeChange('login')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to reset password')
     } finally {
       setIsLoading(false)
     }
@@ -96,13 +244,19 @@ export function AuthModal({ mode, onModeSwitch, onClose }: AuthModalProps) {
           <p className="text-sm text-muted-foreground mt-1">
             {mode === 'login'
               ? 'Sign in to manage your hosting and domains'
-              : 'Get started with DeployHub in seconds'}
+              : mode === 'register'
+                ? 'Get started with DeployHub in seconds'
+                : mode === 'forgot-password'
+                  ? 'Enter your email to receive a reset link'
+                  : mode === 'two-factor'
+                    ? 'Enter the 6-digit code from your authenticator app'
+                    : 'Enter your token and set a new password'}
           </p>
         </div>
 
         {/* Form */}
         <div className="px-6 pb-8">
-          {mode === 'login' ? (
+          {mode === 'login' && (
             <form onSubmit={handleLogin} className="flex flex-col gap-4">
               <div className="flex flex-col gap-2">
                 <Label htmlFor="login-email">Email</Label>
@@ -142,64 +296,401 @@ export function AuthModal({ mode, onModeSwitch, onClose }: AuthModalProps) {
                   'Sign In'
                 )}
               </Button>
-              <p className="text-center text-sm text-muted-foreground">
-                Don&apos;t have an account?{' '}
+              <div className="flex flex-col items-center gap-2">
                 <button
                   type="button"
-                  onClick={onModeSwitch}
-                  className="font-medium text-emerald-600 hover:text-emerald-700 hover:underline"
+                  onClick={() => {
+                    setForgotSuccess(false)
+                    setForgotToken('')
+                    onModeChange('forgot-password')
+                  }}
+                  className="text-sm font-medium text-emerald-600 hover:text-emerald-700 hover:underline"
                   disabled={isLoading}
                 >
-                  Sign up
+                  Forgot password?
                 </button>
-              </p>
+                <p className="text-sm text-muted-foreground">
+                  Don&apos;t have an account?{' '}
+                  <button
+                    type="button"
+                    onClick={() => onModeChange('register')}
+                    className="font-medium text-emerald-600 hover:text-emerald-700 hover:underline"
+                    disabled={isLoading}
+                  >
+                    Sign up
+                  </button>
+                </p>
+              </div>
             </form>
-          ) : (
-            <form onSubmit={handleRegister} className="flex flex-col gap-4">
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="register-name">Full Name</Label>
-                <Input
-                  id="register-name"
-                  type="text"
-                  placeholder="John Doe"
-                  value={registerName}
-                  onChange={(e) => setRegisterName(e.target.value)}
-                  autoComplete="name"
+          )}
+
+          {mode === 'two-factor' && (
+            <div className="flex flex-col gap-4">
+              {/* Shield icon */}
+              <div className="flex justify-center">
+                <div className="flex size-12 items-center justify-center rounded-full bg-emerald-500/10">
+                  <Shield className="size-6 text-emerald-600" />
+                </div>
+              </div>
+
+              {!showBackupInput ? (
+                <form onSubmit={handleTwoFactorVerify} className="flex flex-col gap-4">
+                  <div className="text-center space-y-1">
+                    <p className="text-sm font-medium">Two-Factor Authentication</p>
+                    <p className="text-xs text-muted-foreground">
+                      Open your authenticator app (Google Authenticator, Authy, 1Password, etc.) and enter the 6-digit code for {twoFactorEmail || 'your account'}.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-col items-center gap-2">
+                    <InputOTP
+                      maxLength={6}
+                      value={twoFactorCode}
+                      onChange={(value) => setTwoFactorCode(value)}
+                      disabled={isLoading}
+                      autoFocus
+                    >
+                      <InputOTPGroup>
+                        <InputOTPSlot index={0} />
+                        <InputOTPSlot index={1} />
+                        <InputOTPSlot index={2} />
+                        <InputOTPSlot index={3} />
+                        <InputOTPSlot index={4} />
+                        <InputOTPSlot index={5} />
+                      </InputOTPGroup>
+                    </InputOTP>
+                  </div>
+
+                  <Button
+                    type="submit"
+                    className="mt-2 w-full bg-emerald-500 hover:bg-emerald-600 text-white"
+                    disabled={isLoading || twoFactorCode.length !== 6}
+                  >
+                    {isLoading ? (
+                      <>
+                        <Loader2 className="size-4 animate-spin mr-2" />
+                        Verifying...
+                      </>
+                    ) : (
+                      'Verify & Sign In'
+                    )}
+                  </Button>
+
+                  <div className="flex flex-col items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setShowBackupInput(true)}
+                      className="text-sm font-medium text-emerald-600 hover:text-emerald-700 hover:underline"
+                      disabled={isLoading}
+                    >
+                      Use a backup code instead
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTwoFactorTempToken('')
+                        setTwoFactorCode('')
+                        setTwoFactorEmail('')
+                        setBackupCode('')
+                        setShowBackupInput(false)
+                        onModeChange('login')
+                      }}
+                      className="text-sm font-medium text-muted-foreground hover:text-foreground hover:underline inline-flex items-center gap-1"
+                      disabled={isLoading}
+                    >
+                      <ArrowLeft className="size-3" />
+                      Back to sign in
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <form onSubmit={handleBackupCodeVerify} className="flex flex-col gap-4">
+                  <div className="text-center space-y-1">
+                    <p className="text-sm font-medium">Use Backup Code</p>
+                    <p className="text-xs text-muted-foreground">
+                      Enter one of the 10 single-use backup codes you saved when enabling 2FA. Each code can only be used once.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="backup-code">Backup Code</Label>
+                    <Input
+                      id="backup-code"
+                      type="text"
+                      placeholder="AB12-CD34"
+                      value={backupCode}
+                      onChange={(e) => setBackupCode(e.target.value)}
+                      autoComplete="one-time-code"
+                      disabled={isLoading}
+                      className="font-mono text-center text-lg tracking-wider"
+                      autoFocus
+                    />
+                  </div>
+
+                  <Button
+                    type="submit"
+                    className="mt-2 w-full bg-emerald-500 hover:bg-emerald-600 text-white"
+                    disabled={isLoading || !backupCode.trim()}
+                  >
+                    {isLoading ? (
+                      <>
+                        <Loader2 className="size-4 animate-spin mr-2" />
+                        Verifying...
+                      </>
+                    ) : (
+                      'Sign In with Backup Code'
+                    )}
+                  </Button>
+
+                  <div className="flex justify-center pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setShowBackupInput(false)}
+                      className="text-sm font-medium text-muted-foreground hover:text-foreground hover:underline inline-flex items-center gap-1"
+                      disabled={isLoading}
+                    >
+                      <ArrowLeft className="size-3" />
+                      Use authenticator app
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          )}
+
+          {mode === 'register' && (
+            registerSuccess ? (
+              <div className="flex flex-col gap-4">
+                <div className="flex justify-center">
+                  <div className="flex size-12 items-center justify-center rounded-full bg-emerald-500/10">
+                    <CheckCircle2 className="size-6 text-emerald-600" />
+                  </div>
+                </div>
+                <div className="rounded-lg border bg-emerald-500/5 border-emerald-500/20 p-4 space-y-2 text-center">
+                  <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
+                    Check your email for verification
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    We sent a verification link to{' '}
+                    <span className="font-medium text-foreground">{registerEmail}</span>.
+                    Click the link in the email to activate your account, then sign in.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  className="w-full bg-emerald-500 hover:bg-emerald-600 text-white"
+                  onClick={() => {
+                    setRegisterSuccess(false)
+                    setRegisterName('')
+                    setRegisterEmail('')
+                    setRegisterPassword('')
+                    setRegisterConfirmPassword('')
+                    onModeChange('login')
+                  }}
+                >
+                  Continue to sign in
+                </Button>
+                <p className="text-center text-xs text-muted-foreground">
+                  Didn&apos;t get the email? Check your spam folder, or{' '}
+                  <button
+                    type="button"
+                    onClick={() => setRegisterSuccess(false)}
+                    className="font-medium text-emerald-600 hover:text-emerald-700 hover:underline"
+                  >
+                    try a different email
+                  </button>
+                  .
+                </p>
+              </div>
+            ) : (
+              <form onSubmit={handleRegister} className="flex flex-col gap-4">
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="register-name">Full Name</Label>
+                  <Input
+                    id="register-name"
+                    type="text"
+                    placeholder="John Doe"
+                    value={registerName}
+                    onChange={(e) => setRegisterName(e.target.value)}
+                    autoComplete="name"
+                    disabled={isLoading}
+                  />
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="register-email">Email</Label>
+                  <Input
+                    id="register-email"
+                    type="email"
+                    placeholder="you@example.com"
+                    value={registerEmail}
+                    onChange={(e) => setRegisterEmail(e.target.value)}
+                    autoComplete="email"
+                    disabled={isLoading}
+                  />
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="register-password">Password</Label>
+                  <Input
+                    id="register-password"
+                    type="password"
+                    placeholder="At least 6 characters"
+                    value={registerPassword}
+                    onChange={(e) => setRegisterPassword(e.target.value)}
+                    autoComplete="new-password"
+                    disabled={isLoading}
+                  />
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="register-confirm-password">Confirm Password</Label>
+                  <Input
+                    id="register-confirm-password"
+                    type="password"
+                    placeholder="Repeat your password"
+                    value={registerConfirmPassword}
+                    onChange={(e) => setRegisterConfirmPassword(e.target.value)}
+                    autoComplete="new-password"
+                    disabled={isLoading}
+                  />
+                </div>
+                <Button
+                  type="submit"
+                  className="mt-2 w-full bg-emerald-500 hover:bg-emerald-600 text-white"
                   disabled={isLoading}
-                />
+                >
+                  {isLoading ? (
+                    <>
+                      <Loader2 className="size-4 animate-spin mr-2" />
+                      Creating account...
+                    </>
+                  ) : (
+                    'Create Account'
+                  )}
+                </Button>
+                <p className="text-center text-sm text-muted-foreground">
+                  Already have an account?{' '}
+                  <button
+                    type="button"
+                    onClick={() => onModeChange('login')}
+                    className="font-medium text-emerald-600 hover:text-emerald-700 hover:underline"
+                    disabled={isLoading}
+                  >
+                    Sign in
+                  </button>
+                </p>
+              </form>
+            )
+          )}
+
+          {mode === 'forgot-password' && (
+            <form onSubmit={handleForgotPassword} className="flex flex-col gap-4">
+              <div className="flex justify-center">
+                <div className="flex size-12 items-center justify-center rounded-full bg-emerald-500/10">
+                  <Mail className="size-6 text-emerald-600" />
+                </div>
               </div>
               <div className="flex flex-col gap-2">
-                <Label htmlFor="register-email">Email</Label>
+                <Label htmlFor="forgot-email">Email</Label>
                 <Input
-                  id="register-email"
+                  id="forgot-email"
                   type="email"
                   placeholder="you@example.com"
-                  value={registerEmail}
-                  onChange={(e) => setRegisterEmail(e.target.value)}
+                  value={forgotEmail}
+                  onChange={(e) => setForgotEmail(e.target.value)}
                   autoComplete="email"
                   disabled={isLoading}
                 />
               </div>
+              {forgotSuccess && (
+                <div className="rounded-lg border bg-emerald-500/5 border-emerald-500/20 p-4 space-y-2 text-center">
+                  <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
+                    Check your email
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    If an account with{' '}
+                    <span className="font-medium text-foreground">{forgotEmail}</span>{' '}
+                    exists, a password reset link has been sent. Click the link in the email to choose a new password.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full mt-2"
+                    onClick={() => onModeChange('reset-password')}
+                  >
+                    I have my token - reset password
+                  </Button>
+                </div>
+              )}
+              {!forgotSuccess && (
+                <Button
+                  type="submit"
+                  className="mt-2 w-full bg-emerald-500 hover:bg-emerald-600 text-white"
+                  disabled={isLoading}
+                >
+                  {isLoading ? (
+                    <>
+                      <Loader2 className="size-4 animate-spin mr-2" />
+                      Sending reset link...
+                    </>
+                  ) : (
+                    'Send Reset Link'
+                  )}
+                </Button>
+              )}
+              <p className="text-center text-sm text-muted-foreground">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setForgotSuccess(false)
+                    setForgotToken('')
+                    onModeChange('login')
+                  }}
+                  className="font-medium text-emerald-600 hover:text-emerald-700 hover:underline"
+                  disabled={isLoading}
+                >
+                  Back to sign in
+                </button>
+              </p>
+            </form>
+          )}
+
+          {mode === 'reset-password' && (
+            <form onSubmit={handleResetPassword} className="flex flex-col gap-4">
+              <div className="flex justify-center">
+                <div className="flex size-12 items-center justify-center rounded-full bg-emerald-500/10">
+                  <KeyRound className="size-6 text-emerald-600" />
+                </div>
+              </div>
               <div className="flex flex-col gap-2">
-                <Label htmlFor="register-password">Password</Label>
+                <Label htmlFor="reset-token">Reset Token</Label>
                 <Input
-                  id="register-password"
+                  id="reset-token"
+                  type="text"
+                  placeholder="Paste your reset token here"
+                  value={resetToken}
+                  onChange={(e) => setResetToken(e.target.value)}
+                  disabled={isLoading}
+                />
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="reset-password">New Password</Label>
+                <Input
+                  id="reset-password"
                   type="password"
-                  placeholder="At least 6 characters"
-                  value={registerPassword}
-                  onChange={(e) => setRegisterPassword(e.target.value)}
+                  placeholder="At least 8 characters"
+                  value={resetPassword}
+                  onChange={(e) => setResetPassword(e.target.value)}
                   autoComplete="new-password"
                   disabled={isLoading}
                 />
               </div>
               <div className="flex flex-col gap-2">
-                <Label htmlFor="register-confirm-password">Confirm Password</Label>
+                <Label htmlFor="reset-confirm-password">Confirm New Password</Label>
                 <Input
-                  id="register-confirm-password"
+                  id="reset-confirm-password"
                   type="password"
-                  placeholder="Repeat your password"
-                  value={registerConfirmPassword}
-                  onChange={(e) => setRegisterConfirmPassword(e.target.value)}
+                  placeholder="Repeat your new password"
+                  value={resetConfirmPassword}
+                  onChange={(e) => setResetConfirmPassword(e.target.value)}
                   autoComplete="new-password"
                   disabled={isLoading}
                 />
@@ -212,21 +703,25 @@ export function AuthModal({ mode, onModeSwitch, onClose }: AuthModalProps) {
                 {isLoading ? (
                   <>
                     <Loader2 className="size-4 animate-spin mr-2" />
-                    Creating account...
+                    Resetting password...
                   </>
                 ) : (
-                  'Create Account'
+                  'Reset Password'
                 )}
               </Button>
               <p className="text-center text-sm text-muted-foreground">
-                Already have an account?{' '}
                 <button
                   type="button"
-                  onClick={onModeSwitch}
+                  onClick={() => {
+                    setResetToken('')
+                    setResetPassword('')
+                    setResetConfirmPassword('')
+                    onModeChange('login')
+                  }}
                   className="font-medium text-emerald-600 hover:text-emerald-700 hover:underline"
                   disabled={isLoading}
                 >
-                  Sign in
+                  Back to sign in
                 </button>
               </p>
             </form>

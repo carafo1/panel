@@ -7,23 +7,33 @@ export interface User {
   role: string
   emailVerified: boolean
   avatar?: string
+  twoFactorEnabled?: boolean
 }
+
+/** Result returned by `login`. Either a fully-authed user or a 2FA challenge. */
+export type LoginResult =
+  | { requiresTwoFactor: false; user: User; token: string }
+  | { requiresTwoFactor: true; tempToken: string }
 
 interface AuthState {
   user: User | null
   token: string | null
   isLoading: boolean
   isAuthenticated: boolean
-  login: (email: string, password: string) => Promise<void>
-  register: (name: string, email: string, password: string) => Promise<void>
-  logout: () => void
+  login: (email: string, password: string) => Promise<LoginResult>
+  completeTwoFactorLogin: (tempToken: string, token: string) => Promise<void>
+  loginWithBackupCode: (email: string, backupCode: string) => Promise<void>
+  register: (name: string, email: string, password: string) => Promise<{ message: string }>
+  logout: () => Promise<void>
   loadUser: () => Promise<void>
   setAuth: (user: User, token: string) => void
+  verifyEmail: (token: string) => Promise<void>
+  markEmailVerified: () => void
 }
 
 const API_BASE = '/api'
 
-async function apiFetch(path: string, options?: RequestInit) {
+export async function apiFetch(path: string, options?: RequestInit) {
   const token = typeof window !== 'undefined' ? localStorage.getItem('deployhub_token') : null
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
@@ -56,6 +66,30 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       method: 'POST',
       body: JSON.stringify({ email, password }),
     })
+    // 2FA gate: if the user has 2FA enabled, the API returns a tempToken
+    // instead of a session. The caller (UI) is responsible for prompting
+    // for the second factor via completeTwoFactorLogin() or
+    // loginWithBackupCode().
+    if (data.requiresTwoFactor) {
+      return { requiresTwoFactor: true, tempToken: data.tempToken }
+    }
+    get().setAuth(data.user, data.token)
+    return { requiresTwoFactor: false, user: data.user, token: data.token }
+  },
+
+  completeTwoFactorLogin: async (tempToken, token) => {
+    const data = await apiFetch('/auth/2fa/login-verify', {
+      method: 'POST',
+      body: JSON.stringify({ tempToken, token }),
+    })
+    get().setAuth(data.user, data.token)
+  },
+
+  loginWithBackupCode: async (email, backupCode) => {
+    const data = await apiFetch('/auth/2fa/verify-backup', {
+      method: 'POST',
+      body: JSON.stringify({ email, backupCode }),
+    })
     get().setAuth(data.user, data.token)
   },
 
@@ -64,10 +98,20 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       method: 'POST',
       body: JSON.stringify({ name, email, password }),
     })
-    get().setAuth(data.user, data.token)
+    // Registration now requires email verification before login.
+    // The API returns `{ message: "..." }` only - no session token -
+    // so we do NOT call setAuth here. The user must click the
+    // verification link in their email, then sign in normally.
+    return data as { message: string }
   },
 
-  logout: () => {
+  logout: async () => {
+    // Fire-and-forget audit log on the server (best-effort - never blocks UI).
+    try {
+      await apiFetch('/auth/logout', { method: 'POST' })
+    } catch {
+      // ignore - logout must succeed client-side even if API call fails
+    }
     localStorage.removeItem('deployhub_token')
     set({ user: null, token: null, isAuthenticated: false, isLoading: false })
   },
@@ -86,6 +130,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({ user: null, token: null, isAuthenticated: false, isLoading: false })
     }
   },
-}))
 
-export { apiFetch }
+  verifyEmail: async (verificationToken: string) => {
+    const data = await apiFetch(`/auth/verify-email?token=${verificationToken}`)
+    if (data.success) {
+      set((state) => ({
+        user: state.user ? { ...state.user, emailVerified: true } : state.user,
+      }))
+    }
+  },
+
+  markEmailVerified: () => {
+    set((state) => ({
+      user: state.user ? { ...state.user, emailVerified: true } : state.user,
+    }))
+  },
+}))

@@ -51,6 +51,9 @@ import {
   ExternalLink,
   Loader2,
   Search,
+  Settings2,
+  Ban,
+  ShieldCheck,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -77,6 +80,9 @@ interface Subscription {
   status: string
   currentPeriodStart: string
   currentPeriodEnd: string
+  cancelAtPeriodEnd?: boolean
+  stripeSubId?: string | null
+  stripeCustomerId?: string | null
   plan?: { name: string; price: number; slug: string; id: string }
 }
 
@@ -86,7 +92,9 @@ interface Payment {
   currency: string
   status: string
   type: string
-  metadata: { planName?: string; domainName?: string; purchaseType?: string } | null
+  stripePaymentId?: string | null
+  stripeInvoiceId?: string | null
+  metadata: { planName?: string; domainName?: string; purchaseType?: string; checkoutSessionId?: string } | null
   createdAt: string
   plan: { name: string; price: number } | null
 }
@@ -94,12 +102,32 @@ interface Payment {
 type PurchaseType = 'hosting' | 'domain' | 'both'
 
 interface CheckoutResult {
-  payment: { id: string; amount: number; currency: string; status: string; type: string }
-  subscription: { id: string; status: string; planName: string; planId: string } | null
+  // Stripe Checkout fields (real mode)
+  sessionId?: string
+  url?: string | null
+  demo?: boolean
+  paymentId?: string
+  message?: string
+  // Demo-mode success payload
+  payment?: { id: string; amount: number; currency: string; status: string; type: string }
+  subscription?: { id: string; status: string; planName: string; planId: string } | null
   project?: { id: string; name: string; slug: string; subdomain: string; status: string; framework: string; customDomain: string | null } | null
   domain?: { id: string; name: string; status: string; registrar: string } | null
   deployment?: { id: string; status: string; deployUrl: string | null; branch: string } | null
   automation?: { processed: boolean; actionsCount: number; results: unknown[] }
+}
+
+interface PortalResult {
+  url: string | null
+  demo?: boolean
+  message?: string
+  subscription?: {
+    id: string
+    status: string
+    planName: string
+    currentPeriodEnd: string
+    cancelAtPeriodEnd: boolean
+  }
 }
 
 // ── API helper ─────────────────────────────────────────────────────────
@@ -167,6 +195,8 @@ function PaymentStatusBadge({ status }: { status: string }) {
     pending: { className: 'bg-yellow-100 text-yellow-700 border-yellow-200', label: 'Pending' },
     failed: { className: 'bg-red-100 text-red-700 border-red-200', label: 'Failed' },
     refunded: { className: 'bg-gray-100 text-gray-700 border-gray-200', label: 'Refunded' },
+    past_due: { className: 'bg-orange-100 text-orange-700 border-orange-200', label: 'Past Due' },
+    cancelled: { className: 'bg-gray-100 text-gray-700 border-gray-200', label: 'Cancelled' },
   }
   const cfg = map[status] || map.pending
   return (
@@ -228,8 +258,24 @@ function CheckoutDialog({
           framework: showProject ? framework : undefined,
         }),
       })
+
+      // ── Real Stripe mode: redirect to Stripe Checkout ─────────
+      if (!result.demo && result.url) {
+        toast.success('Redirecting to Stripe Checkout…')
+        // Persist a flag so the panel can show a success toast when the
+        // user comes back from Stripe
+        try {
+          sessionStorage.setItem('deployhub_pending_checkout', result.sessionId || '1')
+        } catch {
+          /* ignore */
+        }
+        window.location.href = result.url
+        return
+      }
+
+      // ── Demo mode: show the in-app success dialog ─────────────
       setSuccess(result)
-      toast.success('Purchase completed successfully!')
+      toast.success('Purchase completed successfully! (demo mode)')
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Checkout failed')
     } finally {
@@ -500,6 +546,8 @@ export function BillingPanel() {
   const [payments, setPayments] = useState<Payment[]>([])
   const [loading, setLoading] = useState(true)
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null)
+  const [portalLoading, setPortalLoading] = useState(false)
+  const [cancelLoading, setCancelLoading] = useState(false)
 
   // Checkout dialog state
   const [checkoutOpen, setCheckoutOpen] = useState(false)
@@ -528,6 +576,19 @@ export function BillingPanel() {
     fetchData()
   }, [fetchData])
 
+  // ── Refresh data after Stripe Checkout redirect ──────────────
+  // Note: toast notifications + URL cleanup are handled centrally by the
+  // root page (src/app/page.tsx). Here we only refresh billing data so the
+  // newly-completed payment/subscription is shown.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const url = new URL(window.location.href)
+    const paymentStatus = url.searchParams.get('payment')
+    if (paymentStatus === 'success') {
+      fetchData()
+    }
+  }, [fetchData])
+
   const handleSelectPlan = (plan: Plan, planDef: typeof PLAN_DEFINITIONS[number]) => {
     setSelectedPlan(plan)
     setSelectedPlanDef(planDef)
@@ -539,6 +600,54 @@ export function BillingPanel() {
     setSelectedPlan(null)
     setSelectedPlanDef(null)
     fetchData() // Refresh all data
+  }
+
+  // ── Open Stripe Customer Portal ──────────────────────────────
+  const handleManageSubscription = async () => {
+    setPortalLoading(true)
+    try {
+      const result = await apiFetch<PortalResult>('/billing/portal', {
+        method: 'POST',
+      })
+      if (result.url) {
+        window.location.href = result.url
+        return
+      }
+      // Demo mode - show the explanatory message
+      if (result.message) {
+        toast.info(result.message)
+      } else {
+        toast.info('Customer portal is not available in demo mode.')
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to open customer portal')
+    } finally {
+      setPortalLoading(false)
+    }
+  }
+
+  // ── Cancel the user's active subscription ────────────────────
+  const handleCancelSubscription = async () => {
+    if (!subscription) return
+    const confirmed = window.confirm(
+      `Cancel your ${subscription.plan?.name || 'current'} subscription? ` +
+      `You'll retain access until ${new Date(subscription.currentPeriodEnd).toLocaleDateString()}.`
+    )
+    if (!confirmed) return
+
+    setCancelLoading(true)
+    try {
+      await apiFetch<{ cancelled: boolean; cancelledViaStripe: boolean; activeUntil: string }>(
+        '/billing/subscription',
+        { method: 'DELETE' }
+      )
+      toast.success('Subscription cancelled. Access remains until the end of the current period.')
+      await fetchData()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to cancel subscription')
+    } finally {
+      setCancelLoading(false)
+    }
   }
 
   // ── Loading skeleton ────────────────────────────────────────────────
@@ -571,26 +680,108 @@ export function BillingPanel() {
         </CardHeader>
         <CardContent>
           {subscription ? (
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 rounded-lg border border-emerald-200 bg-emerald-50/50 p-4">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-lg font-semibold text-emerald-900">
-                    {subscription.plan?.name || 'Active Plan'}
-                  </h3>
-                  <Badge className="bg-emerald-600 text-white border-emerald-600">
-                    Active
-                  </Badge>
+            <div className="space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 rounded-lg border border-emerald-200 bg-emerald-50/50 p-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-lg font-semibold text-emerald-900">
+                      {subscription.plan?.name || 'Active Plan'}
+                    </h3>
+                    <Badge
+                      className={
+                        subscription.status === 'active'
+                          ? 'bg-emerald-600 text-white border-emerald-600'
+                          : subscription.status === 'past_due'
+                          ? 'bg-red-100 text-red-700 border-red-200'
+                          : subscription.status === 'pending'
+                          ? 'bg-yellow-100 text-yellow-700 border-yellow-200'
+                          : 'bg-gray-100 text-gray-700 border-gray-200'
+                      }
+                    >
+                      {subscription.status === 'past_due'
+                        ? 'Past Due'
+                        : subscription.status === 'pending'
+                        ? 'Pending'
+                        : subscription.cancelAtPeriodEnd
+                        ? 'Cancelling'
+                        : 'Active'}
+                    </Badge>
+                    {subscription.stripeSubId && (
+                      <Badge variant="outline" className="bg-white/70 border-emerald-200 text-emerald-700 gap-1">
+                        <ShieldCheck className="size-3" />
+                        Stripe
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-sm text-emerald-700">
+                    ${subscription.plan?.price || '—'}/month
+                  </p>
+                  <p className="text-xs text-emerald-600">
+                    {subscription.cancelAtPeriodEnd
+                      ? `Cancels on ${new Date(subscription.currentPeriodEnd).toLocaleDateString()}`
+                      : `Renews ${new Date(subscription.currentPeriodEnd).toLocaleDateString()}`}
+                  </p>
                 </div>
-                <p className="text-sm text-emerald-700">
-                  ${subscription.plan?.price || '—'}/month
-                </p>
-                <p className="text-xs text-emerald-600">
-                  Renews {new Date(subscription.currentPeriodEnd).toLocaleDateString()}
-                </p>
+                <div className="flex items-center gap-2 text-emerald-700">
+                  <Check className="size-4" />
+                  <span className="text-sm">All features included</span>
+                </div>
               </div>
-              <div className="flex items-center gap-2 text-emerald-700">
-                <Check className="size-4" />
-                <span className="text-sm">All features included</span>
+
+              {/* Subscription management actions */}
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleManageSubscription}
+                  disabled={portalLoading}
+                >
+                  {portalLoading ? (
+                    <span className="flex items-center gap-2">
+                      <Loader2 className="size-4 animate-spin" />
+                      Opening…
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-2">
+                      <Settings2 className="size-4" />
+                      Manage Subscription
+                    </span>
+                  )}
+                </Button>
+                {!subscription.cancelAtPeriodEnd && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleCancelSubscription}
+                    disabled={cancelLoading}
+                    className="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+                  >
+                    {cancelLoading ? (
+                      <span className="flex items-center gap-2">
+                        <Loader2 className="size-4 animate-spin" />
+                        Cancelling…
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-2">
+                        <Ban className="size-4" />
+                        Cancel Subscription
+                      </span>
+                    )}
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  asChild
+                >
+                  <a
+                    href="#plan-comparison"
+                    className="flex items-center gap-2"
+                  >
+                    <ArrowRight className="size-4" />
+                    Change Plan
+                  </a>
+                </Button>
               </div>
             </div>
           ) : (
@@ -748,31 +939,42 @@ export function BillingPanel() {
                     <TableHead>Description</TableHead>
                     <TableHead>Amount</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead className="hidden md:table-cell">Transaction ID</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {payments.map((p) => (
-                    <TableRow key={p.id}>
-                      <TableCell className="text-muted-foreground">
-                        {new Date(p.createdAt).toLocaleDateString()}
-                      </TableCell>
-                      <TableCell>
-                        {p.metadata?.planName
-                          ? `${p.metadata.planName} Plan`
-                          : p.type === 'domain'
-                          ? `Domain: ${p.metadata?.domainName || 'Registration'}`
-                          : p.type === 'both'
-                          ? `Hosting + Domain`
-                          : p.type.charAt(0).toUpperCase() + p.type.slice(1)}
-                      </TableCell>
-                      <TableCell className="font-medium">
-                        ${p.amount.toFixed(2)}
-                      </TableCell>
-                      <TableCell>
-                        <PaymentStatusBadge status={p.status} />
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {payments.map((p) => {
+                    const txId =
+                      p.stripePaymentId ||
+                      p.stripeInvoiceId ||
+                      (p.metadata?.checkoutSessionId as string | undefined) ||
+                      '—'
+                    return (
+                      <TableRow key={p.id}>
+                        <TableCell className="text-muted-foreground">
+                          {new Date(p.createdAt).toLocaleDateString()}
+                        </TableCell>
+                        <TableCell>
+                          {p.metadata?.planName
+                            ? `${p.metadata.planName} Plan`
+                            : p.type === 'domain'
+                            ? `Domain: ${p.metadata?.domainName || 'Registration'}`
+                            : p.type === 'both'
+                            ? `Hosting + Domain`
+                            : p.type.charAt(0).toUpperCase() + p.type.slice(1)}
+                        </TableCell>
+                        <TableCell className="font-medium">
+                          ${p.amount.toFixed(2)}
+                        </TableCell>
+                        <TableCell>
+                          <PaymentStatusBadge status={p.status} />
+                        </TableCell>
+                        <TableCell className="hidden md:table-cell font-mono text-xs text-muted-foreground max-w-[180px] truncate" title={txId}>
+                          {txId}
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
                 </TableBody>
               </Table>
             </div>

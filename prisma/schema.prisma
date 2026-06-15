@@ -13,8 +13,12 @@ model User {
   name         String
   password     String
   role         String        @default("user") // user, admin
-  emailVerified Boolean      @default(false)
-  avatar       String?
+  emailVerified           Boolean  @default(false)
+  emailVerificationToken  String?
+  avatar                  String?
+  twoFactorSecret         String?
+  twoFactorEnabled        Boolean  @default(false)
+  twoFactorBackupCodes    String? // JSON string of hashed backup codes
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
@@ -24,6 +28,14 @@ model User {
   domains       Domain[]
   deployments   Deployment[]
   automationLogs AutomationLog[]
+  apiKeys            ApiKey[]
+  notifications      Notification[]
+  ownedTeams         Team[]
+  teamMemberships    TeamMember[]
+  githubIntegrations GithubIntegration[]
+  webhooks           Webhook[]
+  pipelines          Pipeline[]
+  auditLogs          AuditLog[]
 }
 
 model Plan {
@@ -53,6 +65,7 @@ model Subscription {
   planId      String
   status      String   @default("active") // active, cancelled, past_due, trialing
   stripeSubId String?  // Stripe subscription ID
+  stripeCustomerId String? // Stripe customer ID
   currentPeriodStart DateTime
   currentPeriodEnd   DateTime
   cancelAtPeriodEnd  Boolean @default(false)
@@ -104,6 +117,14 @@ model Project {
   deployments  Deployment[]
   domains      Domain[]
   automationLogs AutomationLog[]
+  envVars            EnvironmentVariable[]
+  githubIntegration  GithubIntegration?
+  analyticsEvents    AnalyticsEvent[]
+  team               Team?              @relation(fields: [teamId], references: [id])
+  teamId             String?
+  webhooks           Webhook[]
+  pipelines          Pipeline[]
+  monitors           UptimeMonitor[]
 }
 
 model Domain {
@@ -125,6 +146,9 @@ model Domain {
   project      Project?      @relation(fields: [projectId], references: [id])
   dnsRecords   DnsRecord[]
   automationLogs AutomationLog[]
+  provider           String   @default("deployhub") // "deployhub", "dynadot"
+  externalId         String?  // Dynadot domain ID
+  verification       DomainVerification?
 }
 
 model DnsRecord {
@@ -174,6 +198,7 @@ model Deployment {
   deployUrl   String?
   duration    Int?     // seconds
   triggeredBy String   @default("user") // user, webhook, auto
+  coolifyDeploymentId String? // Coolify deployment UUID returned by deployApplication()
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -215,4 +240,260 @@ model JobQueue {
   result      String?  // JSON result
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+}
+
+model EnvironmentVariable {
+  id        String   @id @default(cuid())
+  projectId String
+  key       String
+  value     String
+  encrypted Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project  Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, key])
+}
+
+model ApiKey {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  key       String   @unique
+  prefix    String   // first 8 chars for display
+  lastUsed  DateTime?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String
+  message   String
+  type      String   @default("info") // info, success, warning, error
+  read      Boolean  @default(false)
+  link      String?  // optional navigation link
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Team {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  ownerId   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  owner    User          @relation(fields: [ownerId], references: [id])
+  members  TeamMember[]
+  projects Project[]
+}
+
+model TeamMember {
+  id       String   @id @default(cuid())
+  teamId   String
+  userId   String
+  role     String   @default("developer") // owner, admin, developer
+  joinedAt DateTime @default(now())
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, userId])
+}
+
+model GithubIntegration {
+  id            String    @id @default(cuid())
+  userId        String
+  projectId     String?
+  githubId      String
+  accessToken   String
+  refreshToken  String?
+  username      String
+  repoFullName  String?   // e.g. "owner/repo"
+  repoUrl       String?
+  webhookId     String?
+  autoDeploy    Boolean   @default(true)
+  branch        String    @default("main")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project Project? @relation(fields: [projectId], references: [id])
+
+  @@unique([projectId])
+}
+
+model AnalyticsEvent {
+  id        String   @id @default(cuid())
+  projectId String
+  type      String   // page_view, api_call, error, deployment, bandwidth
+  path      String?
+  method    String?
+  status    Int?
+  duration  Int?     // ms
+  country   String?
+  city      String?
+  userAgent String?
+  ip        String?
+  timestamp DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model Webhook {
+  id        String   @id @default(cuid())
+  userId    String
+  projectId String?
+  name      String
+  url       String
+  secret    String
+  events    String   // JSON array of event types: deployment.success, deployment.failed, domain.registered, etc.
+  active    Boolean  @default(true)
+  lastTriggeredAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project Project? @relation(fields: [projectId], references: [id])
+  deliveries WebhookDelivery[]
+}
+
+model WebhookDelivery {
+  id        String   @id @default(cuid())
+  webhookId String
+  event     String
+  payload   String   // JSON payload
+  response  String?  // HTTP response body
+  statusCode Int?
+  success   Boolean
+  duration  Int?     // ms
+  createdAt DateTime @default(now())
+
+  webhook Webhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+}
+
+model Pipeline {
+  id          String   @id @default(cuid())
+  userId      String
+  projectId   String
+  name        String
+  description String?
+  stages      String   // JSON array of pipeline stages with config
+  status      String   @default("draft") // draft, active, paused
+  triggerBranch String @default("main")
+  triggerEvents String @default("push") // JSON array: push, pull_request, schedule
+  lastRunAt   DateTime?
+  lastRunStatus String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  runs    PipelineRun[]
+}
+
+model PipelineRun {
+  id         String   @id @default(cuid())
+  pipelineId String
+  status     String   @default("running") // running, success, failed, cancelled
+  trigger    String   @default("manual")  // manual, push, pull_request, schedule
+  commit     String?
+  branch     String?
+  stages     String   // JSON array of stage results
+  startedAt  DateTime @default(now())
+  completedAt DateTime?
+  duration   Int?     // seconds
+
+  pipeline Pipeline @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+}
+
+model Template {
+  id              String   @id @default(cuid())
+  name            String
+  slug            String   @unique
+  description     String
+  category        String   // "Framework", "Backend", "Static", "CMS", "Fullstack", "Frontend"
+  framework       String   // "nextjs", "react", "vue", "nuxt", "astro", "svelte", "express", "fastapi", "node", "static", "gatsby", "go"
+  icon            String   // emoji or icon name
+  stars           Int      @default(0)
+  deployments     Int      @default(0)
+  features        String   // JSON string of feature list
+  tags            String   // JSON string of tag list
+  previewGradient String   @default("from-gray-800 to-gray-900") // Tailwind gradient classes
+  author          String   @default("DeployHub")
+  repoUrl         String?
+  isOfficial      Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String   // e.g., "user.login", "project.create", "project.delete"
+  resource  String   // e.g., "project", "domain", "user"
+  resourceId String?
+  ip        String?
+  userAgent String?
+  metadata  String   // JSON string
+  status    String   @default("success") // "success" or "failed"
+  createdAt DateTime @default(now())
+
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+model UptimeMonitor {
+  id           String   @id @default(cuid())
+  projectId    String
+  url          String
+  intervalSec  Int      @default(60)
+  enabled      Boolean  @default(true)
+  lastStatus   String   @default("unknown") // "up", "down", "unknown"
+  lastCheckedAt DateTime?
+  uptimePct    Float    @default(100.0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  checks       UptimeCheck[]
+
+  @@index([projectId])
+}
+
+model UptimeCheck {
+  id           String   @id @default(cuid())
+  monitorId    String
+  status       String   // "up" or "down"
+  responseTime Int?     // milliseconds
+  statusCode   Int?
+  error        String?
+  checkedAt    DateTime @default(now())
+
+  monitor      UptimeMonitor @relation(fields: [monitorId], references: [id], onDelete: Cascade)
+
+  @@index([monitorId])
+  @@index([checkedAt])
+}
+
+model DomainVerification {
+  id           String   @id @default(cuid())
+  domainId     String   @unique
+  verificationCode String // TXT record value to verify
+  verified     Boolean  @default(false)
+  verifiedAt   DateTime?
+  createdAt    DateTime @default(now())
+
+  domain       Domain   @relation(fields: [domainId], references: [id], onDelete: Cascade)
+
+  @@index([domainId])
 }

@@ -29,6 +29,21 @@ import {
   Triangle,
   Hexagon,
   Layout,
+  Eye,
+  EyeOff,
+  Key,
+  Lock,
+  Edit,
+  Github,
+  GitCommit,
+  Unplug,
+  Search,
+  Filter,
+  ArrowUpDown,
+  Square,
+  CheckSquare,
+  X,
+  RotateCcw,
 } from 'lucide-react'
 import {
   Card,
@@ -84,6 +99,8 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuSeparator,
+  DropdownMenuLabel,
 } from '@/components/ui/dropdown-menu'
 
 // Types
@@ -133,6 +150,39 @@ interface Deployment {
   triggeredBy: string
   createdAt: string
   updatedAt: string
+}
+
+interface EnvVar {
+  id: string
+  key: string
+  value: string
+  encrypted: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+interface GithubIntegrationData {
+  id: string
+  userId: string
+  projectId: string
+  githubId: string
+  username: string
+  repoFullName: string
+  repoUrl: string
+  branch: string
+  autoDeploy: boolean
+  webhookId: string
+  createdAt: string
+}
+
+interface CommitData {
+  sha: string
+  shortSha: string
+  message: string
+  author: string
+  authorEmail: string
+  date: string
+  branch: string
 }
 
 interface Plan {
@@ -343,20 +393,59 @@ function ProjectCardSkeleton() {
 function ProjectCard({
   project,
   onClick,
+  selected,
+  onSelectToggle,
+  onShiftSelect,
 }: {
   project: Project
   onClick: () => void
+  selected: boolean
+  onSelectToggle: () => void
+  onShiftSelect: () => void
 }) {
   return (
     <Card
-      className="group cursor-pointer transition-all hover:shadow-lg hover:border-emerald-200 dark:hover:border-emerald-800 hover:bg-gradient-to-br hover:from-card hover:to-emerald-50/30 dark:hover:to-emerald-950/10 relative overflow-hidden"
+      className={`group cursor-pointer transition-all hover:shadow-lg relative overflow-hidden ${
+        selected
+          ? 'border-emerald-500 ring-2 ring-emerald-500/30 bg-emerald-50/30 dark:bg-emerald-950/10'
+          : 'hover:border-emerald-200 dark:hover:border-emerald-800 hover:bg-gradient-to-br hover:from-card hover:to-emerald-50/30 dark:hover:to-emerald-950/10'
+      }`}
       onClick={onClick}
     >
       {/* Subtle gradient overlay on hover */}
       <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/0 to-emerald-500/0 group-hover:from-emerald-500/5 group-hover:to-transparent transition-all pointer-events-none" />
 
+      {/* Selection checkbox (top-right) */}
+      <div
+        className="absolute top-3 right-3 z-10"
+        onClick={(e) => {
+          e.stopPropagation()
+          if (e.shiftKey) {
+            onShiftSelect()
+          } else {
+            onSelectToggle()
+          }
+        }}
+      >
+        <button
+          type="button"
+          aria-label={selected ? 'Deselect project' : 'Select project'}
+          className={`flex size-6 items-center justify-center rounded-md border transition-all ${
+            selected
+              ? 'border-emerald-500 bg-emerald-500 text-white'
+              : 'border-input bg-background/80 opacity-0 group-hover:opacity-100 hover:border-emerald-400'
+          }`}
+        >
+          {selected ? (
+            <CheckSquare className="size-4" />
+          ) : (
+            <Square className="size-4 text-muted-foreground" />
+          )}
+        </button>
+      </div>
+
       <CardHeader className="pb-2 relative">
-        <div className="flex items-start justify-between">
+        <div className="flex items-start justify-between pr-8">
           <div className="flex items-center gap-2">
             {frameworkIcon(project.framework)}
             <CardTitle className="text-base">{project.name}</CardTitle>
@@ -685,6 +774,35 @@ function ProjectDetailView({
   const [settingsCustomDomain, setSettingsCustomDomain] = useState('')
   const [savingSettings, setSavingSettings] = useState(false)
 
+  // Env vars state
+  const [envVars, setEnvVars] = useState<EnvVar[]>([])
+  const [envLoading, setEnvLoading] = useState(true)
+  const [envReveal, setEnvReveal] = useState(false)
+  const [envDialogOpen, setEnvDialogOpen] = useState(false)
+  const [envDialogMode, setEnvDialogMode] = useState<'create' | 'edit'>('create')
+  const [envEditId, setEnvEditId] = useState<string | null>(null)
+  const [envKey, setEnvKey] = useState('')
+  const [envValue, setEnvValue] = useState('')
+  const [envEncrypted, setEnvEncrypted] = useState(false)
+  const [envSaving, setEnvSaving] = useState(false)
+  const [envDeleteId, setEnvDeleteId] = useState<string | null>(null)
+  const [envDeleting, setEnvDeleting] = useState(false)
+
+  // GitHub integration state
+  const [githubIntegration, setGithubIntegration] = useState<GithubIntegrationData | null>(null)
+  const [githubLoading, setGithubLoading] = useState(true)
+  const [connectDialogOpen, setConnectDialogOpen] = useState(false)
+  const [connectRepoUrl, setConnectRepoUrl] = useState('')
+  const [connectBranch, setConnectBranch] = useState('main')
+  const [connectAutoDeploy, setConnectAutoDeploy] = useState(true)
+  const [connecting, setConnecting] = useState(false)
+  const [commitsDialogOpen, setCommitsDialogOpen] = useState(false)
+  const [commits, setCommits] = useState<CommitData[]>([])
+  const [commitsLoading, setCommitsLoading] = useState(false)
+  const [disconnectDialogOpen, setDisconnectDialogOpen] = useState(false)
+  const [disconnecting, setDisconnecting] = useState(false)
+  const [redeploying, setRedeploying] = useState(false)
+
   const fetchProject = useCallback(async () => {
     try {
       const res = await fetch(`/api/hosting/${projectId}`, {
@@ -710,10 +828,54 @@ function ProjectDetailView({
     }
   }, [projectId, onBack])
 
+  const fetchEnvVars = useCallback(async () => {
+    setEnvLoading(true)
+    try {
+      const res = await fetch(`/api/hosting/${projectId}/env${envReveal ? '?reveal=true' : ''}`, {
+        headers: getAuthHeaders(),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setEnvVars(data.envVars || [])
+      } else {
+        toast.error(data.error || 'Failed to load env vars')
+      }
+    } catch {
+      toast.error('Failed to load env vars')
+    } finally {
+      setEnvLoading(false)
+    }
+  }, [projectId, envReveal])
+
   useEffect(() => {
     setLoading(true)
     fetchProject()
   }, [fetchProject])
+
+  useEffect(() => {
+    fetchEnvVars()
+  }, [fetchEnvVars])
+
+  // Fetch GitHub integration when project loads
+  useEffect(() => {
+    const loadGithub = async () => {
+      setGithubLoading(true)
+      try {
+        const res = await fetch(`/api/hosting/${projectId}`, {
+          headers: getAuthHeaders(),
+        })
+        const data = await res.json()
+        if (res.ok && data.project?.githubIntegration) {
+          setGithubIntegration(data.project.githubIntegration)
+        }
+      } catch {
+        // Silently handle
+      } finally {
+        setGithubLoading(false)
+      }
+    }
+    loadGithub()
+  }, [projectId])
 
   const handleDeploy = async () => {
     setDeploying(true)
@@ -801,6 +963,96 @@ function ProjectDetailView({
       toast.error('Failed to save settings')
     } finally {
       setSavingSettings(false)
+    }
+  }
+
+  const handleOpenEnvDialog = (mode: 'create' | 'edit', envVar?: EnvVar) => {
+    setEnvDialogMode(mode)
+    if (mode === 'edit' && envVar) {
+      setEnvEditId(envVar.id)
+      setEnvKey(envVar.key)
+      setEnvValue('')
+      setEnvEncrypted(envVar.encrypted)
+    } else {
+      setEnvEditId(null)
+      setEnvKey('')
+      setEnvValue('')
+      setEnvEncrypted(false)
+    }
+    setEnvDialogOpen(true)
+  }
+
+  const handleSaveEnvVar = async () => {
+    if (!envKey.trim()) {
+      toast.error('Key is required')
+      return
+    }
+    if (envDialogMode === 'create' && !envValue) {
+      toast.error('Value is required')
+      return
+    }
+
+    setEnvSaving(true)
+    try {
+      if (envDialogMode === 'create') {
+        const res = await fetch(`/api/hosting/${projectId}/env`, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ key: envKey.trim(), value: envValue, encrypted: envEncrypted }),
+        })
+        const data = await res.json()
+        if (!res.ok) {
+          toast.error(data.error || 'Failed to create env var')
+          return
+        }
+        toast.success('Environment variable added')
+      } else {
+        const body: Record<string, unknown> = {}
+        if (envKey.trim()) body.key = envKey.trim()
+        if (envValue) body.value = envValue
+        body.encrypted = envEncrypted
+
+        const res = await fetch(`/api/hosting/${projectId}/env/${envEditId}`, {
+          method: 'PATCH',
+          headers: getAuthHeaders(),
+          body: JSON.stringify(body),
+        })
+        const data = await res.json()
+        if (!res.ok) {
+          toast.error(data.error || 'Failed to update env var')
+          return
+        }
+        toast.success('Environment variable updated')
+      }
+      setEnvDialogOpen(false)
+      fetchEnvVars()
+    } catch {
+      toast.error('Network error')
+    } finally {
+      setEnvSaving(false)
+    }
+  }
+
+  const handleDeleteEnvVar = async () => {
+    if (!envDeleteId) return
+    setEnvDeleting(true)
+    try {
+      const res = await fetch(`/api/hosting/${projectId}/env/${envDeleteId}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        toast.error(data.error || 'Failed to delete env var')
+        return
+      }
+      toast.success('Environment variable deleted')
+      setEnvDeleteId(null)
+      fetchEnvVars()
+    } catch {
+      toast.error('Network error')
+    } finally {
+      setEnvDeleting(false)
     }
   }
 
@@ -1164,6 +1416,497 @@ function ProjectDetailView({
         </CardContent>
       </Card>
 
+      {/* Environment Variables */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Key className="size-5 text-emerald-600" />
+                Environment Variables
+                <Badge variant="outline" className="ml-1 bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-900/50 text-[10px] h-5">
+                  <Lock className="size-3 mr-1" />
+                  AES-256
+                </Badge>
+              </CardTitle>
+              <CardDescription className="mt-1">
+                Manage environment variables for your project. Values are encrypted at rest.
+              </CardDescription>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setEnvReveal(!envReveal)}
+                className="h-8 text-xs"
+              >
+                {envReveal ? (
+                  <>
+                    <EyeOff className="size-3.5 mr-1" />
+                    Hide
+                  </>
+                ) : (
+                  <>
+                    <Eye className="size-3.5 mr-1" />
+                    Reveal
+                  </>
+                )}
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => handleOpenEnvDialog('create')}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white h-8 text-xs"
+              >
+                <Plus className="size-3.5 mr-1" />
+                Add Variable
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {envLoading ? (
+            <div className="space-y-3">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+            </div>
+          ) : envVars.length === 0 ? (
+            <div className="text-center py-10 text-muted-foreground">
+              <Key className="size-10 mx-auto mb-3 opacity-30" />
+              <p className="text-sm font-medium">No environment variables</p>
+              <p className="text-xs mt-1">Add environment variables to configure your application</p>
+              <Button
+                size="sm"
+                onClick={() => handleOpenEnvDialog('create')}
+                className="mt-4 bg-emerald-600 hover:bg-emerald-700 text-white h-8 text-xs"
+              >
+                <Plus className="size-3.5 mr-1" />
+                Add Your First Variable
+              </Button>
+            </div>
+          ) : (
+            <div className="max-h-96 overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/20">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Key</TableHead>
+                    <TableHead>Value</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {envVars.map((ev) => (
+                    <TableRow key={ev.id} className="hover:bg-emerald-50/50 dark:hover:bg-emerald-950/20 transition-colors">
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <Key className="size-3.5 text-muted-foreground" />
+                          <span className="font-mono text-sm font-medium">{ev.key}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <span className="font-mono text-sm text-muted-foreground">
+                          {ev.value}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        {ev.encrypted ? (
+                          <Badge variant="outline" className="bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400 text-xs">
+                            <Lock className="size-3 mr-1" />
+                            Encrypted
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="bg-gray-50 text-gray-600 dark:bg-gray-800/30 dark:text-gray-400 text-xs">
+                            Plain
+                          </Badge>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs hover:text-emerald-600"
+                            onClick={() => handleOpenEnvDialog('edit', ev)}
+                          >
+                            <Edit className="size-3 mr-1" />
+                            Edit
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/20"
+                            onClick={() => setEnvDeleteId(ev.id)}
+                          >
+                            <Trash2 className="size-3 mr-1" />
+                            Delete
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* GitHub Integration */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Github className="size-5 text-emerald-600" />
+                GitHub Integration
+              </CardTitle>
+              <CardDescription className="mt-1">
+                Connect your repository for auto-deployments
+              </CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {githubLoading ? (
+            <div className="space-y-3">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+            </div>
+          ) : !githubIntegration ? (
+            <div className="text-center py-10 text-muted-foreground">
+              <Github className="size-10 mx-auto mb-3 opacity-30" />
+              <p className="text-sm font-medium">No repository connected</p>
+              <p className="text-xs mt-1">Connect a GitHub repository to enable auto-deployments</p>
+              <Button
+                size="sm"
+                onClick={() => setConnectDialogOpen(true)}
+                className="mt-4 bg-emerald-600 hover:bg-emerald-700 text-white h-8 text-xs"
+              >
+                <Github className="size-3.5 mr-1" />
+                Connect GitHub
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">
+                <div className="size-10 rounded-lg bg-gray-900 dark:bg-gray-100 flex items-center justify-center">
+                  <Github className="size-5 text-white dark:text-gray-900" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{githubIntegration.repoFullName}</p>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <Badge variant="outline" className="text-[10px] h-5">
+                      <GitBranch className="size-3 mr-1" />
+                      {githubIntegration.branch}
+                    </Badge>
+                    {githubIntegration.autoDeploy && (
+                      <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px] h-5">
+                        Auto-deploy
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 text-xs"
+                  onClick={() => window.open(githubIntegration.repoUrl, '_blank')}
+                >
+                  <ExternalLink className="size-3.5 mr-1" />
+                  Open
+                </Button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs"
+                  onClick={async () => {
+                    setCommitsDialogOpen(true)
+                    setCommitsLoading(true)
+                    try {
+                      const res = await fetch(`/api/github/${githubIntegration.id}/commits`, {
+                        headers: getAuthHeaders(),
+                      })
+                      const data = await res.json()
+                      if (res.ok) {
+                        setCommits(data.commits || [])
+                      } else {
+                        toast.error('Failed to load commits')
+                      }
+                    } catch {
+                      toast.error('Failed to load commits')
+                    } finally {
+                      setCommitsLoading(false)
+                    }
+                  }}
+                >
+                  <GitCommit className="size-3.5 mr-1" />
+                  Commit History
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs"
+                  disabled={redeploying}
+                  onClick={async () => {
+                    setRedeploying(true)
+                    try {
+                      const res = await fetch(`/api/hosting/${projectId}/deploy`, {
+                        method: 'POST',
+                        headers: getAuthHeaders(),
+                      })
+                      const data = await res.json()
+                      if (res.ok) {
+                        toast.success('Redeployment triggered!')
+                        fetchProject()
+                      } else {
+                        toast.error(data.error || 'Redeploy failed')
+                      }
+                    } catch {
+                      toast.error('Redeploy failed')
+                    } finally {
+                      setRedeploying(false)
+                    }
+                  }}
+                >
+                  {redeploying ? <Loader2 className="size-3.5 mr-1 animate-spin" /> : <RefreshCw className="size-3.5 mr-1" />}
+                  Trigger Redeploy
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/20"
+                  onClick={() => setDisconnectDialogOpen(true)}
+                >
+                  <Unplug className="size-3.5 mr-1" />
+                  Disconnect
+                </Button>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Connect GitHub Dialog */}
+      <Dialog open={connectDialogOpen} onOpenChange={(v) => !v && setConnectDialogOpen(false)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Github className="size-5 text-emerald-600" />
+              Connect GitHub Repository
+            </DialogTitle>
+            <DialogDescription>
+              Link a GitHub repository to enable automatic deployments.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="gh-repo-url">Repository URL</Label>
+              <Input
+                id="gh-repo-url"
+                placeholder="https://github.com/user/repo"
+                value={connectRepoUrl}
+                onChange={(e) => setConnectRepoUrl(e.target.value)}
+                className="font-mono text-sm"
+              />
+              <p className="text-xs text-muted-foreground">Enter the full URL of your GitHub repository</p>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="gh-branch">Branch</Label>
+              <Input
+                id="gh-branch"
+                placeholder="main"
+                value={connectBranch}
+                onChange={(e) => setConnectBranch(e.target.value)}
+                className="font-mono text-sm"
+              />
+            </div>
+            <div className="flex items-center justify-between rounded-lg border p-4">
+              <div className="space-y-0.5">
+                <Label className="text-base flex items-center gap-2">
+                  <RefreshCw className="size-4 text-emerald-600" />
+                  Auto-deploy
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Automatically deploy when changes are pushed to the branch
+                </p>
+              </div>
+              <Switch
+                checked={connectAutoDeploy}
+                onCheckedChange={setConnectAutoDeploy}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConnectDialogOpen(false)} disabled={connecting}>
+              Cancel
+            </Button>
+            <Button
+              onClick={async () => {
+                if (!connectRepoUrl.trim()) {
+                  toast.error('Repository URL is required')
+                  return
+                }
+                setConnecting(true)
+                try {
+                  const res = await fetch('/api/github/connect', {
+                    method: 'POST',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({
+                      projectId,
+                      repoUrl: connectRepoUrl,
+                      branch: connectBranch || 'main',
+                    }),
+                  })
+                  const data = await res.json()
+                  if (!res.ok) {
+                    toast.error(data.error || 'Failed to connect')
+                    return
+                  }
+                  setGithubIntegration(data.integration)
+                  setConnectDialogOpen(false)
+                  setConnectRepoUrl('')
+                  setConnectBranch('main')
+                  setConnectAutoDeploy(true)
+                  toast.success('GitHub repository connected!')
+                } catch {
+                  toast.error('Failed to connect')
+                } finally {
+                  setConnecting(false)
+                }
+              }}
+              disabled={connecting || !connectRepoUrl.trim()}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+            >
+              {connecting ? (
+                <>
+                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  Connecting...
+                </>
+              ) : (
+                <>
+                  <Github className="size-4 mr-2" />
+                  Connect
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Commit History Dialog */}
+      <Dialog open={commitsDialogOpen} onOpenChange={(v) => !v && setCommitsDialogOpen(false)}>
+        <DialogContent className="sm:max-w-2xl max-h-[80vh]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <GitCommit className="size-5 text-emerald-600" />
+              Commit History
+            </DialogTitle>
+            <DialogDescription>
+              {githubIntegration ? `${githubIntegration.repoFullName} · ${githubIntegration.branch}` : 'Recent commits'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-96 overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/20">
+            {commitsLoading ? (
+              <div className="space-y-3 p-2">
+                <Skeleton className="h-12 w-full" />
+                <Skeleton className="h-12 w-full" />
+                <Skeleton className="h-12 w-full" />
+              </div>
+            ) : commits.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <GitCommit className="size-8 mx-auto mb-2 opacity-30" />
+                <p className="text-sm">No commits found</p>
+              </div>
+            ) : (
+              <div className="space-y-0">
+                {commits.map((commit) => (
+                  <div
+                    key={commit.sha}
+                    className="flex items-start gap-3 py-3 border-b last:border-b-0 hover:bg-muted/30 transition-colors px-2 rounded"
+                  >
+                    <div className="size-8 rounded-full bg-muted flex items-center justify-center shrink-0 mt-0.5">
+                      <span className="text-xs font-medium text-muted-foreground">
+                        {commit.author.charAt(0).toUpperCase()}
+                      </span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{commit.message}</p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-xs text-muted-foreground">{commit.author}</span>
+                        <span className="text-xs text-muted-foreground">·</span>
+                        <span className="text-xs text-muted-foreground">{timeAgo(commit.date)}</span>
+                      </div>
+                    </div>
+                    <code className="text-[10px] font-mono text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20 px-1.5 py-0.5 rounded shrink-0">
+                      {commit.shortSha}
+                    </code>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Disconnect GitHub Confirmation */}
+      <AlertDialog open={disconnectDialogOpen} onOpenChange={setDisconnectDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <Unplug className="size-5 text-red-500" />
+              Disconnect GitHub
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to disconnect <strong>{githubIntegration?.repoFullName}</strong>? Auto-deployments will stop and the webhook will be removed.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={disconnecting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={async () => {
+                setDisconnecting(true)
+                try {
+                  const res = await fetch('/api/github/disconnect', {
+                    method: 'POST',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({ projectId }),
+                  })
+                  const data = await res.json()
+                  if (!res.ok) {
+                    toast.error(data.error || 'Failed to disconnect')
+                    return
+                  }
+                  setGithubIntegration(null)
+                  setDisconnectDialogOpen(false)
+                  toast.success('GitHub repository disconnected')
+                } catch {
+                  toast.error('Failed to disconnect')
+                } finally {
+                  setDisconnecting(false)
+                }
+              }}
+              disabled={disconnecting}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              {disconnecting ? (
+                <>
+                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  Disconnecting...
+                </>
+              ) : (
+                <>
+                  <Unplug className="size-4 mr-2" />
+                  Disconnect
+                </>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* Danger Zone */}
       <Card className="border-red-200 dark:border-red-900/50">
         <CardHeader>
@@ -1243,6 +1986,122 @@ function ProjectDetailView({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Environment Variable Dialog */}
+      <Dialog open={envDialogOpen} onOpenChange={(v) => !v && setEnvDialogOpen(false)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Key className="size-5 text-emerald-600" />
+              {envDialogMode === 'create' ? 'Add Environment Variable' : 'Edit Environment Variable'}
+            </DialogTitle>
+            <DialogDescription>
+              {envDialogMode === 'create'
+                ? 'Add a new environment variable to your project.'
+                : 'Update the environment variable. Leave value blank to keep the existing value.'}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="env-key">Key</Label>
+              <Input
+                id="env-key"
+                placeholder="DATABASE_URL"
+                value={envKey}
+                onChange={(e) => setEnvKey(e.target.value)}
+                className="font-mono text-sm"
+                disabled={envDialogMode === 'edit'}
+              />
+              {envDialogMode === 'edit' && (
+                <p className="text-xs text-muted-foreground">Key cannot be changed when editing</p>
+              )}
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="env-value">Value</Label>
+              <Input
+                id="env-value"
+                type="password"
+                placeholder={envDialogMode === 'edit' ? 'Leave blank to keep current value' : 'Enter value'}
+                value={envValue}
+                onChange={(e) => setEnvValue(e.target.value)}
+                className="font-mono text-sm"
+              />
+            </div>
+
+            <div className="flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 dark:border-emerald-900/50 dark:bg-emerald-950/20 p-3">
+              <Lock className="size-4 text-emerald-600 mt-0.5 shrink-0" />
+              <div className="space-y-0.5">
+                <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
+                  Encrypted at rest with AES-256-GCM
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  All values are transparently encrypted before being stored in the database and decrypted only when revealed.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEnvDialogOpen(false)} disabled={envSaving}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSaveEnvVar}
+              disabled={envSaving || !envKey.trim()}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+            >
+              {envSaving ? (
+                <>
+                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Save className="size-4 mr-2" />
+                  {envDialogMode === 'create' ? 'Add Variable' : 'Save Changes'}
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Env Var Delete Confirmation Dialog */}
+      <AlertDialog open={!!envDeleteId} onOpenChange={(v) => !v && setEnvDeleteId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="size-5 text-red-500" />
+              Delete Environment Variable
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this environment variable? This action cannot be undone and your application may stop working if it depends on this variable.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={envDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteEnvVar}
+              disabled={envDeleting}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              {envDeleting ? (
+                <>
+                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="size-4 mr-2" />
+                  Delete Variable
+                </>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
@@ -1255,9 +2114,45 @@ export default function HostingPanel() {
   const [showCreate, setShowCreate] = useState(false)
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
 
+  // ── Search / filter / sort state ──────────────────────────────────
+  const [searchInput, setSearchInput] = useState('')
+  const [searchQuery, setSearchQuery] = useState('') // debounced
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [frameworkFilter, setFrameworkFilter] = useState('all')
+  const [sortBy, setSortBy] = useState<'name' | 'created' | 'deployed'>('created')
+
+  // ── Multi-select state ────────────────────────────────────────────
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const lastSelectedIndex = useRef<number | null>(null)
+
+  // ── Bulk action state ─────────────────────────────────────────────
+  const [bulkAction, setBulkAction] = useState<'deploy' | 'stop' | 'restart' | 'delete' | null>(null)
+  const [bulkLoading, setBulkLoading] = useState(false)
+  const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = useState(false)
+
+  // ── Debounce search input (300ms) ─────────────────────────────────
+  useEffect(() => {
+    const t = setTimeout(() => setSearchQuery(searchInput.trim()), 300)
+    return () => clearTimeout(t)
+  }, [searchInput])
+
+  // ── Listen for command palette "create project" event ────────────
+  useEffect(() => {
+    const handler = () => setShowCreate(true)
+    window.addEventListener('deployhub:command:create-project', handler)
+    return () => window.removeEventListener('deployhub:command:create-project', handler)
+  }, [])
+
   const fetchProjects = useCallback(async () => {
     try {
-      const res = await fetch('/api/hosting', {
+      const params = new URLSearchParams()
+      if (searchQuery) params.set('search', searchQuery)
+      if (statusFilter !== 'all') params.set('status', statusFilter)
+      if (frameworkFilter !== 'all') params.set('framework', frameworkFilter)
+      params.set('sort', sortBy)
+
+      const qs = params.toString()
+      const res = await fetch(`/api/hosting${qs ? `?${qs}` : ''}`, {
         headers: getAuthHeaders(),
       })
       const data = await res.json()
@@ -1271,11 +2166,125 @@ export default function HostingPanel() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [searchQuery, statusFilter, frameworkFilter, sortBy])
 
   useEffect(() => {
     fetchProjects()
   }, [fetchProjects])
+
+  // ── Selection helpers ─────────────────────────────────────────────
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
+      return next
+    })
+  }
+
+  // Shift-click: select range from the last clicked card to this one
+  const shiftSelectRange = (index: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      const from = lastSelectedIndex.current
+      if (from === null) {
+        const id = projects[index]?.id
+        if (id) next.add(id)
+        return next
+      }
+      const start = Math.min(from, index)
+      const end = Math.max(from, index)
+      for (let i = start; i <= end; i++) {
+        const id = projects[i]?.id
+        if (id) next.add(id)
+      }
+      return next
+    })
+  }
+
+  const clearSelection = () => {
+    setSelectedIds(new Set())
+    lastSelectedIndex.current = null
+  }
+
+  const selectAll = () => {
+    setSelectedIds(new Set(projects.map((p) => p.id)))
+  }
+
+  // ── Bulk action runner ────────────────────────────────────────────
+  const runBulkAction = async (action: 'deploy' | 'stop' | 'restart' | 'delete') => {
+    const ids = Array.from(selectedIds)
+    if (ids.length === 0) return
+
+    if (action === 'delete') {
+      setBulkDeleteConfirmOpen(true)
+      return
+    }
+
+    setBulkLoading(true)
+    setBulkAction(action)
+    try {
+      const res = await fetch('/api/hosting/bulk', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ action, projectIds: ids }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        toast.error(data.error || `Bulk ${action} failed`)
+        return
+      }
+      const { succeeded, failed } = data.summary
+      if (failed === 0) {
+        toast.success(`Successfully ${action}ed ${succeeded} project${succeeded !== 1 ? 's' : ''}`)
+      } else {
+        toast.warning(`${succeeded} succeeded, ${failed} failed`)
+      }
+      clearSelection()
+      fetchProjects()
+    } catch {
+      toast.error('Network error during bulk action')
+    } finally {
+      setBulkLoading(false)
+      setBulkAction(null)
+    }
+  }
+
+  const confirmBulkDelete = async () => {
+    const ids = Array.from(selectedIds)
+    if (ids.length === 0) return
+    setBulkLoading(true)
+    setBulkAction('delete')
+    try {
+      const res = await fetch('/api/hosting/bulk', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ action: 'delete', projectIds: ids }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        toast.error(data.error || 'Bulk delete failed')
+        return
+      }
+      const { succeeded, failed } = data.summary
+      if (failed === 0) {
+        toast.success(`Deleted ${succeeded} project${succeeded !== 1 ? 's' : ''}`)
+      } else {
+        toast.warning(`${succeeded} deleted, ${failed} failed`)
+      }
+      clearSelection()
+      setBulkDeleteConfirmOpen(false)
+      fetchProjects()
+    } catch {
+      toast.error('Network error during delete')
+    } finally {
+      setBulkLoading(false)
+      setBulkAction(null)
+    }
+  }
 
   // Detail View
   if (selectedProjectId) {
@@ -1290,11 +2299,20 @@ export default function HostingPanel() {
     )
   }
 
+  const selectedCount = selectedIds.size
+  const hasActiveFilters = searchInput !== '' || statusFilter !== 'all' || frameworkFilter !== 'all'
+
+  const clearFilters = () => {
+    setSearchInput('')
+    setStatusFilter('all')
+    setFrameworkFilter('all')
+  }
+
   // List View
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold">Hosting Projects</h2>
           <p className="text-sm text-muted-foreground mt-1">
@@ -1303,12 +2321,223 @@ export default function HostingPanel() {
         </div>
         <Button
           onClick={() => setShowCreate(true)}
-          className="bg-emerald-600 hover:bg-emerald-700 text-white"
+          className="bg-emerald-600 hover:bg-emerald-700 text-white shrink-0"
         >
           <Plus className="size-4 mr-2" />
           New Project
         </Button>
       </div>
+
+      {/* Search & Filter Bar */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+          <Input
+            type="search"
+            placeholder="Search by name, framework, or domain..."
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            className="pl-9 pr-4"
+          />
+          {searchInput && (
+            <button
+              type="button"
+              onClick={() => setSearchInput('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              aria-label="Clear search"
+            >
+              <X className="size-4" />
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Status filter */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-2">
+                <Filter className="size-4" />
+                <span className="hidden sm:inline">Status:</span>
+                <span className="capitalize">{statusFilter === 'all' ? 'All' : statusFilter}</span>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuLabel>Filter by status</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {['all', 'running', 'stopped', 'error', 'creating'].map((s) => (
+                <DropdownMenuItem
+                  key={s}
+                  onClick={() => setStatusFilter(s)}
+                  className={statusFilter === s ? 'bg-accent' : ''}
+                >
+                  <span className="capitalize">{s}</span>
+                  {statusFilter === s && <CheckCircle2 className="size-3.5 ml-auto text-emerald-600" />}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* Framework filter */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-2">
+                <FileCode className="size-4" />
+                <span className="hidden sm:inline">Framework:</span>
+                <span>{frameworkFilter === 'all' ? 'All' : frameworkLabel(frameworkFilter)}</span>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuLabel>Filter by framework</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {['all', 'nextjs', 'react', 'node', 'static'].map((f) => (
+                <DropdownMenuItem
+                  key={f}
+                  onClick={() => setFrameworkFilter(f)}
+                  className={frameworkFilter === f ? 'bg-accent' : ''}
+                >
+                  {f === 'all' ? 'All' : frameworkLabel(f)}
+                  {frameworkFilter === f && <CheckCircle2 className="size-3.5 ml-auto text-emerald-600" />}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* Sort */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-2">
+                <ArrowUpDown className="size-4" />
+                <span className="hidden sm:inline">Sort:</span>
+                <span className="capitalize">
+                  {sortBy === 'created' ? 'Newest' : sortBy === 'name' ? 'Name' : 'Last deployed'}
+                </span>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuLabel>Sort by</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={() => setSortBy('created')}
+                className={sortBy === 'created' ? 'bg-accent' : ''}
+              >
+                Created date (newest)
+                {sortBy === 'created' && <CheckCircle2 className="size-3.5 ml-auto text-emerald-600" />}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => setSortBy('name')}
+                className={sortBy === 'name' ? 'bg-accent' : ''}
+              >
+                Name (A → Z)
+                {sortBy === 'name' && <CheckCircle2 className="size-3.5 ml-auto text-emerald-600" />}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => setSortBy('deployed')}
+                className={sortBy === 'deployed' ? 'bg-accent' : ''}
+              >
+                Last deployed
+                {sortBy === 'deployed' && <CheckCircle2 className="size-3.5 ml-auto text-emerald-600" />}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {hasActiveFilters && (
+            <Button variant="ghost" size="sm" onClick={clearFilters} className="gap-1">
+              <X className="size-3.5" />
+              Clear
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* Bulk Action Toolbar */}
+      {selectedCount > 0 && (
+        <div className="sticky top-0 z-20 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between p-3 rounded-lg border border-emerald-200 dark:border-emerald-900/50 bg-emerald-50/80 dark:bg-emerald-950/30 backdrop-blur-sm shadow-sm animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <div className="flex size-7 items-center justify-center rounded-md bg-emerald-600 text-white text-xs font-semibold">
+                {selectedCount}
+              </div>
+              <span>project{selectedCount !== 1 ? 's' : ''} selected</span>
+            </div>
+            <button
+              type="button"
+              onClick={selectAll}
+              className="text-xs text-emerald-700 dark:text-emerald-400 hover:underline"
+            >
+              Select all ({projects.length})
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => runBulkAction('deploy')}
+              disabled={bulkLoading}
+              className="gap-1.5 bg-background"
+            >
+              {bulkLoading && bulkAction === 'deploy' ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Rocket className="size-3.5 text-emerald-600" />
+              )}
+              Deploy All
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => runBulkAction('stop')}
+              disabled={bulkLoading}
+              className="gap-1.5 bg-background"
+            >
+              {bulkLoading && bulkAction === 'stop' ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <StopCircle className="size-3.5 text-yellow-600" />
+              )}
+              Stop All
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => runBulkAction('restart')}
+              disabled={bulkLoading}
+              className="gap-1.5 bg-background"
+            >
+              {bulkLoading && bulkAction === 'restart' ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <RotateCcw className="size-3.5 text-blue-600" />
+              )}
+              Restart All
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => runBulkAction('delete')}
+              disabled={bulkLoading}
+              className="gap-1.5 text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 bg-background"
+            >
+              {bulkLoading && bulkAction === 'delete' ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Trash2 className="size-3.5" />
+              )}
+              Delete All
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={clearSelection}
+              disabled={bulkLoading}
+              className="gap-1"
+            >
+              <X className="size-3.5" />
+              Clear
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Project Grid */}
       {loading ? (
@@ -1321,30 +2550,67 @@ export default function HostingPanel() {
       ) : projects.length === 0 ? (
         <Card className="border-dashed">
           <CardContent className="flex flex-col items-center justify-center py-16">
-            <Rocket className="size-12 text-muted-foreground/40 mb-4" />
-            <h3 className="text-lg font-semibold mb-1">No projects yet</h3>
-            <p className="text-sm text-muted-foreground mb-4">
-              Create your first hosting project to get started
-            </p>
-            <Button
-              onClick={() => setShowCreate(true)}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white"
-            >
-              <Plus className="size-4 mr-2" />
-              Create Project
-            </Button>
+            {hasActiveFilters ? (
+              <>
+                <Search className="size-12 text-muted-foreground/40 mb-4" />
+                <h3 className="text-lg font-semibold mb-1">No projects match</h3>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Try adjusting your search or filters
+                </p>
+                <Button variant="outline" onClick={clearFilters} className="gap-1.5">
+                  <X className="size-4" />
+                  Clear filters
+                </Button>
+              </>
+            ) : (
+              <>
+                <Rocket className="size-12 text-muted-foreground/40 mb-4" />
+                <h3 className="text-lg font-semibold mb-1">No projects yet</h3>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Create your first hosting project to get started
+                </p>
+                <Button
+                  onClick={() => setShowCreate(true)}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                >
+                  <Plus className="size-4 mr-2" />
+                  Create Project
+                </Button>
+              </>
+            )}
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {projects.map((project) => (
-            <ProjectCard
-              key={project.id}
-              project={project}
-              onClick={() => setSelectedProjectId(project.id)}
-            />
-          ))}
-        </div>
+        <>
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <span>
+              Showing {projects.length} project{projects.length !== 1 ? 's' : ''}
+            </span>
+            {selectedCount > 0 && (
+              <span className="text-emerald-600 dark:text-emerald-400 font-medium">
+                {selectedCount} selected
+              </span>
+            )}
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {projects.map((project, index) => (
+              <ProjectCard
+                key={project.id}
+                project={project}
+                selected={selectedIds.has(project.id)}
+                onSelectToggle={() => {
+                  lastSelectedIndex.current = index
+                  toggleSelect(project.id)
+                }}
+                onShiftSelect={() => {
+                  shiftSelectRange(index)
+                  lastSelectedIndex.current = index
+                }}
+                onClick={() => setSelectedProjectId(project.id)}
+              />
+            ))}
+          </div>
+        </>
       )}
 
       <CreateProjectDialog
@@ -1352,6 +2618,44 @@ export default function HostingPanel() {
         onClose={() => setShowCreate(false)}
         onCreated={fetchProjects}
       />
+
+      {/* Bulk Delete Confirmation */}
+      <AlertDialog open={bulkDeleteConfirmOpen} onOpenChange={setBulkDeleteConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="size-5 text-red-500" />
+              Delete {selectedCount} project{selectedCount !== 1 ? 's' : ''}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete <strong>{selectedCount}</strong> project
+              {selectedCount !== 1 ? 's' : ''} along with all their deployments,
+              environment variables, and associated data. This action
+              <strong> cannot be undone</strong>.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={bulkLoading}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmBulkDelete}
+              disabled={bulkLoading}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              {bulkLoading ? (
+                <>
+                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  Deleting {selectedCount}...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="size-4 mr-2" />
+                  Delete {selectedCount} project{selectedCount !== 1 ? 's' : ''}
+                </>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
