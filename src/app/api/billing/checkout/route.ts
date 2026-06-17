@@ -2,8 +2,12 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
 import { processEvent } from '@/lib/automation'
-import { createCheckoutSession, isStripeDemoMode } from '@/lib/stripe'
+import { isStripeDemoMode } from '@/lib/stripe'
 import { createNotification } from '@/lib/notifications'
+import {
+  processPayment,
+  resolveActiveMethod,
+} from '@/lib/payment-methods'
 
 // Helper: generate a slug from a name
 function slugify(text: string): string {
@@ -35,7 +39,14 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json()
-    const { planId, type, domainName, projectName, framework } = body
+    const {
+      planId,
+      type,
+      domainName,
+      projectName,
+      framework,
+      method,
+    } = body
 
     if (!planId || !type) {
       return NextResponse.json(
@@ -50,6 +61,9 @@ export async function POST(request: Request) {
         { status: 400 }
       )
     }
+
+    // Backward compatibility: if no method specified, default to "stripe".
+    const requestedMethod = (method || 'stripe').toLowerCase()
 
     // Get plan
     const plan = await db.plan.findUnique({ where: { id: planId } })
@@ -77,7 +91,16 @@ export async function POST(request: Request) {
       amount = plan.price + 12.99
     }
 
-    const demoMode = isStripeDemoMode()
+    // ── Validate requested method is active ───────────────────────
+    const activeMethod = await resolveActiveMethod(requestedMethod)
+    if (!activeMethod) {
+      return NextResponse.json(
+        {
+          error: `Payment method "${requestedMethod}" is not available. Please choose another method.`,
+        },
+        { status: 400 }
+      )
+    }
 
     // ── Build success & cancel URLs ─────────────────────────────
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || ''
@@ -98,7 +121,7 @@ export async function POST(request: Request) {
         data: {
           userId: decoded.userId,
           planId: plan.id,
-          status: demoMode ? 'active' : 'pending',
+          status: 'pending',
           currentPeriodStart: now,
           currentPeriodEnd: new Date(
             now.getFullYear(),
@@ -110,8 +133,12 @@ export async function POST(request: Request) {
       })
     }
 
-    // ── DEMO MODE: simulate success immediately ─────────────────
-    if (demoMode) {
+    // ═══════════════════════════════════════════════════════════════
+    // SPECIAL PATH: Stripe demo mode keeps the original inline-success
+    // behaviour so the existing UI flow (immediate project/domain
+    // creation) keeps working unchanged.
+    // ═══════════════════════════════════════════════════════════════
+    if (requestedMethod === 'stripe' && isStripeDemoMode()) {
       // Create Project (hosting or both)
       let project = null
       if (type === 'hosting' || type === 'both') {
@@ -217,43 +244,50 @@ export async function POST(request: Request) {
         }
       }
 
-      // Create the demo Stripe Checkout Session (returns a fake URL)
-      const sessionResult = await createCheckoutSession({
+      // Process the payment through the unified dispatcher. In demo mode
+      // Stripe returns a fake session URL; we then mark the payment as
+      // completed and drive the automation pipeline immediately.
+      const result = await processPayment({
+        method: 'stripe',
         planId: plan.id,
         planName: plan.name,
-        amount: Math.round(amount * 100), // convert to cents
+        amount,
         currency: 'usd',
-        successUrl,
-        cancelUrl,
         userId: decoded.userId,
         email: user.email,
+        successUrl,
+        cancelUrl,
+        purchaseType: type,
+        domainName: domainName || null,
+        projectName: projectName || null,
+        framework: framework || null,
+        subscriptionId: subscription?.id || null,
       })
 
-      // Create Payment record marked as completed (demo mode = auto success)
-      const payment = await db.payment.create({
+      if (!result.success || !result.paymentId) {
+        if (project) {
+          await db.project.delete({ where: { id: project.id } }).catch(() => {})
+        }
+        if (domain) {
+          await db.domain.delete({ where: { id: domain.id } }).catch(() => {})
+        }
+        return NextResponse.json(
+          { error: result.error || 'Payment initiation failed' },
+          { status: 502 }
+        )
+      }
+
+      // Mark the demo payment as completed
+      const payment = await db.payment.update({
+        where: { id: result.paymentId },
         data: {
-          userId: decoded.userId,
-          subscriptionId: subscription?.id || null,
-          amount,
-          currency: 'usd',
           status: 'completed',
-          type,
-          stripePaymentId: `pay_demo_${Date.now()}`,
+          stripePaymentId: result.transactionId,
           stripeInvoiceId: `in_demo_${Date.now()}`,
-          metadata: JSON.stringify({
-            planId: plan.id,
-            planName: plan.name,
-            domainName: domainName || null,
-            purchaseType: type,
-            projectId: project?.id || null,
-            domainId: domain?.id || null,
-            checkoutSessionId: sessionResult.sessionId,
-            demoMode: true,
-          }),
         },
       })
 
-      // Activate subscription if it was pending
+      // Activate the subscription
       if (subscription && subscription.status === 'pending') {
         await db.subscription.update({
           where: { id: subscription.id },
@@ -277,7 +311,6 @@ export async function POST(request: Request) {
         },
       })
 
-      // Notify user
       await createNotification({
         userId: decoded.userId,
         title: 'Payment Successful',
@@ -286,12 +319,12 @@ export async function POST(request: Request) {
         link: '/?tab=billing',
       })
 
-      // Build the response — preserve existing shape so the UI keeps working,
-      // and add the new Stripe fields so the panel can decide what to do.
+      // Build the response — preserve existing shape so the UI keeps working
       const response: Record<string, unknown> = {
-        sessionId: sessionResult.sessionId,
-        url: sessionResult.url,
+        sessionId: result.sessionId,
+        url: result.redirectUrl,
         demo: true,
+        method: 'stripe',
         payment: {
           id: payment.id,
           amount: payment.amount,
@@ -363,51 +396,58 @@ export async function POST(request: Request) {
       return NextResponse.json(response, { status: 201 })
     }
 
-    // ── REAL STRIPE MODE: create a real Checkout Session ────────
-    // We do NOT create project/domain records here - that happens after
-    // the webhook confirms the payment. We only create a pending Payment
-    // record so we can match the webhook to the user.
-    const sessionResult = await createCheckoutSession({
+    // ═══════════════════════════════════════════════════════════════
+    // UNIFIED PATH: any method (real Stripe, Waafi, manual, real-mode
+    // Stripe redirect) - dispatch through processPayment and return a
+    // generic response the UI can branch on.
+    // ═══════════════════════════════════════════════════════════════
+    const result = await processPayment({
+      method: requestedMethod,
       planId: plan.id,
       planName: plan.name,
-      amount: Math.round(amount * 100), // cents
+      amount,
       currency: 'usd',
-      successUrl,
-      cancelUrl,
       userId: decoded.userId,
       email: user.email,
+      successUrl,
+      cancelUrl,
+      purchaseType: type,
+      domainName: domainName || null,
+      projectName: projectName || null,
+      framework: framework || null,
+      subscriptionId: subscription?.id || null,
     })
 
-    // Create a pending Payment record keyed to the Stripe session ID
-    const payment = await db.payment.create({
-      data: {
-        userId: decoded.userId,
-        subscriptionId: subscription?.id || null,
-        amount,
-        currency: 'usd',
-        status: 'pending',
-        type,
-        stripePaymentId: sessionResult.sessionId, // store session ID for matching
-        metadata: JSON.stringify({
-          planId: plan.id,
-          planName: plan.name,
-          domainName: domainName || null,
-          purchaseType: type,
-          projectName: projectName || null,
-          framework: framework || null,
-          checkoutSessionId: sessionResult.sessionId,
-          demoMode: false,
-        }),
-      },
-    })
+    if (!result.success) {
+      return NextResponse.json(
+        { error: result.error || 'Payment initiation failed' },
+        { status: 502 }
+      )
+    }
 
+    // For Stripe demo we already returned above; this branch handles:
+    //  - Real Stripe Checkout (status: redirect_required)
+    //  - Waafi Pay (status: redirect_required)
+    //  - Manual / Bank Transfer (status: pending - admin confirms later)
     return NextResponse.json(
       {
-        sessionId: sessionResult.sessionId,
-        url: sessionResult.url,
+        success: true,
+        method: requestedMethod,
+        status: result.status,
+        // Stripe-style fields, kept for UI backward compatibility:
+        sessionId: result.sessionId,
+        url: result.redirectUrl,
+        // New generic fields:
+        redirectUrl: result.redirectUrl,
+        transactionId: result.transactionId,
+        paymentId: result.paymentId,
         demo: false,
-        paymentId: payment.id,
-        message: 'Redirecting to Stripe Checkout…',
+        message:
+          result.status === 'redirect_required'
+            ? `Redirecting to ${activeMethod.displayName}…`
+            : result.status === 'pending'
+              ? 'Your payment is pending admin confirmation. You will be notified once approved.'
+              : 'Payment initiated.',
       },
       { status: 201 }
     )

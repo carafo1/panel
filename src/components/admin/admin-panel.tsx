@@ -23,6 +23,14 @@ import { Progress } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import {
   Users,
   DollarSign,
   Server,
@@ -38,8 +46,15 @@ import {
   CheckCircle2,
   XCircle,
   Clock,
+  CreditCard,
+  ChevronDown,
+  Crown,
+  User as UserIcon,
+  Building2,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { useAuthStore } from '@/store/auth-store'
+import { PaymentMethodsPanel } from '@/components/admin/payment-methods-panel'
 
 // ── Types ──────────────────────────────────────────────────────────────
 interface Stats {
@@ -124,19 +139,53 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 // ── Badge helpers ──────────────────────────────────────────────────────
+//
+// Roles: super_admin (highest), admin, client, user. Each gets a distinct
+// colour so admins can spot privileged users at a glance.
+const ROLE_STYLES: Record<
+  string,
+  { className: string; icon?: React.ElementType }
+> = {
+  super_admin: {
+    className: 'bg-purple-100 text-purple-700 border-purple-200',
+    icon: Crown,
+  },
+  admin: {
+    className: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+    icon: ShieldCheck,
+  },
+  client: {
+    className: 'bg-blue-100 text-blue-700 border-blue-200',
+    icon: Building2,
+  },
+  user: {
+    className: 'bg-gray-100 text-gray-700 border-gray-200',
+    icon: UserIcon,
+  },
+}
+
+function roleLabel(role: string): string {
+  switch (role) {
+    case 'super_admin':
+      return 'Super Admin'
+    case 'admin':
+      return 'Admin'
+    case 'client':
+      return 'Client'
+    case 'user':
+      return 'User'
+    default:
+      return role.charAt(0).toUpperCase() + role.slice(1)
+  }
+}
+
 function RoleBadge({ role }: { role: string }) {
-  const isAdmin = role === 'admin'
+  const cfg = ROLE_STYLES[role] || ROLE_STYLES.user
+  const Icon = cfg.icon
   return (
-    <Badge
-      variant="outline"
-      className={
-        isAdmin
-          ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
-          : 'bg-gray-100 text-gray-700 border-gray-200'
-      }
-    >
-      {isAdmin && <ShieldCheck className="size-3 mr-1" />}
-      {role.charAt(0).toUpperCase() + role.slice(1)}
+    <Badge variant="outline" className={cfg.className}>
+      {Icon && <Icon className="size-3 mr-1" />}
+      {roleLabel(role)}
     </Badge>
   )
 }
@@ -185,6 +234,13 @@ export function AdminPanel() {
   const [userSearch, setUserSearch] = useState('')
   const [jobFilter, setJobFilter] = useState('all')
   const [retryLoading, setRetryLoading] = useState<string | null>(null)
+  const [roleLoading, setRoleLoading] = useState<string | null>(null)
+
+  // Current viewer role — used to gate the super_admin-only Payment
+  // Methods tab and the inline role-change dropdown.
+  const currentRole = useAuthStore((s) => s.user?.role || '')
+  const currentUserId = useAuthStore((s) => s.user?.id || '')
+  const isSuperAdmin = currentRole === 'super_admin'
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
@@ -222,6 +278,37 @@ export function AdminPanel() {
       toast.error(err instanceof Error ? err.message : 'Retry failed')
     } finally {
       setRetryLoading(null)
+    }
+  }
+
+  // ── Change a user's role (super_admin only) ───────────────────────
+  // Calls PATCH /api/admin/users/[userId]/role with the new role. The
+  // API prevents self role-change so we mirror that check client-side
+  // for a snappier UX.
+  const handleChangeRole = async (userId: string, newRole: string) => {
+    if (userId === currentUserId) {
+      toast.error('You cannot change your own role')
+      return
+    }
+    setRoleLoading(userId)
+    try {
+      const res = await apiFetch<{ success: boolean; user: { id: string; role: string } }>(
+        `/admin/users/${userId}/role`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({ role: newRole }),
+        }
+      )
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.id === res.user.id ? { ...u, role: res.user.role } : u
+        )
+      )
+      toast.success(`Role updated to ${roleLabel(newRole)}`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update role')
+    } finally {
+      setRoleLoading(null)
     }
   }
 
@@ -316,10 +403,16 @@ export function AdminPanel() {
 
       {/* ── Tabbed sections ────────────────────────────────────────── */}
       <Tabs defaultValue="users" className="space-y-4">
-        <TabsList>
+        <TabsList className="flex flex-wrap">
           <TabsTrigger value="users">Users</TabsTrigger>
           <TabsTrigger value="jobs">Job Queue</TabsTrigger>
           <TabsTrigger value="servers">Servers</TabsTrigger>
+          {isSuperAdmin && (
+            <TabsTrigger value="payment-methods">
+              <CreditCard className="size-4 mr-1.5" />
+              Payment Methods
+            </TabsTrigger>
+          )}
         </TabsList>
 
         {/* ── Users Tab ──────────────────────────────────────────────── */}
@@ -355,12 +448,13 @@ export function AdminPanel() {
                       <TableHead>Plan</TableHead>
                       <TableHead>Projects</TableHead>
                       <TableHead>Joined</TableHead>
+                      {isSuperAdmin && <TableHead className="text-right">Actions</TableHead>}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {filteredUsers.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                        <TableCell colSpan={isSuperAdmin ? 7 : 6} className="text-center py-8 text-muted-foreground">
                           No users found
                         </TableCell>
                       </TableRow>
@@ -372,7 +466,43 @@ export function AdminPanel() {
                             {u.email}
                           </TableCell>
                           <TableCell>
-                            <RoleBadge role={u.role} />
+                            {isSuperAdmin && u.id !== currentUserId ? (
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <button
+                                    className="inline-flex items-center gap-1 rounded-md border bg-background px-2 py-1 text-xs font-medium hover:bg-muted transition-colors disabled:opacity-50"
+                                    disabled={roleLoading === u.id}
+                                  >
+                                    {roleLoading === u.id ? (
+                                      <Loader2 className="size-3 animate-spin" />
+                                    ) : (
+                                      <RoleBadge role={u.role} />
+                                    )}
+                                    <ChevronDown className="size-3 ml-0.5 text-muted-foreground" />
+                                  </button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="start">
+                                  <DropdownMenuLabel>Change role</DropdownMenuLabel>
+                                  <DropdownMenuSeparator />
+                                  {(['super_admin', 'admin', 'client', 'user'] as const).map(
+                                    (r) => (
+                                      <DropdownMenuItem
+                                        key={r}
+                                        onClick={() => handleChangeRole(u.id, r)}
+                                        className={u.role === r ? 'bg-muted/60' : ''}
+                                      >
+                                        <RoleBadge role={r} />
+                                        {u.role === r && (
+                                          <CheckCircle2 className="size-3.5 ml-auto text-emerald-600" />
+                                        )}
+                                      </DropdownMenuItem>
+                                    )
+                                  )}
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            ) : (
+                              <RoleBadge role={u.role} />
+                            )}
                           </TableCell>
                           <TableCell>
                             {u.activeSubscription ? (
@@ -389,6 +519,19 @@ export function AdminPanel() {
                           <TableCell className="text-xs text-muted-foreground">
                             {new Date(u.createdAt).toLocaleDateString()}
                           </TableCell>
+                          {isSuperAdmin && (
+                            <TableCell className="text-right">
+                              {u.id === currentUserId ? (
+                                <span className="text-xs text-muted-foreground italic">
+                                  You
+                                </span>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">
+                                  Use role menu
+                                </span>
+                              )}
+                            </TableCell>
+                          )}
                         </TableRow>
                       ))
                     )}
@@ -568,6 +711,13 @@ export function AdminPanel() {
             </div>
           )}
         </TabsContent>
+
+        {/* ── Payment Methods Tab (super_admin only) ─────────────────── */}
+        {isSuperAdmin && (
+          <TabsContent value="payment-methods">
+            <PaymentMethodsPanel />
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   )

@@ -53,7 +53,8 @@ export async function POST(request: Request) {
           { status: 401 }
         )
       }
-      if (decoded.role !== 'admin') {
+      // Allow both super_admin and admin (backward compatible).
+      if (decoded.role !== 'admin' && decoded.role !== 'super_admin') {
         return NextResponse.json(
           { error: 'Admin privileges required to trigger job processing' },
           { status: 403 }

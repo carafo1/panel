@@ -12,7 +12,7 @@ model User {
   email        String        @unique
   name         String
   password     String
-  role         String        @default("user") // user, admin
+  role         String        @default("user") // "super_admin", "client", "user", "admin"
   emailVerified           Boolean  @default(false)
   emailVerificationToken  String?
   avatar                  String?
@@ -36,6 +36,7 @@ model User {
   webhooks           Webhook[]
   pipelines          Pipeline[]
   auditLogs          AuditLog[]
+  provisioningJobs   ProvisioningJob[]
 }
 
 model Plan {
@@ -85,6 +86,8 @@ model Payment {
   currency        String   @default("usd")
   status          String   @default("pending") // pending, completed, failed, refunded
   type            String   // hosting, domain, both
+  method          String   @default("stripe") // "stripe", "waafi", "manual"
+  transactionId   String?  // external transaction ID (Stripe session, Waafi ref, manual ref)
   stripePaymentId String?
   stripeInvoiceId String?
   metadata        String?  // JSON string for extra data
@@ -101,6 +104,7 @@ model Project {
   slug         String
   description  String?
   framework    String   @default("nextjs") // nextjs, react, node, static
+  stack        String   @default("nodejs") // "nodejs", "php", "python", "docker", "wordpress"
   status       String   @default("creating") // creating, running, stopped, error
   coolifyId    String?  // Coolify project ID
   serverId     String?
@@ -148,7 +152,10 @@ model Domain {
   automationLogs AutomationLog[]
   provider           String   @default("deployhub") // "deployhub", "dynadot"
   externalId         String?  // Dynadot domain ID
+  emailHosted        Boolean  @default(false)
+  mailcowDomainId    String?
   verification       DomainVerification?
+  mailboxes          EmailMailbox[]
 }
 
 model DnsRecord {
@@ -496,4 +503,104 @@ model DomainVerification {
   domain       Domain   @relation(fields: [domainId], references: [id], onDelete: Cascade)
 
   @@index([domainId])
+}
+
+model ProvisioningJob {
+  id            String   @id @default(cuid())
+  userId        String
+  domainName    String   // the domain being provisioned
+  stack         String   // "nodejs", "php", "python", "docker", "wordpress"
+  includeEmail  Boolean  @default(true)
+  includeHosting Boolean @default(true)
+  status        String   @default("pending") // "pending", "running", "success", "failed", "rolled_back"
+  currentStep   String   @default("init") // "init", "domain", "dns", "hosting", "email", "verify", "done"
+
+  // Structured result (JSON string)
+  result        String?  // { domain_status, hosting_status, email_status, dns_status, credentials, overall_status }
+
+  // Error tracking
+  error         String?
+  errorCode     String?
+
+  // Rollback tracking
+  rollbackStartedAt DateTime?
+  rollbackCompletedAt DateTime?
+  rollbackSteps     String?  // JSON array of completed steps for rollback
+
+  startedAt     DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  steps         ProvisioningStep[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model ProvisioningStep {
+  id              String   @id @default(cuid())
+  jobId           String
+  stepName        String   // "domain_register", "dns_configure", "hosting_provision", "email_provision", "verify"
+  stepOrder       Int      // 1, 2, 3, 4, 5
+  status          String   @default("pending") // "pending", "running", "success", "failed", "skipped", "rolled_back"
+
+  // Step-specific data
+  input           String?  // JSON string of input params
+  output          String?  // JSON string of step result
+  error           String?
+
+  // Retry tracking
+  attempts        Int      @default(0)
+  maxAttempts     Int      @default(3)
+  lastAttemptAt   DateTime?
+
+  // Timing
+  startedAt       DateTime?
+  completedAt     DateTime?
+  duration        Int?     // milliseconds
+  createdAt       DateTime @default(now())
+
+  job             ProvisioningJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+  @@index([stepOrder])
+}
+
+model EmailMailbox {
+  id            String   @id @default(cuid())
+  domainId      String
+  address       String   @unique // full email address e.g. "admin@example.com"
+  localPart     String   // "admin", "info", "support"
+  password      String   // encrypted (AES-256-GCM)
+  quota         Int      @default(1073741824) // 1GB in bytes
+  active        Boolean  @default(true)
+  isDefault     Boolean  @default(false) // true for admin mailbox
+
+  // Mailcow tracking
+  mailcowId     String?  // Mailcow mailbox ID
+
+  // DKIM info stored on domain level, but cache here for quick access
+  dkimEnabled   Boolean  @default(true)
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  domain        Domain   @relation(fields: [domainId], references: [id], onDelete: Cascade)
+
+  @@index([domainId])
+}
+
+model PaymentMethodSetting {
+  id          String   @id @default(cuid())
+  method      String   @unique // "stripe", "waafi", "manual"
+  displayName String   // "Credit Card (Stripe)", "Waafi Pay", "Bank Transfer"
+  active      Boolean  @default(false)
+  config      String?  // JSON string of method-specific config (e.g., Waafi merchant ID)
+  icon        String?  // icon name or emoji
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }

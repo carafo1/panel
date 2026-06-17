@@ -21,22 +21,24 @@ const globalForPrisma = globalThis as unknown as {
  * even if the dev server's Turbopack has cached an older copy from
  * before `prisma db push` regenerated the client.
  */
-const SCHEMA_VERSION = '2025-06-18-deployment-coolify-id'
+const SCHEMA_VERSION = '2025-06-19-provisioning-ui'
 
 // Bust the require cache for the generated Prisma client so the latest
 // schema (e.g. the new `stripeCustomerId` column on Subscription) is
 // picked up without a full dev-server restart.
 try {
-   
   const generatedClientPath = require.resolve('@prisma/client/index.js')
   if (generatedClientPath) {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const path = require('path')
     const generatedDir = path.dirname(generatedClientPath)
-     
+
     Object.keys(require.cache).forEach((key) => {
-      if (key.startsWith(generatedDir) || key.includes('.prisma' + path.sep + 'client')) {
-         
+      if (
+        key.startsWith(generatedDir) ||
+        key.includes('.prisma' + path.sep + 'client') ||
+        key.includes('@prisma' + path.sep + 'client')
+      ) {
         delete require.cache[key]
       }
     })

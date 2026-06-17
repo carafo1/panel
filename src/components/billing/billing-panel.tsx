@@ -44,6 +44,8 @@ import {
   Zap,
   Crown,
   Building2,
+  Building,
+  Wallet,
   ArrowRight,
   Globe,
   Server,
@@ -54,6 +56,7 @@ import {
   Settings2,
   Ban,
   ShieldCheck,
+  AlertTriangle,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -115,6 +118,11 @@ interface CheckoutResult {
   domain?: { id: string; name: string; status: string; registrar: string } | null
   deployment?: { id: string; status: string; deployUrl: string | null; branch: string } | null
   automation?: { processed: boolean; actionsCount: number; results: unknown[] }
+  // Unified multi-payment fields (#18 / #22)
+  method?: string // "stripe" | "waafi" | "manual"
+  status?: string // "redirect_required" | "pending" | "completed"
+  redirectUrl?: string | null
+  transactionId?: string
 }
 
 interface PortalResult {
@@ -188,6 +196,39 @@ const FRAMEWORKS = [
   { value: 'static', label: 'Static Site' },
 ]
 
+// ── Payment method helpers ─────────────────────────────────────────────
+interface PaymentMethodOption {
+  method: string // "stripe" | "waafi" | "manual"
+  displayName: string
+  icon: string | null
+  sortOrder: number
+  config: Record<string, unknown> | null
+}
+
+const METHOD_ICON_MAP: Record<string, React.ElementType> = {
+  'credit-card': CreditCard,
+  creditcard: CreditCard,
+  stripe: CreditCard,
+  card: CreditCard,
+  wallet: Wallet,
+  waafi: Wallet,
+  banknote: Building,
+  bank: Building,
+  building: Building,
+  manual: Building,
+}
+
+function getMethodIcon(method: string, icon: string | null): React.ElementType {
+  if (icon) {
+    const key = icon.toLowerCase().trim()
+    if (METHOD_ICON_MAP[key]) return METHOD_ICON_MAP[key]
+  }
+  if (method === 'stripe') return CreditCard
+  if (method === 'waafi') return Wallet
+  if (method === 'manual') return Building
+  return CreditCard
+}
+
 // ── Status badge helper ────────────────────────────────────────────────
 function PaymentStatusBadge({ status }: { status: string }) {
   const map: Record<string, { className: string; label: string }> = {
@@ -227,6 +268,46 @@ function CheckoutDialog({
   const [loading, setLoading] = useState(false)
   const [success, setSuccess] = useState<CheckoutResult | null>(null)
 
+  // Payment-method selection state.
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethodOption[]>([])
+  const [selectedMethod, setSelectedMethod] = useState<string>('')
+  const [methodsLoading, setMethodsLoading] = useState(false)
+  const [methodsError, setMethodsError] = useState<string | null>(null)
+
+  // Fetch active payment methods whenever the dialog opens. Public endpoint
+  // (no auth) — returns the methods the super admin has enabled.
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    setMethodsLoading(true)
+    setMethodsError(null)
+    fetch('/api/billing/methods')
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error('Failed to load payment methods'))))
+      .then((data: { methods: PaymentMethodOption[] }) => {
+        if (cancelled) return
+        const methods = data.methods || []
+        setPaymentMethods(methods)
+        // Auto-select when there's exactly one active method.
+        if (methods.length === 1) {
+          setSelectedMethod(methods[0]!.method)
+        } else if (methods.length > 0 && !methods.find((m) => m.method === selectedMethod)) {
+          // Default to the first method if the current selection is no longer valid.
+          setSelectedMethod(methods[0]!.method)
+        }
+      })
+      .catch((err) => {
+        if (cancelled) return
+        setMethodsError(err instanceof Error ? err.message : 'Failed to load payment methods')
+        setPaymentMethods([])
+      })
+      .finally(() => {
+        if (!cancelled) setMethodsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [open])
+
   const showDomain = purchaseType === 'domain' || purchaseType === 'both'
   const showProject = purchaseType === 'hosting' || purchaseType === 'both'
 
@@ -245,6 +326,10 @@ function CheckoutDialog({
       toast.error('Please enter a project name')
       return
     }
+    if (!selectedMethod) {
+      toast.error('Please select a payment method')
+      return
+    }
 
     setLoading(true)
     try {
@@ -253,23 +338,39 @@ function CheckoutDialog({
         body: JSON.stringify({
           planId: plan.id,
           type: purchaseType,
+          method: selectedMethod,
           domainName: showDomain ? domainName.trim() : undefined,
           projectName: showProject ? projectName.trim() : undefined,
           framework: showProject ? framework : undefined,
         }),
       })
 
+      // ── Manual payment: status 'pending' — no resources provisioned yet.
+      // Show the pending state with bank details / reference number.
+      if (result.status === 'pending' && result.method === 'manual') {
+        setSuccess(result)
+        toast.success('Payment recorded. Awaiting admin confirmation.')
+        return
+      }
+
       // ── Real Stripe mode: redirect to Stripe Checkout ─────────
+      // Backward-compat: existing demo-mode response has `demo: true` +
+      // provisioned resources. Real Stripe responses have a `url`.
       if (!result.demo && result.url) {
         toast.success('Redirecting to Stripe Checkout…')
-        // Persist a flag so the panel can show a success toast when the
-        // user comes back from Stripe
         try {
           sessionStorage.setItem('deployhub_pending_checkout', result.sessionId || '1')
         } catch {
           /* ignore */
         }
         window.location.href = result.url
+        return
+      }
+
+      // ── Waafi (or any unified redirect_required response) ──────
+      if (result.status === 'redirect_required' && result.redirectUrl) {
+        toast.success('Redirecting to payment gateway…')
+        window.location.href = result.redirectUrl
         return
       }
 
@@ -292,6 +393,7 @@ function CheckoutDialog({
     setDomainName('')
     setProjectName('')
     setFramework('nextjs')
+    setSelectedMethod('')
     onOpenChange(false)
   }
 
@@ -303,78 +405,138 @@ function CheckoutDialog({
         {success ? (
           // ── Success State ──────────────────────────────────────
           <div className="space-y-4">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2 text-emerald-700">
-                <Check className="size-5" />
-                Purchase Complete!
-              </DialogTitle>
-              <DialogDescription>
-                Your resources have been provisioned automatically.
-              </DialogDescription>
-            </DialogHeader>
+            {/* ── Manual payment pending ── */}
+            {success.method === 'manual' && success.status === 'pending' ? (
+              <>
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2 text-amber-700">
+                    <AlertTriangle className="size-5" />
+                    Payment Awaiting Confirmation
+                  </DialogTitle>
+                  <DialogDescription>
+                    Your manual payment has been recorded. Your subscription
+                    will be activated once an admin confirms the transfer.
+                  </DialogDescription>
+                </DialogHeader>
 
-            <div className="space-y-3 rounded-lg border p-4 bg-emerald-50/50">
-              {success.project && (
-                <div className="flex items-start gap-3">
-                  <Server className="size-5 text-emerald-600 mt-0.5 shrink-0" />
-                  <div>
-                    <p className="font-medium text-sm">Project Created</p>
-                    <p className="text-sm text-muted-foreground">{success.project.name}</p>
-                    <p className="text-xs text-emerald-600 mt-1">
-                      https://{success.project.subdomain}
-                    </p>
-                    {success.project.customDomain && (
-                      <p className="text-xs text-emerald-600">
-                        Custom: {success.project.customDomain}
+                <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50/50 p-4">
+                  <div className="flex items-start gap-3">
+                    <Building className="size-5 text-amber-600 mt-0.5 shrink-0" />
+                    <div>
+                      <p className="font-medium text-sm">Reference Number</p>
+                      <p className="text-sm font-mono text-amber-700 mt-0.5">
+                        {success.transactionId || '—'}
                       </p>
-                    )}
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Include this reference on your bank transfer so we can
+                        match it to your account.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3">
+                    <CreditCard className="size-5 text-amber-600 mt-0.5 shrink-0" />
+                    <div>
+                      <p className="font-medium text-sm">Amount Due</p>
+                      <p className="text-sm text-amber-700 mt-0.5">
+                        ${calculateTotal().toFixed(2)}{' '}
+                        {purchaseType !== 'domain' ? '/mo' : '/yr'}
+                      </p>
+                    </div>
                   </div>
                 </div>
-              )}
 
-              {success.domain && (
-                <div className="flex items-start gap-3">
-                  <Globe className="size-5 text-emerald-600 mt-0.5 shrink-0" />
-                  <div>
-                    <p className="font-medium text-sm">Domain Registered</p>
-                    <p className="text-sm text-muted-foreground">{success.domain.name}</p>
-                    <p className="text-xs text-emerald-600 mt-1">
-                      Status: {success.domain.status}
-                    </p>
-                  </div>
+                <p className="text-xs text-muted-foreground">
+                  You will receive an email notification once the payment is
+                  verified. You can close this dialog — your pending payment is
+                  visible in the Payment History table.
+                </p>
+
+                <DialogFooter>
+                  <Button
+                    onClick={handleClose}
+                    className="bg-amber-600 hover:bg-amber-700 text-white"
+                  >
+                    Done
+                  </Button>
+                </DialogFooter>
+              </>
+            ) : (
+              <>
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2 text-emerald-700">
+                    <Check className="size-5" />
+                    Purchase Complete!
+                  </DialogTitle>
+                  <DialogDescription>
+                    Your resources have been provisioned automatically.
+                  </DialogDescription>
+                </DialogHeader>
+
+                <div className="space-y-3 rounded-lg border p-4 bg-emerald-50/50">
+                  {success.project && (
+                    <div className="flex items-start gap-3">
+                      <Server className="size-5 text-emerald-600 mt-0.5 shrink-0" />
+                      <div>
+                        <p className="font-medium text-sm">Project Created</p>
+                        <p className="text-sm text-muted-foreground">{success.project.name}</p>
+                        <p className="text-xs text-emerald-600 mt-1">
+                          https://{success.project.subdomain}
+                        </p>
+                        {success.project.customDomain && (
+                          <p className="text-xs text-emerald-600">
+                            Custom: {success.project.customDomain}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {success.domain && (
+                    <div className="flex items-start gap-3">
+                      <Globe className="size-5 text-emerald-600 mt-0.5 shrink-0" />
+                      <div>
+                        <p className="font-medium text-sm">Domain Registered</p>
+                        <p className="text-sm text-muted-foreground">{success.domain.name}</p>
+                        <p className="text-xs text-emerald-600 mt-1">
+                          Status: {success.domain.status}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {success.deployment && (
+                    <div className="flex items-start gap-3">
+                      <Package className="size-5 text-emerald-600 mt-0.5 shrink-0" />
+                      <div>
+                        <p className="font-medium text-sm">Initial Deployment</p>
+                        <p className="text-xs text-emerald-600 mt-1">
+                          Status: {success.deployment.status} | Branch: {success.deployment.branch}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {success.subscription && (
+                    <div className="flex items-start gap-3">
+                      <CreditCard className="size-5 text-emerald-600 mt-0.5 shrink-0" />
+                      <div>
+                        <p className="font-medium text-sm">Subscription Active</p>
+                        <p className="text-sm text-muted-foreground">
+                          {success.subscription.planName} Plan
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              )}
 
-              {success.deployment && (
-                <div className="flex items-start gap-3">
-                  <Package className="size-5 text-emerald-600 mt-0.5 shrink-0" />
-                  <div>
-                    <p className="font-medium text-sm">Initial Deployment</p>
-                    <p className="text-xs text-emerald-600 mt-1">
-                      Status: {success.deployment.status} | Branch: {success.deployment.branch}
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {success.subscription && (
-                <div className="flex items-start gap-3">
-                  <CreditCard className="size-5 text-emerald-600 mt-0.5 shrink-0" />
-                  <div>
-                    <p className="font-medium text-sm">Subscription Active</p>
-                    <p className="text-sm text-muted-foreground">
-                      {success.subscription.planName} Plan
-                    </p>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <DialogFooter>
-              <Button onClick={handleClose} className="bg-emerald-600 hover:bg-emerald-700 text-white">
-                Done
-              </Button>
-            </DialogFooter>
+                <DialogFooter>
+                  <Button onClick={handleClose} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+                    Done
+                  </Button>
+                </DialogFooter>
+              </>
+            )}
           </div>
         ) : (
           // ── Checkout Form ──────────────────────────────────────
@@ -501,6 +663,74 @@ function CheckoutDialog({
               </div>
             )}
 
+            {/* Payment method picker */}
+            <div className="space-y-2">
+              <Label>Payment Method</Label>
+              {methodsLoading ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground rounded-lg border p-3">
+                  <Loader2 className="size-4 animate-spin" />
+                  Loading payment methods…
+                </div>
+              ) : methodsError ? (
+                <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                  {methodsError}
+                </div>
+              ) : paymentMethods.length === 0 ? (
+                <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">
+                  <AlertTriangle className="size-4 mt-0.5 shrink-0" />
+                  <div>
+                    <span className="font-semibold">
+                      No payment methods available.
+                    </span>{' '}
+                    Contact support to complete your purchase.
+                  </div>
+                </div>
+              ) : (
+                <RadioGroup
+                  value={selectedMethod}
+                  onValueChange={setSelectedMethod}
+                  className={`grid gap-2 ${
+                    paymentMethods.length === 1
+                      ? 'grid-cols-1'
+                      : paymentMethods.length === 2
+                        ? 'grid-cols-2'
+                        : 'grid-cols-1 sm:grid-cols-3'
+                  }`}
+                >
+                  {paymentMethods.map((m) => {
+                    const MethodIcon = getMethodIcon(m.method, m.icon)
+                    const isSelected = selectedMethod === m.method
+                    return (
+                      <Label
+                        key={m.method}
+                        htmlFor={`pm-${m.method}`}
+                        className={`flex flex-col items-center gap-1.5 rounded-lg border p-3 cursor-pointer transition-colors hover:bg-emerald-50 ${
+                          isSelected ? 'border-emerald-500 bg-emerald-50' : ''
+                        }`}
+                      >
+                        <RadioGroupItem
+                          value={m.method}
+                          id={`pm-${m.method}`}
+                          className="sr-only"
+                        />
+                        <MethodIcon className="size-5 text-emerald-600" />
+                        <span className="text-xs font-medium text-center leading-tight">
+                          {m.displayName}
+                        </span>
+                      </Label>
+                    )
+                  })}
+                </RadioGroup>
+              )}
+              {selectedMethod === 'manual' && paymentMethods.find((m) => m.method === 'manual') && (
+                <p className="text-xs text-muted-foreground">
+                  Manual payments are confirmed by an admin after proof of
+                  transfer is received. Your subscription activates after
+                  confirmation.
+                </p>
+              )}
+            </div>
+
             {/* Total */}
             <div className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50/50 p-3">
               <span className="text-sm font-medium">Total</span>
@@ -516,7 +746,13 @@ function CheckoutDialog({
               </Button>
               <Button
                 onClick={handlePurchase}
-                disabled={loading}
+                disabled={
+                  loading ||
+                  methodsLoading ||
+                  !!methodsError ||
+                  paymentMethods.length === 0 ||
+                  !selectedMethod
+                }
                 className="bg-emerald-600 hover:bg-emerald-700 text-white"
               >
                 {loading ? (

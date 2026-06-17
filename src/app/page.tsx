@@ -48,12 +48,14 @@ import WebhooksPanel from '@/components/webhooks/webhooks-panel'
 import GithubPanel from '@/components/github/github-panel'
 import AssistantPanel from '@/components/assistant/assistant-panel'
 import UptimePanel from '@/components/monitoring/uptime-panel'
+import ProvisioningPanel from '@/components/provisioning/provisioning-panel'
 import { CommandPalette } from '@/components/command-palette'
-import { Search } from 'lucide-react'
+import { Search, Zap } from 'lucide-react'
 
 // ── Sidebar nav items ──────────────────────────────────────────────────
 const NAV_ITEMS: { id: DashboardTab; label: string; icon: React.ElementType; adminOnly?: boolean }[] = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+  { id: 'provisioning', label: 'Provisioning', icon: Zap },
   { id: 'hosting', label: 'Hosting', icon: Server },
   { id: 'domains', label: 'Domains', icon: Globe },
   { id: 'deployments', label: 'Deployments', icon: Rocket },
@@ -121,6 +123,8 @@ function Dashboard() {
           switch (dashboardTab) {
             case 'overview':
               return <OverviewPanel />
+            case 'provisioning':
+              return <ProvisioningPanel />
             case 'hosting':
               return <HostingPanel />
             case 'domains':
@@ -138,7 +142,7 @@ function Dashboard() {
             case 'github':
               return <GithubPanel />
             case 'admin':
-              return user?.role === 'admin' ? <AdminPanel /> : <OverviewPanel />
+              return user?.role === 'admin' || user?.role === 'super_admin' ? <AdminPanel /> : <OverviewPanel />
             case 'teams':
               return <TeamsPanel />
             case 'settings':
@@ -201,7 +205,7 @@ function Dashboard() {
 
         {/* Nav */}
         <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
-          {NAV_ITEMS.filter(item => !item.adminOnly || user?.role === 'admin').map((item) => {
+          {NAV_ITEMS.filter(item => !item.adminOnly || user?.role === 'admin' || user?.role === 'super_admin').map((item) => {
             const Icon = item.icon
             const isActive = dashboardTab === item.id
             return (
@@ -263,6 +267,7 @@ function Dashboard() {
             {dashboardTab === 'deployments' && <Badge variant="outline" className="text-[10px] hidden sm:inline-flex">CI/CD</Badge>}
             {dashboardTab === 'github' && <Badge variant="outline" className="text-[10px] hidden sm:inline-flex">Repos</Badge>}
             {dashboardTab === 'monitoring' && <Badge variant="outline" className="text-[10px] hidden sm:inline-flex">Uptime</Badge>}
+            {dashboardTab === 'provisioning' && <Badge variant="outline" className="text-[10px] hidden sm:inline-flex bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30">Auto</Badge>}
           </div>
           <div className="ml-auto flex items-center gap-2">
             <button

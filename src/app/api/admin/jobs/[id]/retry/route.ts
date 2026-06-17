@@ -26,8 +26,8 @@ export async function POST(
       )
     }
 
-    // Check admin role
-    if (decoded.role !== 'admin') {
+    // Check admin role (super_admin OR admin - backward compatible)
+    if (decoded.role !== 'admin' && decoded.role !== 'super_admin') {
       return NextResponse.json(
         { error: 'Admin access required' },
         { status: 403 }
