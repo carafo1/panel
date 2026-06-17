@@ -37,6 +37,10 @@ model User {
   pipelines          Pipeline[]
   auditLogs          AuditLog[]
   provisioningJobs   ProvisioningJob[]
+  domainOrders       DomainOrder[]
+  domainInvoices     Invoice[]
+  domainLogs         DomainLog[]
+  domainPriceUpdates DomainPrice[]  @relation("PriceUpdatedBy")
 }
 
 model Plan {
@@ -136,13 +140,17 @@ model Domain {
   userId          String
   projectId       String?
   name            String   @unique // e.g. example.com
-  status          String   @default("pending") // pending, active, expired, transferring
-  registrar       String   @default("openprovider")
+  status          String   @default("pending") // pending, active, expired, transferring, suspended, deleted
+  registrar       String   @default("dynadot")
   registeredAt    DateTime?
   expiresAt       DateTime?
   autoRenew       Boolean  @default(true)
   whoisPrivacy    Boolean  @default(true)
+  locked          Boolean  @default(true) // registrar lock
   nameservers     String?  // JSON array
+  authCode        String?  // EPP auth code (encrypted at rest)
+  transferStatus  String?  // pending, completed, failed
+  premium         Boolean  @default(false)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -150,12 +158,18 @@ model Domain {
   project      Project?      @relation(fields: [projectId], references: [id])
   dnsRecords   DnsRecord[]
   automationLogs AutomationLog[]
-  provider           String   @default("deployhub") // "deployhub", "dynadot"
+  provider           String   @default("dynadot") // "deployhub", "dynadot"
   externalId         String?  // Dynadot domain ID
   emailHosted        Boolean  @default(false)
   mailcowDomainId    String?
   verification       DomainVerification?
   mailboxes          EmailMailbox[]
+  orders             DomainOrder[]
+  invoices           Invoice[]
+  renewals           Renewal[]
+  contacts           DomainContact[]
+  logs               DomainLog[]
+  nameserverEntries  NameserverEntry[]
 }
 
 model DnsRecord {
@@ -603,4 +617,173 @@ model PaymentMethodSetting {
   sortOrder   Int      @default(0)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Domain Reseller Module (Dynadot)
+// ────────────────────────────────────────────────────────────────────────────
+
+model DomainPrice {
+  id              String   @id @default(cuid())
+  tld             String   @unique // e.g. ".com", ".net" (with leading dot)
+  wholesale       Float    // Dynadot wholesale price in USD
+  markup          Float    @default(6.50) // automatic markup in USD
+  registration    Float    // selling registration price (wholesale + markup)
+  renewal         Float    // selling renewal price
+  transfer        Float    // selling transfer price
+  currency        String   @default("USD")
+  premium         Boolean  @default(false)
+  active          Boolean  @default(true)
+  lastSyncedAt    DateTime?
+  updatedById     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  updatedBy       User?    @relation("PriceUpdatedBy", fields: [updatedById], references: [id])
+
+  @@index([active])
+}
+
+model DomainOrder {
+  id              String   @id @default(cuid())
+  userId          String
+  domainId        String?
+  domainName      String   // the domain being purchased
+  type            String   // "register", "renew", "transfer"
+  duration        Int      @default(1) // years
+  status          String   @default("pending") // pending, completed, failed, refunded
+  unitPrice       Float    // selling price per year
+  totalAmount     Float    // total amount charged
+  currency        String   @default("USD")
+  provider        String   @default("dynadot")
+  providerOrderId String?  // Dynadot order ID
+  metadata        String?  // JSON string of extra data
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  domain          Domain?  @relation(fields: [domainId], references: [id])
+  invoices        Invoice[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+model Invoice {
+  id              String   @id @default(cuid())
+  number          String   @unique // e.g. INV-2024-0001
+  userId          String
+  orderId         String?
+  domainId        String?
+  items           String   // JSON array of line items
+  subtotal        Float
+  tax             Float    @default(0)
+  total           Float
+  currency        String   @default("USD")
+  status          String   @default("unpaid") // unpaid, paid, void, refunded
+  paidAt          DateTime?
+  dueDate         DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  order           DomainOrder? @relation(fields: [orderId], references: [id])
+  domain          Domain?  @relation(fields: [domainId], references: [id])
+  transactions    Transaction[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+model Transaction {
+  id              String   @id @default(cuid())
+  invoiceId       String
+  userId          String
+  gateway         String   // "stripe", "waafi", "manual", "balance"
+  amount          Float
+  currency        String   @default("USD")
+  status          String   @default("pending") // pending, completed, failed, refunded
+  reference       String?  // gateway transaction reference
+  metadata        String?  // JSON string
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  invoice         Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@index([userId])
+}
+
+model Renewal {
+  id              String   @id @default(cuid())
+  domainId        String
+  userId          String
+  years           Int      @default(1)
+  pricePerYear    Float
+  totalAmount     Float
+  status          String   @default("pending") // pending, completed, failed
+  providerRenewId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  domain          Domain   @relation(fields: [domainId], references: [id], onDelete: Cascade)
+
+  @@index([domainId])
+  @@index([status])
+}
+
+model DomainContact {
+  id              String   @id @default(cuid())
+  domainId        String
+  type            String   // "registrant", "admin", "tech", "billing"
+  firstName       String
+  lastName        String
+  email           String
+  phone           String?
+  organization    String?
+  address1        String?
+  address2        String?
+  city            String?
+  state           String?
+  postalCode      String?
+  country         String?  // ISO country code
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  domain          Domain   @relation(fields: [domainId], references: [id], onDelete: Cascade)
+
+  @@index([domainId])
+}
+
+model DomainLog {
+  id              String   @id @default(cuid())
+  domainId        String?
+  userId          String?
+  action          String   // register, renew, transfer, lock, unlock, privacy, dns, nameservers, etc.
+  status          String   @default("success") // success, failed, error
+  message         String
+  ipAddress       String?
+  metadata        String?  // JSON string
+  createdAt       DateTime @default(now())
+
+  domain          Domain?  @relation(fields: [domainId], references: [id], onDelete: SetNull)
+  user            User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([domainId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+model NameserverEntry {
+  id              String   @id @default(cuid())
+  domainId        String
+  hostname        String   // e.g. ns1.example.com
+  ip              String?  // optional IP
+  sortOrder       Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  domain          Domain   @relation(fields: [domainId], references: [id], onDelete: Cascade)
+
+  @@index([domainId])
 }

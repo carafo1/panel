@@ -1,0 +1,2002 @@
+     1→'use client'
+     2→
+     3→import { useState, useEffect, useCallback, useRef } from 'react'
+     4→import { toast } from 'sonner'
+     5→import {
+     6→  Search,
+     7→  Globe,
+     8→  ArrowLeft,
+     9→  Plus,
+    10→  Trash2,
+    11→  Link2,
+    12→  ExternalLink,
+    13→  RefreshCw,
+    14→  Shield,
+    15→  Clock,
+    16→  CheckCircle2,
+    17→  XCircle,
+    18→  Tag,
+    19→  Server,
+    20→  Lock,
+    21→  Upload,
+    22→  MapPin,
+    23→  Activity,
+    24→  Loader2,
+    25→  FileText,
+    26→  FileCheck,
+    27→  AlertTriangle,
+    28→  Radio,
+    29→  Copy,
+    30→  CloudUpload,
+    31→  ShieldCheck,
+    32→  HelpCircle,
+    33→} from 'lucide-react'
+    34→import {
+    35→  Card,
+    36→  CardContent,
+    37→  CardDescription,
+    38→  CardHeader,
+    39→  CardTitle,
+    40→} from '@/components/ui/card'
+    41→import { Button } from '@/components/ui/button'
+    42→import { Input } from '@/components/ui/input'
+    43→import { Label } from '@/components/ui/label'
+    44→import { Badge } from '@/components/ui/badge'
+    45→import { Skeleton } from '@/components/ui/skeleton'
+    46→import { Separator } from '@/components/ui/separator'
+    47→import {
+    48→  Dialog,
+    49→  DialogContent,
+    50→  DialogDescription,
+    51→  DialogFooter,
+    52→  DialogHeader,
+    53→  DialogTitle,
+    54→} from '@/components/ui/dialog'
+    55→import {
+    56→  Select,
+    57→  SelectContent,
+    58→  SelectItem,
+    59→  SelectTrigger,
+    60→  SelectValue,
+    61→} from '@/components/ui/select'
+    62→import {
+    63→  Table,
+    64→  TableBody,
+    65→  TableCell,
+    66→  TableHead,
+    67→  TableHeader,
+    68→  TableRow,
+    69→} from '@/components/ui/table'
+    70→import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+    71→import { Progress } from '@/components/ui/progress'
+    72→import { Textarea } from '@/components/ui/textarea'
+    73→import {
+    74→  Collapsible,
+    75→  CollapsibleContent,
+    76→  CollapsibleTrigger,
+    77→} from '@/components/ui/collapsible'
+    78→
+    79→// Types
+    80→interface DomainVerificationInfo {
+    81→  verified: boolean
+    82→  verifiedAt?: string | null
+    83→  code?: string
+    84→  createdAt?: string
+    85→}
+    86→
+    87→interface Domain {
+    88→  id: string
+    89→  name: string
+    90→  status: string
+    91→  registrar: string
+    92→  provider?: string // "deployhub" | "dynadot" | "custom"
+    93→  externalId?: string | null
+    94→  registeredAt?: string
+    95→  expiresAt?: string
+    96→  autoRenew: boolean
+    97→  whoisPrivacy: boolean
+    98→  nameservers: string[]
+    99→  project?: {
+   100→    id: string
+   101→    name: string
+   102→    slug: string
+   103→    subdomain: string
+   104→    status?: string
+   105→  } | null
+   106→  dnsRecords: DnsRecord[]
+   107→  verification?: DomainVerificationInfo | null
+   108→  createdAt: string
+   109→  updatedAt: string
+   110→}
+   111→
+   112→interface DnsRecord {
+   113→  id: string
+   114→  type: string
+   115→  name: string
+   116→  value: string
+   117→  ttl: number
+   118→  priority?: number | null
+   119→  proxied: boolean
+   120→  createdAt: string
+   121→  updatedAt: string
+   122→}
+   123→
+   124→interface DomainSearchResult {
+   125→  domain: string
+   126→  available: boolean
+   127→  price?: number | null
+   128→  message?: string
+   129→  suggestions?: { domain: string; available: boolean; price: number }[]
+   130→}
+   131→
+   132→interface Project {
+   133→  id: string
+   134→  name: string
+   135→  slug: string
+   136→  subdomain: string
+   137→}
+   138→
+   139→// SSL Certificate API type
+   140→interface SslCertificateApi {
+   141→  id: string
+   142→  domain: string
+   143→  issuer: string
+   144→  status: 'active' | 'pending' | 'expired' | 'renewing'
+   145→  type: 'auto' | 'custom'
+   146→  issuedAt: string
+   147→  expiresAt: string
+   148→  autoRenew: boolean
+   149→  daysRemaining: number
+   150→  fingerprint: string
+   151→  sans: string[]
+   152→  keySize: number
+   153→  protocol: string
+   154→}
+   155→
+   156→// DNS Propagation API types
+   157→interface PropagationChecker {
+   158→  location: string
+   159→  ip: string
+   160→  status: 'propagated' | 'pending' | 'failed'
+   161→  checkedAt: string
+   162→  latency?: number
+   163→}
+   164→
+   165→interface RecordPropagation {
+   166→  id: string
+   167→  type: string
+   168→  name: string
+   169→  value: string
+   170→  propagation: {
+   171→    overall: number
+   172→    checkers: PropagationChecker[]
+   173→  }
+   174→}
+   175→
+   176→interface PropagationResponse {
+   177→  domain: string
+   178→  nameservers: string[]
+   179→  records: RecordPropagation[]
+   180→  overallPropagation: number
+   181→}
+   182→
+   183→// Helpers
+   184→function getAuthHeaders(): Record<string, string> {
+   185→  const token = localStorage.getItem('deployhub_token')
+   186→  return {
+   187→    'Authorization': `Bearer ${token}`,
+   188→    'Content-Type': 'application/json',
+   189→  }
+   190→}
+   191→
+   192→function domainStatusColor(status: string) {
+   193→  switch (status) {
+   194→    case 'active':
+   195→      return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+   196→    case 'pending':
+   197→    case 'pending_verification':
+   198→    case 'transferring':
+   199→      return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
+   200→    case 'expired':
+   201→      return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+   202→    default:
+   203→      return 'bg-gray-100 text-gray-600 dark:bg-gray-800/30 dark:text-gray-400'
+   204→  }
+   205→}
+   206→
+   207→function providerLabel(provider?: string): string {
+   208→  switch (provider) {
+   209→    case 'dynadot':
+   210→      return 'Dynadot'
+   211→    case 'custom':
+   212→      return 'Custom'
+   213→    case 'deployhub':
+   214→    default:
+   215→      return 'DeployHub'
+   216→  }
+   217→}
+   218→
+   219→function providerColor(provider?: string): string {
+   220→  switch (provider) {
+   221→    case 'dynadot':
+   222→      return 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
+   223→    case 'custom':
+   224→      return 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+   225→    case 'deployhub':
+   226→    default:
+   227→      return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+   228→  }
+   229→}
+   230→
+   231→function formatDate(dateStr?: string) {
+   232→  if (!dateStr) return '-'
+   233→  try {
+   234→    return new Date(dateStr).toLocaleDateString('en-US', {
+   235→      month: 'short',
+   236→      day: 'numeric',
+   237→      year: 'numeric',
+   238→    })
+   239→  } catch {
+   240→    return dateStr
+   241→  }
+   242→}
+   243→
+   244→function formatTTL(ttl: number) {
+   245→  if (ttl >= 3600) return `${ttl / 3600}h`
+   246→  if (ttl >= 60) return `${ttl / 60}m`
+   247→  return `${ttl}s`
+   248→}
+   249→
+   250→const POPULAR_TLDS = [
+   251→  { tld: '.com', price: 12.99 },
+   252→  { tld: '.io', price: 39.99 },
+   253→  { tld: '.dev', price: 14.99 },
+   254→  { tld: '.app', price: 14.99 },
+   255→  { tld: '.net', price: 11.99 },
+   256→]
+   257→
+   258→const DNS_TYPES = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'SRV']
+   259→
+   260→// ─── Propagation Ring Component ──────────────────────────────────
+   261→
+   262→function PropagationRing({ percentage, size = 80 }: { percentage: number; size?: number }) {
+   263→  const strokeWidth = 6
+   264→  const radius = (size - strokeWidth) / 2
+   265→  const circumference = radius * 2 * Math.PI
+   266→  const offset = circumference - (percentage / 100) * circumference
+   267→
+   268→  const color =
+   269→    percentage >= 80
+   270→      ? 'text-emerald-500'
+   271→      : percentage >= 50
+   272→      ? 'text-yellow-500'
+   273→      : 'text-red-500'
+   274→
+   275→  const strokeColor =
+   276→    percentage >= 80
+   277→      ? 'stroke-emerald-500'
+   278→      : percentage >= 50
+   279→      ? 'stroke-yellow-500'
+   280→      : 'stroke-red-500'
+   281→
+   282→  return (
+   283→    <div className="relative inline-flex items-center justify-center" style={{ width: size, height: size }}>
+   284→      <svg className="transform -rotate-90" width={size} height={size}>
+   285→        <circle
+   286→          className="stroke-muted"
+   287→          strokeWidth={strokeWidth}
+   288→          fill="transparent"
+   289→          r={radius}
+   290→          cx={size / 2}
+   291→          cy={size / 2}
+   292→        />
+   293→        <circle
+   294→          className={strokeColor}
+   295→          strokeWidth={strokeWidth}
+   296→          strokeDasharray={circumference}
+   297→          strokeDashoffset={offset}
+   298→          strokeLinecap="round"
+   299→          fill="transparent"
+   300→          r={radius}
+   301→          cx={size / 2}
+   302→          cy={size / 2}
+   303→          style={{ transition: 'stroke-dashoffset 0.8s ease-in-out' }}
+   304→        />
+   305→      </svg>
+   306→      <div className={`absolute text-sm font-bold ${color}`}>
+   307→        {percentage}%
+   308→      </div>
+   309→    </div>
+   310→  )
+   311→}
+   312→
+   313→// ─── Sub-components ─────────────────────────────────────────────
+   314→
+   315→function DomainSearchSkeleton() {
+   316→  return (
+   317→    <Card>
+   318→      <CardContent className="py-6">
+   319→        <Skeleton className="h-6 w-48 mb-4" />
+   320→        <Skeleton className="h-10 w-full mb-4" />
+   321→        <Skeleton className="h-20 w-full" />
+   322→      </CardContent>
+   323→    </Card>
+   324→  )
+   325→}
+   326→
+   327→function DomainTableSkeleton() {
+   328→  return (
+   329→    <div className="space-y-2">
+   330→      <Skeleton className="h-10 w-full" />
+   331→      <Skeleton className="h-12 w-full" />
+   332→      <Skeleton className="h-12 w-full" />
+   333→    </div>
+   334→  )
+   335→}
+   336→
+   337→function AddDnsRecordDialog({
+   338→  open,
+   339→  onClose,
+   340→  domainId,
+   341→  onAdded,
+   342→}: {
+   343→  open: boolean
+   344→  onClose: () => void
+   345→  domainId: string
+   346→  onAdded: () => void
+   347→}) {
+   348→  const [type, setType] = useState('A')
+   349→  const [name, setName] = useState('')
+   350→  const [value, setValue] = useState('')
+   351→  const [ttl, setTtl] = useState('3600')
+   352→  const [loading, setLoading] = useState(false)
+   353→
+   354→  const handleAdd = async () => {
+   355→    if (!name.trim() || !value.trim()) {
+   356→      toast.error('Name and value are required')
+   357→      return
+   358→    }
+   359→    setLoading(true)
+   360→    try {
+   361→      const res = await fetch(`/api/domains/${domainId}/dns`, {
+   362→        method: 'PUT',
+   363→        headers: getAuthHeaders(),
+   364→        body: JSON.stringify({
+   365→          records: [{ type, name: name.trim(), value: value.trim(), ttl: parseInt(ttl) || 3600 }],
+   366→        }),
+   367→      })
+   368→      const data = await res.json()
+   369→      if (!res.ok) {
+   370→        toast.error(data.error || 'Failed to add DNS record')
+   371→        return
+   372→      }
+   373→      toast.success('DNS record added')
+   374→      setName('')
+   375→      setValue('')
+   376→      setTtl('3600')
+   377→      setType('A')
+   378→      onAdded()
+   379→      onClose()
+   380→    } catch {
+   381→      toast.error('Network error')
+   382→    } finally {
+   383→      setLoading(false)
+   384→    }
+   385→  }
+   386→
+   387→  return (
+   388→    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+   389→      <DialogContent className="sm:max-w-md">
+   390→        <DialogHeader>
+   391→          <DialogTitle>Add DNS Record</DialogTitle>
+   392→          <DialogDescription>
+   393→            Add a new DNS record for this domain.
+   394→          </DialogDescription>
+   395→        </DialogHeader>
+   396→        <div className="grid gap-4 py-4">
+   397→          <div className="grid gap-2">
+   398→            <Label>Type</Label>
+   399→            <Select value={type} onValueChange={setType}>
+   400→              <SelectTrigger className="w-full">
+   401→                <SelectValue />
+   402→              </SelectTrigger>
+   403→              <SelectContent>
+   404→                {DNS_TYPES.map((t) => (
+   405→                  <SelectItem key={t} value={t}>{t}</SelectItem>
+   406→                ))}
+   407→              </SelectContent>
+   408→            </Select>
+   409→          </div>
+   410→          <div className="grid gap-2">
+   411→            <Label htmlFor="dns-name">Name</Label>
+   412→            <Input
+   413→              id="dns-name"
+   414→              placeholder="@ or subdomain"
+   415→              value={name}
+   416→              onChange={(e) => setName(e.target.value)}
+   417→            />
+   418→          </div>
+   419→          <div className="grid gap-2">
+   420→            <Label htmlFor="dns-value">Value</Label>
+   421→            <Input
+   422→              id="dns-value"
+   423→              placeholder="IP address, hostname, or text"
+   424→              value={value}
+   425→              onChange={(e) => setValue(e.target.value)}
+   426→            />
+   427→          </div>
+   428→          <div className="grid gap-2">
+   429→            <Label htmlFor="dns-ttl">TTL (seconds)</Label>
+   430→            <Select value={ttl} onValueChange={setTtl}>
+   431→              <SelectTrigger className="w-full">
+   432→                <SelectValue />
+   433→              </SelectTrigger>
+   434→              <SelectContent>
+   435→                <SelectItem value="60">1 minute</SelectItem>
+   436→                <SelectItem value="300">5 minutes</SelectItem>
+   437→                <SelectItem value="900">15 minutes</SelectItem>
+   438→                <SelectItem value="3600">1 hour</SelectItem>
+   439→                <SelectItem value="86400">1 day</SelectItem>
+   440→              </SelectContent>
+   441→            </Select>
+   442→          </div>
+   443→        </div>
+   444→        <DialogFooter>
+   445→          <Button variant="outline" onClick={onClose} disabled={loading}>
+   446→            Cancel
+   447→          </Button>
+   448→          <Button
+   449→            onClick={handleAdd}
+   450→            disabled={loading || !name.trim() || !value.trim()}
+   451→            className="bg-emerald-600 hover:bg-emerald-700 text-white"
+   452→          >
+   453→            {loading ? <RefreshCw className="size-4 mr-2 animate-spin" /> : <Plus className="size-4 mr-2" />}
+   454→            Add Record
+   455→          </Button>
+   456→        </DialogFooter>
+   457→      </DialogContent>
+   458→    </Dialog>
+   459→  )
+   460→}
+   461→
+   462→function LinkProjectDialog({
+   463→  open,
+   464→  onClose,
+   465→  domainId,
+   466→  onLinked,
+   467→}: {
+   468→  open: boolean
+   469→  onClose: () => void
+   470→  domainId: string
+   471→  onLinked: () => void
+   472→}) {
+   473→  const [projects, setProjects] = useState<Project[]>([])
+   474→  const [selectedProjectId, setSelectedProjectId] = useState('')
+   475→  const [loading, setLoading] = useState(false)
+   476→
+   477→  useEffect(() => {
+   478→    if (open) {
+   479→      fetch('/api/hosting', { headers: getAuthHeaders() })
+   480→        .then((r) => r.json())
+   481→        .then((data) => setProjects(data.projects || []))
+   482→        .catch(() => toast.error('Failed to load projects'))
+   483→    }
+   484→  }, [open])
+   485→
+   486→  const handleLink = async () => {
+   487→    if (!selectedProjectId) {
+   488→      toast.error('Select a project')
+   489→      return
+   490→    }
+   491→    setLoading(true)
+   492→    try {
+   493→      await fetch(`/api/domains/${domainId}`, {
+   494→        method: 'PUT',
+   495→        headers: getAuthHeaders(),
+   496→        body: JSON.stringify({ projectId: selectedProjectId }),
+   497→      })
+   498→      toast.success('Domain linked to project')
+   499→      onLinked()
+   500→      onClose()
+   501→    } catch {
+   502→      toast.error('Network error')
+   503→    } finally {
+   504→      setLoading(false)
+   505→    }
+   506→  }
+   507→
+   508→  return (
+   509→    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+   510→      <DialogContent className="sm:max-w-md">
+   511→        <DialogHeader>
+   512→          <DialogTitle>Link to Project</DialogTitle>
+   513→          <DialogDescription>
+   514→            Connect this domain to one of your hosting projects.
+   515→          </DialogDescription>
+   516→        </DialogHeader>
+   517→        <div className="grid gap-4 py-4">
+   518→          <div className="grid gap-2">
+   519→            <Label>Select Project</Label>
+   520→            <Select value={selectedProjectId} onValueChange={setSelectedProjectId}>
+   521→              <SelectTrigger className="w-full">
+   522→                <SelectValue placeholder="Choose a project" />
+   523→              </SelectTrigger>
+   524→              <SelectContent>
+   525→                {projects.map((p) => (
+   526→                  <SelectItem key={p.id} value={p.id}>
+   527→                    {p.name} ({p.subdomain})
+   528→                  </SelectItem>
+   529→                ))}
+   530→              </SelectContent>
+   531→            </Select>
+   532→          </div>
+   533→        </div>
+   534→        <DialogFooter>
+   535→          <Button variant="outline" onClick={onClose} disabled={loading}>
+   536→            Cancel
+   537→          </Button>
+   538→          <Button
+   539→            onClick={handleLink}
+   540→            disabled={loading || !selectedProjectId}
+   541→            className="bg-emerald-600 hover:bg-emerald-700 text-white"
+   542→          >
+   543→            <Link2 className="size-4 mr-2" />
+   544→            Link Project
+   545→          </Button>
+   546→        </DialogFooter>
+   547→      </DialogContent>
+   548→    </Dialog>
+   549→  )
+   550→}
+   551→
+   552→// ─── Domain Detail View with Tabs ──────────────────────────────
+   553→
+   554→function DomainDetailView({
+   555→  domainId,
+   556→  onBack,
+   557→  onRefresh,
+   558→}: {
+   559→  domainId: string
+   560→  onBack: () => void
+   561→  onRefresh: () => void
+   562→}) {
+   563→  const [domain, setDomain] = useState<Domain | null>(null)
+   564→  const [loading, setLoading] = useState(true)
+   565→  const [showAddDns, setShowAddDns] = useState(false)
+   566→  const [showLinkProject, setShowLinkProject] = useState(false)
+   567→  const [detailTab, setDetailTab] = useState('dns')
+   568→
+   569→  // SSL state
+   570→  const [sslData, setSslData] = useState<SslCertificateApi | null>(null)
+   571→  const [sslLoading, setSslLoading] = useState(true)
+   572→  const [renewingSsl, setRenewingSsl] = useState(false)
+   573→  const [showUploadCert, setShowUploadCert] = useState(false)
+   574→  const [certPem, setCertPem] = useState('')
+   575→  const [certKey, setCertKey] = useState('')
+   576→  const [uploadingCert, setUploadingCert] = useState(false)
+   577→
+   578→  // DNS Propagation state
+   579→  const [propagationData, setPropagationData] = useState<PropagationResponse | null>(null)
+   580→  const [propagationLoading, setPropagationLoading] = useState(false)
+   581→  const [expandedRecords, setExpandedRecords] = useState<Set<string>>(new Set())
+   582→
+   583→  // Verification state (for custom / pending_verification domains)
+   584→  const [verifyCode, setVerifyCode] = useState<string | null>(null)
+   585→  const [verifyInstructions, setVerifyInstructions] = useState<string>('')
+   586→  const [verifyLoading, setVerifyLoading] = useState(false)
+   587→  const [verifying, setVerifying] = useState(false)
+   588→
+   589→  // Sync-from-Dynadot state
+   590→  const [syncing, setSyncing] = useState(false)
+   591→
+   592→  const fetchDomain = useCallback(async () => {
+   593→    try {
+   594→      const res = await fetch(`/api/domains/${domainId}`, {
+   595→        headers: getAuthHeaders(),
+   596→      })
+   597→      const data = await res.json()
+   598→      if (!res.ok) {
+   599→        toast.error(data.error || 'Failed to load domain')
+   600→        onBack()
+   601→        return
+   602→      }
+   603→      setDomain(data.domain)
+   604→    } catch {
+   605→      toast.error('Network error')
+   606→      onBack()
+   607→    } finally {
+   608→      setLoading(false)
+   609→    }
+   610→  }, [domainId, onBack])
+   611→
+   612→  const fetchSslData = useCallback(async () => {
+   613→    setSslLoading(true)
+   614→    try {
+   615→      const res = await fetch(`/api/domains/${domainId}/ssl`, {
+   616→        headers: getAuthHeaders(),
+   617→      })
+   618→      const data = await res.json()
+   619→      if (res.ok) {
+   620→        setSslData(data.certificate)
+   621→      }
+   622→    } catch {
+   623→      // Silently fail - will show fallback
+   624→    } finally {
+   625→      setSslLoading(false)
+   626→    }
+   627→  }, [domainId])
+   628→
+   629→  const fetchPropagationData = useCallback(async () => {
+   630→    setPropagationLoading(true)
+   631→    try {
+   632→      const res = await fetch(`/api/domains/${domainId}/propagation`, {
+   633→        headers: getAuthHeaders(),
+   634→      })
+   635→      const data = await res.json()
+   636→      if (res.ok) {
+   637→        setPropagationData(data)
+   638→      }
+   639→    } catch {
+   640→      toast.error('Failed to check propagation')
+   641→    } finally {
+   642→      setPropagationLoading(false)
+   643→    }
+   644→  }, [domainId])
+   645→
+   646→  // Fetch the DNS verification code + instructions (for pending_verification domains)
+   647→  const fetchVerifyCode = useCallback(async () => {
+   648→    setVerifyLoading(true)
+   649→    try {
+   650→      const res = await fetch(`/api/domains/${domainId}/verify-code`, {
+   651→        headers: getAuthHeaders(),
+   652→      })
+   653→      const data = await res.json()
+   654→      if (res.ok) {
+   655→        setVerifyCode(data.code || null)
+   656→        setVerifyInstructions(data.instructions || '')
+   657→      }
+   658→    } catch {
+   659→      // Silent - verification is optional
+   660→    } finally {
+   661→      setVerifyLoading(false)
+   662→    }
+   663→  }, [domainId])
+   664→
+   665→  // Verify the domain by checking DNS TXT record against expected code
+   666→  const handleVerify = async () => {
+   667→    setVerifying(true)
+   668→    try {
+   669→      const res = await fetch(`/api/domains/${domainId}/verify`, {
+   670→        method: 'POST',
+   671→        headers: getAuthHeaders(),
+   672→      })
+   673→      const data = await res.json()
+   674→      if (!res.ok) {
+   675→        toast.error(data.error || 'Verification failed')
+   676→        return
+   677→      }
+   678→      if (data.verified) {
+   679→        toast.success(data.message || 'Domain verified successfully!')
+   680→        fetchDomain()
+   681→        onRefresh()
+   682→      } else {
+   683→        toast.error(data.message || 'Verification failed - DNS record not found yet')
+   684→      }
+   685→    } catch {
+   686→      toast.error('Network error during verification')
+   687→    } finally {
+   688→      setVerifying(false)
+   689→    }
+   690→  }
+   691→
+   692→  // Sync domain info from Dynadot
+   693→  const handleSyncDynadot = async () => {
+   694→    setSyncing(true)
+   695→    try {
+   696→      const res = await fetch(`/api/domains/${domainId}/sync`, {
+   697→        method: 'POST',
+   698→        headers: getAuthHeaders(),
+   699→      })
+   700→      const data = await res.json()
+   701→      if (!res.ok) {
+   702→        toast.error(data.error || 'Failed to sync from Dynadot')
+   703→        return
+   704→      }
+   705→      toast.success(data.demo ? 'Synced from Dynadot (demo mode)' : 'Synced from Dynadot')
+   706→      fetchDomain()
+   707→      onRefresh()
+   708→    } catch {
+   709→      toast.error('Network error during sync')
+   710→    } finally {
+   711→      setSyncing(false)
+   712→    }
+   713→  }
+   714→
+   715→  // Copy verification code to clipboard
+   716→  const handleCopyCode = async (code: string) => {
+   717→    try {
+   718→      await navigator.clipboard.writeText(code)
+   719→      toast.success('Verification code copied to clipboard')
+   720→    } catch {
+   721→      toast.error('Failed to copy - copy manually')
+   722→    }
+   723→  }
+   724→
+   725→  useEffect(() => {
+   726→    setLoading(true)
+   727→    fetchDomain()
+   728→  }, [fetchDomain])
+   729→
+   730→  // Load verification code when domain arrives in pending_verification state
+   731→  useEffect(() => {
+   732→    if (domain && domain.status === 'pending_verification') {
+   733→      fetchVerifyCode()
+   734→    }
+   735→  }, [domain, fetchVerifyCode])
+   736→
+   737→  useEffect(() => {
+   738→    if (domainId) {
+   739→      fetchSslData()
+   740→    }
+   741→  }, [domainId, fetchSslData])
+   742→
+   743→  // SSL Renew handler
+   744→  const handleRenewSsl = async () => {
+   745→    setRenewingSsl(true)
+   746→    try {
+   747→      const res = await fetch(`/api/domains/${domainId}/ssl`, {
+   748→        method: 'POST',
+   749→        headers: getAuthHeaders(),
+   750→        body: JSON.stringify({ action: 'renew' }),
+   751→      })
+   752→      const data = await res.json()
+   753→      if (!res.ok) {
+   754→        toast.error(data.error || 'Failed to renew certificate')
+   755→        return
+   756→      }
+   757→      toast.success('Certificate renewal initiated')
+   758→      // Poll for completion after 2 seconds
+   759→      setTimeout(() => {
+   760→        fetchSslData()
+   761→      }, 2500)
+   762→    } catch {
+   763→      toast.error('Network error')
+   764→    } finally {
+   765→      setRenewingSsl(false)
+   766→    }
+   767→  }
+   768→
+   769→  // SSL Upload handler
+   770→  const handleUploadCert = async () => {
+   771→    if (!certPem.trim() || !certKey.trim()) {
+   772→      toast.error('Certificate and private key are required')
+   773→      return
+   774→    }
+   775→    setUploadingCert(true)
+   776→    try {
+   777→      const res = await fetch(`/api/domains/${domainId}/ssl`, {
+   778→        method: 'POST',
+   779→        headers: getAuthHeaders(),
+   780→        body: JSON.stringify({
+   781→          action: 'upload',
+   782→          certificate: certPem,
+   783→          privateKey: certKey,
+   784→        }),
+   785→      })
+   786→      const data = await res.json()
+   787→      if (!res.ok) {
+   788→        toast.error(data.error || 'Failed to upload certificate')
+   789→        return
+   790→      }
+   791→      toast.success('Custom certificate uploaded successfully')
+   792→      setShowUploadCert(false)
+   793→      setCertPem('')
+   794→      setCertKey('')
+   795→      fetchSslData()
+   796→    } catch {
+   797→      toast.error('Network error')
+   798→    } finally {
+   799→      setUploadingCert(false)
+   800→    }
+   801→  }
+   802→
+   803→  const handleDeleteDns = async (recordId: string) => {
+   804→    if (!confirm('Delete this DNS record?')) return
+   805→    try {
+   806→      const res = await fetch(`/api/domains/${domainId}/dns/${recordId}`, {
+   807→        method: 'DELETE',
+   808→        headers: getAuthHeaders(),
+   809→      })
+   810→      const data = await res.json()
+   811→      if (!res.ok) {
+   812→        toast.error(data.error || 'Failed to delete DNS record')
+   813→        return
+   814→      }
+   815→      toast.success('DNS record deleted')
+   816→      fetchDomain()
+   817→      // Also refresh propagation if it was loaded
+   818→      if (propagationData) {
+   819→        fetchPropagationData()
+   820→      }
+   821→    } catch {
+   822→      toast.error('Network error')
+   823→    }
+   824→  }
+   825→
+   826→  const toggleRecordExpanded = (recordId: string) => {
+   827→    setExpandedRecords((prev) => {
+   828→      const next = new Set(prev)
+   829→      if (next.has(recordId)) {
+   830→        next.delete(recordId)
+   831→      } else {
+   832→        next.add(recordId)
+   833→      }
+   834→      return next
+   835→    })
+   836→  }
+   837→
+   838→  if (loading) {
+   839→    return (
+   840→      <div className="space-y-4">
+   841→        <Skeleton className="h-8 w-32" />
+   842→        <Skeleton className="h-40 w-full" />
+   843→        <Skeleton className="h-60 w-full" />
+   844→      </div>
+   845→    )
+   846→  }
+   847→
+   848→  if (!domain) return null
+   849→
+   850→  return (
+   851→    <div className="space-y-6">
+   852→      {/* Header */}
+   853→      <div className="flex items-center gap-3">
+   854→        <Button variant="ghost" size="sm" onClick={onBack}>
+   855→          <ArrowLeft className="size-4 mr-1" />
+   856→          Back
+   857→        </Button>
+   858→      </div>
+   859→
+   860→      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+   861→        <div>
+   862→          <div className="flex items-center gap-3 flex-wrap">
+   863→            <Globe className="size-5 text-emerald-600" />
+   864→            <h2 className="text-2xl font-bold">{domain.name}</h2>
+   865→            <Badge variant="outline" className={domainStatusColor(domain.status)}>
+   866→              {domain.status}
+   867→            </Badge>
+   868→            <Badge variant="outline" className={providerColor(domain.provider)}>
+   869→              <Server className="size-3 mr-1" />
+   870→              {providerLabel(domain.provider)}
+   871→            </Badge>
+   872→            {domain.provider === 'dynadot' && domain.externalId && (
+   873→              <Badge variant="outline" className="font-mono text-xs">
+   874→                ID: {domain.externalId.length > 16 ? domain.externalId.substring(0, 16) + '...' : domain.externalId}
+   875→              </Badge>
+   876→            )}
+   877→          </div>
+   878→          <div className="flex items-center gap-4 mt-2 text-sm text-muted-foreground flex-wrap">
+   879→            {domain.registrar && (
+   880→              <span className="flex items-center gap-1">
+   881→                <Server className="size-3" />
+   882→                {domain.registrar}
+   883→              </span>
+   884→            )}
+   885→            {domain.expiresAt && (
+   886→              <span className="flex items-center gap-1">
+   887→                <Clock className="size-3" />
+   888→                Expires {formatDate(domain.expiresAt)}
+   889→              </span>
+   890→            )}
+   891→            {domain.verification?.verified && (
+   892→              <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+   893→                <ShieldCheck className="size-3" />
+   894→                Verified
+   895→              </span>
+   896→            )}
+   897→          </div>
+   898→        </div>
+   899→        <div className="flex items-center gap-2 flex-wrap">
+   900→          {domain.provider === 'dynadot' && (
+   901→            <Button
+   902→              variant="outline"
+   903→              onClick={handleSyncDynadot}
+   904→              disabled={syncing}
+   905→              size="sm"
+   906→            >
+   907→              {syncing ? (
+   908→                <Loader2 className="size-4 mr-2 animate-spin" />
+   909→              ) : (
+   910→                <RefreshCw className="size-4 mr-2" />
+   911→              )}
+   912→              {syncing ? 'Syncing...' : 'Sync from Dynadot'}
+   913→            </Button>
+   914→          )}
+   915→          <Button
+   916→            variant="outline"
+   917→            onClick={() => setShowLinkProject(true)}
+   918→            size="sm"
+   919→          >
+   920→            <Link2 className="size-4 mr-2" />
+   921→            Link to Project
+   922→          </Button>
+   923→        </div>
+   924→      </div>
+   925→
+   926→      <Separator />
+   927→
+   928→      {/* ─── Verification Banner (for pending_verification domains) ─── */}
+   929→      {domain.status === 'pending_verification' && (
+   930→        <Card className="border-amber-200 bg-amber-50/50 dark:border-amber-800 dark:bg-amber-900/10">
+   931→          <CardHeader>
+   932→            <CardTitle className="text-lg flex items-center gap-2">
+   933→              <ShieldCheck className="size-5 text-amber-600 dark:text-amber-400" />
+   934→              Verify Domain Ownership
+   935→            </CardTitle>
+   936→            <CardDescription>
+   937→              This custom domain requires DNS verification before it can be activated.
+   938→              Add the TXT record below at your DNS provider, then click &quot;Verify Now&quot;.
+   939→            </CardDescription>
+   940→          </CardHeader>
+   941→          <CardContent className="space-y-4">
+   942→            {verifyLoading ? (
+   943→              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+   944→                <Loader2 className="size-4 animate-spin" />
+   945→                Loading verification code...
+   946→              </div>
+   947→            ) : verifyCode ? (
+   948→              <>
+   949→                <div className="space-y-2">
+   950→                  <div className="text-xs font-medium text-muted-foreground">
+   951→                    Step 1 — Add this TXT record at your DNS provider:
+   952→                  </div>
+   953→                  <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-white dark:bg-card overflow-hidden">
+   954→                    <div className="grid grid-cols-1 sm:grid-cols-[100px_1fr] gap-x-4 gap-y-2 p-3 text-sm">
+   955→                      <div className="text-muted-foreground">Type</div>
+   956→                      <div className="font-mono font-medium">TXT</div>
+   957→                      <div className="text-muted-foreground">Name / Host</div>
+   958→                      <div className="font-mono font-medium">@</div>
+   959→                      <div className="text-muted-foreground">Value</div>
+   960→                      <div className="flex items-start gap-2 min-w-0">
+   961→                        <code className="font-mono text-xs break-all bg-amber-50 dark:bg-amber-900/20 px-2 py-1 rounded flex-1">
+   962→                          {verifyCode}
+   963→                        </code>
+   964→                        <Button
+   965→                          size="sm"
+   966→                          variant="outline"
+   967→                          onClick={() => handleCopyCode(verifyCode)}
+   968→                          className="shrink-0"
+   969→                        >
+   970→                          <Copy className="size-3.5 mr-1" />
+   971→                          Copy
+   972→                        </Button>
+   973→                      </div>
+   974→                    </div>
+   975→                  </div>
+   976→                </div>
+   977→                <div className="text-xs text-muted-foreground flex items-start gap-2">
+   978→                  <HelpCircle className="size-3.5 mt-0.5 shrink-0" />
+   979→                  <span>
+   980→                    DNS changes can take a few minutes to propagate. The Name / Host is
+   981→                    usually &quot;@&quot; (apex domain) or your domain name, depending on
+   982→                    your DNS provider. The Value must be entered exactly as shown.
+   983→                  </span>
+   984→                </div>
+   985→                <div className="flex flex-col sm:flex-row gap-2">
+   986→                  <Button
+   987→                    onClick={handleVerify}
+   988→                    disabled={verifying}
+   989→                    className="bg-amber-600 hover:bg-amber-700 text-white"
+   990→                  >
+   991→                    {verifying ? (
+   992→                      <Loader2 className="size-4 mr-2 animate-spin" />
+   993→                    ) : (
+   994→                      <ShieldCheck className="size-4 mr-2" />
+   995→                    )}
+   996→                    {verifying ? 'Verifying...' : 'Verify Now'}
+   997→                  </Button>
+   998→                  <Button
+   999→                    variant="outline"
+  1000→                    onClick={fetchVerifyCode}
+  1001→                    disabled={verifyLoading}
+  1002→                  >
+  1003→                    <RefreshCw className="size-4 mr-2" />
+  1004→                    Reload Code
+  1005→                  </Button>
+  1006→                </div>
+  1007→                {verifyInstructions && (
+  1008→                  <div className="text-xs text-muted-foreground bg-amber-50/50 dark:bg-amber-900/10 rounded p-2 border border-amber-100 dark:border-amber-900">
+  1009→                    {verifyInstructions}
+  1010→                  </div>
+  1011→                )}
+  1012→              </>
+  1013→            ) : (
+  1014→              <div className="text-sm text-muted-foreground">
+  1015→                No verification code available. Try reloading.
+  1016→              </div>
+  1017→            )}
+  1018→          </CardContent>
+  1019→        </Card>
+  1020→      )}
+  1021→
+  1022→      {/* Domain Info Cards */}
+  1023→      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+  1024→        <Card>
+  1025→          <CardHeader className="pb-2">
+  1026→            <CardDescription className="flex items-center gap-1.5">
+  1027→              <Shield className="size-3.5" />
+  1028→              SSL / Privacy
+  1029→            </CardDescription>
+  1030→          </CardHeader>
+  1031→          <CardContent>
+  1032→            <div className="text-sm space-y-1">
+  1033→              <div className="flex items-center gap-2">
+  1034→                <div className={`size-2 rounded-full ${domain.whoisPrivacy ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+  1035→                WHOIS Privacy {domain.whoisPrivacy ? 'On' : 'Off'}
+  1036→              </div>
+  1037→              <div className="flex items-center gap-2">
+  1038→                <div className={`size-2 rounded-full ${domain.autoRenew ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+  1039→                Auto Renew {domain.autoRenew ? 'On' : 'Off'}
+  1040→              </div>
+  1041→            </div>
+  1042→          </CardContent>
+  1043→        </Card>
+  1044→
+  1045→        <Card>
+  1046→          <CardHeader className="pb-2">
+  1047→            <CardDescription className="flex items-center gap-1.5">
+  1048→              <Link2 className="size-3.5" />
+  1049→              Linked Project
+  1050→            </CardDescription>
+  1051→          </CardHeader>
+  1052→          <CardContent>
+  1053→            {domain.project ? (
+  1054→              <div>
+  1055→                <div className="font-medium text-sm">{domain.project.name}</div>
+  1056→                <div className="text-xs text-muted-foreground font-mono">{domain.project.subdomain}</div>
+  1057→              </div>
+  1058→            ) : (
+  1059→              <div className="text-sm text-muted-foreground">Not linked</div>
+  1060→            )}
+  1061→          </CardContent>
+  1062→        </Card>
+  1063→
+  1064→        <Card>
+  1065→          <CardHeader className="pb-2">
+  1066→            <CardDescription className="flex items-center gap-1.5">
+  1067→              <Clock className="size-3.5" />
+  1068→              Registration
+  1069→            </CardDescription>
+  1070→          </CardHeader>
+  1071→          <CardContent>
+  1072→            <div className="text-sm space-y-1">
+  1073→              <div className="text-muted-foreground">Registered: {formatDate(domain.registeredAt)}</div>
+  1074→              <div className="text-muted-foreground">Expires: {formatDate(domain.expiresAt)}</div>
+  1075→            </div>
+  1076→          </CardContent>
+  1077→        </Card>
+  1078→
+  1079→        <Card>
+  1080→          <CardHeader className="pb-2">
+  1081→            <CardDescription className="flex items-center gap-1.5">
+  1082→              <Globe className="size-3.5" />
+  1083→              Nameservers
+  1084→            </CardDescription>
+  1085→          </CardHeader>
+  1086→          <CardContent>
+  1087→            {domain.nameservers.length > 0 ? (
+  1088→              <div className="space-y-0.5">
+  1089→                {domain.nameservers.map((ns, i) => (
+  1090→                  <div key={i} className="text-xs font-mono text-muted-foreground">{ns}</div>
+  1091→                ))}
+  1092→              </div>
+  1093→            ) : (
+  1094→              <div className="text-sm text-muted-foreground">Default nameservers</div>
+  1095→            )}
+  1096→          </CardContent>
+  1097→        </Card>
+  1098→      </div>
+  1099→
+  1100→      {/* Tabbed Detail Section */}
+  1101→      <Tabs value={detailTab} onValueChange={setDetailTab}>
+  1102→        <TabsList className="grid w-full grid-cols-3 max-w-md">
+  1103→          <TabsTrigger value="dns">
+  1104→            <Globe className="size-4 mr-2" />
+  1105→            DNS
+  1106→          </TabsTrigger>
+  1107→          <TabsTrigger value="ssl">
+  1108→            <Lock className="size-4 mr-2" />
+  1109→            SSL
+  1110→          </TabsTrigger>
+  1111→          <TabsTrigger value="settings">
+  1112→            <Server className="size-4 mr-2" />
+  1113→            Settings
+  1114→          </TabsTrigger>
+  1115→        </TabsList>
+  1116→
+  1117→        {/* ─── DNS Records Tab ─────────────────────────────────── */}
+  1118→        <TabsContent value="dns" className="space-y-6 mt-6">
+  1119→
+  1120→          {/* DNS Propagation Widget */}
+  1121→          <Card>
+  1122→            <CardHeader>
+  1123→              <div className="flex items-center justify-between">
+  1124→                <div>
+  1125→                  <CardTitle className="text-lg flex items-center gap-2">
+  1126→                    <Radio className="size-5 text-emerald-600" />
+  1127→                    DNS Propagation
+  1128→                  </CardTitle>
+  1129→                  <CardDescription>
+  1130→                    Check how your DNS records have propagated across global resolvers
+  1131→                  </CardDescription>
+  1132→                </div>
+  1133→                <Button
+  1134→                  onClick={fetchPropagationData}
+  1135→                  disabled={propagationLoading}
+  1136→                  size="sm"
+  1137→                  className="bg-emerald-600 hover:bg-emerald-700 text-white"
+  1138→                >
+  1139→                  {propagationLoading ? (
+  1140→                    <Loader2 className="size-4 mr-1 animate-spin" />
+  1141→                  ) : (
+  1142→                    <RefreshCw className="size-4 mr-1" />
+  1143→                  )}
+  1144→                  {propagationLoading ? 'Checking...' : 'Check Propagation'}
+  1145→                </Button>
+  1146→              </div>
+  1147→            </CardHeader>
+  1148→            <CardContent>
+  1149→              {!propagationData && !propagationLoading ? (
+  1150→                <div className="text-center py-8 text-muted-foreground">
+  1151→                  <Radio className="size-8 mx-auto mb-2 opacity-40" />
+  1152→                  <p className="text-sm">Click &quot;Check Propagation&quot; to verify DNS across global servers</p>
+  1153→                </div>
+  1154→              ) : propagationLoading && !propagationData ? (
+  1155→                <div className="text-center py-8">
+  1156→                  <Loader2 className="size-8 mx-auto mb-2 text-emerald-500 animate-spin" />
+  1157→                  <p className="text-sm text-muted-foreground">Checking propagation across global servers...</p>
+  1158→                </div>
+  1159→              ) : propagationData ? (
+  1160→                <div className="space-y-4">
+  1161→                  {/* Overall Propagation */}
+  1162→                  <div className="flex items-center gap-6">
+  1163→                    <PropagationRing percentage={propagationData.overallPropagation} size={80} />
+  1164→                    <div className="flex-1 space-y-2">
+  1165→                      <div className="flex items-center justify-between text-sm">
+  1166→                        <span className="font-medium">Overall Propagation</span>
+  1167→                        <span className={`font-bold ${
+  1168→                          propagationData.overallPropagation >= 80 ? 'text-emerald-600' :
+  1169→                          propagationData.overallPropagation >= 50 ? 'text-yellow-600' :
+  1170→                          'text-red-600'
+  1171→                        }`}>
+  1172→                          {propagationData.overallPropagation}%
+  1173→                        </span>
+  1174→                      </div>
+  1175→                      <Progress
+  1176→                        value={propagationData.overallPropagation}
+  1177→                        className={`h-2 ${
+  1178→                          propagationData.overallPropagation >= 80 ? '[&>[data-slot=progress-indicator]]:bg-emerald-500' :
+  1179→                          propagationData.overallPropagation >= 50 ? '[&>[data-slot=progress-indicator]]:bg-yellow-500' :
+  1180→                          '[&>[data-slot=progress-indicator]]:bg-red-500'
+  1181→                        }`}
+  1182→                      />
+  1183→                      <div className="text-xs text-muted-foreground">
+  1184→                        {propagationData.records.filter(r => r.propagation.overall >= 80).length} of {propagationData.records.length} records fully propagated
+  1185→                      </div>
+  1186→                    </div>
+  1187→                  </div>
+  1188→
+  1189→                  {/* Per-record propagation */}
+  1190→                  {propagationData.records.length > 0 && (
+  1191→                    <>
+  1192→                      <Separator />
+  1193→                      <div className="space-y-2">
+  1194→                        <h4 className="text-sm font-medium">Record Propagation Status</h4>
+  1195→                        <div className="space-y-2">
+  1196→                          {propagationData.records.map((record) => (
+  1197→                            <Collapsible
+  1198→                              key={record.id}
+  1199→                              open={expandedRecords.has(record.id)}
+  1200→                              onOpenChange={() => toggleRecordExpanded(record.id)}
+  1201→                            >
+  1202→                              <CollapsibleTrigger asChild>
+  1203→                                <div
+  1204→                                  className={`flex items-center justify-between rounded-lg border p-3 cursor-pointer hover:bg-muted/50 transition-colors ${
+  1205→                                    record.propagation.overall >= 80
+  1206→                                      ? 'border-emerald-200 dark:border-emerald-800'
+  1207→                                      : record.propagation.overall >= 50
+  1208→                                      ? 'border-yellow-200 dark:border-yellow-800'
+  1209→                                      : 'border-red-200 dark:border-red-800'
+  1210→                                  }`}
+  1211→                                >
+  1212→                                  <div className="flex items-center gap-3 min-w-0">
+  1213→                                    {/* Propagation indicator */}
+  1214→                                    {record.propagation.overall >= 80 ? (
+  1215→                                      <CheckCircle2 className="size-4 text-emerald-500 shrink-0" />
+  1216→                                    ) : record.propagation.overall >= 50 ? (
+  1217→                                      <Clock className="size-4 text-yellow-500 shrink-0" />
+  1218→                                    ) : (
+  1219→                                      <XCircle className="size-4 text-red-500 shrink-0" />
+  1220→                                    )}
+  1221→                                    <Badge variant="outline" className="font-mono text-xs shrink-0">
+  1222→                                      {record.type}
+  1223→                                    </Badge>
+  1224→                                    <span className="text-sm font-mono truncate">{record.name}</span>
+  1225→                                  </div>
+  1226→                                  <div className="flex items-center gap-2 shrink-0">
+  1227→                                    <span className={`text-xs font-medium ${
+  1228→                                      record.propagation.overall >= 80 ? 'text-emerald-600' :
+  1229→                                      record.propagation.overall >= 50 ? 'text-yellow-600' :
+  1230→                                      'text-red-600'
+  1231→                                    }`}>
+  1232→                                      {record.propagation.overall}%
+  1233→                                    </span>
+  1234→                                    <svg
+  1235→                                      className={`size-4 text-muted-foreground transition-transform ${
+  1236→                                        expandedRecords.has(record.id) ? 'rotate-180' : ''
+  1237→                                      }`}
+  1238→                                      fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+  1239→                                    >
+  1240→                                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+  1241→                                    </svg>
+  1242→                                  </div>
+  1243→                                </div>
+  1244→                              </CollapsibleTrigger>
+  1245→                              <CollapsibleContent>
+  1246→                                <div className="pl-4 pr-2 pt-2 pb-1 space-y-2">
+  1247→                                  <div className="text-xs text-muted-foreground mb-2">
+  1248→                                    Value: <span className="font-mono">{record.value}</span>
+  1249→                                  </div>
+  1250→                                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+  1251→                                    {record.propagation.checkers.map((checker, idx) => (
+  1252→                                      <div
+  1253→                                        key={idx}
+  1254→                                        className={`flex items-center justify-between rounded-md border px-3 py-2 text-xs ${
+  1255→                                          checker.status === 'propagated'
+  1256→                                            ? 'border-emerald-200 bg-emerald-50/50 dark:border-emerald-800 dark:bg-emerald-900/10'
+  1257→                                            : checker.status === 'pending'
+  1258→                                            ? 'border-yellow-200 bg-yellow-50/50 dark:border-yellow-800 dark:bg-yellow-900/10'
+  1259→                                            : 'border-red-200 bg-red-50/50 dark:border-red-800 dark:bg-red-900/10'
+  1260→                                        }`}
+  1261→                                      >
+  1262→                                        <div className="flex items-center gap-2 min-w-0">
+  1263→                                          <MapPin className="size-3 text-muted-foreground shrink-0" />
+  1264→                                          <span className="truncate font-medium">{checker.location}</span>
+  1265→                                        </div>
+  1266→                                        <div className="flex items-center gap-1.5 shrink-0">
+  1267→                                          {checker.status === 'propagated' ? (
+  1268→                                            <CheckCircle2 className="size-3.5 text-emerald-500" />
+  1269→                                          ) : checker.status === 'pending' ? (
+  1270→                                            <Clock className="size-3.5 text-yellow-500" />
+  1271→                                          ) : (
+  1272→                                            <XCircle className="size-3.5 text-red-500" />
+  1273→                                          )}
+  1274→                                          {checker.latency && (
+  1275→                                            <span className="text-muted-foreground">{checker.latency}ms</span>
+  1276→                                          )}
+  1277→                                        </div>
+  1278→                                      </div>
+  1279→                                    ))}
+  1280→                                  </div>
+  1281→                                </div>
+  1282→                              </CollapsibleContent>
+  1283→                            </Collapsible>
+  1284→                          ))}
+  1285→                        </div>
+  1286→                      </div>
+  1287→                    </>
+  1288→                  )}
+  1289→
+  1290→                  {/* Nameservers */}
+  1291→                  {propagationData.nameservers.length > 0 && (
+  1292→                    <>
+  1293→                      <Separator />
+  1294→                      <div className="space-y-2">
+  1295→                        <h4 className="text-sm font-medium">Nameservers</h4>
+  1296→                        <div className="flex flex-wrap gap-2">
+  1297→                          {propagationData.nameservers.map((ns, i) => (
+  1298→                            <Badge key={i} variant="outline" className="font-mono text-xs">
+  1299→                              <Server className="size-3 mr-1" />
+  1300→                              {ns}
+  1301→                            </Badge>
+  1302→                          ))}
+  1303→                        </div>
+  1304→                      </div>
+  1305→                    </>
+  1306→                  )}
+  1307→                </div>
+  1308→              ) : null}
+  1309→            </CardContent>
+  1310→          </Card>
+  1311→
+  1312→          {/* DNS Records Table */}
+  1313→          <Card>
+  1314→            <CardHeader>
+  1315→              <div className="flex items-center justify-between">
+  1316→                <div>
+  1317→                  <CardTitle className="text-lg">DNS Records</CardTitle>
+  1318→                  <CardDescription>Manage DNS records for {domain.name}</CardDescription>
+  1319→                </div>
+  1320→                <Button
+  1321→                  onClick={() => setShowAddDns(true)}
+  1322→                  size="sm"
+  1323→                  className="bg-emerald-600 hover:bg-emerald-700 text-white"
+  1324→                >
+  1325→                  <Plus className="size-4 mr-1" />
+  1326→                  Add Record
+  1327→                </Button>
+  1328→              </div>
+  1329→            </CardHeader>
+  1330→            <CardContent>
+  1331→              {domain.dnsRecords.length === 0 ? (
+  1332→                <div className="text-center py-8 text-muted-foreground">
+  1333→                  <Globe className="size-8 mx-auto mb-2 opacity-40" />
+  1334→                  <p className="text-sm">No DNS records yet</p>
+  1335→                </div>
+  1336→              ) : (
+  1337→                <div className="max-h-96 overflow-y-auto">
+  1338→                  <Table>
+  1339→                    <TableHeader>
+  1340→                      <TableRow>
+  1341→                        <TableHead>Type</TableHead>
+  1342→                        <TableHead>Name</TableHead>
+  1343→                        <TableHead>Value</TableHead>
+  1344→                        <TableHead>TTL</TableHead>
+  1345→                        <TableHead>Proxied</TableHead>
+  1346→                        <TableHead className="text-right">Actions</TableHead>
+  1347→                      </TableRow>
+  1348→                    </TableHeader>
+  1349→                    <TableBody>
+  1350→                      {domain.dnsRecords.map((record) => {
+  1351→                        // Find propagation status for this record
+  1352→                        const recordProp = propagationData?.records.find(r => r.id === record.id)
+  1353→                        return (
+  1354→                          <TableRow key={record.id}>
+  1355→                            <TableCell>
+  1356→                              <div className="flex items-center gap-2">
+  1357→                                <Badge variant="outline" className="font-mono text-xs">
+  1358→                                  {record.type}
+  1359→                                </Badge>
+  1360→                                {/* Small propagation indicator */}
+  1361→                                {recordProp && (
+  1362→                                  recordProp.propagation.overall >= 80 ? (
+  1363→                                    <CheckCircle2 className="size-3.5 text-emerald-500" />
+  1364→                                  ) : recordProp.propagation.overall >= 50 ? (
+  1365→                                    <Clock className="size-3.5 text-yellow-500" />
+  1366→                                  ) : (
+  1367→                                    <XCircle className="size-3.5 text-red-500" />
+  1368→                                  )
+  1369→                                )}
+  1370→                              </div>
+  1371→                            </TableCell>
+  1372→                            <TableCell className="font-mono text-sm">{record.name}</TableCell>
+  1373→                            <TableCell className="font-mono text-sm max-w-[200px] truncate" title={record.value}>
+  1374→                              {record.value}
+  1375→                            </TableCell>
+  1376→                            <TableCell className="text-sm text-muted-foreground">
+  1377→                              {formatTTL(record.ttl)}
+  1378→                            </TableCell>
+  1379→                            <TableCell>
+  1380→                              {record.proxied ? (
+  1381→                                <CheckCircle2 className="size-4 text-emerald-500" />
+  1382→                              ) : (
+  1383→                                <XCircle className="size-4 text-gray-300" />
+  1384→                              )}
+  1385→                            </TableCell>
+  1386→                            <TableCell className="text-right">
+  1387→                              <Button
+  1388→                                variant="ghost"
+  1389→                                size="sm"
+  1390→                                onClick={() => handleDeleteDns(record.id)}
+  1391→                                className="text-red-500 hover:text-red-700 hover:bg-red-50"
+  1392→                              >
+  1393→                                <Trash2 className="size-4" />
+  1394→                              </Button>
+  1395→                            </TableCell>
+  1396→                          </TableRow>
+  1397→                        )
+  1398→                      })}
+  1399→                    </TableBody>
+  1400→                  </Table>
+  1401→                </div>
+  1402→              )}
+  1403→            </CardContent>
+  1404→          </Card>
+  1405→        </TabsContent>
+  1406→
+  1407→        {/* ─── SSL Certificate Tab ─────────────────────────────── */}
+  1408→        <TabsContent value="ssl" className="space-y-6 mt-6">
+  1409→          {sslLoading ? (
+  1410→            <Card>
+  1411→              <CardContent className="py-8">
+  1412→                <div className="text-center">
+  1413→                  <Loader2 className="size-8 mx-auto mb-2 text-emerald-500 animate-spin" />
+  1414→                  <p className="text-sm text-muted-foreground">Loading SSL certificate information...</p>
+  1415→                </div>
+  1416→              </CardContent>
+  1417→            </Card>
+  1418→          ) : sslData ? (
+  1419→            <>
+  1420→              {/* Certificate Status Card */}
+  1421→              <Card>
+  1422→                <CardHeader>
+  1423→                  <CardTitle className="text-lg flex items-center gap-2">
+  1424→                    <Shield className="size-5 text-emerald-600" />
+  1425→                    Certificate Status
+  1426→                  </CardTitle>
+  1427→                  <CardDescription>
+  1428→                    SSL/TLS certificate details for {domain.name}
+  1429→                  </CardDescription>
+  1430→                </CardHeader>
+  1431→                <CardContent>
+  1432→                  <div className="space-y-4">
+  1433→                    {/* Status Banner */}
+  1434→                    <div
+  1435→                      className={`flex items-center gap-3 rounded-xl border p-4 ${
+  1436→                        sslData.status === 'active'
+  1437→                          ? 'border-emerald-200 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-900/20'
+  1438→                          : sslData.status === 'expired'
+  1439→                          ? 'border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20'
+  1440→                          : sslData.status === 'renewing'
+  1441→                          ? 'border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-900/20'
+  1442→                          : 'border-yellow-200 bg-yellow-50 dark:border-yellow-800 dark:bg-yellow-900/20'
+  1443→                      }`}
+  1444→                    >
+  1445→                      {sslData.status === 'active' ? (
+  1446→                        <Shield className="size-8 text-emerald-600 shrink-0" />
+  1447→                      ) : sslData.status === 'expired' ? (
+  1448→                        <AlertTriangle className="size-8 text-red-500 shrink-0" />
+  1449→                      ) : sslData.status === 'renewing' ? (
+  1450→                        <Loader2 className="size-8 text-blue-500 shrink-0 animate-spin" />
+  1451→                      ) : (
+  1452→                        <Lock className="size-8 text-yellow-500 shrink-0" />
+  1453→                      )}
+  1454→                      <div>
+  1455→                        <div className="font-medium">
+  1456→                          {sslData.status === 'active'
+  1457→                            ? 'Certificate Active'
+  1458→                            : sslData.status === 'expired'
+  1459→                            ? 'Certificate Expired'
+  1460→                            : sslData.status === 'renewing'
+  1461→                            ? 'Certificate Renewing'
+  1462→                            : 'Certificate Pending'}
+  1463→                        </div>
+  1464→                        <div className="text-sm text-muted-foreground">
+  1465→                          {sslData.status === 'active'
+  1466→                            ? 'Your site is securely served over HTTPS'
+  1467→                            : sslData.status === 'expired'
+  1468→                            ? 'Your certificate has expired — visitors may see security warnings'
+  1469→                            : sslData.status === 'renewing'
+  1470→                            ? 'Certificate renewal is in progress'
+  1471→                            : 'Certificate is being provisioned'}
+  1472→                        </div>
+  1473→                      </div>
+  1474→                    </div>
+  1475→
+  1476→                    {/* Certificate Details Grid */}
+  1477→                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+  1478→                      <div className="space-y-1">
+  1479→                        <div className="text-xs text-muted-foreground">Certificate Type</div>
+  1480→                        <div className="flex items-center gap-2">
+  1481→                          <FileText className="size-4 text-muted-foreground" />
+  1482→                          <span className="text-sm font-medium">
+  1483→                            {sslData.type === 'auto' ? "Let's Encrypt (Auto)" : 'Custom'}
+  1484→                          </span>
+  1485→                        </div>
+  1486→                      </div>
+  1487→                      <div className="space-y-1">
+  1488→                        <div className="text-xs text-muted-foreground">Issuer</div>
+  1489→                        <div className="text-sm font-medium">{sslData.issuer}</div>
+  1490→                      </div>
+  1491→                      <div className="space-y-1">
+  1492→                        <div className="text-xs text-muted-foreground">Issued Date</div>
+  1493→                        <div className="text-sm font-medium">{formatDate(sslData.issuedAt)}</div>
+  1494→                      </div>
+  1495→                      <div className="space-y-1">
+  1496→                        <div className="text-xs text-muted-foreground">Expiry Date</div>
+  1497→                        <div className={`text-sm font-medium ${sslData.status === 'expired' ? 'text-red-600' : ''}`}>
+  1498→                          {formatDate(sslData.expiresAt)}
+  1499→                        </div>
+  1500→                      </div>
+  1501→                    </div>
+  1502→
+  1503→                    {/* Days Remaining Progress Bar */}
+  1504→                    {sslData.status !== 'renewing' && (
+  1505→                      <div className="space-y-2">
+  1506→                        <div className="flex items-center justify-between text-sm">
+  1507→                          <span className="font-medium">Days Remaining</span>
+  1508→                          <span className={`font-bold ${
+  1509→                            sslData.daysRemaining > 30 ? 'text-emerald-600' :
+  1510→                            sslData.daysRemaining > 15 ? 'text-yellow-600' :
+  1511→                            'text-red-600'
+  1512→                          }`}>
+  1513→                            {sslData.daysRemaining} days
+  1514→                          </span>
+  1515→                        </div>
+  1516→                        <Progress
+  1517→                          value={Math.min(100, (sslData.daysRemaining / 90) * 100)}
+  1518→                          className={`h-3 ${
+  1519→                            sslData.daysRemaining > 30 ? '[&>[data-slot=progress-indicator]]:bg-emerald-500' :
+  1520→                            sslData.daysRemaining > 15 ? '[&>[data-slot=progress-indicator]]:bg-yellow-500' :
+  1521→                            '[&>[data-slot=progress-indicator]]:bg-red-500'
+  1522→                          }`}
+  1523→                        />
+  1524→                        <div className="flex items-center justify-between text-xs text-muted-foreground">
+  1525→                          <span>
+  1526→                            {sslData.daysRemaining > 30 ? 'Certificate is healthy' :
+  1527→                             sslData.daysRemaining > 15 ? 'Consider renewing soon' :
+  1528→                             sslData.daysRemaining > 0 ? 'Renew immediately' :
+  1529→                             'Certificate has expired'}
+  1530→                          </span>
+  1531→                          {sslData.daysRemaining <= 15 && sslData.daysRemaining > 0 && (
+  1532→                            <span className="flex items-center gap-1 text-yellow-600">
+  1533→                              <AlertTriangle className="size-3" />
+  1534→                              Expiring soon
+  1535→                            </span>
+  1536→                          )}
+  1537→                          {sslData.daysRemaining === 0 && (
+  1538→                            <span className="flex items-center gap-1 text-red-600">
+  1539→                              <AlertTriangle className="size-3" />
+  1540→                              Expired
+  1541→                            </span>
+  1542→                          )}
+  1543→                        </div>
+  1544→                      </div>
+  1545→                    )}
+  1546→
+  1547→                    {/* Auto-renew indicator */}
+  1548→                    <div className="flex items-center gap-2 text-sm">
+  1549→                      <div className={`size-2 rounded-full ${sslData.autoRenew ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+  1550→                      Auto-renew {sslData.autoRenew ? 'enabled' : 'disabled'}
+  1551→                    </div>
+  1552→
+  1553→                    <Separator />
+  1554→
+  1555→                    {/* Actions */}
+  1556→                    <div className="flex flex-col sm:flex-row gap-3">
+  1557→                      {sslData.type === 'auto' && (
+  1558→                        <Button
+  1559→                          onClick={handleRenewSsl}
+  1560→                          disabled={renewingSsl || sslData.status === 'renewing'}
+  1561→                          className="bg-emerald-600 hover:bg-emerald-700 text-white"
+  1562→                        >
+  1563→                          {renewingSsl || sslData.status === 'renewing' ? (
+  1564→                            <Loader2 className="size-4 mr-2 animate-spin" />
+  1565→                          ) : (
+  1566→                            <RefreshCw className="size-4 mr-2" />
+  1567→                          )}
+  1568→                          {sslData.status === 'renewing' ? 'Renewing...' : 'Renew Certificate'}
+  1569→                        </Button>
+  1570→                      )}
+  1571→                      <Button
+  1572→                        variant="outline"
+  1573→                        onClick={() => setShowUploadCert(true)}
+  1574→                        className="border-emerald-300 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-900/20"
+  1575→                      >
+  1576→                        <Upload className="size-4 mr-2" />
+  1577→                        Upload Custom Certificate
+  1578→                      </Button>
+  1579→                    </div>
+  1580→                  </div>
+  1581→                </CardContent>
+  1582→              </Card>
+  1583→
+  1584→              {/* Security Info Card */}
+  1585→              <Card>
+  1586→                <CardHeader>
+  1587→                  <CardTitle className="text-lg flex items-center gap-2">
+  1588→                    <FileCheck className="size-5 text-emerald-600" />
+  1589→                    Security Details
+  1590→                  </CardTitle>
+  1591→                  <CardDescription>
+  1592→                    Technical details about your SSL certificate
+  1593→                  </CardDescription>
+  1594→                </CardHeader>
+  1595→                <CardContent>
+  1596→                  <div className="space-y-4">
+  1597→                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+  1598→                      <div className="space-y-1">
+  1599→                        <div className="text-xs text-muted-foreground">TLS Protocol</div>
+  1600→                        <div className="flex items-center gap-2">
+  1601→                          <Lock className="size-4 text-emerald-500" />
+  1602→                          <span className="text-sm font-medium">{sslData.protocol}</span>
+  1603→                        </div>
+  1604→                      </div>
+  1605→                      <div className="space-y-1">
+  1606→                        <div className="text-xs text-muted-foreground">Key Size</div>
+  1607→                        <div className="flex items-center gap-2">
+  1608→                          <Shield className="size-4 text-muted-foreground" />
+  1609→                          <span className="text-sm font-medium">{sslData.keySize}-bit RSA</span>
+  1610→                        </div>
+  1611→                      </div>
+  1612→                    </div>
+  1613→
+  1614→                    <Separator />
+  1615→
+  1616→                    {/* Fingerprint */}
+  1617→                    <div className="space-y-1">
+  1618→                      <div className="text-xs text-muted-foreground">SHA-256 Fingerprint</div>
+  1619→                      <div className="text-xs font-mono text-muted-foreground break-all bg-muted/50 rounded-lg p-3">
+  1620→                        {sslData.fingerprint}
+  1621→                      </div>
+  1622→                    </div>
+  1623→
+  1624→                    <Separator />
+  1625→
+  1626→                    {/* Subject Alternative Names */}
+  1627→                    <div className="space-y-2">
+  1628→                      <div className="text-xs text-muted-foreground">Subject Alternative Names (SANs)</div>
+  1629→                      <div className="flex flex-wrap gap-2">
+  1630→                        {sslData.sans.map((san, i) => (
+  1631→                          <Badge key={i} variant="outline" className="font-mono text-xs">
+  1632→                            <Globe className="size-3 mr-1" />
+  1633→                            {san}
+  1634→                          </Badge>
+  1635→                        ))}
+  1636→                      </div>
+  1637→                    </div>
+  1638→                  </div>
+  1639→                </CardContent>
+  1640→              </Card>
+  1641→            </>
+  1642→          ) : (
+  1643→            <Card>
+  1644→              <CardContent className="py-8">
+  1645→                <div className="text-center text-muted-foreground">
+  1646→                  <Lock className="size-8 mx-auto mb-2 opacity-40" />
+  1647→                  <p className="text-sm">No SSL certificate found</p>
+  1648→                  <Button
+  1649→                    variant="outline"
+  1650→                    onClick={() => setShowUploadCert(true)}
+  1651→                    className="mt-4 border-emerald-300 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-900/20"
+  1652→                  >
+  1653→                    <Upload className="size-4 mr-2" />
+  1654→                    Upload Custom Certificate
+  1655→                  </Button>
+  1656→                </div>
+  1657→              </CardContent>
+  1658→            </Card>
+  1659→          )}
+  1660→        </TabsContent>
+  1661→
+  1662→        {/* ─── Settings Tab ────────────────────────────────────── */}
+  1663→        <TabsContent value="settings" className="space-y-6 mt-6">
+  1664→          <Card>
+  1665→            <CardHeader>
+  1666→              <CardTitle className="text-lg">Domain Settings</CardTitle>
+  1667→              <CardDescription>
+  1668→                Configure domain settings for {domain.name}
+  1669→              </CardDescription>
+  1670→            </CardHeader>
+  1671→            <CardContent>
+  1672→              <div className="space-y-4">
+  1673→                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+  1674→                  <div className="space-y-1">
+  1675→                    <div className="text-xs text-muted-foreground">Domain Name</div>
+  1676→                    <div className="text-sm font-mono font-medium">{domain.name}</div>
+  1677→                  </div>
+  1678→                  <div className="space-y-1">
+  1679→                    <div className="text-xs text-muted-foreground">Status</div>
+  1680→                    <Badge variant="outline" className={domainStatusColor(domain.status)}>
+  1681→                      {domain.status}
+  1682→                    </Badge>
+  1683→                  </div>
+  1684→                  <div className="space-y-1">
+  1685→                    <div className="text-xs text-muted-foreground">Registrar</div>
+  1686→                    <div className="text-sm font-medium">{domain.registrar || '-'}</div>
+  1687→                  </div>
+  1688→                  <div className="space-y-1">
+  1689→                    <div className="text-xs text-muted-foreground">Created</div>
+  1690→                    <div className="text-sm font-medium">{formatDate(domain.createdAt)}</div>
+  1691→                  </div>
+  1692→                </div>
+  1693→
+  1694→                <Separator />
+  1695→
+  1696→                <div className="space-y-3">
+  1697→                  <div className="flex items-center justify-between">
+  1698→                    <div>
+  1699→                      <div className="text-sm font-medium">Auto Renew</div>
+  1700→                      <div className="text-xs text-muted-foreground">Automatically renew domain before expiry</div>
+  1701→                    </div>
+  1702→                    <Badge variant="outline" className={domain.autoRenew ? 'text-emerald-600' : 'text-muted-foreground'}>
+  1703→                      {domain.autoRenew ? 'Enabled' : 'Disabled'}
+  1704→                    </Badge>
+  1705→                  </div>
+  1706→                  <div className="flex items-center justify-between">
+  1707→                    <div>
+  1708→                      <div className="text-sm font-medium">WHOIS Privacy</div>
+  1709→                      <div className="text-xs text-muted-foreground">Hide your contact information from WHOIS lookups</div>
+  1710→                    </div>
+  1711→                    <Badge variant="outline" className={domain.whoisPrivacy ? 'text-emerald-600' : 'text-muted-foreground'}>
+  1712→                      {domain.whoisPrivacy ? 'Enabled' : 'Disabled'}
+  1713→                    </Badge>
+  1714→                  </div>
+  1715→                </div>
+  1716→
+  1717→                <Separator />
+  1718→
+  1719→                <div className="space-y-2">
+  1720→                  <div className="text-sm font-medium">Nameservers</div>
+  1721→                  {domain.nameservers.length > 0 ? (
+  1722→                    <div className="space-y-1">
+  1723→                      {domain.nameservers.map((ns, i) => (
+  1724→                        <div key={i} className="flex items-center gap-2 text-sm font-mono text-muted-foreground">
+  1725→                          <Server className="size-3" />
+  1726→                          {ns}
+  1727→                        </div>
+  1728→                      ))}
+  1729→                    </div>
+  1730→                  ) : (
+  1731→                    <div className="text-sm text-muted-foreground">Using default nameservers</div>
+  1732→                  )}
+  1733→                </div>
+  1734→              </div>
+  1735→            </CardContent>
+  1736→          </Card>
+  1737→
+  1738→          {/* Linked Project Settings */}
+  1739→          <Card>
+  1740→            <CardHeader>
+  1741→              <CardTitle className="text-lg">Linked Project</CardTitle>
+  1742→              <CardDescription>Project associated with this domain</CardDescription>
+  1743→            </CardHeader>
+  1744→            <CardContent>
+  1745→              {domain.project ? (
+  1746→                <div className="flex items-center justify-between">
+  1747→                  <div>
+  1748→                    <div className="font-medium">{domain.project.name}</div>
+  1749→                    <div className="text-sm text-muted-foreground font-mono">{domain.project.subdomain}.deployhub.io</div>
+  1750→                  </div>
+  1751→                  <Button
+  1752→                    variant="outline"
+  1753→                    onClick={() => setShowLinkProject(true)}
+  1754→                    size="sm"
+  1755→                  >
+  1756→                    Change Project
+  1757→                  </Button>
+  1758→                </div>
+  1759→              ) : (
+  1760→                <div className="flex items-center justify-between">
+  1761→                  <div className="text-sm text-muted-foreground">No project linked</div>
+  1762→                  <Button
+  1763→                    onClick={() => setShowLinkProject(true)}
+  1764→                    size="sm"
+  1765→                    className="bg-emerald-600 hover:bg-emerald-700 text-white"
+  1766→                  >
+  1767→                    <Link2 className="size-4 mr-2" />
+  1768→                    Link Project
+  1769→                  </Button>
+  1770→                </div>
+  1771→              )}
+  1772→            </CardContent>
+  1773→          </Card>
+  1774→        </TabsContent>
+  1775→      </Tabs>
+  1776→
+  1777→      <AddDnsRecordDialog
+  1778→        open={showAddDns}
+  1779→        onClose={() => setShowAddDns(false)}
+  1780→        domainId={domainId}
+  1781→        onAdded={fetchDomain}
+  1782→      />
+  1783→      <LinkProjectDialog
+  1784→        open={showLinkProject}
+  1785→        onClose={() => setShowLinkProject(false)}
+  1786→        domainId={domainId}
+  1787→        onLinked={() => { fetchDomain(); onRefresh(); }}
+  1788→      />
+  1789→
+  1790→      {/* Upload Custom Certificate Dialog */}
+  1791→      <Dialog open={showUploadCert} onOpenChange={(v) => !v && setShowUploadCert(false)}>
+  1792→        <DialogContent className="sm:max-w-lg">
+  1793→          <DialogHeader>
+  1794→            <DialogTitle className="flex items-center gap-2">
+  1795→              <Lock className="size-5" />
+  1796→              Upload Custom Certificate
+  1797→            </DialogTitle>
+  1798→            <DialogDescription>
+  1799→              Upload your own SSL/TLS certificate and private key for {domain?.name}
+  1800→            </DialogDescription>
+  1801→          </DialogHeader>
+  1802→          <div className="grid gap-4 py-4">
+  1803→            <div className="grid gap-2">
+  1804→              <Label htmlFor="cert-pem">Certificate (PEM)</Label>
+  1805→              <Textarea
+  1806→                id="cert-pem"
+  1807→                placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"
+  1808→                value={certPem}
+  1809→                onChange={(e) => setCertPem(e.target.value)}
+  1810→                className="font-mono text-xs min-h-[120px]"
+  1811→              />
+  1812→              <p className="text-xs text-muted-foreground">
+  1813→                Paste your full certificate chain in PEM format
+  1814→              </p>
+  1815→            </div>
+  1816→            <div className="grid gap-2">
+  1817→              <Label htmlFor="cert-key">Private Key (PEM)</Label>
+  1818→              <Textarea
+  1819→                id="cert-key"
+  1820→                placeholder="-----BEGIN PRIVATE KEY-----&#10;...&#10;-----END PRIVATE KEY-----"
+  1821→                value={certKey}
+  1822→                onChange={(e) => setCertKey(e.target.value)}
+  1823→                className="font-mono text-xs min-h-[120px]"
+  1824→              />
+  1825→              <p className="text-xs text-muted-foreground">
+  1826→                Paste your private key in PEM format. This will be stored securely.
+  1827→              </p>
+  1828→            </div>
+  1829→          </div>
+  1830→          <DialogFooter>
+  1831→            <Button variant="outline" onClick={() => setShowUploadCert(false)} disabled={uploadingCert}>
+  1832→              Cancel
+  1833→            </Button>
+  1834→            <Button
+  1835→              onClick={handleUploadCert}
+  1836→              disabled={uploadingCert || !certPem.trim() || !certKey.trim()}
+  1837→              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+  1838→            >
+  1839→              {uploadingCert ? (
+  1840→                <Loader2 className="size-4 mr-2 animate-spin" />
+  1841→              ) : (
+  1842→                <Upload className="size-4 mr-2" />
+  1843→              )}
+  1844→              {uploadingCert ? 'Uploading...' : 'Upload Certificate'}
+  1845→            </Button>
+  1846→          </DialogFooter>
+  1847→        </DialogContent>
+  1848→      </Dialog>
+  1849→    </div>
+  1850→  )
+  1851→}
+  1852→
+  1853→// ─── Main Component ─────────────────────────────────────────────
+  1854→
+  1855→export default function DomainsPanel() {
+  1856→  const [activeTab, setActiveTab] = useState('search')
+  1857→  const [domains, setDomains] = useState<Domain[]>([])
+  1858→  const [loading, setLoading] = useState(true)
+  1859→  const [selectedDomainId, setSelectedDomainId] = useState<string | null>(null)
+  1860→
+  1861→  // Search state
+  1862→  const [searchQuery, setSearchQuery] = useState('')
+  1863→  const [searching, setSearching] = useState(false)
+  1864→  const [searchResult, setSearchResult] = useState<DomainSearchResult | null>(null)
+  1865→  const [registering, setRegistering] = useState(false)
+  1866→
+  1867→  // Custom-domain flow state
+  1868→  const [showCustomDomain, setShowCustomDomain] = useState(false)
+  1869→  const [customDomainInput, setCustomDomainInput] = useState('')
+  1870→
+  1871→  const fetchDomains = useCallback(async () => {
+  1872→    try {
+  1873→      const res = await fetch('/api/domains', {
+  1874→        headers: getAuthHeaders(),
+  1875→      })
+  1876→      const data = await res.json()
+  1877→      if (res.ok) {
+  1878→        setDomains(data.domains || [])
+  1879→      } else {
+  1880→        toast.error(data.error || 'Failed to load domains')
+  1881→      }
+  1882→    } catch {
+  1883→      toast.error('Network error')
+  1884→    } finally {
+  1885→      setLoading(false)
+  1886→    }
+  1887→  }, [])
+  1888→
+  1889→  useEffect(() => {
+  1890→    fetchDomains()
+  1891→  }, [fetchDomains])
+  1892→
+  1893→  const handleSearch = async () => {
+  1894→    if (!searchQuery.trim()) {
+  1895→      toast.error('Enter a domain name')
+  1896→      return
+  1897→    }
+  1898→    setSearching(true)
+  1899→    setSearchResult(null)
+  1900→    try {
+  1901→      const res = await fetch('/api/domains/search', {
+  1902→        method: 'POST',
+  1903→        headers: getAuthHeaders(),
+  1904→        body: JSON.stringify({ domain: searchQuery.trim() }),
+  1905→      })
+  1906→      const data = await res.json()
+  1907→      if (!res.ok) {
+  1908→        toast.error(data.error || 'Search failed')
+  1909→        return
+  1910→      }
+  1911→      setSearchResult(data)
+  1912→    } catch {
+  1913→      toast.error('Network error')
+  1914→    } finally {
+  1915→      setSearching(false)
+  1916→    }
+  1917→  }
+  1918→
+  1919→  const handleRegister = async (domainName: string) => {
+  1920→    setRegistering(true)
+  1921→    try {
+  1922→      const res = await fetch('/api/domains/register', {
+  1923→        method: 'POST',
+  1924→        headers: getAuthHeaders(),
+  1925→        body: JSON.stringify({ name: domainName }),
+  1926→      })
+  1927→      const data = await res.json()
+  1928→      if (!res.ok) {
+  1929→        toast.error(data.error || 'Registration failed')
+  1930→        return
+  1931→      }
+  1932→      toast.success(`Domain ${domainName} registered!`)
+  1933→      fetchDomains()
+  1934→      setActiveTab('my-domains')
+  1935→      setSearchResult(null)
+  1936→      setSearchQuery('')
+  1937→    } catch {
+  1938→      toast.error('Network error')
+  1939→    } finally {
+  1940→      setRegistering(false)
+  1941→    }
+  1942→  }
+  1943→
+  1944→  // Add a custom domain the user already owns. They will need to verify
+  1945→  // ownership by adding a DNS TXT record.
+  1946→  const handleAddCustomDomain = async (domainName: string) => {
+  1947→    setRegistering(true)
+  1948→    try {
+  1949→      const res = await fetch('/api/domains/register', {
+  1950→        method: 'POST',
+  1951→        headers: getAuthHeaders(),
+  1952→        body: JSON.stringify({ name: domainName, provider: 'custom' }),
+  1953→      })
+  1954→      const data = await res.json()
+  1955→      if (!res.ok) {
+  1956→        toast.error(data.error || 'Failed to add custom domain')
+  1957→        return
+  1958→      }
+  1959→      toast.success(`Custom domain ${domainName} added - verify via DNS to activate`)
+  1960→      fetchDomains()
+  1961→      setActiveTab('my-domains')
+  1962→      setSearchResult(null)
+  1963→      setSearchQuery('')
+  1964→      setShowCustomDomain(false)
+  1965→      setCustomDomainInput('')
+  1966→    } catch {
+  1967→      toast.error('Network error')
+  1968→    } finally {
+  1969→      setRegistering(false)
+  1970→    }
+  1971→  }
+  1972→
+  1973→  // Detail View
+  1974→  if (selectedDomainId) {
+  1975→    return (
+  1976→      <div>
+  1977→        <DomainDetailView
+  1978→          domainId={selectedDomainId}
+  1979→          onBack={() => setSelectedDomainId(null)}
+  1980→          onRefresh={fetchDomains}
+  1981→        />
+  1982→      </div>
+  1983→    )
+  1984→  }
+  1985→
+  1986→  return (
+  1987→    <div className="space-y-6">
+  1988→      {/* Header */}
+  1989→      <div>
+  1990→        <h2 className="text-2xl font-bold">Domain Management</h2>
+  1991→        <p className="text-sm text-muted-foreground mt-1">
+  1992→          Search, register, and manage your domains
+  1993→        </p>
+  1994→      </div>
+  1995→
+  1996→      <Tabs value={activeTab} onValueChange={setActiveTab}>
+  1997→        <TabsList className="grid w-full grid-cols-2 max-w-md">
+  1998→          <TabsTrigger value="search">
+  1999→            <Search className="size-4 mr-2" />
+  2000→            Search
+
+[showing lines 1-2000 of 2314; use offset=2001 with limit to continue reading]
