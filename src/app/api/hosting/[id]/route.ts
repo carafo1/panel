@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
-import { deleteApplication, isCoolifyDemoMode } from '@/lib/coolify'
 
 export async function GET(
   request: Request,
@@ -74,7 +73,6 @@ export async function GET(
         repoUrl: project.repoUrl,
         autoDeploy: project.autoDeploy,
         sslEnabled: project.sslEnabled,
-        coolifyId: project.coolifyId,
         lastDeployment,
         server: project.server ? {
           id: project.server.id,
@@ -251,28 +249,10 @@ export async function DELETE(
       )
     }
 
-    // ── Clean up the Coolify app before touching the DB ────────────────
-    // We always attempt to delete the Coolify app (if a coolifyId exists)
-    // so the server-side resource is released. If the call fails (e.g. the
-    // app was already deleted, network error, demo mode off), we log the
-    // error but continue with the DB-side stop so the user can still clean
-    // up their project from the dashboard.
-    if (project.coolifyId) {
-      try {
-        await deleteApplication(project.coolifyId)
-        console.log(
-          `[hosting/delete] Coolify app ${project.coolifyId} deleted (demo=${isCoolifyDemoMode()})`
-        )
-      } catch (err) {
-        // Log but don't fail - the DB record still needs to be updated.
-        console.error(
-          '[hosting/delete] Coolify deleteApplication failed (continuing with DB cleanup):',
-          err instanceof Error ? err.message : err
-        )
-      }
-    }
-
-    // Stop the project by updating status
+    // ── Stop the project ─────────────────────────────────────────────
+    // We simply mark the project as stopped in the database. There is no
+    // external hosting provider to clean up; the worker service will pick
+    // up the status change.
     await db.project.update({
       where: { id },
       data: { status: 'stopped' },
@@ -289,8 +269,6 @@ export async function DELETE(
         name: project.name,
         framework: project.framework,
         subdomain: project.subdomain,
-        coolifyId: project.coolifyId,
-        coolifyDemoMode: isCoolifyDemoMode(),
       },
     })
 
@@ -300,7 +278,6 @@ export async function DELETE(
         id: project.id,
         name: project.name,
         status: 'stopped',
-        coolifyId: project.coolifyId,
       },
     })
   } catch (error) {

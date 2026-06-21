@@ -145,7 +145,7 @@ export async function POST(
     // Update project status to running
     await db.project.update({
       where: { id: project.id },
-      data: { status: 'running', coolifyId: `coolify-${Date.now()}` },
+      data: { status: 'running' },
     })
 
     // Update deployment status

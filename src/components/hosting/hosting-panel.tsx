@@ -127,7 +127,6 @@ interface Project {
 }
 
 interface ProjectDetail extends Project {
-  coolifyId?: string
   repoUrl?: string
   deployments: Deployment[]
   domains: { id: string; name: string; status: string; dnsRecords?: unknown[] }[]

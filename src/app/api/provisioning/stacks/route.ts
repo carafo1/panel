@@ -11,7 +11,7 @@
  * Response: { stacks: Array<{ id, name, description, icon }> }
  */
 import { NextResponse } from 'next/server'
-import { listStacks } from '@/lib/coolify'
+import { listStacks } from '@/lib/stacks'
 
 export async function GET() {
   try {

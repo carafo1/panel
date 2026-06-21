@@ -3,7 +3,7 @@
  * =======================================
  *
  * Triggers rollback for a provisioning job — deletes mailboxes, removes the
- * Mailcow domain, deletes the Coolify application, and clears the DNS records
+ * Mailcow domain, stops the hosting project, and clears the DNS records
  * that were created. Only the job's owner may trigger a rollback, and only
  * when the job is in a terminal state (success / failed / partial).
  *

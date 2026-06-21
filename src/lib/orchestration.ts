@@ -13,12 +13,12 @@
  * Hosting + Email are NON-CRITICAL — if they fail but domain+DNS succeeded,
  * the pipeline continues to verification and the overall status is `partial`.
  *
- * All external API calls (Dynadot, Coolify, Mailcow) have DEMO MODE fallbacks
+ * All external API calls (Dynadot, Mailcow) have DEMO MODE fallbacks
  * so the entire pipeline runs out-of-the-box without any real provider env
  * vars configured.
  *
  * Used by:
- *  - Task #19 Orchestration Engine — ties together Dynadot, DNS, Coolify, and
+ *  - Task #19 Orchestration Engine — ties together Dynadot, DNS, and
  *    Mailcow into a single end-to-end provisioning flow.
  */
 import crypto from 'crypto'
@@ -33,13 +33,6 @@ import {
   isDynadotDemoMode,
 } from '@/lib/dynadot'
 import { verifyTxtRecord } from '@/lib/dns'
-import {
-  createApplication,
-  deployApplication,
-  getApplicationStatus,
-  deleteApplication,
-  isCoolifyDemoMode,
-} from '@/lib/coolify'
 import {
   addDomain,
   generateDkim,
@@ -83,7 +76,6 @@ export interface ProvisioningResult {
     status: 'success' | 'fail' | 'skipped'
     projectId?: string
     url?: string
-    coolifyId?: string
     sslEnabled: boolean
     healthChecked: boolean
     details: string
@@ -124,7 +116,6 @@ interface PipelineContext {
   dkimPublicKey?: string
   dkimSelector?: string
   projectId?: string
-  coolifyId?: string
   hostingUrl?: string
   mailboxes: Array<{
     address: string
@@ -167,7 +158,7 @@ function generatePassword(): string {
   return crypto.randomBytes(12).toString('base64url')
 }
 
-/** Map a stack name to a Coolify framework identifier. */
+/** Map a stack name to a framework identifier. */
 function stackToFramework(stack: string): string {
   switch (stack) {
     case 'nodejs':
@@ -393,7 +384,7 @@ export async function runProvisioningPipeline(
     | { records: Array<{ type: string; name: string; value: string; recordId: string }> }
     | undefined
   let hostingResult:
-    | { projectId: string; coolifyId: string; url: string }
+    | { projectId: string; url: string }
     | undefined
   let emailResult:
     | {
@@ -437,7 +428,6 @@ export async function runProvisioningPipeline(
         if (step.stepName === 'hosting_provision' && out) {
           hostingResult = out
           ctx.projectId = out.projectId
-          ctx.coolifyId = out.coolifyId
           ctx.hostingUrl = out.url
         }
         if (step.stepName === 'email_provision' && out) {
@@ -516,7 +506,6 @@ export async function runProvisioningPipeline(
             }
           )
           ctx.projectId = hostingResult.projectId
-          ctx.coolifyId = hostingResult.coolifyId
           ctx.hostingUrl = hostingResult.url
           break
         case 'email_provision':
@@ -731,7 +720,7 @@ function buildResult(
   dnsResult:
     | { records: Array<{ type: string; name: string; value: string; recordId: string }> }
     | undefined,
-  hostingResult: { projectId: string; coolifyId: string; url: string } | undefined,
+  hostingResult: { projectId: string; url: string } | undefined,
   emailResult:
     | {
         mailboxes: Array<{
@@ -782,10 +771,9 @@ function buildResult(
         status: 'success',
         projectId: hostingResult.projectId,
         url: hostingResult.url,
-        coolifyId: hostingResult.coolifyId,
         sslEnabled: true,
         healthChecked: verifyResult?.hostingReachable ?? false,
-        details: `Application provisioned in Coolify (id=${hostingResult.coolifyId}). URL: ${hostingResult.url}`,
+        details: `Application provisioned. URL: ${hostingResult.url}`,
       }
     : hostingFailed
       ? {
@@ -848,8 +836,7 @@ function buildResult(
 
   if (hostingResult) {
     credentials.hosting = {
-      adminUrl: process.env.COOLIFY_API_URL || 'https://coolify.deployhub.io',
-      apiKey: isCoolifyDemoMode() ? undefined : process.env.COOLIFY_API_TOKEN,
+      adminUrl: '/dashboard/hosting',
     }
   }
 
@@ -1062,25 +1049,26 @@ async function configureDns(
 // ─── Step 3: provisionHosting ────────────────────────────────────────────
 
 /**
- * Step 3: Provision web hosting via Coolify.
+ * Step 3: Provision web hosting.
  *
  *  1. Create a Project in DB with name=domainName, framework based on stack.
- *  2. Call Coolify createApplication() to create the app.
- *  3. Call Coolify deployApplication() to trigger an initial deploy.
- *  4. Create a Deployment record tracking this initial deploy.
+ *  2. Create an initial Deployment record in 'queued' status.
+ *  3. Queue a deployment_status_check job so the worker transitions it
+ *     through building → live.
  */
 async function provisionHosting(
   job: { id: string; userId: string; domainName: string; stack: string },
   step: { id: string },
   domainId: string,
   domainName: string
-): Promise<{ projectId: string; coolifyId: string; url: string }> {
+): Promise<{ projectId: string; url: string }> {
   const framework = stackToFramework(job.stack)
   const slug = domainName
     .toLowerCase()
     .replace(/[^a-z0-9.-]+/g, '-')
     .replace(/^-|-$/g, '')
   const subdomain = `${slug.split('.')[0]}.deployhub.io`
+  const url = `https://${subdomain}`
 
   // 1. Create the Project record.
   const project = await db.project.create({
@@ -1103,47 +1091,30 @@ async function provisionHosting(
     data: { projectId: project.id },
   })
 
-  // 3. Call Coolify createApplication().
-  // In demo mode, serverId is synthetic — that's fine.
-  const coolifyApp = await createApplication({
-    name: domainName,
-    framework,
-    serverId: 'deployhub-default',
-  })
-
-  // Persist the Coolify ID on the project.
+  // 3. Mark project as running and create an initial Deployment record.
   await db.project.update({
     where: { id: project.id },
-    data: {
-      coolifyId: coolifyApp.id,
-      status: 'running',
-    },
+    data: { status: 'running' },
   })
 
-  // 4. Trigger an initial deploy.
-  const deploy = await deployApplication(coolifyApp.id)
-
-  // 5. Create a Deployment record.
   await db.deployment.create({
     data: {
       projectId: project.id,
       userId: job.userId,
       branch: 'main',
-      status: 'building',
-      deployUrl: coolifyApp.url,
+      status: 'queued',
+      deployUrl: url,
       triggeredBy: 'provisioning',
-      coolifyDeploymentId: deploy.deploymentId,
     },
   })
 
   console.log(
-    `[orchestration] step=hosting_provision projectId=${project.id} coolifyId=${coolifyApp.id} url=${coolifyApp.url}`
+    `[orchestration] step=hosting_provision projectId=${project.id} url=${url}`
   )
 
   return {
     projectId: project.id,
-    coolifyId: coolifyApp.id,
-    url: coolifyApp.url,
+    url,
   }
 }
 
@@ -1273,7 +1244,7 @@ async function provisionEmail(
  * Step 5: Verify that all provisioned services are reachable and properly
  * configured.
  *
- *  1. Hosting: poll Coolify getApplicationStatus() for the app.
+ *  1. Hosting: confirm the Project exists and is in a non-error state.
  *  2. Email: call Mailcow verifyEmailSetup() for the domain.
  *  3. DNS: call dns.ts verifyTxtRecord() for the DKIM record (best-effort —
  *     DNS propagation can take minutes/hours so we don't fail the pipeline
@@ -1290,13 +1261,9 @@ async function verifyProvisioning(
   if (projectId) {
     try {
       const project = await db.project.findUnique({ where: { id: projectId } })
-      if (project?.coolifyId) {
-        const status = await getApplicationStatus(project.coolifyId)
-        hostingReachable =
-          status.status === 'running' ||
-          status.status === 'healthy' ||
-          status.status === 'ready'
-      }
+      hostingReachable =
+        !!project &&
+        (project.status === 'running' || project.status === 'creating' || project.status === 'building')
     } catch (err) {
       console.warn(
         `[orchestration] hosting health check failed:`,
@@ -1344,7 +1311,7 @@ async function verifyProvisioning(
  * Roll back all completed steps in REVERSE order. For each successful step:
  *
  *   email_provision      → Mailcow removeDomain() + delete EmailMailbox rows
- *   hosting_provision    → Coolify deleteApplication() + mark Project stopped
+ *   hosting_provision    → mark Project stopped (no external provider to clean up)
  *   dns_configure        → delete DnsRecord rows
  *   domain_register      → mark Domain status='cancelled' (can't unregister)
  *
@@ -1415,16 +1382,6 @@ export async function rollbackProvisioning(
           const project = await db.project.findFirst({
             where: { userId: job.userId, name: job.domainName },
           })
-          if (project?.coolifyId) {
-            try {
-              await deleteApplication(project.coolifyId)
-            } catch (err) {
-              console.warn(
-                `[orchestration] rollback deleteApplication ${project.coolifyId} failed:`,
-                err instanceof Error ? err.message : err
-              )
-            }
-          }
           if (project) {
             await db.project.update({
               where: { id: project.id },

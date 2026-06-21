@@ -72,8 +72,6 @@ export async function seedDatabase() {
           bandwidthGB: 1000,
           usedRamGB: 8.5,
           usedStorageGB: 120.3,
-          coolifyUrl: 'https://185.234.72.10:8000',
-          coolifyToken: 'coolify-token-eu-001',
           region: 'eu-central',
         },
         {
@@ -87,8 +85,6 @@ export async function seedDatabase() {
           bandwidthGB: 2000,
           usedRamGB: 12.0,
           usedStorageGB: 250.7,
-          coolifyUrl: 'https://192.168.1.50:8000',
-          coolifyToken: 'coolify-token-us-001',
           region: 'us-east',
         },
       ],

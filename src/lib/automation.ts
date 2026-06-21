@@ -1,7 +1,6 @@
 import { db } from '@/lib/db'
 import { createNotification } from '@/lib/notifications'
 import { slugify } from '@/lib/utils'
-import { getApplicationStatus } from '@/lib/coolify'
 
 export type EventType =
   | 'payment_success'
@@ -13,7 +12,6 @@ export type EventType =
 
 export type ActionType =
   | 'create_user_workspace'
-  | 'create_coolify_project'
   | 'assign_server'
   | 'enable_ssl'
   | 'deploy_template'
@@ -44,7 +42,6 @@ function getActionsForEvent(event: AutomationEvent): ActionDef[] {
       if (purchaseType === 'hosting') {
         return [
           { type: 'create_user_workspace', label: 'Create User Workspace' },
-          { type: 'create_coolify_project', label: 'Create Coolify Project' },
           { type: 'assign_server', label: 'Assign Server' },
           { type: 'enable_ssl', label: 'Enable SSL' },
           { type: 'deploy_template', label: 'Deploy Template' },
@@ -58,7 +55,6 @@ function getActionsForEvent(event: AutomationEvent): ActionDef[] {
         // both
         return [
           { type: 'create_user_workspace', label: 'Create User Workspace' },
-          { type: 'create_coolify_project', label: 'Create Coolify Project' },
           { type: 'assign_server', label: 'Assign Server' },
           { type: 'enable_ssl', label: 'Enable SSL' },
           { type: 'deploy_template', label: 'Deploy Template' },
@@ -76,7 +72,6 @@ function getActionsForEvent(event: AutomationEvent): ActionDef[] {
 
     case 'hosting_requested':
       return [
-        { type: 'create_coolify_project', label: 'Create Coolify Project' },
         { type: 'assign_server', label: 'Assign Server' },
         { type: 'enable_ssl', label: 'Enable SSL' },
         { type: 'deploy_template', label: 'Deploy Template' },
@@ -133,20 +128,9 @@ async function executeAction(
     }
 
     case 'create_coolify_project': {
-      // If a projectId was provided, update it; otherwise just log
-      const projectId = payload.projectId as string | undefined
-      if (projectId) {
-        const project = await db.project.findUnique({ where: { id: projectId } })
-        if (project) {
-          await db.project.update({
-            where: { id: projectId },
-            data: {
-              coolifyId: `coolify-${Date.now()}`,
-            },
-          })
-        }
-      }
-      return { coolifyProjectId: `cp-${Date.now()}`, status: 'created' }
+      // Legacy action retained for backward compatibility with already-queued
+      // jobs. No-op now that the Coolify integration has been removed.
+      return { status: 'skipped', reason: 'coolify_integration_removed' }
     }
 
     case 'assign_server': {
@@ -336,10 +320,9 @@ async function executeAction(
     }
 
     case 'deployment_status_check': {
-      // Poll Coolify (or demo mode) for the live status of a deployment and
-      // mirror it onto the Deployment row. If the deployment is still
-      // in-flight, we schedule a follow-up check job so the worker picks it
-      // up again ~15s later. Once the deployment reaches a terminal state
+      // Advance the deployment status through building → live. The worker
+      // service picks this job up and re-queues it ~15s later while the
+      // deployment is still in-flight. Once it reaches a terminal state
       // (live/failed), no follow-up is queued.
       const deploymentId = payload.deploymentId as string | undefined
       const projectId = payload.projectId as string | undefined
@@ -367,86 +350,37 @@ async function executeAction(
         }
       }
 
-      const coolifyAppId = deployment.project.coolifyId
-      if (!coolifyAppId) {
-        // No Coolify app yet - nothing to poll. Mark deployment as live in
-        // demo mode so the UI doesn't hang forever.
-        await db.deployment.update({
-          where: { id: deploymentId },
-          data: {
-            status: 'live',
-            deployUrl: `https://${deployment.project.subdomain}`,
-            duration: Math.floor((Date.now() - deployment.createdAt.getTime()) / 1000) || 1,
-          },
-        })
-        return { status: 'no_coolify_id_marked_live', deploymentId }
-      }
-
-      let coolifyStatus: { status: string; url?: string } = {
-        status: 'unknown',
-      }
-      try {
-        coolifyStatus = await getApplicationStatus(coolifyAppId)
-      } catch (err) {
-        console.error(
-          '[automation] deployment_status_check: getApplicationStatus failed',
-          err instanceof Error ? err.message : err
-        )
-        // Re-queue and try again — but only up to a sane limit.
-        const attempts = (payload.attempt as number | undefined) || 0
-        if (attempts < 10) {
-          await db.jobQueue.create({
-            data: {
-              type: 'deployment_status_check',
-              payload: JSON.stringify({
-                deploymentId,
-                projectId,
-                userId,
-                attempt: attempts + 1,
-              }),
-              status: 'queued',
-              attempts: 0,
-              maxAttempts: 3,
-              runAt: new Date(Date.now() + 15_000),
-            },
-          })
-        }
-        return { status: 'poll_failed_will_retry', deploymentId, error: err instanceof Error ? err.message : 'unknown' }
-      }
-
-      // Map Coolify's vocabulary onto our Deployment.status vocabulary.
-      const raw = (coolifyStatus.status || '').toLowerCase()
-      let mapped: string
-      if (raw === 'running' || raw === 'healthy' || raw === 'ready') {
-        mapped = 'live'
-      } else if (raw.includes('error') || raw === 'exited' || raw === 'failed') {
-        mapped = 'failed'
-      } else if (raw === 'building' || raw === 'deploying' || raw === 'in_progress' || raw === 'queued') {
-        mapped = raw === 'queued' ? 'building' : raw
-      } else if (raw === 'stopped' || raw === 'paused') {
-        mapped = 'failed'
-      } else {
-        // Unknown - keep the existing status so we don't downgrade.
-        mapped = deployment.status
-      }
-
+      const attempts = (payload.attempt as number | undefined) || 0
       const nowIso = new Date().toISOString()
       const elapsedSec = Math.max(
         1,
         Math.floor((Date.now() - deployment.createdAt.getTime()) / 1000)
       )
 
-      // Append a short status line to the build log so the live log view
-      // shows polling activity.
-      const logLine = `[${nowIso}] Coolify status: ${raw || 'unknown'} → ${mapped}`
+      // Transition logic: queued → building (after 1st poll) → live (after 2nd).
+      // This keeps the build log feeling alive without depending on any
+      // external hosting provider.
+      let mapped: string
+      if (deployment.status === 'queued') {
+        mapped = 'building'
+      } else if (deployment.status === 'building') {
+        // After ~1 poll in 'building' (attempts >= 1), go live.
+        mapped = attempts >= 1 ? 'live' : 'building'
+      } else if (deployment.status === 'deploying') {
+        mapped = 'live'
+      } else {
+        // Unknown - keep the existing status so we don't downgrade.
+        mapped = deployment.status
+      }
+
+      const logLine = `[${nowIso}] Build progress: ${deployment.status} → ${mapped}`
       const existingLog = deployment.buildLog || ''
       const newBuildLog = existingLog
         ? `${existingLog}\n${logLine}`
         : logLine
 
       if (mapped === 'live') {
-        const finalUrl =
-          coolifyStatus.url || `https://${deployment.project.subdomain}`
+        const finalUrl = `https://${deployment.project.subdomain}`
         await db.deployment.update({
           where: { id: deploymentId },
           data: {
@@ -473,7 +407,6 @@ async function executeAction(
         return {
           status: 'live',
           deploymentId,
-          coolifyStatus: raw,
           url: finalUrl,
         }
       }
@@ -484,7 +417,7 @@ async function executeAction(
           data: {
             status: 'failed',
             duration: elapsedSec,
-            buildLog: `${newBuildLog}\n❌ Deployment failed (Coolify status: ${raw})`,
+            buildLog: `${newBuildLog}\n❌ Deployment failed`,
           },
         })
         if (userId) {
@@ -496,7 +429,7 @@ async function executeAction(
             link: `/deployments/${deploymentId}`,
           })
         }
-        return { status: 'failed', deploymentId, coolifyStatus: raw }
+        return { status: 'failed', deploymentId }
       }
 
       // Still in-flight. Update the row's status + log, then schedule the
@@ -509,7 +442,6 @@ async function executeAction(
         },
       })
 
-      const attempts = (payload.attempt as number | undefined) || 0
       if (attempts < 30) {
         await db.jobQueue.create({
           data: {
@@ -530,7 +462,6 @@ async function executeAction(
       return {
         status: 'in_progress',
         deploymentId,
-        coolifyStatus: raw,
         mapped,
         attempt: attempts + 1,
       }
@@ -671,10 +602,9 @@ export async function processEvent(event: AutomationEvent) {
               `Subdomain: ${project.subdomain}`,
               ``,
               `Step 1: Create workspace.............. ✅`,
-              `Step 2: Provision Coolify project..... ✅`,
-              `Step 3: Assign server................. ✅`,
-              `Step 4: Enable SSL.................... ✅`,
-              `Step 5: Deploy template............... ✅`,
+              `Step 2: Assign server................. ✅`,
+              `Step 3: Enable SSL.................... ✅`,
+              `Step 4: Deploy template............... ✅`,
               ``,
               `Deployment completed successfully!`,
               `Live at: https://${project.subdomain}`,

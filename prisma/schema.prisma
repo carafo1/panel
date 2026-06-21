@@ -110,7 +110,6 @@ model Project {
   framework    String   @default("nextjs") // nextjs, react, node, static
   stack        String   @default("nodejs") // "nodejs", "php", "python", "docker", "wordpress"
   status       String   @default("creating") // creating, running, stopped, error
-  coolifyId    String?  // Coolify project ID
   serverId     String?
   subdomain    String   // e.g. myapp.deployhub.io
   customDomain String?
@@ -199,8 +198,6 @@ model Server {
   bandwidthGB   Int
   usedRamGB     Float    @default(0)
   usedStorageGB Float    @default(0)
-  coolifyUrl    String?
-  coolifyToken  String?
   region        String   @default("eu-central")
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
@@ -219,7 +216,6 @@ model Deployment {
   deployUrl   String?
   duration    Int?     // seconds
   triggeredBy String   @default("user") // user, webhook, auto
-  coolifyDeploymentId String? // Coolify deployment UUID returned by deployApplication()
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

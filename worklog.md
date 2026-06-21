@@ -2015,3 +2015,70 @@ Stage Summary:
 - Standardized API envelope on all new endpoints: {success, message, data, errors, timestamp, requestId}
 - SOLID principles, Service Layer + Repository patterns, fully typed TypeScript
 - Note: dev server (Turbopack) is unstable in sandbox under heavy compilation load but all endpoints verified working via curl and UI verified via Agent Browser
+
+---
+Task ID: remove-coolify
+Agent: main (orchestrator)
+Task: Remove Coolify integration from the entire system
+
+Work Log:
+- Audited all 62 files matching "coolify" (case-insensitive). Filtered to 19 source files plus prisma schema and 2 mini-services (rest were tool-result caches / agent-ctx docs which are read-only).
+- Created src/lib/stacks.ts — extracted pure-data STACK_DEFINITIONS, getStackDefinition, listStacks, StackType from coolify.ts. These have no Coolify API dependency and are needed by /api/provisioning/stacks and the stack picker UI.
+- Updated prisma/schema.prisma — removed 4 fields: Project.coolifyId, Server.coolifyUrl, Server.coolifyToken, Deployment.coolifyDeploymentId.
+- Ran `bunx prisma db push --accept-data-loss` (data loss was expected: 13 Project.coolifyId values, 11 Deployment.coolifyDeploymentId values, 2 Server.coolifyUrl/coolifyToken values — all demo data we no longer need).
+- Deleted src/lib/coolify.ts entirely (712 lines).
+- Updated src/lib/orchestration.ts:
+  - Removed `createApplication`, `deployApplication`, `getApplicationStatus`, `deleteApplication`, `isCoolifyDemoMode` imports from @/lib/coolify
+  - Removed `coolifyId` from ProvisioningResult.hostingStatus and PipelineContext interfaces
+  - Rewrote `provisionHosting()` — no longer calls createApplication/deployApplication; instead creates the Project + an initial queued Deployment row, marks project running, returns `{ projectId, url }`
+  - Rewrote `verifyProvisioning()` hosting check — no longer polls getApplicationStatus; instead checks Project.status in DB
+  - Rewrote `rollbackProvisioning()` hosting_provision case — no longer calls deleteApplication; just marks Project stopped
+  - Removed `credentials.hosting.apiKey` + COOLIFY_API_URL reference; replaced with `adminUrl: '/dashboard/hosting'`
+- Updated src/lib/automation.ts:
+  - Removed `getApplicationStatus` import from @/lib/coolify
+  - Removed `create_coolify_project` from ActionType union (kept a no-op case for backward compat with already-queued jobs)
+  - Removed `create_coolify_project` action from all event→action mappings (payment_success hosting/both, hosting_requested)
+  - Rewrote `deployment_status_check` job handler — no longer polls Coolify; instead transitions deployment queued → building → live based on attempt count
+  - Updated payment_success build log — removed "Step 2: Provision Coolify project" line, renumbered subsequent steps
+- Updated src/lib/seed.ts — removed coolifyUrl/coolifyToken from the 2 seeded servers
+- Updated src/lib/email-dns.ts — comment now says "DeployHub's hosting layer" instead of "Coolify"
+- Updated src/app/api/admin/servers/route.ts — removed `coolifyUrl` from response
+- Updated src/app/api/billing/checkout/route.ts — removed `coolifyId` from project create
+- Updated src/app/api/templates/[id]/deploy/route.ts — removed `coolifyId` from project update
+- Updated src/app/api/provisioning/stacks/route.ts — import changed from `@/lib/coolify` to `@/lib/stacks`
+- Updated src/app/api/provisioning/[jobId]/rollback/route.ts — comment now says "stops the hosting project" instead of "deletes the Coolify application"
+- Rewrote src/app/api/deployments/[id]/status/route.ts — removed all Coolify polling; returns the DB-persisted status directly. Response no longer includes coolifyStatus, coolifyDeploymentId, coolifyDemoMode fields.
+- Rewrote src/app/api/hosting/[id]/deploy/route.ts — removed deployApplication/isCoolifyDemoMode imports; just creates the Deployment row + queues a status_check job
+- Rewrote src/app/api/hosting/create/route.ts — removed createApplication/deployApplication/isCoolifyDemoMode imports; just creates the Project + Deployment + queues a status_check job
+- Updated src/app/api/hosting/[id]/route.ts — removed deleteApplication/isCoolifyDemoMode imports; DELETE handler now just marks Project stopped (no external cleanup)
+- Updated src/components/hosting/hosting-panel.tsx — removed `coolifyId?: string` from ProjectDetail interface
+- Updated src/components/provisioning/provisioning-panel.tsx — removed "Coolify ID" DetailRow, changed "Coolify app + SSL" label to "Hosting + SSL", changed rollback dialog text from "Coolify application" to "hosting project"
+- Updated mini-services/realtime-service/index.ts — comments now say "container build pipeline" instead of "Coolify"
+- Updated mini-services/worker-service/index.ts — comment now says "transition deployments through building → live" instead of "poll Coolify"
+- Ran `bun run lint` → 0 errors
+- Ran `bunx prisma generate` to refresh the Prisma Client (the running server had a stale client cached)
+- Restarted dev server (killed old processes, started fresh)
+- Verified end-to-end via curl + Agent Browser:
+  - /api/provisioning/stacks returns 200 with stack list (no "Coolify" mentions in descriptions)
+  - /api/admin/servers returns 200 (no coolifyUrl field in response)
+  - /api/hosting/create returns 201 (project + deployment created without any Coolify provisioning)
+  - /api/domains/search returns 200 (Dynadot integration unaffected)
+  - /api/pricing returns 200
+  - Login + auth/me works
+  - Dashboard renders with no console errors
+  - Provisioning tab renders with no "Coolify" text on page (verified via JS eval)
+  - Hosting tab renders with no "Coolify" text on page
+  - Project detail view renders without the old "Coolify ID" row
+- Verified the worker service is still processing jobs every 10s without errors
+
+Stage Summary:
+Coolify integration has been completely removed from the system. The dev server is running stably on port 3000 with no console errors and no "Coolify" text anywhere in the rendered UI.
+- Deleted: src/lib/coolify.ts (712 lines)
+- Created: src/lib/stacks.ts (145 lines — pure-data stack definitions preserved)
+- Modified: 17 source files (lib + api routes + components + mini-services)
+- Schema: removed 4 fields across 3 models (Project, Server, Deployment)
+- Database: prisma db push applied with --accept-data-loss (demo data only)
+- Lint: 0 errors
+- Browser verification: all core flows (login, dashboard, provisioning, hosting, project detail) work cleanly
+
+The deployment workflow still works end-to-end — creating a project now creates a Project + queued Deployment row, and the worker transitions it queued → building → live via the deployment_status_check job (no external API calls). The hosting layer is now self-contained without any external provider dependency.

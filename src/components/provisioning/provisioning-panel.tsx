@@ -620,7 +620,7 @@ function NewProvisioningDialog({
                   />
                 </div>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Coolify app + SSL · ${HOSTING_PRICE.toFixed(2)}/mo
+                  Hosting + SSL · ${HOSTING_PRICE.toFixed(2)}/mo
                 </p>
               </div>
             </div>
@@ -1096,9 +1096,6 @@ function HostingResultCard({ result }: { result: ProvisioningResult }) {
             }
             mono
           />
-        )}
-        {s.coolifyId && (
-          <DetailRow label="Coolify ID" value={s.coolifyId} mono />
         )}
         {s.projectId && (
           <DetailRow label="Project ID" value={s.projectId} mono />
@@ -1755,8 +1752,8 @@ function JobDetailView({
           <AlertDialogHeader>
             <AlertDialogTitle>Roll back this provisioning job?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete the mailboxes, Mailcow domain, Coolify
-              application, and DNS records that were created for{' '}
+              This will permanently delete the mailboxes, Mailcow domain, hosting
+              project, and DNS records that were created for{' '}
               <span className="font-medium text-foreground">{job.domainName}</span>.
               The registered domain itself cannot be unregistered, but will be
               marked cancelled in our system. This action cannot be undone.

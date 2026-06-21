@@ -3,10 +3,6 @@ import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { createMonitor } from '@/lib/monitor'
-import {
-  deployApplication,
-  isCoolifyDemoMode,
-} from '@/lib/coolify'
 import { createJob } from '@/lib/automation'
 
 export async function POST(
@@ -53,8 +49,7 @@ export async function POST(
       // No body or invalid JSON - that's fine, defaults are used.
     }
 
-    // Create the Deployment row first so we have a record even if the
-    // Coolify call below fails.
+    // Create the Deployment row first so we have a record of the deploy.
     const deployment = await db.deployment.create({
       data: {
         projectId: project.id,
@@ -67,65 +62,9 @@ export async function POST(
       },
     })
 
-    // ── Trigger the real Coolify deployment ────────────────────────────
-    // If the project has a coolifyId (always true post-Wave-11 create flow,
-    // and always present in demo mode), call deployApplication() to start a
-    // fresh build in Coolify. Store the returned deployment UUID on the row
-    // so /api/deployments/[id]/status can poll it.
-    let coolifyDeploymentId: string | undefined
-    let deployTriggerError: string | undefined
-    if (project.coolifyId) {
-      try {
-        const result = await deployApplication(project.coolifyId)
-        coolifyDeploymentId = result.deploymentId
-        await db.deployment.update({
-          where: { id: deployment.id },
-          data: {
-            coolifyDeploymentId,
-            status: 'building',
-            buildLog: `${
-              deployment.buildLog || ''
-            }\n✓ Coolify deployment ${coolifyDeploymentId} triggered`,
-          },
-        })
-      } catch (err) {
-        deployTriggerError =
-          err instanceof Error ? err.message : 'Unknown Coolify deploy error'
-        console.error('[deploy] deployApplication failed:', deployTriggerError)
-        await db.deployment.update({
-          where: { id: deployment.id },
-          data: {
-            status: 'failed',
-            buildLog: `${
-              deployment.buildLog || ''
-            }\n❌ Coolify deploy trigger failed: ${deployTriggerError}`,
-          },
-        })
-        return NextResponse.json(
-          {
-            error: 'Coolify deployment trigger failed',
-            detail: deployTriggerError,
-            deploymentId: deployment.id,
-          },
-          { status: 502 }
-        )
-      }
-    } else {
-      // No coolifyId - this should be rare post-Wave-11, but handle it.
-      await db.deployment.update({
-        where: { id: deployment.id },
-        data: {
-          status: 'building',
-          buildLog: `${
-            deployment.buildLog || ''
-          }\n⚠️ No Coolify app ID on project - deploying in legacy/demo mode.`,
-        },
-      })
-    }
-
-    // Queue a background job to poll Coolify for the deployment status.
-    // The worker-service picks this up within ~10s and will keep polling
-    // every ~15s until the deployment reaches a terminal state.
+    // Queue a background job to advance the deployment status. The worker
+    // service picks this up within ~10s and transitions the deployment
+    // through building → live, appending realistic log lines.
     await createJob('deployment_status_check', {
       deploymentId: deployment.id,
       projectId: project.id,
@@ -144,9 +83,7 @@ export async function POST(
         name: project.name,
         framework: project.framework,
         deploymentId: deployment.id,
-        coolifyDeploymentId,
         branch,
-        coolifyDemoMode: isCoolifyDemoMode(),
       },
     })
 
@@ -171,17 +108,13 @@ export async function POST(
       deployment: {
         id: deployment.id,
         projectId: project.id,
-        status: deployment.status === 'queued' ? 'building' : deployment.status,
+        status: 'building',
         deployUrl: `https://${project.subdomain}`,
-        coolifyDeploymentId,
         triggeredBy: 'user',
         branch,
         createdAt: deployment.createdAt,
       },
-      coolifyDemoMode: isCoolifyDemoMode(),
-      message: coolifyDeploymentId
-        ? 'Deployment triggered - worker will poll for status updates'
-        : 'Deployment triggered (no Coolify app ID)',
+      message: 'Deployment triggered - worker will update status',
     })
   } catch (error) {
     console.error('Deploy error:', error)

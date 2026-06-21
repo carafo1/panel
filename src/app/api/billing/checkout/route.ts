@@ -163,7 +163,6 @@ export async function POST(request: Request) {
             status: 'creating',
             subdomain,
             serverId: bestServer?.id || null,
-            coolifyId: `coolify-${Date.now()}`,
             sslEnabled: true,
             autoDeploy: true,
           },

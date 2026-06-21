@@ -176,9 +176,10 @@ function emitNotification(
   console.log(`[notification] user:${userId} → ${title}`)
 }
 
-// Realistic build log lines - mirror the actual shell commands Coolify
-// runs when building a Nixpacks/Docker application. The leading `$ ` makes
-// it visually obvious these are shell commands, just like a real CI log.
+// Realistic build log lines - mirror the actual shell commands a container
+// build pipeline runs when building a Nixpacks/Docker application. The
+// leading `$ ` makes it visually obvious these are shell commands, just
+// like a real CI log.
 const BUILD_LOG_LINES = [
   { line: '🚀 DeployHub Build Pipeline v2.4.0', delay: 300 },
   { line: '────────────────────────────────────────', delay: 200 },
@@ -301,7 +302,7 @@ function simulateDeployment(deploymentId: string, projectId: string) {
 
   // Derive a realistic subdomain + container id from the deployment/project
   // ids so the log lines (which contain {id} and {subdomain} placeholders)
-  // read like a real Coolify build.
+  // read like a real build.
   const shortId = deploymentId.replace(/[^a-z0-9]/gi, '').toLowerCase().slice(0, 10) || 'app'
   const subdomain = `${shortId}.deployhub.io`
   const renderLine = (raw: string): string =>

@@ -7,7 +7,8 @@
  *   - Every 10s:  POST /api/admin/jobs/process   (with x-cron-key)
  *     -> picks up queued/failed JobQueue rows and runs them via the
  *        automation engine. This is what advances deployment_status_check
- *        jobs (which poll Coolify) through to completion.
+ *        jobs (which transition deployments through building → live) to
+ *        completion.
  *
  *   - Every 60s:  POST /api/monitors/run         (with x-cron-key)
  *     -> runs an uptime check sweep across every enabled UptimeMonitor.

@@ -5,7 +5,7 @@
  *  - #20 Email DNS helper — generate the standard MX/SPF/DKIM/DMARC records
  *    that a domain needs in order to send and receive mail through DeployHub's
  *    Mailcow instance, plus the A/CNAME records a domain needs in order to
- *    host a website through Coolify.
+ *    host a website through DeployHub's hosting layer.
  *
  * The records produced here are designed to match what Mailcow itself
  * documents (https://mailcow.github.io/mailcow-dockerized-docs/prerequisite-dns/)

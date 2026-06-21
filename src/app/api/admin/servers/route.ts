@@ -52,7 +52,6 @@ export async function GET(request: Request) {
         bandwidthGB: s.bandwidthGB,
         usedRamGB: s.usedRamGB,
         usedStorageGB: s.usedStorageGB,
-        coolifyUrl: s.coolifyUrl,
         region: s.region,
         projectCount: s._count.projects,
         ramUsagePercent: Math.round((s.usedRamGB / s.ramGB) * 100),
