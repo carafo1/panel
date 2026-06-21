@@ -3,7 +3,7 @@ import { db } from '@/lib/db'
 import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
 import { processEvent } from '@/lib/automation'
 import { logAudit } from '@/lib/audit'
-import { createJob } from '@/lib/automation'
+import { deployProject } from '@/lib/vps'
 
 function slugify(text: string): string {
   return text
@@ -73,11 +73,34 @@ export async function POST(request: Request) {
       )
     }
 
-    // Find the least loaded server
-    const server = await db.server.findFirst({
+    // Auto-assign a server: prefer active servers with dockerInstalled=true
+    // that have the fewest projects; fall back to any active server. If no
+    // active server exists at all, return a 400 so the user knows to add one
+    // via the admin panel first.
+    const serverCandidates = await db.server.findMany({
       where: { status: 'active' },
-      orderBy: { usedRamGB: 'asc' },
+      include: { _count: { select: { projects: true } } },
     })
+    serverCandidates.sort((a, b) => {
+      if (a.dockerInstalled !== b.dockerInstalled) {
+        return a.dockerInstalled ? -1 : 1
+      }
+      const pa = a._count?.projects ?? 0
+      const pb = b._count?.projects ?? 0
+      if (pa !== pb) return pa - pb
+      return a.createdAt.getTime() - b.createdAt.getTime()
+    })
+    const server = serverCandidates[0] || null
+
+    if (!server) {
+      return NextResponse.json(
+        {
+          error:
+            'No active servers available. Add a server in admin panel first.',
+        },
+        { status: 400 }
+      )
+    }
 
     // Create the project (initially in 'creating' status - will be updated
     // to 'running' once the deployment pipeline completes).
@@ -88,17 +111,12 @@ export async function POST(request: Request) {
         slug,
         framework,
         status: 'creating',
-        serverId: server?.id || null,
+        serverId: server.id,
         subdomain,
         sslEnabled: true,
         autoDeploy: true,
         repoUrl: repoUrl || null,
       },
-    })
-
-    await db.project.update({
-      where: { id: project.id },
-      data: { status: 'building' },
     })
 
     // Trigger the rest of the automation pipeline (workspace, ssl, server assignment, etc).
@@ -113,7 +131,7 @@ export async function POST(request: Request) {
           projectName: name,
           framework,
           planId: planId || subscription?.planId || null,
-          serverId: server?.id || null,
+          serverId: server.id,
         },
       })
     } catch (automationErr) {
@@ -123,9 +141,9 @@ export async function POST(request: Request) {
       )
     }
 
-    // Create an initial Deployment row so the UI has something to surface,
-    // and queue a status-check job so the worker transitions it through
-    // building → live.
+    // Create an initial Deployment row in 'queued' status. The real VPS
+    // deployer (fired below) will transition it to 'live' or 'failed' as it
+    // runs, streaming build logs into buildLog.
     const deployment = await db.deployment.create({
       data: {
         projectId: project.id,
@@ -134,22 +152,43 @@ export async function POST(request: Request) {
         branch: branch || 'main',
         status: 'queued',
         triggeredBy: 'user',
-        buildLog: `🚀 Provisioned project ${project.name}\nTriggering deployment...`,
+        buildLog: `🚀 Provisioned project ${project.name}\nTriggering deployment on ${server.name}…`,
       },
     })
 
-    await createJob('deployment_status_check', {
-      deploymentId: deployment.id,
+    // Fire-and-forget the real VPS deploy so the HTTP response returns
+    // immediately. The deployer updates the Deployment row's status + buildLog
+    // as it progresses; the UI polls for status.
+    void deployProject({
       projectId: project.id,
-      userId: decoded.userId,
-      attempt: 0,
-    })
-
-    // Update project status to 'running' so the dashboard reflects a
-    // successful creation. The status-check job will refine this further.
-    await db.project.update({
-      where: { id: project.id },
-      data: { status: 'running' },
+      deploymentId: deployment.id,
+      onLog: (msg) =>
+        console.log(`[hosting/create ${deployment.id.slice(0, 8)}] ${msg}`),
+    }).catch(async (err) => {
+      console.error(
+        `[hosting/create ${deployment.id}] Deploy failed:`,
+        err
+      )
+      const errMsg = err instanceof Error ? err.message : String(err)
+      try {
+        await db.deployment.update({
+          where: { id: deployment.id },
+          data: {
+            status: 'failed',
+            buildLog: `❌ Deploy threw: ${errMsg}`,
+            duration: 0,
+          },
+        })
+        await db.project.update({
+          where: { id: project.id },
+          data: { status: 'error' },
+        })
+      } catch (persistErr) {
+        console.error(
+          `[hosting/create ${deployment.id}] Failed to persist failure state:`,
+          persistErr
+        )
+      }
     })
 
     // Refresh the deployment row for the response.
@@ -168,26 +207,28 @@ export async function POST(request: Request) {
         name: project.name,
         framework: project.framework,
         subdomain,
-        serverId: server?.id || null,
+        serverId: server.id,
       },
     })
 
-    return NextResponse.json({
-      project: {
-        id: project.id,
-        name: project.name,
-        slug: project.slug,
-        framework: project.framework,
-        status: 'running',
-        subdomain: project.subdomain,
-        sslEnabled: project.sslEnabled,
-        autoDeploy: project.autoDeploy,
-        server: server ? {
-          id: server.id,
-          name: server.name,
-          ip: server.ip,
-          region: server.region,
-        } : null,
+    return NextResponse.json(
+      {
+        project: {
+          id: project.id,
+          name: project.name,
+          slug: project.slug,
+          framework: project.framework,
+          status: project.status,
+          subdomain: project.subdomain,
+          sslEnabled: project.sslEnabled,
+          autoDeploy: project.autoDeploy,
+          server: {
+            id: server.id,
+            name: server.name,
+            ip: server.ip,
+            region: server.region,
+          },
+        },
         deployment: finalDeployment
           ? {
               id: finalDeployment.id,
@@ -195,8 +236,10 @@ export async function POST(request: Request) {
               deployUrl: finalDeployment.deployUrl || `https://${subdomain}`,
             }
           : null,
+        message: 'Project created — deployment started',
       },
-    }, { status: 201 })
+      { status: 201 }
+    )
   } catch (error) {
     console.error('Create hosting error:', error)
     return NextResponse.json(

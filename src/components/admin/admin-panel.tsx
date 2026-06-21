@@ -19,7 +19,6 @@ import {
   TableRow,
   TableCell,
 } from '@/components/ui/table'
-import { Progress } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import {
@@ -37,9 +36,6 @@ import {
   Globe,
   Search,
   RefreshCw,
-  Cpu,
-  HardDrive,
-  MapPin,
   Loader2,
   ShieldCheck,
   AlertTriangle,
@@ -55,6 +51,7 @@ import {
 import { toast } from 'sonner'
 import { useAuthStore } from '@/store/auth-store'
 import { PaymentMethodsPanel } from '@/components/admin/payment-methods-panel'
+import { ServersPanel } from '@/components/admin/servers-panel'
 
 // ── Types ──────────────────────────────────────────────────────────────
 interface Stats {
@@ -100,24 +97,6 @@ interface Job {
   createdAt: string
   startedAt: string | null
   completedAt: string | null
-}
-
-interface ServerInfo {
-  id: string
-  name: string
-  ip: string
-  provider: string
-  status: string
-  cpuCores: number
-  ramGB: number
-  storageGB: number
-  bandwidthGB: number
-  usedRamGB: number
-  usedStorageGB: number
-  region: string
-  projectCount: number
-  ramUsagePercent: number
-  storageUsagePercent: number
 }
 
 // ── API helper ─────────────────────────────────────────────────────────
@@ -207,29 +186,11 @@ function JobStatusBadge({ status }: { status: string }) {
   )
 }
 
-function ServerStatusBadge({ status }: { status: string }) {
-  const map: Record<string, { className: string }> = {
-    active: { className: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
-    maintenance: { className: 'bg-yellow-100 text-yellow-700 border-yellow-200' },
-    offline: { className: 'bg-red-100 text-red-700 border-red-200' },
-  }
-  const cfg = map[status] || map.offline
-  return (
-    <Badge variant="outline" className={cfg.className}>
-      {status === 'active' && <CheckCircle2 className="size-3 mr-1" />}
-      {status === 'maintenance' && <AlertTriangle className="size-3 mr-1" />}
-      {status === 'offline' && <XCircle className="size-3 mr-1" />}
-      {status.charAt(0).toUpperCase() + status.slice(1)}
-    </Badge>
-  )
-}
-
 // ── Component ──────────────────────────────────────────────────────────
 export function AdminPanel() {
   const [stats, setStats] = useState<Stats | null>(null)
   const [users, setUsers] = useState<AdminUser[]>([])
   const [jobs, setJobs] = useState<Job[]>([])
-  const [servers, setServers] = useState<ServerInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [userSearch, setUserSearch] = useState('')
   const [jobFilter, setJobFilter] = useState('all')
@@ -245,18 +206,14 @@ export function AdminPanel() {
   const fetchAll = useCallback(async () => {
     setLoading(true)
     try {
-      const [statsRes, usersRes, jobsRes, serversRes] = await Promise.all([
+      const [statsRes, usersRes, jobsRes] = await Promise.all([
         apiFetch<{ stats: Stats }>('/admin/stats').catch(() => ({ stats: null as Stats | null })),
         apiFetch<{ users: AdminUser[] }>('/admin/users').catch(() => ({ users: [] as AdminUser[] })),
         apiFetch<{ jobs: Job[] }>('/admin/jobs').catch(() => ({ jobs: [] as Job[] })),
-        apiFetch<{ servers: ServerInfo[] }>('/admin/servers').catch(() => ({
-          servers: [] as ServerInfo[],
-        })),
       ])
       setStats(statsRes.stats)
       setUsers(usersRes.users)
       setJobs(jobsRes.jobs)
-      setServers(serversRes.servers)
     } catch {
       toast.error('Failed to load admin data. Make sure you have admin access.')
     } finally {
@@ -636,80 +593,7 @@ export function AdminPanel() {
 
         {/* ── Servers Tab ────────────────────────────────────────────── */}
         <TabsContent value="servers">
-          {servers.length === 0 ? (
-            <Card>
-              <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-                <Server className="size-10 text-muted-foreground mb-3" />
-                <p className="text-muted-foreground">No servers configured</p>
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {servers.map((s) => (
-                <Card key={s.id}>
-                  <CardHeader className="pb-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className="size-9 rounded-lg bg-emerald-50 flex items-center justify-center">
-                          <Server className="size-5 text-emerald-600" />
-                        </div>
-                        <div>
-                          <CardTitle className="text-base">{s.name}</CardTitle>
-                          <CardDescription className="flex items-center gap-2 text-xs">
-                            <span>{s.ip}</span>
-                            <span className="flex items-center gap-1">
-                              <MapPin className="size-3" />
-                              {s.region}
-                            </span>
-                          </CardDescription>
-                        </div>
-                      </div>
-                      <ServerStatusBadge status={s.status} />
-                    </div>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    {/* RAM */}
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="flex items-center gap-1 text-muted-foreground">
-                          <Cpu className="size-3.5" />
-                          RAM
-                        </span>
-                        <span className="font-medium">
-                          {s.usedRamGB}/{s.ramGB} GB
-                        </span>
-                      </div>
-                      <Progress value={s.ramUsagePercent} className="h-2" />
-                    </div>
-
-                    {/* Storage */}
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="flex items-center gap-1 text-muted-foreground">
-                          <HardDrive className="size-3.5" />
-                          Storage
-                        </span>
-                        <span className="font-medium">
-                          {s.usedStorageGB}/{s.storageGB} GB
-                        </span>
-                      </div>
-                      <Progress value={s.storageUsagePercent} className="h-2" />
-                    </div>
-
-                    {/* CPU & extra info */}
-                    <div className="flex items-center justify-between text-xs text-muted-foreground pt-1 border-t">
-                      <span className="flex items-center gap-1">
-                        <Cpu className="size-3" />
-                        {s.cpuCores} vCPU
-                      </span>
-                      <span>{s.projectCount} projects</span>
-                      <span>{s.provider}</span>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
+          <ServersPanel />
         </TabsContent>
 
         {/* ── Payment Methods Tab (super_admin only) ─────────────────── */}

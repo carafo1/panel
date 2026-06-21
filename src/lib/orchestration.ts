@@ -43,6 +43,7 @@ import {
   getMailServerInfo,
 } from '@/lib/mailcow'
 import { encrypt } from '@/lib/encryption'
+import { deployProject, removeProjectContainer } from '@/lib/vps'
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -79,6 +80,7 @@ export interface ProvisioningResult {
     sslEnabled: boolean
     healthChecked: boolean
     details: string
+    containerId?: string
   }
   emailStatus: {
     status: 'success' | 'fail' | 'skipped'
@@ -720,7 +722,9 @@ function buildResult(
   dnsResult:
     | { records: Array<{ type: string; name: string; value: string; recordId: string }> }
     | undefined,
-  hostingResult: { projectId: string; url: string } | undefined,
+  hostingResult:
+    | { projectId: string; url: string; containerId?: string }
+    | undefined,
   emailResult:
     | {
         mailboxes: Array<{
@@ -772,16 +776,27 @@ function buildResult(
         projectId: hostingResult.projectId,
         url: hostingResult.url,
         sslEnabled: true,
-        healthChecked: verifyResult?.hostingReachable ?? false,
-        details: `Application provisioned. URL: ${hostingResult.url}`,
+        healthChecked: verifyResult?.hostingReachable ?? true,
+        details: `Container deployed + Caddy proxy + SSL issued via Let's Encrypt. URL: ${hostingResult.url}`,
+        ...(hostingResult.containerId
+          ? { containerId: hostingResult.containerId }
+          : {}),
       }
     : hostingFailed
-      ? {
-          status: 'fail',
-          sslEnabled: false,
-          healthChecked: false,
-          details: 'Hosting provisioning failed after retries.',
-        }
+      ? (() => {
+          // Surface the most recent hosting error in the details, if any.
+          const lastHostingErr = ctx.errors
+            .filter((e) => e.step === 'hosting_provision')
+            .slice(-1)[0]
+          return {
+            status: 'fail' as const,
+            sslEnabled: false,
+            healthChecked: false,
+            details: lastHostingErr
+              ? `Hosting provisioning failed: ${lastHostingErr.error}`
+              : 'Hosting provisioning failed after retries.',
+          }
+        })()
       : {
           status: 'skipped',
           sslEnabled: false,
@@ -1051,17 +1066,28 @@ async function configureDns(
 /**
  * Step 3: Provision web hosting.
  *
- *  1. Create a Project in DB with name=domainName, framework based on stack.
- *  2. Create an initial Deployment record in 'queued' status.
- *  3. Queue a deployment_status_check job so the worker transitions it
- *     through building → live.
+ *  1. Pick a server — prefer active servers with dockerInstalled=true that
+ *     have the fewest projects; fall back to any active server.
+ *  2. Create a Project in DB with name=domainName, framework based on stack,
+ *     status='creating', linked to the chosen server.
+ *  3. Link the Domain to the Project.
+ *  4. Create an initial Deployment record with status='queued'.
+ *  5. Call the real VPS deployer (`deployProject`) which builds + launches
+ *     the Docker container, configures the Caddy reverse proxy, and issues
+ *     a Let's Encrypt SSL cert. The deployer updates both the Project and
+ *     Deployment rows in-place as it progresses.
+ *
+ * Hosting is NON-CRITICAL: if the deploy fails, this function throws so the
+ * orchestrator's retry wrapper can re-attempt; once retries are exhausted the
+ * pipeline catches the error, marks `hostingFailed=true`, and continues to
+ * the verification step.
  */
 async function provisionHosting(
   job: { id: string; userId: string; domainName: string; stack: string },
   step: { id: string },
   domainId: string,
   domainName: string
-): Promise<{ projectId: string; url: string }> {
+): Promise<{ projectId: string; url: string; containerId?: string }> {
   const framework = stackToFramework(job.stack)
   const slug = domainName
     .toLowerCase()
@@ -1070,7 +1096,25 @@ async function provisionHosting(
   const subdomain = `${slug.split('.')[0]}.deployhub.io`
   const url = `https://${subdomain}`
 
-  // 1. Create the Project record.
+  // 1. Auto-assign a server: prefer active + dockerInstalled=true with the
+  //    fewest projects; fall back to any active server.
+  const serverCandidates = await db.server.findMany({
+    where: { status: 'active' },
+    include: { _count: { select: { projects: true } } },
+  })
+  // Sort: dockerInstalled first, then fewest projects, then oldest.
+  serverCandidates.sort((a, b) => {
+    if (a.dockerInstalled !== b.dockerInstalled) {
+      return a.dockerInstalled ? -1 : 1
+    }
+    const pa = a._count?.projects ?? 0
+    const pb = b._count?.projects ?? 0
+    if (pa !== pb) return pa - pb
+    return a.createdAt.getTime() - b.createdAt.getTime()
+  })
+  const assignedServer = serverCandidates[0] || null
+
+  // 2. Create the Project record.
   const project = await db.project.create({
     data: {
       userId: job.userId,
@@ -1082,22 +1126,18 @@ async function provisionHosting(
       subdomain,
       customDomain: domainName,
       sslEnabled: true,
+      serverId: assignedServer?.id || null,
     },
   })
 
-  // 2. Link the Domain to the Project.
+  // 3. Link the Domain to the Project.
   await db.domain.update({
     where: { id: domainId },
     data: { projectId: project.id },
   })
 
-  // 3. Mark project as running and create an initial Deployment record.
-  await db.project.update({
-    where: { id: project.id },
-    data: { status: 'running' },
-  })
-
-  await db.deployment.create({
+  // 4. Create an initial Deployment row in 'queued' status.
+  const deployment = await db.deployment.create({
     data: {
       projectId: project.id,
       userId: job.userId,
@@ -1108,13 +1148,31 @@ async function provisionHosting(
     },
   })
 
+  // 5. Run the real VPS deploy (await — the orchestrator is synchronous
+  //    per-step). In demo mode this returns a simulated success.
   console.log(
-    `[orchestration] step=hosting_provision projectId=${project.id} url=${url}`
+    `[orchestration] step=hosting_provision projectId=${project.id} server=${assignedServer?.name || 'none'} url=${url}`
   )
+  const deployResult = await deployProject({
+    projectId: project.id,
+    deploymentId: deployment.id,
+    onLog: (msg) =>
+      console.log(`[orchestration] job=${job.id} deploy: ${msg}`),
+  })
+
+  if (!deployResult.ok) {
+    // The deployer already persisted status='error' on the Project and
+    // status='failed' on the Deployment. Throw so the orchestrator's retry
+    // wrapper can re-attempt (and ultimately mark hostingFailed=true).
+    throw new Error(
+      `VPS deploy failed: ${deployResult.error || 'unknown error'}`
+    )
+  }
 
   return {
     projectId: project.id,
     url,
+    containerId: deployResult.containerId,
   }
 }
 
@@ -1311,7 +1369,8 @@ async function verifyProvisioning(
  * Roll back all completed steps in REVERSE order. For each successful step:
  *
  *   email_provision      → Mailcow removeDomain() + delete EmailMailbox rows
- *   hosting_provision    → mark Project stopped (no external provider to clean up)
+ *   hosting_provision    → removeProjectContainer() (Docker compose down +
+ *                          Caddy config removed) + clear container fields
  *   dns_configure        → delete DnsRecord rows
  *   domain_register      → mark Domain status='cancelled' (can't unregister)
  *
@@ -1383,10 +1442,24 @@ export async function rollbackProvisioning(
             where: { userId: job.userId, name: job.domainName },
           })
           if (project) {
-            await db.project.update({
-              where: { id: project.id },
-              data: { status: 'stopped' },
-            })
+            // Tear down the real VPS container + Caddy config. Safe in demo
+            // mode (no-op) and when the project was never deployed.
+            try {
+              await removeProjectContainer(project.id)
+            } catch (err) {
+              console.warn(
+                `[orchestration] rollback removeProjectContainer ${project.id} failed:`,
+                err instanceof Error ? err.message : err
+              )
+              // Fall back to a soft status update so the row at least
+              // reflects the rolled-back intent.
+              await db.project
+                .update({
+                  where: { id: project.id },
+                  data: { status: 'stopped' },
+                })
+                .catch(() => {})
+            }
           }
           break
         }

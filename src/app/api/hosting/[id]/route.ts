@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
+import { removeProjectContainer } from '@/lib/vps'
 
 export async function GET(
   request: Request,
@@ -67,12 +68,22 @@ export async function GET(
         slug: project.slug,
         description: project.description,
         framework: project.framework,
+        stack: project.stack,
         status: project.status,
         subdomain: project.subdomain,
         customDomain: project.customDomain,
         repoUrl: project.repoUrl,
         autoDeploy: project.autoDeploy,
         sslEnabled: project.sslEnabled,
+        // Real VPS deployment fields
+        containerId: project.containerId,
+        containerName: project.containerName,
+        containerPort: project.containerPort,
+        externalPort: project.externalPort,
+        deployPath: project.deployPath,
+        sslCertStatus: project.sslCertStatus,
+        sslCertExpiry: project.sslCertExpiry?.toISOString() ?? null,
+        lastDeployedAt: project.lastDeployedAt?.toISOString() ?? null,
         lastDeployment,
         server: project.server ? {
           id: project.server.id,
@@ -249,14 +260,29 @@ export async function DELETE(
       )
     }
 
-    // ── Stop the project ─────────────────────────────────────────────
-    // We simply mark the project as stopped in the database. There is no
-    // external hosting provider to clean up; the worker service will pick
-    // up the status change.
-    await db.project.update({
-      where: { id },
-      data: { status: 'stopped' },
-    })
+    // ── Tear down the real VPS deployment ────────────────────────────
+    // removeProjectContainer() gracefully handles demo mode (no sshHost),
+    // missing containers, and un-deployed projects. It removes the Caddy
+    // proxy entry, runs `docker compose down -v --rmi local` on the VPS,
+    // deletes /opt/deployhub/projects/<slug>, and clears the Project's
+    // containerId/containerName/containerPort/externalPort/deployPath fields.
+    // The Project row is then marked 'stopped'.
+    try {
+      await removeProjectContainer(id)
+    } catch (err) {
+      // Don't abort the delete — the user still wants the project gone
+      // from the dashboard. Log and fall back to a soft status update.
+      console.error(
+        `[hosting/delete] removeProjectContainer failed for ${id}:`,
+        err instanceof Error ? err.message : err
+      )
+      await db.project
+        .update({
+          where: { id },
+          data: { status: 'stopped' },
+        })
+        .catch(() => {})
+    }
 
     // Audit project delete (stop)
     await logAudit({
@@ -273,7 +299,8 @@ export async function DELETE(
     })
 
     return NextResponse.json({
-      message: 'Project stopped successfully',
+      success: true,
+      message: 'Project deleted — container removed from VPS',
       project: {
         id: project.id,
         name: project.name,

@@ -86,11 +86,18 @@ export async function GET(request: Request) {
       slug: p.slug,
       description: p.description,
       framework: p.framework,
+      stack: p.stack,
       status: p.status,
       subdomain: p.subdomain,
       customDomain: p.customDomain,
       sslEnabled: p.sslEnabled,
       autoDeploy: p.autoDeploy,
+      // Real VPS deployment fields
+      containerId: p.containerId,
+      containerName: p.containerName,
+      externalPort: p.externalPort,
+      sslCertStatus: p.sslCertStatus,
+      lastDeployedAt: p.lastDeployedAt?.toISOString() ?? null,
       server: p.server
         ? {
             id: p.server.id,

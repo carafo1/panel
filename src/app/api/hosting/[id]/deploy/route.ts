@@ -3,7 +3,7 @@ import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { createMonitor } from '@/lib/monitor'
-import { createJob } from '@/lib/automation'
+import { deployProject } from '@/lib/vps'
 
 export async function POST(
   request: Request,
@@ -50,26 +50,55 @@ export async function POST(
     }
 
     // Create the Deployment row first so we have a record of the deploy.
+    // We start it in 'building' (rather than 'queued') because we trigger
+    // the real VPS deployer immediately below — the deployer streams its
+    // progress into this row's buildLog + transitions status to 'live' or
+    // 'failed' as it runs.
     const deployment = await db.deployment.create({
       data: {
         projectId: project.id,
         userId: decoded.userId,
         commit: commit || `auto-${Date.now()}`,
         branch,
-        status: 'queued',
+        status: 'building',
         triggeredBy: 'user',
-        buildLog: `🚀 Deployment triggered by ${decoded.email}\nBranch: ${branch}\nProject: ${project.name} (${project.framework})`,
+        buildLog: `🚀 Deployment triggered by ${decoded.email}\nBranch: ${branch}\nProject: ${project.name} (${project.framework})\n\nConnecting to VPS…`,
       },
     })
 
-    // Queue a background job to advance the deployment status. The worker
-    // service picks this up within ~10s and transitions the deployment
-    // through building → live, appending realistic log lines.
-    await createJob('deployment_status_check', {
-      deploymentId: deployment.id,
+    // Fire-and-forget the real deploy so the HTTP response returns
+    // immediately. The deployer updates the Deployment row's status + buildLog
+    // as it progresses, so the UI can poll /api/deployments/[id]/status for
+    // live progress. On failure the deployer marks the Deployment 'failed'
+    // and the Project 'error'.
+    void deployProject({
       projectId: project.id,
-      userId: decoded.userId,
-      attempt: 0,
+      deploymentId: deployment.id,
+      onLog: (msg) => console.log(`[deploy ${deployment.id.slice(0, 8)}] ${msg}`),
+    }).catch(async (err) => {
+      console.error(`[deploy ${deployment.id}] Deploy failed:`, err)
+      // Defensive: if the deployer threw before persisting the failure
+      // itself, mark the rows so the UI doesn't stay 'building' forever.
+      const errMsg = err instanceof Error ? err.message : String(err)
+      try {
+        await db.deployment.update({
+          where: { id: deployment.id },
+          data: {
+            status: 'failed',
+            buildLog: `❌ Deploy threw: ${errMsg}`,
+            duration: 0,
+          },
+        })
+        await db.project.update({
+          where: { id: project.id },
+          data: { status: 'error' },
+        })
+      } catch (persistErr) {
+        console.error(
+          `[deploy ${deployment.id}] Failed to persist failure state:`,
+          persistErr
+        )
+      }
     })
 
     // Audit project deploy
@@ -104,18 +133,21 @@ export async function POST(
       console.error('[deploy] Auto-create monitor failed:', err)
     }
 
-    return NextResponse.json({
-      deployment: {
-        id: deployment.id,
-        projectId: project.id,
-        status: 'building',
-        deployUrl: `https://${project.subdomain}`,
-        triggeredBy: 'user',
-        branch,
-        createdAt: deployment.createdAt,
+    return NextResponse.json(
+      {
+        deployment: {
+          id: deployment.id,
+          projectId: project.id,
+          status: 'building',
+          deployUrl: `https://${project.subdomain}`,
+          triggeredBy: 'user',
+          branch,
+          createdAt: deployment.createdAt,
+        },
+        message: 'Deployment started',
       },
-      message: 'Deployment triggered - worker will update status',
-    })
+      { status: 201 }
+    )
   } catch (error) {
     console.error('Deploy error:', error)
     return NextResponse.json(

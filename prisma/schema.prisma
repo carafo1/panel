@@ -116,6 +116,15 @@ model Project {
   repoUrl      String?  // GitHub repo URL
   autoDeploy   Boolean  @default(true)
   sslEnabled   Boolean  @default(true)
+  // Real VPS deployment fields
+  containerId    String?  // Docker container ID on the VPS
+  containerName  String?  // Docker container name (e.g. deployhub-<slug>)
+  containerPort  Int?     // Internal port the container listens on
+  deployPath     String?  // Path on VPS where the project files live (e.g. /opt/deployhub/<slug>)
+  externalPort   Int?     // Host port mapped to the container
+  sslCertStatus  String   @default("none") // none, pending, issued, failed, renewing
+  sslCertExpiry  DateTime?
+  lastDeployedAt DateTime?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -191,7 +200,7 @@ model Server {
   name          String
   ip            String
   provider      String   @default("netcup")
-  status        String   @default("active") // active, maintenance, offline
+  status        String   @default("active") // active, maintenance, offline, provisioning
   cpuCores      Int
   ramGB         Int
   storageGB     Int
@@ -199,6 +208,25 @@ model Server {
   usedRamGB     Float    @default(0)
   usedStorageGB Float    @default(0)
   region        String   @default("eu-central")
+  // Real VPS SSH connection fields (all sensitive fields encrypted at rest)
+  sshHost       String   @default("") // usually same as ip, but can differ
+  sshPort       Int      @default(22)
+  sshUser       String   @default("root")
+  sshPrivateKey String?  // encrypted PEM private key
+  sshPassword   String?  // encrypted password (fallback when no key)
+  sshFingerprint String? // known host key fingerprint for verification
+  // Provisioning state
+  dockerInstalled  Boolean @default(false)
+  caddyInstalled   Boolean @default(false)
+  firewallConfigured Boolean @default(false)
+  caddyVersion     String? // e.g. 2.7.6
+  dockerVersion    String? // e.g. 24.0.7
+  osInfo           String? // e.g. Ubuntu 22.04.3 LTS
+  lastProvisionedAt DateTime?
+  lastHealthCheckAt DateTime?
+  healthStatus     String  @default("unknown") // unknown, healthy, degraded, down
+  // Public SSH key DeployHub installs on the VPS for itself (when generating keys)
+  deployedPublicKey String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

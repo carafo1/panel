@@ -1,0 +1,820 @@
+     1→/**
+     2→ * Container Deployer
+     3→ * ==================
+     4→ *
+     5→ * Real Docker container deployment on a provisioned VPS:
+     6→ *
+     7→ *   1. Generate a Dockerfile + docker-compose.yml from the project's stack
+     8→ *      (nodejs, php, python, docker, wordpress) and any custom repo URL.
+     9→ *   2. SFTP-upload the project files to /opt/deployhub/projects/<slug>/
+    10→ *   3. Pull the repo (if GitHub-connected) OR write the generated files.
+    11→ *   4. Run `docker compose up -d --build` and capture logs.
+    12→ *   5. Register the container on the deployhub docker network (so Caddy can
+    13→ *      proxy to it via the container's service name).
+    14→ *   6. Persist containerId, containerName, containerPort, externalPort,
+    15→ *      deployPath, lastDeployedAt back to the Project row.
+    16→ *   7. Trigger the reverse-proxy manager to add the Caddyfile entry.
+    17→ *
+    18→ * In DEMO MODE (VPS_DEMO_MODE=1 or no server.sshHost), the deployer returns
+    19→ * a realistic simulated success — the Project row is updated with a fake
+    20→ * containerId + simulated build logs, so the dashboard UX is intact.
+    21→ */
+    22→import { db } from '@/lib/db'
+    23→import { STACK_DEFINITIONS, getStackDefinition } from '@/lib/stacks'
+    24→import {
+    25→  withConnection,
+    26→  exec,
+    27→  execStream,
+    28→  putFile,
+    29→  isVpsDemoMode,
+    30→  type ExecResult,
+    31→  type StreamChunk,
+    32→} from './ssh'
+    33→import { getServerCredentials } from './provisioner'
+    34→import { configureProjectProxy, removeProjectProxy } from './proxy'
+    35→
+    36→// ─── Types ───────────────────────────────────────────────────────────────
+    37→
+    38→export interface DeployRequest {
+    39→  projectId: string
+    40→  deploymentId: string
+    41→  onLog?: (msg: string) => void
+    42→  onStreamChunk?: (chunk: StreamChunk) => void
+    43→}
+    44→
+    45→export interface DeployResult {
+    46→  ok: boolean
+    47→  projectId: string
+    48→  deploymentId: string
+    49→  containerId?: string
+    50→  containerName?: string
+    51→  containerPort?: number
+    52→  externalPort?: number
+    53→  deployPath?: string
+    54→  buildLog: string
+    55→  durationMs: number
+    56→  error?: string
+    57→}
+    58→
+    59→export interface ContainerStatus {
+    60→  containerId: string
+    61→  name: string
+    62→  state: 'running' | 'exited' | 'paused' | 'restarting' | 'not_found'
+    63→  status: string
+    64→  image: string
+    65→  ports: string[]
+    66→  createdAt: string
+    67→}
+    68→
+    69→// ─── Main deploy function ────────────────────────────────────────────────
+    70→
+    71→export async function deployProject(req: DeployRequest): Promise<DeployResult> {
+    72→  const start = Date.now()
+    73→  const { projectId, deploymentId } = req
+    74→  const log = (m: string) => req.onLog?.(m)
+    75→
+    76→  const project = await db.project.findUnique({
+    77→    where: { id: projectId },
+    78→    include: { server: true },
+    79→  })
+    80→  if (!project) throw new Error(`Project ${projectId} not found`)
+    81→  if (!project.serverId || !project.server) {
+    82→    throw new Error('Project has no server assigned')
+    83→  }
+    84→
+    85→  const stack = getStackDefinition(project.stack)
+    86→  if (!stack) throw new Error(`Unknown stack: ${project.stack}`)
+    87→
+    88→  const deployPath = project.deployPath || `/opt/deployhub/projects/${project.slug}`
+    89→  const containerName = project.containerName || `deployhub-${project.slug}`
+    90→  const containerPort = project.containerPort || stack.port
+    91→  const externalPort = project.externalPort || await pickExternalPort(project.serverId)
+    92→
+    93→  log(`Deploying ${project.name} (${project.stack}) to ${project.server.name}`)
+    94→  log(`  Path: ${deployPath}`)
+    95→  log(`  Container: ${containerName} (internal ${containerPort} → host ${externalPort})`)
+    96→
+    97→  // ── DEMO MODE: simulated deploy with realistic build log ────────────
+    98→  if (isVpsDemoMode() || !project.server.sshHost) {
+    99→    const buildLog = generateDemoBuildLog(project, stack.name, containerName)
+   100→    log('[demo mode] Simulating deploy…')
+   101→    for (const line of buildLog.split('\n')) {
+   102→      req.onStreamChunk?.({ stream: 'stdout', data: line + '\n' })
+   103→      await sleep(150)
+   104→    }
+   105→    const fakeContainerId = generateFakeContainerId()
+   106→
+   107→    await db.project.update({
+   108→      where: { id: projectId },
+   109→      data: {
+   110→        status: 'running',
+   111→        containerId: fakeContainerId,
+   112→        containerName,
+   113→        containerPort,
+   114→        externalPort,
+   115→        deployPath,
+   116→        lastDeployedAt: new Date(),
+   117→        sslCertStatus: project.sslEnabled ? 'issued' : 'none',
+   118→        sslCertExpiry: project.sslEnabled
+   119→          ? new Date(Date.now() + 90 * 24 * 60 * 60 * 1000)
+   120→          : null,
+   121→      },
+   122→    })
+   123→
+   124→    await db.deployment.update({
+   125→      where: { id: deploymentId },
+   126→      data: {
+   127→        status: 'live',
+   128→        buildLog,
+   129→        deployUrl: `https://${project.customDomain || project.subdomain}`,
+   130→        duration: Math.round((Date.now() - start) / 1000),
+   131→      },
+   132→    })
+   133→
+   134→    log('[demo mode] Deploy simulated successfully')
+   135→    return {
+   136→      ok: true,
+   137→      projectId,
+   138→      deploymentId,
+   139→      containerId: fakeContainerId,
+   140→      containerName,
+   141→      containerPort,
+   142→      externalPort,
+   143→      deployPath,
+   144→      buildLog,
+   145→      durationMs: Date.now() - start,
+   146→    }
+   147→  }
+   148→
+   149→  // ── REAL deploy ─────────────────────────────────────────────────────
+   150→  const creds = await getServerCredentials(project.serverId)
+   151→  let buildLog = ''
+   152→  let containerId: string | undefined
+   153→
+   154→  try {
+   155→    await withConnection(creds, async (client) => {
+   156→      // 1. Create project directory
+   157→      log('Creating project directory…')
+   158→      await exec(
+   159→        client,
+   160→        `mkdir -p ${deployPath}`,
+   161→        { timeoutMs: 10000 }
+   162→      )
+   163→
+   164→      // 2. Either clone the repo OR write a placeholder app
+   165→      if (project.repoUrl) {
+   166→        log(`Cloning ${project.repoUrl}…`)
+   167→        const clone = await exec(
+   168→          client,
+   169→          `if [ -d ${deployPath}/.git ]; then cd ${deployPath} && git pull; else rm -rf ${deployPath}/* && git clone ${shellQuote(project.repoUrl)} ${deployPath}; fi`,
+   170→          { timeoutMs: 120000 }
+   171→        )
+   172→        buildLog += `[git] ${clone.stdout}\n`
+   173→        if (clone.exitCode !== 0) {
+   174→          throw new Error(`git clone failed: ${clone.stderr}`)
+   175→        }
+   176→      } else {
+   177→        log('No repo URL — writing placeholder app from stack template…')
+   178→        const placeholder = generatePlaceholderApp(project.stack, project.name)
+   179→        for (const [filename, content] of Object.entries(placeholder)) {
+   180→          await putFile(client, `${deployPath}/${filename}`, content, { mode: 0o644 })
+   181→        }
+   182→        buildLog += `[placeholder] Wrote ${Object.keys(placeholder).length} files\n`
+   183→      }
+   184→
+   185→      // 3. Write Dockerfile if stack defines one
+   186→      if (stack.dockerfile && project.stack !== 'docker') {
+   187→        log('Writing Dockerfile…')
+   188→        await putFile(client, `${deployPath}/Dockerfile`, stack.dockerfile, {
+   189→          mode: 0o644,
+   190→        })
+   191→        buildLog += `[dockerfile] Written (${stack.dockerfile.length} bytes)\n`
+   192→      }
+   193→
+   194→      // 4. Write docker-compose.yml
+   195→      log('Writing docker-compose.yml…')
+   196→      const composeYml = generateDockerCompose({
+   197→        projectName: project.slug,
+   198→        containerName,
+   199→        deployPath,
+   200→        containerPort,
+   201→        externalPort,
+   202→        stack: project.stack,
+   203→        envVars: await getProjectEnvVars(projectId),
+   204→      })
+   205→      await putFile(client, `${deployPath}/docker-compose.yml`, composeYml, {
+   206→        mode: 0o644,
+   207→      })
+   208→      buildLog += `[compose] Written docker-compose.yml\n`
+   209→
+   210→      // 5. docker compose build + up (stream logs live)
+   211→      log('Running docker compose build…')
+   212→      const buildGen = execStream(
+   213→        client,
+   214→        `cd ${deployPath} && docker compose build --progress=plain 2>&1`,
+   215→        { timeoutMs: 600000 }
+   216→      )
+   217→      for await (const chunk of buildGen) {
+   218→        buildLog += chunk.data
+   219→        req.onStreamChunk?.(chunk)
+   220→      }
+   221→      const buildResult = await buildGen.next().then(() => buildGen).catch(() => null)
+   222→      log(`Build finished (exit code from stream closed)`)
+   223→
+   224→      log('Starting container with docker compose up -d…')
+   225→      const upGen = execStream(
+   226→        client,
+   227→        `cd ${deployPath} && docker compose up -d 2>&1`,
+   228→        { timeoutMs: 120000 }
+   229→      )
+   230→      for await (const chunk of upGen) {
+   231→        buildLog += chunk.data
+   232→        req.onStreamChunk?.(chunk)
+   233→      }
+   234→
+   235→      // 6. Connect container to the deployhub network so Caddy can reach it
+   236→      log('Connecting container to deployhub network…')
+   237→      const net = await exec(
+   238→        client,
+   239→        `docker network connect deployhub ${containerName} 2>/dev/null || true`,
+   240→        { timeoutMs: 15000 }
+   241→      )
+   242→      buildLog += `[network] ${net.stdout || 'already connected'}\n`
+   243→
+   244→      // 7. Get container ID + verify it's running
+   245→      log('Verifying container is running…')
+   246→      const inspect = await exec(
+   247→        client,
+   248→        `docker inspect --format '{{.Id}} {{.State.Status}}' ${containerName}`,
+   249→        { timeoutMs: 15000 }
+   250→      )
+   251→      const [cid, state] = inspect.stdout.trim().split(' ')
+   252→      if (!cid || state !== 'running') {
+   253→        throw new Error(
+   254→          `Container did not start properly (state=${state}). Logs:\n` +
+   255→            (await exec(client, `docker logs ${containerName} --tail 50 2>&1`, {
+   256→              timeoutMs: 15000,
+   257→            })).stdout
+   258→        )
+   259→      }
+   260→      containerId = cid
+   261→      log(`Container running: ${cid.slice(0, 12)}`)
+   262→
+   263→      // 8. Update Caddy reverse proxy config (auto-HTTPS)
+   264→      log('Configuring Caddy reverse proxy…')
+   265→      await configureProjectProxy(project.id, { onLog: log })
+   266→      log('Caddy reloaded with new site config')
+   267→    })
+   268→
+   269→    // 9. Persist project + deployment state
+   270→    await db.project.update({
+   271→      where: { id: projectId },
+   272→      data: {
+   273→        status: 'running',
+   274→        containerId,
+   275→        containerName,
+   276→        containerPort,
+   277→        externalPort,
+   278→        deployPath,
+   279→        lastDeployedAt: new Date(),
+   280→        sslCertStatus: project.sslEnabled ? 'issued' : 'none',
+   281→        sslCertExpiry: project.sslEnabled
+   282→          ? new Date(Date.now() + 90 * 24 * 60 * 60 * 1000)
+   283→          : null,
+   284→      },
+   285→    })
+   286→
+   287→    await db.deployment.update({
+   288→      where: { id: deploymentId },
+   289→      data: {
+   290→        status: 'live',
+   291→        buildLog,
+   292→        deployUrl: `https://${project.customDomain || project.subdomain}`,
+   293→        duration: Math.round((Date.now() - start) / 1000),
+   294→      },
+   295→    })
+   296→
+   297→    log('Deploy complete!')
+   298→    return {
+   299→      ok: true,
+   300→      projectId,
+   301→      deploymentId,
+   302→      containerId,
+   303→      containerName,
+   304→      containerPort,
+   305→      externalPort,
+   306→      deployPath,
+   307→      buildLog,
+   308→      durationMs: Date.now() - start,
+   309→    }
+   310→  } catch (err) {
+   311→    const message = err instanceof Error ? err.message : String(err)
+   312→    log(`DEPLOY FAILED: ${message}`)
+   313→    buildLog += `\n[FATAL] ${message}\n`
+   314→
+   315→    await db.project.update({
+   316→      where: { id: projectId },
+   317→      data: { status: 'error' },
+   318→    })
+   319→    await db.deployment.update({
+   320→      where: { id: deploymentId },
+   321→      data: { status: 'failed', buildLog, duration: Math.round((Date.now() - start) / 1000) },
+   322→    })
+   323→
+   324→    return {
+   325→      ok: false,
+   326→      projectId,
+   327→      deploymentId,
+   328→      containerId,
+   329→      containerName,
+   330→      containerPort,
+   331→      externalPort,
+   332→      deployPath,
+   333→      buildLog,
+   334→      durationMs: Date.now() - start,
+   335→      error: message,
+   336→    }
+   337→  }
+   338→}
+   339→
+   340→// ─── Stop / restart / remove container ───────────────────────────────────
+   341→
+   342→export async function stopProject(projectId: string): Promise<{ ok: boolean; message: string }> {
+   343→  const project = await db.project.findUnique({ where: { id: projectId }, include: { server: true } })
+   344→  if (!project || !project.containerName) {
+   345→    return { ok: false, message: 'Project has no running container' }
+   346→  }
+   347→  if (isVpsDemoMode() || !project.server?.sshHost) {
+   348→    await db.project.update({ where: { id: projectId }, data: { status: 'stopped' } })
+   349→    return { ok: true, message: 'Demo mode: container stopped (simulated)' }
+   350→  }
+   351→  try {
+   352→    const creds = await getServerCredentials(project.serverId!)
+   353→    await withConnection(creds, async (client) => {
+   354→      await exec(client, `cd ${project.deployPath} && docker compose down 2>&1`, {
+   355→        timeoutMs: 60000,
+   356→      })
+   357→    })
+   358→    await db.project.update({ where: { id: projectId }, data: { status: 'stopped' } })
+   359→    return { ok: true, message: 'Container stopped' }
+   360→  } catch (err) {
+   361→    return {
+   362→      ok: false,
+   363→      message: err instanceof Error ? err.message : String(err),
+   364→    }
+   365→  }
+   366→}
+   367→
+   368→export async function restartProject(projectId: string): Promise<{ ok: boolean; message: string }> {
+   369→  const project = await db.project.findUnique({ where: { id: projectId }, include: { server: true } })
+   370→  if (!project || !project.containerName) {
+   371→    return { ok: false, message: 'Project has no running container' }
+   372→  }
+   373→  if (isVpsDemoMode() || !project.server?.sshHost) {
+   374→    return { ok: true, message: 'Demo mode: container restarted (simulated)' }
+   375→  }
+   376→  try {
+   377→    const creds = await getServerCredentials(project.serverId!)
+   378→    await withConnection(creds, async (client) => {
+   379→      await exec(client, `cd ${project.deployPath} && docker compose restart 2>&1`, {
+   380→        timeoutMs: 60000,
+   381→      })
+   382→    })
+   383→    return { ok: true, message: 'Container restarted' }
+   384→  } catch (err) {
+   385→    return {
+   386→      ok: false,
+   387→      message: err instanceof Error ? err.message : String(err),
+   388→    }
+   389→  }
+   390→}
+   391→
+   392→export async function removeProjectContainer(projectId: string): Promise<{ ok: boolean; message: string }> {
+   393→  const project = await db.project.findUnique({ where: { id: projectId }, include: { server: true } })
+   394→  if (!project) return { ok: false, message: 'Project not found' }
+   395→
+   396→  // Remove Caddy config first
+   397→  await removeProjectProxy(projectId).catch(() => {})
+   398→
+   399→  if (!isVpsDemoMode() && project.server?.sshHost && project.containerName) {
+   400→    try {
+   401→      const creds = await getServerCredentials(project.serverId!)
+   402→      await withConnection(creds, async (client) => {
+   403→        await exec(
+   404→          client,
+   405→          `cd ${project.deployPath} && docker compose down --rmi local -v 2>&1 || true`,
+   406→          { timeoutMs: 60000 }
+   407→        )
+   408→        await exec(client, `rm -rf ${project.deployPath}`, { timeoutMs: 30000 })
+   409→      })
+   410→    } catch (err) {
+   411→      console.error('[vps-deploy] remove container error:', err)
+   412→    }
+   413→  }
+   414→
+   415→  await db.project.update({
+   416→    where: { id: projectId },
+   417→    data: {
+   418→      status: 'stopped',
+   419→      containerId: null,
+   420→      containerName: null,
+   421→      containerPort: null,
+   422→      externalPort: null,
+   423→      deployPath: null,
+   424→      sslCertStatus: 'none',
+   425→      sslCertExpiry: null,
+   426→    },
+   427→  })
+   428→  return { ok: true, message: 'Container removed' }
+   429→}
+   430→
+   431→// ─── Container status ────────────────────────────────────────────────────
+   432→
+   433→export async function getContainerStatus(projectId: string): Promise<ContainerStatus | null> {
+   434→  const project = await db.project.findUnique({ where: { id: projectId }, include: { server: true } })
+   435→  if (!project || !project.containerName) return null
+   436→
+   437→  if (isVpsDemoMode() || !project.server?.sshHost) {
+   438→    return {
+   439→      containerId: project.containerId || 'demo',
+   440→      name: project.containerName,
+   441→      state: project.status === 'running' ? 'running' : 'exited',
+   442→      status: project.status === 'running' ? 'Up (simulated)' : 'Exited (simulated)',
+   443→      image: `deployhub/${project.stack}:latest`,
+   444→      ports: [`${project.externalPort}->${project.containerPort}`],
+   445→      createdAt: project.lastDeployedAt?.toISOString() || new Date().toISOString(),
+   446→    }
+   447→  }
+   448→
+   449→  try {
+   450→    const creds = await getServerCredentials(project.serverId!)
+   451→    return await withConnection(creds, async (client) => {
+   452→      const r = await exec(
+   453→        client,
+   454→        `docker inspect --format '{{.Id}}|{{.Name}}|{{.State.Status}}|{{.State.Health.Status}}|{{.Config.Image}}|{{range $p, $conf := .NetworkSettings.Ports}}{{$p}}->{{(index $conf 0).HostPort}} {{end}}|{{.Created}}' ${project.containerName} 2>/dev/null`,
+   455→        { timeoutMs: 10000 }
+   456→      )
+   457→      if (r.exitCode !== 0) {
+   458→        return {
+   459→          containerId: project.containerId || '',
+   460→          name: project.containerName,
+   461→          state: 'not_found' as const,
+   462→          status: 'Container not found on server',
+   463→          image: '',
+   464→          ports: [],
+   465→          createdAt: '',
+   466→        }
+   467→      }
+   468→      const parts = r.stdout.trim().split('|')
+   469→      const [id, name, state, health, image, ports, created] = parts
+   470→      return {
+   471→        containerId: id,
+   472→        name: name.replace(/^\//, ''),
+   473→        state: state as ContainerStatus['state'],
+   474→        status: health && health !== '<no value>' ? `${state} (${health})` : state,
+   475→        image,
+   476→        ports: ports ? ports.trim().split(' ').filter(Boolean) : [],
+   477→        createdAt: created || '',
+   478→      }
+   479→    })
+   480→  } catch (err) {
+   481→    console.error('[vps-deploy] container status error:', err)
+   482→    return null
+   483→  }
+   484→}
+   485→
+   486→// ─── Container logs ──────────────────────────────────────────────────────
+   487→
+   488→export async function getContainerLogs(
+   489→  projectId: string,
+   490→  opts: { tail?: number; since?: string } = {}
+   491→): Promise<string> {
+   492→  const project = await db.project.findUnique({ where: { id: projectId }, include: { server: true } })
+   493→  if (!project || !project.containerName) return 'No container running'
+   494→
+   495→  if (isVpsDemoMode() || !project.server?.sshHost) {
+   496→    return generateDemoRuntimeLog(project)
+   497→  }
+   498→
+   499→  try {
+   500→    const creds = await getServerCredentials(project.serverId!)
+   501→    return await withConnection(creds, async (client) => {
+   502→      const tail = opts.tail ?? 200
+   503→      const sinceFlag = opts.since ? `--since ${shellQuote(opts.since)}` : ''
+   504→      const r = await exec(
+   505→        client,
+   506→        `docker logs ${project.containerName} --tail ${tail} ${sinceFlag} 2>&1`,
+   507→        { timeoutMs: 30000 }
+   508→      )
+   509→      return r.stdout || r.stderr
+   510→    })
+   511→  } catch (err) {
+   512→    return `Failed to fetch logs: ${err instanceof Error ? err.message : err}`
+   513→  }
+   514→}
+   515→
+   516→// ─── Helpers ─────────────────────────────────────────────────────────────
+   517→
+   518→async function pickExternalPort(serverId: string): Promise<number> {
+   519→  // Find the highest externalPort in use on this server + 1, starting from 30000.
+   520→  const projects = await db.project.findMany({
+   521→    where: { serverId, externalPort: { not: null } },
+   522→    select: { externalPort: true },
+   523→  })
+   524→  const usedPorts = new Set(projects.map((p) => p.externalPort!))
+   525→  for (let port = 30000; port < 40000; port++) {
+   526→    if (!usedPorts.has(port)) return port
+   527→  }
+   528→  return 30000 + Math.floor(Math.random() * 9999)
+   529→}
+   530→
+   531→async function getProjectEnvVars(projectId: string): Promise<Record<string, string>> {
+   532→  const envVars = await db.environmentVariable.findMany({
+   533→    where: { projectId },
+   534→    select: { key: true, value: true, encrypted: true },
+   535→  })
+   536→  // Note: env var values are encrypted at rest; decrypt here. The actual
+   537→  // decryption is handled by the env var API; for compose we re-read the
+   538→  // raw value via the encryption module.
+   539→  const { decrypt } = await import('@/lib/encryption')
+   540→  const out: Record<string, string> = {}
+   541→  for (const v of envVars) {
+   542→    try {
+   543→      out[v.key] = v.encrypted ? decrypt(v.value) : v.value
+   544→    } catch {
+   545→      out[v.key] = v.value
+   546→    }
+   547→  }
+   548→  return out
+   549→}
+   550→
+   551→function generateDockerCompose(opts: {
+   552→  projectName: string
+   553→  containerName: string
+   554→  deployPath: string
+   555→  containerPort: number
+   556→  externalPort: number
+   557→  stack: string
+   558→  envVars: Record<string, string>
+   559→}): string {
+   560→  const envLines = Object.entries(opts.envVars)
+   561→    .map(([k, v]) => `      ${k}: "${v.replace(/"/g, '\\"')}"`)
+   562→    .join('\n')
+   563→
+   564→  // For WordPress we add a MariaDB service.
+   565→  if (opts.stack === 'wordpress') {
+   566→    return `# Auto-generated by DeployHub
+   567→services:
+   568→  wordpress:
+   569→    image: wordpress:php8.2-apache
+   570→    container_name: ${opts.containerName}
+   571→    restart: unless-stopped
+   572→    ports:
+   573→      - "${opts.externalPort}:80"
+   574→    environment:
+   575→      WORDPRESS_DB_HOST: db
+   576→      WORDPRESS_DB_USER: wp
+   577→      WORDPRESS_DB_PASSWORD: wpdbpass_${randomHex(8)}
+   578→      WORDPRESS_DB_NAME: wp
+   579→${envLines ? envLines + '\n' : ''}    volumes:
+   580→      - ./wp-content:/var/www/html/wp-content
+   581→    depends_on:
+   582→      - db
+   583→    networks:
+   584→      - default
+   585→      - deployhub
+   586→
+   587→  db:
+   588→    image: mariadb:11
+   589→    restart: unless-stopped
+   590→    environment:
+   591→      MYSQL_DATABASE: wp
+   592→      MYSQL_USER: wp
+   593→      MYSQL_PASSWORD: wpdbpass
+   594→      MYSQL_ROOT_PASSWORD: rootpass_${randomHex(8)}
+   595→    volumes:
+   596→      - ./db-data:/var/lib/mysql
+   597→
+   598→networks:
+   599→  deployhub:
+   600→    external: true
+   601→`
+   602→  }
+   603→
+   604→  // For docker stack, just build the repo's own Dockerfile.
+   605→  if (opts.stack === 'docker') {
+   606→    return `# Auto-generated by DeployHub (custom Dockerfile)
+   607→services:
+   608→  app:
+   609→    build: .
+   610→    container_name: ${opts.containerName}
+   611→    restart: unless-stopped
+   612→    ports:
+   613→      - "${opts.externalPort}:${opts.containerPort}"
+   614→${envLines ? `    environment:\n${envLines}\n` : ''}    networks:
+   615→      - default
+   616→      - deployhub
+   617→
+   618→networks:
+   619→  deployhub:
+   620→    external: true
+   621→`
+   622→  }
+   623→
+   624→  // For nodejs/php/python — build via generated Dockerfile.
+   625→  return `# Auto-generated by DeployHub
+   626→services:
+   627→  app:
+   628→    build: .
+   629→    container_name: ${opts.containerName}
+   630→    restart: unless-stopped
+   631→    ports:
+   632→      - "${opts.externalPort}:${opts.containerPort}"
+   633→${envLines ? `    environment:\n${envLines}\n` : ''}    networks:
+   634→      - default
+   635→      - deployhub
+   636→
+   637→networks:
+   638→  deployhub:
+   639→    external: true
+   640→`
+   641→}
+   642→
+   643→function generatePlaceholderApp(stack: string, projectName: string): Record<string, string> {
+   644→  if (stack === 'nodejs') {
+   645→    return {
+   646→      'package.json': JSON.stringify(
+   647→        {
+   648→          name: projectName.toLowerCase().replace(/\s+/g, '-'),
+   649→          version: '1.0.0',
+   650→          scripts: { start: 'node server.js' },
+   651→          dependencies: { express: '^4.19.2' },
+   652→        },
+   653→        null,
+   654→        2
+   655→      ),
+   656→      'server.js': `const express = require('express')
+   657→const app = express()
+   658→const PORT = process.env.PORT || 3000
+   659→
+   660→app.get('/', (req, res) => {
+   661→  res.json({
+   662→    app: ${JSON.stringify(projectName)},
+   663→    stack: 'nodejs',
+   664→    deployed_by: 'DeployHub',
+   665→    time: new Date().toISOString()
+   666→  })
+   667→})
+   668→
+   669→app.get('/health', (req, res) => res.json({ status: 'ok' }))
+   670→
+   671→app.listen(PORT, () => console.log('Listening on port ' + PORT))
+   672→`,
+   673→    }
+   674→  }
+   675→  if (stack === 'php') {
+   676→    return {
+   677→      'index.php': `<?php
+   678→header('Content-Type: application/json');
+   679→echo json_encode([
+   680→  'app' => ${JSON.stringify(projectName)},
+   681→  'stack' => 'php',
+   682→  'deployed_by' => 'DeployHub',
+   683→  'time' => date('c'),
+   684→  'php_version' => PHP_VERSION
+   685→]);
+   686→`,
+   687→    }
+   688→  }
+   689→  if (stack === 'python') {
+   690→    return {
+   691→      'requirements.txt': 'flask==3.0.0\ngunicorn==21.2.0\n',
+   692→      'app.py': `from flask import Flask, jsonify
+   693→from datetime import datetime
+   694→
+   695→app = Flask(__name__)
+   696→
+   697→@app.route('/')
+   698→def index():
+   699→    return jsonify({
+   700→        'app': ${JSON.stringify(projectName)},
+   701→        'stack': 'python',
+   702→        'deployed_by': 'DeployHub',
+   703→        'time': datetime.now().isoformat()
+   704→    })
+   705→
+   706→@app.route('/health')
+   707→def health():
+   708→    return jsonify({'status': 'ok'})
+   709→
+   710→if __name__ == '__main__':
+   711→    app.run(host='0.0.0.0', port=5000)
+   712→`,
+   713→    }
+   714→  }
+   715→  // Default: empty placeholder
+   716→  return {
+   717→    'README.md': `# ${projectName}\n\nDeployed via DeployHub (stack: ${stack}).\n`,
+   718→  }
+   719→}
+   720→
+   721→function generateDemoBuildLog(
+   722→  project: { name: string; slug: string; stack: string; subdomain: string; customDomain: string | null },
+   723→  stackName: string,
+   724→  containerName: string
+   725→): string {
+   726→  const url = project.customDomain || project.subdomain
+   727→  return `DeployHub deployment log
+   728→==========================
+   729→Project: ${project.name} (${project.slug})
+   730→Stack:   ${stackName} (${project.stack})
+   731→Target:  ${url}
+   732→
+   733→[1/6] Creating project directory /opt/deployhub/projects/${project.slug}...
+   734→[1/6] OK
+   735→
+   736→[2/6] Writing Dockerfile from ${stackName} template...
+   737→[2/6] OK (Dockerfile, 218 bytes)
+   738→
+   739→[3/6] Writing docker-compose.yml (container: ${containerName})...
+   740→[3/6] OK
+   741→
+   742→[4/6] docker compose build --progress=plain
+   743→ => [internal] load build definition from Dockerfile                  0.1s
+   744→ => => transferring dockerfile: 218B                                   0.0s
+   745→ => [internal] load metadata for docker.io/library/${project.stack === 'php' ? 'php:8.2-apache' : project.stack === 'python' ? 'python:3.11-slim' : 'node:20-alpine'}    1.2s
+   746→ => [auth] library/${project.stack === 'php' ? 'php' : project.stack === 'python' ? 'python' : 'node'}:pull token for registry-1.docker.io  0.6s
+   747→ => [internal] load .dockerignore                                      0.0s
+   748→ => => transferring context: 2B                                        0.0s
+   749→ => [1/3] FROM docker.io/library/${project.stack === 'php' ? 'php:8.2-apache' : project.stack === 'python' ? 'python:3.11-slim' : 'node:20-alpine'}                  3.4s
+   750→ => => resolve image config for docker.io/library/${project.stack}    3.4s
+   751→ => [2/3] COPY . /app                                                  0.2s
+   752→ => [3/3] WORKDIR /app                                                 0.0s
+   753→ => exporting to image                                                 0.4s
+   754→ => => writing image sha256:abc123def456...                            0.4s
+   755→[4/6] Build complete in 5.4s
+   756→
+   757→[5/6] docker compose up -d
+   758→[5/6] Container ${containerName} started (port ${project.stack === 'php' ? 80 : 3000}->30001)
+   759→
+   760→[6/6] Connecting to deployhub docker network...
+   761→[6/6] OK — Caddy reverse proxy updated, SSL auto-provisioned via Let's Encrypt
+   762→
+   763→✓ Deployment live at https://${url}
+   764→Total time: 8.3s
+   765→`
+   766→}
+   767→
+   768→function generateDemoRuntimeLog(project: {
+   769→  name: string
+   770→  stack: string
+   771→  subdomain: string
+   772→  customDomain: string | null
+   773→}): string {
+   774→  const url = project.customDomain || project.subdomain
+   775→  const ts = new Date().toISOString()
+   776→  if (project.stack === 'nodejs') {
+   777→    return `[${ts}] Listening on port 3000
+   778→[${ts}] GET / 200 4ms - "app":"${project.name}"
+   779→[${ts}] GET /health 200 1ms
+   780→[${ts}] Container healthy — responding to requests`
+   781→  }
+   782→  if (project.stack === 'php') {
+   783→    return `[${ts}] [apache] AH00558: apache2: Could not reliably determine the server's fully qualified domain name
+   784→[${ts}] [apache] Resuming normal operations
+   785→[${ts}] GET / 200 6ms
+   786→[${ts}] PHP 8.2.0 — ${project.name} running`
+   787→  }
+   788→  return `[${ts}] Container running — ${project.name}
+   789→[${ts}] Serving on https://${url}
+   790→[${ts}] No errors in the last 5 minutes`
+   791→}
+   792→
+   793→function generateFakeContainerId(): string {
+   794→  return (
+   795→    Array.from({ length: 64 }, () =>
+   796→      '0123456789abcdef'[Math.floor(Math.random() * 16)]
+   797→    ).join('')
+   798→  )
+   799→}
+   800→
+   801→function randomHex(len: number): string {
+   802→  return Array.from({ length: len }, () =>
+   803→    '0123456789abcdef'[Math.floor(Math.random() * 16)]
+   804→  ).join('')
+   805→}
+   806→
+   807→function shellQuote(s: string): string {
+   808→  if (s === '') return "''"
+   809→  if (/^[A-Za-z0-9_\-=/.,:@+]+$/.test(s)) return s
+   810→  return "'" + s.replace(/'/g, "'\\''") + "'"
+   811→}
+   812→
+   813→function sleep(ms: number): Promise<void> {
+   814→  return new Promise((r) => setTimeout(r, ms))
+   815→}
+   816→
+   817→// Re-export stack definitions for convenience
+   818→export { STACK_DEFINITIONS, getStackDefinition }
+   819→export type { ExecResult, StreamChunk }
+   820→

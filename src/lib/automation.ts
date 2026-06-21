@@ -1,6 +1,7 @@
 import { db } from '@/lib/db'
 import { createNotification } from '@/lib/notifications'
 import { slugify } from '@/lib/utils'
+import { getContainerStatus, isVpsDemoMode } from '@/lib/vps'
 
 export type EventType =
   | 'payment_success'
@@ -320,10 +321,18 @@ async function executeAction(
     }
 
     case 'deployment_status_check': {
-      // Advance the deployment status through building → live. The worker
-      // service picks this job up and re-queues it ~15s later while the
-      // deployment is still in-flight. Once it reaches a terminal state
-      // (live/failed), no follow-up is queued.
+      // Real container health monitor: polls the VPS for the actual Docker
+      // container state and transitions the Deployment row accordingly.
+      //
+      //   running              → mark deployment 'live' (set deployUrl + duration)
+      //   exited / not_found   → mark deployment 'failed' (only if currently
+      //                          'building' — a 'queued' deployment may not
+      //                          have started the container yet)
+      //   paused / restarting  → leave as 'building', re-check later
+      //
+      // In DEMO MODE (no sshHost configured) the container status is
+      // simulated, so we fall back to the original attempt-count-based
+      // transition to keep the UX snappy in dev/demo environments.
       const deploymentId = payload.deploymentId as string | undefined
       const projectId = payload.projectId as string | undefined
       const userId = event.userId || (payload.userId as string | undefined) || ''
@@ -356,10 +365,129 @@ async function executeAction(
         1,
         Math.floor((Date.now() - deployment.createdAt.getTime()) / 1000)
       )
+      const finalUrl = `https://${deployment.project.subdomain}`
 
-      // Transition logic: queued → building (after 1st poll) → live (after 2nd).
-      // This keeps the build log feeling alive without depending on any
-      // external hosting provider.
+      // ── Real-mode: poll the VPS for the container's actual state ──
+      const project = deployment.project
+      const realMode =
+        !isVpsDemoMode() && !!project.serverId && !!project.containerName
+
+      if (realMode) {
+        let containerState: string | null = null
+        try {
+          const status = await getContainerStatus(projectId)
+          containerState = status?.state ?? null
+        } catch (err) {
+          console.warn(
+            `[automation] getContainerStatus failed for ${projectId}:`,
+            err instanceof Error ? err.message : err
+          )
+        }
+
+        const logLine = `[${nowIso}] Container status: ${containerState || 'unknown'}`
+        const existingLog = deployment.buildLog || ''
+        const newBuildLog = existingLog
+          ? `${existingLog}\n${logLine}`
+          : logLine
+
+        if (containerState === 'running') {
+          await db.deployment.update({
+            where: { id: deploymentId },
+            data: {
+              status: 'live',
+              deployUrl: finalUrl,
+              duration: elapsedSec,
+              buildLog: `${newBuildLog}\n✅ Container running — deployment live at ${finalUrl} (after ${elapsedSec}s)`,
+            },
+          })
+          await db.project.update({
+            where: { id: projectId },
+            data: { status: 'running' },
+          })
+          if (userId) {
+            await createNotification({
+              userId,
+              title: 'Deployment Live',
+              message: `Your deployment is now live at ${finalUrl}`,
+              type: 'success',
+              link: `/deployments/${deploymentId}`,
+            })
+          }
+          return { status: 'live', deploymentId, url: finalUrl }
+        }
+
+        if (
+          (containerState === 'exited' || containerState === 'not_found') &&
+          deployment.status === 'building'
+        ) {
+          const failLog =
+            (deployment.buildLog || '') +
+            `\n❌ Container ${containerState} — deployment failed`
+          await db.deployment.update({
+            where: { id: deploymentId },
+            data: {
+              status: 'failed',
+              duration: elapsedSec,
+              buildLog: failLog.trim() || undefined,
+            },
+          })
+          await db.project.update({
+            where: { id: projectId },
+            data: { status: 'error' },
+          })
+          if (userId) {
+            await createNotification({
+              userId,
+              title: 'Deployment Failed',
+              message: `Deployment ${deploymentId.slice(0, 8)} failed — container ${containerState}.`,
+              type: 'error',
+              link: `/deployments/${deploymentId}`,
+            })
+          }
+          return {
+            status: 'failed',
+            deploymentId,
+            containerState: containerState || 'unknown',
+          }
+        }
+
+        // paused / restarting / unknown → keep as 'building' (or upgrade
+        // 'queued' → 'building') and re-queue.
+        const nextStatus = deployment.status === 'queued' ? 'building' : deployment.status
+        await db.deployment.update({
+          where: { id: deploymentId },
+          data: { status: nextStatus, buildLog: newBuildLog },
+        })
+
+        if (attempts < 60) {
+          await db.jobQueue.create({
+            data: {
+              type: 'deployment_status_check',
+              payload: JSON.stringify({
+                deploymentId,
+                projectId,
+                userId,
+                attempt: attempts + 1,
+              }),
+              status: 'queued',
+              attempts: 0,
+              maxAttempts: 3,
+              runAt: new Date(Date.now() + 15_000),
+            },
+          })
+        }
+        return {
+          status: 'in_progress',
+          deploymentId,
+          containerState: containerState || 'unknown',
+          attempt: attempts + 1,
+        }
+      }
+
+      // ── Demo-mode fallback: attempt-count-based transition ─────────
+      // Keeps the build log feeling alive without depending on any real
+      // hosting provider. Used when no Server has an sshHost configured
+      // OR when VPS_DEMO_MODE=1.
       let mapped: string
       if (deployment.status === 'queued') {
         mapped = 'building'
@@ -380,7 +508,6 @@ async function executeAction(
         : logLine
 
       if (mapped === 'live') {
-        const finalUrl = `https://${deployment.project.subdomain}`
         await db.deployment.update({
           where: { id: deploymentId },
           data: {

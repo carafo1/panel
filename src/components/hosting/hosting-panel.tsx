@@ -44,6 +44,10 @@ import {
   CheckSquare,
   X,
   RotateCcw,
+  Container,
+  Calendar,
+  Network,
+  FileText,
 } from 'lucide-react'
 import {
   Card,
@@ -182,6 +186,46 @@ interface CommitData {
   authorEmail: string
   date: string
   branch: string
+}
+
+// ─── Container + SSL types (VPS-UI) ────────────────────────────────────
+interface ContainerStatus {
+  containerId: string
+  name: string
+  state: 'running' | 'exited' | 'paused' | 'restarting' | 'not_found'
+  status: string
+  image: string
+  ports: string[]
+  createdAt: string
+}
+
+interface ContainerInfoResponse {
+  projectId: string
+  projectName: string
+  projectStatus: string
+  container: ContainerStatus | null
+}
+
+interface CertInfo {
+  hostname: string
+  issuer: string
+  issuedAt: string | null
+  expiresAt: string | null
+  daysUntilExpiry: number | null
+  autoRenew: boolean
+  status: 'issued' | 'pending' | 'failed' | 'renewing' | 'none'
+  keyType: string
+  sans: string[]
+}
+
+interface SslInfoResponse {
+  projectId: string
+  projectName: string
+  hostname: string
+  sslEnabled: boolean
+  sslCertStatus: string
+  sslCertExpiry: string | null
+  cert: CertInfo | null
 }
 
 interface Plan {
@@ -745,6 +789,175 @@ function BuildLogsDialog({
   )
 }
 
+// ─── Container Logs Dialog (VPS-UI) ────────────────────────────────────
+
+function ContainerLogsDialog({
+  open,
+  onClose,
+  logs,
+  loading,
+  tail,
+  onTailChange,
+  onRefresh,
+  containerName,
+}: {
+  open: boolean
+  onClose: () => void
+  logs: string
+  loading: boolean
+  tail: number
+  onTailChange: (tail: number) => void
+  onRefresh: () => void
+  containerName: string
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [copied, setCopied] = useState(false)
+
+  // Auto-scroll to bottom when logs update
+  useEffect(() => {
+    if (open && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    }
+  }, [open, logs, loading])
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(logs)
+      setCopied(true)
+      toast.success('Logs copied to clipboard')
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      toast.error('Copy failed')
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="sm:max-w-3xl max-h-[90vh] flex flex-col">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Terminal className="size-5 text-emerald-600" />
+            Container Logs
+          </DialogTitle>
+          <DialogDescription className="flex items-center gap-2 flex-wrap">
+            <span className="font-mono">{containerName}</span>
+            <span className="text-muted-foreground">·</span>
+            <span>last {tail} lines</span>
+          </DialogDescription>
+        </DialogHeader>
+
+        {/* Controls */}
+        <div className="flex items-center justify-between gap-2 flex-wrap pb-2">
+          <div className="flex items-center gap-2">
+            <Label className="text-xs text-muted-foreground">Tail</Label>
+            <Select
+              value={String(tail)}
+              onValueChange={(v) => onTailChange(parseInt(v, 10))}
+            >
+              <SelectTrigger className="h-8 w-24 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {[100, 500, 1000, 5000].map((t) => (
+                  <SelectItem key={t} value={String(t)}>
+                    {t}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs"
+              onClick={handleCopy}
+              disabled={!logs || loading}
+            >
+              {copied ? (
+                <>
+                  <CheckCircle2 className="size-3.5 mr-1 text-emerald-500" />
+                  Copied
+                </>
+              ) : (
+                <>
+                  <FileText className="size-3.5 mr-1" />
+                  Copy
+                </>
+              )}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs"
+              onClick={onRefresh}
+              disabled={loading}
+            >
+              <RefreshCw className={`size-3.5 mr-1 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+          </div>
+        </div>
+
+        {/* Terminal-style log viewer */}
+        <div className="flex-1 min-h-0 rounded-lg border border-zinc-800 bg-zinc-950 overflow-hidden">
+          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-900 border-b border-zinc-800">
+            <span className="size-2 rounded-full bg-red-500/80" />
+            <span className="size-2 rounded-full bg-amber-500/80" />
+            <span className="size-2 rounded-full bg-emerald-500/80" />
+            <span className="ml-2 text-[10px] text-zinc-500 font-mono">
+              docker logs --tail {tail} {containerName}
+            </span>
+          </div>
+          <div
+            ref={scrollRef}
+            className="p-3 text-xs font-mono text-emerald-400 overflow-auto max-h-[60vh] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-zinc-700"
+          >
+            {loading ? (
+              <div className="flex items-center gap-2 text-zinc-400">
+                <Loader2 className="size-3.5 animate-spin" />
+                Fetching logs...
+              </div>
+            ) : logs ? (
+              <pre className="whitespace-pre-wrap break-all">
+                {logs.split('\n').map((line, i) => (
+                  <div key={i} className="leading-relaxed">
+                    <span className="text-zinc-600 select-none mr-3">
+                      {String(i + 1).padStart(3, '0')}
+                    </span>
+                    <span
+                      className={
+                        line.toLowerCase().includes('error') ||
+                        line.toLowerCase().includes('fatal')
+                          ? 'text-red-400'
+                          : line.toLowerCase().includes('warn')
+                            ? 'text-yellow-400'
+                            : line.toLowerCase().includes('debug')
+                              ? 'text-zinc-500'
+                              : 'text-emerald-400'
+                      }
+                    >
+                      {line || ' '}
+                    </span>
+                  </div>
+                ))}
+              </pre>
+            ) : (
+              <div className="text-zinc-500">No logs available</div>
+            )}
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            Close
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 // ─── Project Detail View ─────────────────────────────────────────
 
 function ProjectDetailView({
@@ -801,6 +1014,20 @@ function ProjectDetailView({
   const [disconnectDialogOpen, setDisconnectDialogOpen] = useState(false)
   const [disconnecting, setDisconnecting] = useState(false)
   const [redeploying, setRedeploying] = useState(false)
+
+  // ── Container status state (VPS-UI) ──────────────────────────────────
+  const [containerInfo, setContainerInfo] = useState<ContainerInfoResponse | null>(null)
+  const [containerLoading, setContainerLoading] = useState(true)
+  const [containerActionLoading, setContainerActionLoading] = useState(false)
+  const [containerLogsOpen, setContainerLogsOpen] = useState(false)
+  const [containerLogs, setContainerLogs] = useState('')
+  const [containerLogsLoading, setContainerLogsLoading] = useState(false)
+  const [logTail, setLogTail] = useState(500)
+
+  // ── SSL certificate state (VPS-UI) ───────────────────────────────────
+  const [sslInfo, setSslInfo] = useState<SslInfoResponse | null>(null)
+  const [sslLoading, setSslLoading] = useState(true)
+  const [sslActionLoading, setSslActionLoading] = useState(false)
 
   const fetchProject = useCallback(async () => {
     try {
@@ -875,6 +1102,58 @@ function ProjectDetailView({
     }
     loadGithub()
   }, [projectId])
+
+  // ── Fetch container status (VPS-UI) ──────────────────────────────────
+  // Auto-refresh every 10s while the container is running.
+  const fetchContainerInfo = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/hosting/${projectId}/container`, {
+        headers: getAuthHeaders(),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setContainerInfo(data)
+      }
+    } catch {
+      // silently ignore — UI shows a friendly error
+    } finally {
+      setContainerLoading(false)
+    }
+  }, [projectId])
+
+  useEffect(() => {
+    fetchContainerInfo()
+  }, [fetchContainerInfo])
+
+  useEffect(() => {
+    // Only auto-refresh when the container is actually running.
+    if (containerInfo?.container?.state !== 'running') return
+    const interval = setInterval(() => {
+      fetchContainerInfo()
+    }, 10000)
+    return () => clearInterval(interval)
+  }, [containerInfo?.container?.state, fetchContainerInfo])
+
+  // ── Fetch SSL certificate info (VPS-UI) ──────────────────────────────
+  const fetchSslInfo = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/hosting/${projectId}/ssl`, {
+        headers: getAuthHeaders(),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setSslInfo(data)
+      }
+    } catch {
+      // silently ignore
+    } finally {
+      setSslLoading(false)
+    }
+  }, [projectId])
+
+  useEffect(() => {
+    fetchSslInfo()
+  }, [fetchSslInfo])
 
   const handleDeploy = async () => {
     setDeploying(true)
@@ -1089,6 +1368,120 @@ function ProjectDetailView({
   }
 
   if (!project) return null
+
+  // ── Container action handlers (VPS-UI) ────────────────────────────────
+  const handleContainerRestart = async () => {
+    setContainerActionLoading(true)
+    try {
+      const res = await fetch(`/api/hosting/${projectId}/container/restart`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        toast.error(data.error || 'Failed to restart container')
+        return
+      }
+      toast.success(data.message || 'Container restarted')
+      fetchContainerInfo()
+    } catch {
+      toast.error('Network error')
+    } finally {
+      setContainerActionLoading(false)
+    }
+  }
+
+  const handleContainerStop = async () => {
+    setContainerActionLoading(true)
+    try {
+      const res = await fetch(`/api/hosting/${projectId}/container/stop`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        toast.error(data.error || 'Failed to stop container')
+        return
+      }
+      toast.success(data.message || 'Container stopped')
+      fetchContainerInfo()
+      onRefresh()
+    } catch {
+      toast.error('Network error')
+    } finally {
+      setContainerActionLoading(false)
+    }
+  }
+
+  const handleFetchContainerLogs = async (tail: number) => {
+    setContainerLogsLoading(true)
+    try {
+      const res = await fetch(
+        `/api/hosting/${projectId}/container/logs?tail=${tail}`,
+        { headers: getAuthHeaders() }
+      )
+      const data = await res.json()
+      if (res.ok) {
+        setContainerLogs(data.logs || 'No logs available')
+      } else {
+        setContainerLogs(`Error: ${data.error || 'Failed to fetch logs'}`)
+      }
+    } catch {
+      setContainerLogs('Network error fetching logs')
+    } finally {
+      setContainerLogsLoading(false)
+    }
+  }
+
+  const handleOpenContainerLogs = () => {
+    setContainerLogsOpen(true)
+    handleFetchContainerLogs(logTail)
+  }
+
+  const handleSslRenew = async () => {
+    setSslActionLoading(true)
+    try {
+      const res = await fetch(`/api/hosting/${projectId}/ssl`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ action: 'renew' }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        toast.error(data.error || 'SSL renewal failed')
+        return
+      }
+      toast.success(data.message || 'SSL certificate renewal triggered')
+      fetchSslInfo()
+    } catch {
+      toast.error('Network error')
+    } finally {
+      setSslActionLoading(false)
+    }
+  }
+
+  const handleSslToggle = async (enabled: boolean) => {
+    setSslActionLoading(true)
+    try {
+      const res = await fetch(`/api/hosting/${projectId}/ssl`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ action: 'toggle', enabled }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        toast.error(data.error || 'Failed to toggle SSL')
+        return
+      }
+      toast.success(data.message || `SSL ${enabled ? 'enabled' : 'disabled'}`)
+      fetchSslInfo()
+      fetchProject()
+    } catch {
+      toast.error('Network error')
+    } finally {
+      setSslActionLoading(false)
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -1412,6 +1805,380 @@ function ProjectDetailView({
               )}
             </Button>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Container Status (VPS-UI) */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Container className="size-5 text-emerald-600" />
+                Container Status
+              </CardTitle>
+              <CardDescription className="mt-1">
+                Live Docker container running this project
+              </CardDescription>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs"
+              onClick={() => fetchContainerInfo()}
+              disabled={containerLoading}
+            >
+              <RefreshCw className={`size-3.5 mr-1 ${containerLoading ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {containerLoading && !containerInfo ? (
+            <div className="space-y-3">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+            </div>
+          ) : !containerInfo?.container ? (
+            <div className="text-center py-10 text-muted-foreground">
+              <Container className="size-10 mx-auto mb-3 opacity-30" />
+              <p className="text-sm font-medium">No container running</p>
+              <p className="text-xs mt-1">
+                Deploy this project to start a container on the assigned server.
+              </p>
+              <Button
+                size="sm"
+                onClick={handleDeploy}
+                disabled={deploying || project.status !== 'running'}
+                className="mt-4 bg-emerald-600 hover:bg-emerald-700 text-white h-8 text-xs"
+              >
+                {deploying ? (
+                  <Loader2 className="size-3.5 mr-1 animate-spin" />
+                ) : (
+                  <Rocket className="size-3.5 mr-1" />
+                )}
+                Deploy now
+              </Button>
+            </div>
+          ) : (
+            (() => {
+              const c = containerInfo.container
+              const isRunning = c.state === 'running'
+              const stateColor =
+                c.state === 'running'
+                  ? 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400'
+                  : c.state === 'paused'
+                    ? 'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:text-amber-400'
+                    : 'bg-gray-100 text-gray-600 border-gray-200 dark:bg-gray-800/30 dark:text-gray-400'
+              return (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground w-20">Name</span>
+                        <span className="font-mono text-sm truncate">{c.name}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground w-20">Container ID</span>
+                        <span className="font-mono text-xs text-muted-foreground truncate">
+                          {c.containerId ? c.containerId.substring(0, 12) : '—'}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground w-20">Image</span>
+                        <span className="font-mono text-xs truncate">{c.image || '—'}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground w-20">Created</span>
+                        <span className="text-xs">
+                          {c.createdAt ? formatDate(c.createdAt) : '—'}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground w-20">State</span>
+                        <Badge variant="outline" className={stateColor}>
+                          {isRunning && (
+                            <span className="size-1.5 rounded-full bg-emerald-500 mr-1.5 animate-pulse" />
+                          )}
+                          {c.state}
+                        </Badge>
+                      </div>
+                      <div className="flex items-start gap-2">
+                        <span className="text-xs text-muted-foreground w-20 shrink-0">Status</span>
+                        <span className="text-xs">{c.status || '—'}</span>
+                      </div>
+                      <div className="flex items-start gap-2">
+                        <span className="text-xs text-muted-foreground w-20 shrink-0">Ports</span>
+                        <div className="flex flex-wrap gap-1 min-w-0">
+                          {c.ports.length === 0 ? (
+                            <span className="text-xs text-muted-foreground">No published ports</span>
+                          ) : (
+                            c.ports.map((p, i) => (
+                              <span
+                                key={i}
+                                className="font-mono text-[10px] bg-muted px-1.5 py-0.5 rounded break-all"
+                              >
+                                {p}
+                              </span>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2 pt-2 border-t">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 text-xs"
+                      onClick={handleContainerRestart}
+                      disabled={containerActionLoading}
+                    >
+                      {containerActionLoading ? (
+                        <Loader2 className="size-3.5 mr-1 animate-spin" />
+                      ) : (
+                        <RotateCcw className="size-3.5 mr-1" />
+                      )}
+                      Restart
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 text-xs"
+                      onClick={handleContainerStop}
+                      disabled={containerActionLoading || !isRunning}
+                    >
+                      <Square className="size-3.5 mr-1" />
+                      Stop
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 text-xs"
+                      onClick={handleOpenContainerLogs}
+                    >
+                      <Terminal className="size-3.5 mr-1" />
+                      View Logs
+                    </Button>
+                  </div>
+                </div>
+              )
+            })()
+          )}
+        </CardContent>
+      </Card>
+
+      {/* SSL Certificate (VPS-UI) */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Shield className="size-5 text-emerald-600" />
+                SSL Certificate
+              </CardTitle>
+              <CardDescription className="mt-1">
+                HTTPS certificate status &amp; renewal
+              </CardDescription>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs"
+              onClick={() => fetchSslInfo()}
+              disabled={sslLoading}
+            >
+              <RefreshCw className={`size-3.5 mr-1 ${sslLoading ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {sslLoading && !sslInfo ? (
+            <div className="space-y-3">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+            </div>
+          ) : !sslInfo ? (
+            <div className="text-center py-8 text-sm text-muted-foreground">
+              <Shield className="size-8 mx-auto mb-2 opacity-30" />
+              Failed to load SSL info
+            </div>
+          ) : (
+            (() => {
+              const cert = sslInfo.cert
+              const status = cert?.status ?? (sslInfo.sslEnabled ? 'issued' : 'none')
+              const statusMap: Record<string, { className: string; pulse?: boolean }> = {
+                issued: {
+                  className: 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400',
+                },
+                pending: {
+                  className: 'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:text-amber-400',
+                  pulse: true,
+                },
+                failed: {
+                  className: 'bg-red-100 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-400',
+                },
+                renewing: {
+                  className: 'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:text-amber-400',
+                  pulse: true,
+                },
+                none: {
+                  className: 'bg-gray-100 text-gray-600 border-gray-200 dark:bg-gray-800/30 dark:text-gray-400',
+                },
+              }
+              const sCfg = statusMap[status] || statusMap.none
+              const days = cert?.daysUntilExpiry
+              const expiryColor =
+                days == null
+                  ? 'text-muted-foreground'
+                  : days < 0
+                    ? 'text-red-600'
+                    : days < 7
+                      ? 'text-red-600 font-medium'
+                      : days < 30
+                        ? 'text-amber-600 font-medium'
+                        : 'text-emerald-600'
+
+              return (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <Badge variant="outline" className={sCfg.className}>
+                      {sCfg.pulse && (
+                        <span className="size-1.5 rounded-full bg-current mr-1.5 animate-pulse" />
+                      )}
+                      SSL: {status}
+                    </Badge>
+                    <span className="text-xs text-muted-foreground font-mono">
+                      {sslInfo.hostname}
+                    </span>
+                  </div>
+
+                  {!sslInfo.sslEnabled ? (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-900/10 p-4 text-sm">
+                      <p className="font-medium text-amber-700 dark:text-amber-400">
+                        SSL is currently disabled for this project.
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Enabling SSL will request a free Let&apos;s Encrypt
+                        certificate automatically via Caddy.
+                      </p>
+                      <Button
+                        size="sm"
+                        onClick={() => handleSslToggle(true)}
+                        disabled={sslActionLoading}
+                        className="mt-3 bg-emerald-600 hover:bg-emerald-700 text-white h-8 text-xs"
+                      >
+                        {sslActionLoading ? (
+                          <Loader2 className="size-3.5 mr-1 animate-spin" />
+                        ) : (
+                          <Lock className="size-3.5 mr-1" />
+                        )}
+                        Enable SSL
+                      </Button>
+                    </div>
+                  ) : cert ? (
+                    <>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <span className="text-xs text-muted-foreground flex items-center gap-1.5">
+                            <Network className="size-3" />
+                            Hostname
+                          </span>
+                          <span className="font-mono text-sm">{cert.hostname}</span>
+                        </div>
+                        <div className="space-y-1">
+                          <span className="text-xs text-muted-foreground flex items-center gap-1.5">
+                            <Shield className="size-3" />
+                            Issuer
+                          </span>
+                          <span className="text-sm">{cert.issuer || '—'}</span>
+                        </div>
+                        <div className="space-y-1">
+                          <span className="text-xs text-muted-foreground flex items-center gap-1.5">
+                            <Calendar className="size-3" />
+                            Issued
+                          </span>
+                          <span className="text-xs">
+                            {cert.issuedAt ? formatDate(cert.issuedAt) : '—'}
+                          </span>
+                        </div>
+                        <div className="space-y-1">
+                          <span className="text-xs text-muted-foreground flex items-center gap-1.5">
+                            <Calendar className="size-3" />
+                            Expires
+                          </span>
+                          <span className={`text-xs ${expiryColor}`}>
+                            {cert.expiresAt ? formatDate(cert.expiresAt) : '—'}
+                            {days != null && (
+                              <span className="ml-1 opacity-80">
+                                ({days < 0 ? `expired ${-days}d ago` : `${days}d left`})
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                      </div>
+
+                      {cert.sans.length > 0 && (
+                        <div className="space-y-1">
+                          <span className="text-xs text-muted-foreground">SANs</span>
+                          <div className="flex flex-wrap gap-1">
+                            {cert.sans.map((s, i) => (
+                              <span
+                                key={i}
+                                className="font-mono text-[10px] bg-muted px-1.5 py-0.5 rounded"
+                              >
+                                {s}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="flex items-center justify-between gap-2 flex-wrap pt-2 border-t">
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            checked={sslInfo.sslEnabled}
+                            onCheckedChange={(v) => handleSslToggle(v)}
+                            disabled={sslActionLoading}
+                          />
+                          <span className="text-xs text-muted-foreground">
+                            SSL {sslInfo.sslEnabled ? 'Enabled' : 'Disabled'}
+                          </span>
+                          {cert.autoRenew && (
+                            <Badge variant="outline" className="text-[10px] h-5 bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400">
+                              Auto-renew
+                            </Badge>
+                          )}
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8 text-xs"
+                          onClick={handleSslRenew}
+                          disabled={sslActionLoading}
+                        >
+                          {sslActionLoading ? (
+                            <Loader2 className="size-3.5 mr-1 animate-spin" />
+                          ) : (
+                            <RefreshCw className="size-3.5 mr-1" />
+                          )}
+                          Renew Certificate
+                        </Button>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="text-sm text-muted-foreground">
+                      SSL is enabled but no certificate info is available yet.
+                    </div>
+                  )}
+                </div>
+              )
+            })()
+          )}
         </CardContent>
       </Card>
 
@@ -1949,6 +2716,21 @@ function ProjectDetailView({
         deployment={selectedDeployment}
         project={project}
         loading={logLoading}
+      />
+
+      {/* Container Logs Dialog (VPS-UI) */}
+      <ContainerLogsDialog
+        open={containerLogsOpen}
+        onClose={() => setContainerLogsOpen(false)}
+        logs={containerLogs}
+        loading={containerLogsLoading}
+        tail={logTail}
+        onTailChange={(t) => {
+          setLogTail(t)
+          handleFetchContainerLogs(t)
+        }}
+        onRefresh={() => handleFetchContainerLogs(logTail)}
+        containerName={containerInfo?.container?.name || project.name}
       />
 
       {/* Delete Confirmation Dialog */}
