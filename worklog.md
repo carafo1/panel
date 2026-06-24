@@ -2281,3 +2281,40 @@ Stage Summary:
 - All external integrations work in REAL mode when credentials are configured (Dynadot API, Mailcow API, Stripe, Waafi, GitHub OAuth, SSH/Docker/Caddy) and gracefully fall back to DEMO MODE when env vars/credentials are absent
 - Lint: clean (0 errors); Dev server: running stably on port 3000; Browser verification: all core flows pass with no console errors
 - The system is now a REAL hosting platform: when you add a VPS with SSH credentials and click "Provision", it actually installs Docker + Caddy via SSH; when you create a project, it actually deploys a Docker container and configures the Caddy reverse proxy with automatic Let's Encrypt SSL
+
+---
+Task ID: DYNADOT-TRANSFER-VISIBILITY
+Agent: Main Agent
+Task: Make "Domain transfer" feature visible/discoverable (user reported "i don't see Domain transfer")
+
+Work Log:
+- User reported they couldn't see the "Domain transfer" button.
+- Investigated via Agent Browser + VLM screenshot analysis:
+  • The "Initiate Transfer" button DID exist — but only inside a domain detail page (click domain → Renew/Transfer tab → scroll down past the Renew card)
+  • VLM screenshot confirmed: the Transfer Domain card heading was visible on the Renew/Transfer tab, but the "Initiate Transfer" button was BELOW THE FOLD (cut off by viewport)
+  • The transfer feature was effectively buried 3 clicks deep + required scrolling
+- Root cause: poor discoverability. The transfer feature (bring a domain from another registrar) was only accessible from within an existing domain's detail page, even though it doesn't require an existing domain — you enter the domain name + auth code in the form.
+- Fix: Added a prominent "Transfer Domain" button to the main Domains panel header (src/components/domains/domains-panel.tsx):
+  • New `transferOpen` state on DomainsPanel component
+  • "Transfer Domain" button (with Send icon) placed next to the "$6.50 markup applied" badge in the panel header — always visible on the main Domains page
+  • Created new `TransferDomainDialog` component — a standalone modal with:
+    - "Domain to transfer" input (placeholder: example.com)
+    - "EPP / Auth code" input (password field)
+    - "Before transferring" info box with 4 tips (unlock domain, disable WHOIS privacy, 7+ days until expiry, 5-7 day transfer time)
+    - "Initiate Transfer" button (disabled until both fields filled)
+    - Cancel button
+    - Calls POST /domains/transfer on submit, shows success toast, closes dialog, switches to My Domains tab
+  • The existing transfer form on the domain detail Renew/Transfer tab is preserved (for users who prefer that flow)
+- Verified via Agent Browser:
+  • "Transfer Domain" button visible in Domains panel header (screenshot confirmed via VLM)
+  • Clicking it opens the transfer dialog with all fields + info box + buttons fully visible (no scrolling needed)
+  • Form validation works: button is [disabled] initially, becomes enabled after filling both domain + auth code fields
+  • Dialog is fully visible in viewport (VLM confirmed no clipping)
+- Ran `bun run lint` → 0 errors, 0 warnings
+
+Stage Summary:
+- The "Domain transfer" feature is now prominently accessible via a "Transfer Domain" button in the main Domains panel header
+- A new TransferDomainDialog component provides a clean, self-contained transfer form with helpful tips
+- No more 3-clicks-deep + scroll-to-find workflow — the button is visible immediately when you open the Domains panel
+- The transfer form calls the existing POST /domains/transfer endpoint (real Dynadot API call)
+- Files modified: src/components/domains/domains-panel.tsx (added TransferDomainDialog component + header button + transferOpen state)

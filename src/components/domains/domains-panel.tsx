@@ -132,6 +132,7 @@ function daysUntil(dateStr?: string): number | null {
 export default function DomainsPanel() {
   const [tab, setTab] = useState<Tab>('search')
   const [selectedDomainId, setSelectedDomainId] = useState<string | null>(null)
+  const [transferOpen, setTransferOpen] = useState(false)
   const { user } = useAuthStore()
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin'
 
@@ -157,11 +158,24 @@ export default function DomainsPanel() {
             Search, register, renew, transfer &amp; manage domains via Dynadot
           </p>
         </div>
-        <Badge variant="outline" className="w-fit">
-          <Sparkles className="h-3 w-3 mr-1 text-amber-500" />
-          $6.50 markup applied
-        </Badge>
+        <div className="flex items-center gap-2">
+          <Badge variant="outline" className="w-fit">
+            <Sparkles className="h-3 w-3 mr-1 text-amber-500" />
+            $6.50 markup applied
+          </Badge>
+          <Button variant="outline" size="sm" onClick={() => setTransferOpen(true)}>
+            <Send className="h-4 w-4 mr-1.5" />
+            Transfer Domain
+          </Button>
+        </div>
       </div>
+
+      {transferOpen && (
+        <TransferDomainDialog
+          onClose={() => setTransferOpen(false)}
+          onTransferred={() => setTab('domains')}
+        />
+      )}
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
         <TabsList className="grid w-full grid-cols-2 sm:grid-cols-5 h-auto">
@@ -614,6 +628,107 @@ function RegisterDialog({
           <Button onClick={() => onConfirm(duration)} disabled={loading}>
             {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Zap className="h-4 w-4 mr-2" />}
             Complete Purchase (${total})
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ─── Transfer Domain Dialog (standalone — opens from main panel header) ───────
+
+function TransferDomainDialog({
+  onClose,
+  onTransferred,
+}: {
+  onClose: () => void
+  onTransferred: () => void
+}) {
+  const [domain, setDomain] = useState('')
+  const [authCode, setAuthCode] = useState('')
+  const [transferring, setTransferring] = useState(false)
+
+  const submit = async () => {
+    if (!domain.trim() || !authCode.trim()) {
+      toast.error('Domain and auth code are required')
+      return
+    }
+    setTransferring(true)
+    try {
+      const data = await apiFetch('/domains/transfer', {
+        method: 'POST',
+        body: JSON.stringify({ domain: domain.trim(), authCode: authCode.trim() }),
+      })
+      toast.success('Transfer initiated!', {
+        description: `${data.data?.domain || domain} — invoice ${data.data?.invoiceNumber || 'created'}`,
+      })
+      onTransferred()
+      onClose()
+    } catch (err) {
+      toast.error('Transfer failed', { description: (err as Error).message })
+    } finally {
+      setTransferring(false)
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Send className="h-5 w-5 text-blue-500" />
+            Transfer Domain
+          </DialogTitle>
+          <DialogDescription>
+            Bring a domain from another registrar to your account. You&apos;ll need
+            the EPP authorization code from your current registrar.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div className="space-y-2">
+            <Label>Domain to transfer</Label>
+            <Input
+              placeholder="example.com"
+              value={domain}
+              onChange={(e) => setDomain(e.target.value)}
+              className="font-mono"
+              autoFocus
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>EPP / Auth code</Label>
+            <Input
+              placeholder="Authorization code from current registrar"
+              value={authCode}
+              onChange={(e) => setAuthCode(e.target.value)}
+              type="password"
+              className="font-mono"
+            />
+          </div>
+          <div className="rounded-md border border-blue-500/30 bg-blue-500/5 p-3 text-xs text-muted-foreground space-y-1">
+            <div className="flex items-center gap-1.5 font-medium text-blue-700 dark:text-blue-400">
+              <AlertTriangle className="h-3.5 w-3.5" />
+              Before transferring
+            </div>
+            <ul className="list-disc list-inside space-y-0.5 ml-1">
+              <li>Unlock the domain at your current registrar</li>
+              <li>Disable WHOIS privacy if enabled</li>
+              <li>Ensure the domain has 7+ days until expiry</li>
+              <li>Transfers typically take 5–7 days to complete</li>
+            </ul>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={transferring}>
+            Cancel
+          </Button>
+          <Button onClick={submit} disabled={transferring || !domain.trim() || !authCode.trim()}>
+            {transferring ? (
+              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+            ) : (
+              <Send className="h-4 w-4 mr-2" />
+            )}
+            Initiate Transfer
           </Button>
         </DialogFooter>
       </DialogContent>
