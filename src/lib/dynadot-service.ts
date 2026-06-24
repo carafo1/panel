@@ -287,6 +287,9 @@ class DynadotService {
 
   /**
    * Bulk search across many domains at once.
+   *
+   * Uses `show_price=1` so Dynadot returns real Registration + Renewal prices
+   * in the `Price` field (a human-readable string we parse).
    */
   async bulkSearch(domains: string[]): Promise<DomainSearchResult[]> {
     const cleaned = domains.map((d) => d.toLowerCase().trim()).filter(Boolean)
@@ -311,7 +314,12 @@ class DynadotService {
 
     // Dynadot's search API requires separate domain0, domain1, domain2... params.
     // A single comma-separated domain0 value returns "invalid characters in domain".
-    const searchParams: Record<string, string> = { command: 'search' }
+    // show_price=1 makes Dynadot return real Registration + Renewal prices.
+    const searchParams: Record<string, string> = {
+      command: 'search',
+      show_price: '1',
+      currency: 'USD',
+    }
     cleaned.forEach((d, i) => {
       searchParams[`domain${i}`] = d
     })
@@ -320,7 +328,8 @@ class DynadotService {
 
     // Dynadot search API returns:
     //   { SearchResponse: { ResponseCode: "0", SearchResults: [{ DomainName, Status, Available: "yes"|"no", Price?, Premium? }] } }
-    // (Older docs described a Response.domain0 format, so we support both.)
+    // Price (when show_price=1) is a string like:
+    //   "Registration Price: 10.88 in USD and Renewal price: 10.88 in USD and Domain is not a Premium Domain"
     const searchResp = json.SearchResponse as
       | { SearchResults?: Array<Record<string, unknown>> }
       | undefined
@@ -330,13 +339,16 @@ class DynadotService {
         const name = String(item.DomainName || '')
         // Dynadot returns Available as "yes"/"no" (string)
         const available = String(item.Available || '').toLowerCase() === 'yes'
-        const premium = String(item.Premium || '').toLowerCase() === 'yes'
-        const priceStr = item.Price ? String(item.Price) : undefined
+        const priceRaw = item.Price ? String(item.Price) : ''
+        const parsed = this.parsePriceString(priceRaw)
+        const premium = parsed?.premium ?? (String(item.Premium || '').toLowerCase() === 'yes')
         out.push({
           domain: name,
           available,
           premium,
-          registrationPrice: priceStr ? parseFloat(priceStr) : undefined,
+          registrationPrice: parsed?.registration,
+          renewalPrice: parsed?.renewal,
+          transferPrice: parsed?.renewal, // Dynadot transfer = renewal
           currency: 'USD',
         })
       }
@@ -347,11 +359,14 @@ class DynadotService {
         if (key.startsWith('domain') && typeof value === 'object' && value !== null) {
           const dv = value as { Name?: string; Available?: string; Price?: string; Premium?: string }
           const name = dv.Name || ''
+          const parsed = this.parsePriceString(dv.Price)
           out.push({
             domain: name,
             available: String(dv.Available).toLowerCase() === 'yes',
-            premium: String(dv.Premium).toLowerCase() === 'yes',
-            registrationPrice: dv.Price ? parseFloat(dv.Price) : undefined,
+            premium: parsed?.premium ?? (String(dv.Premium || '').toLowerCase() === 'yes'),
+            registrationPrice: parsed?.registration,
+            renewalPrice: parsed?.renewal,
+            transferPrice: parsed?.renewal,
             currency: 'USD',
           })
         }
@@ -369,6 +384,23 @@ class DynadotService {
         }
       )
     })
+  }
+
+  /**
+   * Parse Dynadot's `show_price=1` Price string.
+   * Example: "Registration Price: 10.88 in USD and Renewal price: 10.88 in USD and Domain is not a Premium Domain"
+   */
+  private parsePriceString(
+    raw: string | undefined
+  ): { registration: number; renewal: number; premium: boolean } | null {
+    if (!raw || typeof raw !== 'string') return null
+    const matches = raw.match(/([\d.]+)\s+in\s+USD/gi)
+    if (!matches || matches.length < 1) return null
+    const nums = matches.map((m) => parseFloat(m.replace(/[^\d.]/g, '')))
+    const registration = nums[0] || 0
+    const renewal = nums[1] || registration
+    const premium = /is\s+a\s+Premium/i.test(raw)
+    return { registration, renewal, premium }
   }
 
   /**

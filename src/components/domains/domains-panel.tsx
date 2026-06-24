@@ -1832,6 +1832,8 @@ function AdminTab({ onSelect }: { onSelect: (id: string) => void }) {
 
   return (
     <div className="space-y-4">
+      <IntegrationStatusCard />
+
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
@@ -1908,5 +1910,141 @@ function AdminTab({ onSelect }: { onSelect: (id: string) => void }) {
         </AlertDialogContent>
       </AlertDialog>
     </div>
+  )
+}
+
+// ─── Domain Integration Status (live Dynadot feature verification) ────────────
+
+interface FeatureStatus {
+  id: number
+  name: string
+  status: 'live' | 'simulated' | 'error'
+  detail: string
+  lastChecked: string
+}
+
+function IntegrationStatusCard() {
+  const [data, setData] = useState<{
+    provider: string
+    demoMode: boolean
+    apiKeyConfigured: boolean
+    summary: { total: number; live: number; simulated: number; error: number }
+    features: FeatureStatus[]
+    checkedAt: string
+  } | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [checking, setChecking] = useState(false)
+
+  const load = useCallback(async () => {
+    setChecking(true)
+    try {
+      const res = await apiFetch('/domains/status')
+      setData(res.data)
+    } catch (err) {
+      toast.error('Failed to check integration status', {
+        description: (err as Error).message,
+      })
+    } finally {
+      setLoading(false)
+      setChecking(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    load()
+  }, [load])
+
+  const allLive = data && data.summary.live === data.summary.total && data.summary.total > 0
+  const hasErrors = data && data.summary.error > 0
+  const hasSimulated = data && data.summary.simulated > 0
+
+  const statusIcon = (s: FeatureStatus['status']) => {
+    if (s === 'live') return <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+    if (s === 'simulated') return <XCircle className="h-4 w-4 text-amber-500" />
+    return <AlertTriangle className="h-4 w-4 text-red-500" />
+  }
+
+  const statusBadge = (s: FeatureStatus['status']) => {
+    if (s === 'live') return <Badge className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">LIVE</Badge>
+    if (s === 'simulated') return <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">SIMULATED</Badge>
+    return <Badge className="bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300">ERROR</Badge>
+  }
+
+  return (
+    <Card className={
+      allLive
+        ? 'border-emerald-500/50 bg-emerald-50/50 dark:bg-emerald-950/20'
+        : hasErrors
+        ? 'border-red-500/50 bg-red-50/50 dark:bg-red-950/20'
+        : 'border-amber-500/50 bg-amber-50/50 dark:bg-amber-950/20'
+    }>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <Zap className="h-5 w-5 text-amber-500" />
+              Domain Integration Status
+              {allLive && (
+                <Badge className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+                  All Live
+                </Badge>
+              )}
+              {hasErrors && (
+                <Badge className="bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300">
+                  {data!.summary.error} Error{data!.summary.error > 1 ? 's' : ''}
+                </Badge>
+              )}
+              {hasSimulated && (
+                <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                  {data!.summary.simulated} Simulated
+                </Badge>
+              )}
+            </CardTitle>
+            <CardDescription className="mt-1">
+              {data
+                ? `Provider: ${data.provider} • ${data.summary.live}/${data.summary.total} features live • Last checked ${new Date(data.checkedAt).toLocaleTimeString()}`
+                : 'Live-testing all 7 domain features against the Dynadot API…'}
+            </CardDescription>
+          </div>
+          <Button variant="outline" size="sm" onClick={load} disabled={checking}>
+            {checking ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <RefreshCw className="h-4 w-4 mr-1" />}
+            Re-check
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <div className="space-y-2">{[1, 2, 3, 4, 5].map((i) => <Skeleton key={i} className="h-12" />)}</div>
+        ) : data ? (
+          <div className="rounded-md border overflow-hidden">
+            <Table>
+              <TableHeader className="sticky top-0 bg-background">
+                <TableRow>
+                  <TableHead className="w-12 text-center">#</TableHead>
+                  <TableHead>Feature</TableHead>
+                  <TableHead className="w-32 text-center">Status</TableHead>
+                  <TableHead>What&apos;s happening</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {data.features.map((f) => (
+                  <TableRow key={f.id}>
+                    <TableCell className="text-center font-mono text-muted-foreground">{f.id}</TableCell>
+                    <TableCell className="font-medium flex items-center gap-2">
+                      {statusIcon(f.status)}
+                      {f.name}
+                    </TableCell>
+                    <TableCell className="text-center">{statusBadge(f.status)}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{f.detail}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        ) : (
+          <div className="text-sm text-muted-foreground">Unable to load integration status.</div>
+        )}
+      </CardContent>
+    </Card>
   )
 }

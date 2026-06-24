@@ -1,0 +1,711 @@
+     1→     1→/**
+     2→     2→ * Dynadot Reseller API service class.
+     3→     3→ *
+     4→     4→ * Implements the complete domain lifecycle:
+     5→     5→ *  - Domain availability search (instant + bulk)
+     6→     6→ *  - Register / Renew / Transfer
+     7→     7→ *  - Get domain information
+     8→     8→ *  - List customer domains
+     9→     9→ *  - Lock / Unlock domain
+    10→    10→ *  - Enable / Disable Whois privacy
+    11→    11→ *  - Get EPP / Auth code
+    12→    12→ *  - Set Nameservers
+    13→    13→ *  - Configure DNS (A, AAAA, CNAME, MX, TXT, SRV, CAA, NS)
+    14→    14→ *  - Domain contacts
+    15→    15→ *  - Domain expiration information
+    16→    16→ *  - Auto-renew management
+    17→    17→ *
+    18→    18→ * API docs: https://www.dynadot.com/domain/api3.html
+    19→    19→ *
+    20→    20→ * When DYNADOT_API_KEY is not set, the service runs in DEMO MODE and returns
+    21→    21→ * deterministic simulated data so the full application can be exercised without
+    22→    22→ * a real registrar account.
+    23→    23→ *
+    24→    24→ * Design notes:
+    25→    25→ *  - SOLID: single responsibility (Dynadot API communication only)
+    26→    26→ *  - Repository/Service pattern: this is the provider gateway; domain state
+    27→    27→ *    persistence lives in the DomainService orchestrator.
+    28→    28→ *  - Retry with exponential backoff for transient network errors.
+    29→    29→ *  - Rate-limit aware (429 → honours Retry-After).
+    30→    30→ */
+    31→    31→import { isDynadotDemoMode } from './dynadot'
+    32→    32→
+    33→    33→const API_BASE = 'https://api.dynadot.com/api3.json'
+    34→    34→const MAX_RETRIES = 3
+    35→    35→const BASE_DELAY_MS = 500
+    36→    36→
+    37→    37→// ─── Types ────────────────────────────────────────────────────────────────────
+    38→    38→
+    39→    39→export interface DomainSearchResult {
+    40→    40→  domain: string
+    41→    41→  available: boolean
+    42→    42→  premium: boolean
+    43→    43→  registrationPrice?: number
+    44→    44→  renewalPrice?: number
+    45→    45→  transferPrice?: number
+    46→    46→  currency?: string
+    47→    47→}
+    48→    48→
+    49→    49→export interface DomainInfo {
+    50→    50→  domain: string
+    51→    51→  status: string
+    52→    52→  expiry?: string
+    53→    53→  registeredAt?: string
+    54→    54→  nameservers: string[]
+    55→    55→  locked: boolean
+    56→    56→  whoisPrivacy: boolean
+    57→    57→  autoRenew: boolean
+    58→    58→  premium: boolean
+    59→    59→}
+    60→    60→
+    61→    61→export interface DnsRecordInput {
+    62→    62→  type: 'A' | 'AAAA' | 'CNAME' | 'MX' | 'TXT' | 'SRV' | 'CAA' | 'NS'
+    63→    63→  name: string // subdomain or @
+    64→    64→  value: string
+    65→    65→  ttl?: number
+    66→    66→  priority?: number
+    67→    67→}
+    68→    68→
+    69→    69→export interface DomainContactInput {
+    70→    70→  type: 'registrant' | 'admin' | 'tech' | 'billing'
+    71→    71→  firstName: string
+    72→    72→  lastName: string
+    73→    73→  email: string
+    74→    74→  phone?: string
+    75→    75→  organization?: string
+    76→    76→  address1?: string
+    77→    77→  address2?: string
+    78→    78→  city?: string
+    79→    79→  state?: string
+    80→    80→  postalCode?: string
+    81→    81→  country?: string
+    82→    82→}
+    83→    83→
+    84→    84→export interface RegisterResult {
+    85→    85→  success: boolean
+    86→    86→  orderId?: string
+    87→    87→  registrationPrice?: number
+    88→    88→  domain?: string
+    89→    89→}
+    90→    90→
+    91→    91→export interface RenewResult {
+    92→    92→  success: boolean
+    93→    93→  orderId?: string
+    94→    94→  renewalPrice?: number
+    95→    95→  newExpiry?: string
+    96→    96→}
+    97→    97→
+    98→    98→export interface TransferResult {
+    99→    99→  success: boolean
+   100→   100→  orderId?: string
+   101→   101→  message?: string
+   102→   102→}
+   103→   103→
+   104→   104→// ─── Demo data ────────────────────────────────────────────────────────────────
+   105→   105→
+   106→   106→const DEMO_TLD_PRICES: Record<string, { reg: number; renew: number; transfer: number }> = {
+   107→   107→  '.com': { reg: 9.99, renew: 9.99, transfer: 9.99 },
+   108→   108→  '.net': { reg: 11.99, renew: 11.99, transfer: 11.99 },
+   109→   109→  '.org': { reg: 10.99, renew: 10.99, transfer: 10.99 },
+   110→   110→  '.info': { reg: 14.99, renew: 14.99, transfer: 14.99 },
+   111→   111→  '.biz': { reg: 12.99, renew: 12.99, transfer: 12.99 },
+   112→   112→  '.co': { reg: 24.99, renew: 24.99, transfer: 24.99 },
+   113→   113→  '.io': { reg: 32.0, renew: 32.0, transfer: 32.0 },
+   114→   114→  '.app': { reg: 14.99, renew: 14.99, transfer: 14.99 },
+   115→   115→  '.dev': { reg: 14.99, renew: 14.99, transfer: 14.99 },
+   116→   116→  '.ai': { reg: 69.99, renew: 69.99, transfer: 69.99 },
+   117→   117→  '.xyz': { reg: 3.99, renew: 9.99, transfer: 9.99 },
+   118→   118→  '.online': { reg: 8.99, renew: 29.99, transfer: 29.99 },
+   119→   119→  '.site': { reg: 7.99, renew: 29.99, transfer: 29.99 },
+   120→   120→  '.store': { reg: 9.99, renew: 49.99, transfer: 49.99 },
+   121→   121→  '.tech': { reg: 9.99, renew: 39.99, transfer: 39.99 },
+   122→   122→  '.cloud': { reg: 9.99, renew: 19.99, transfer: 19.99 },
+   123→   123→  '.live': { reg: 9.99, renew: 24.99, transfer: 24.99 },
+   124→   124→  '.me': { reg: 14.99, renew: 14.99, transfer: 14.99 },
+   125→   125→  '.us': { reg: 8.99, renew: 8.99, transfer: 8.99 },
+   126→   126→  '.ca': { reg: 12.99, renew: 12.99, transfer: 12.99 },
+   127→   127→  '.uk': { reg: 7.99, renew: 7.99, transfer: 7.99 },
+   128→   128→  '.eu': { reg: 7.99, renew: 7.99, transfer: 7.99 },
+   129→   129→  '.de': { reg: 6.99, renew: 6.99, transfer: 6.99 },
+   130→   130→  '.fr': { reg: 9.99, renew: 9.99, transfer: 9.99 },
+   131→   131→  '.it': { reg: 9.99, renew: 9.99, transfer: 9.99 },
+   132→   132→  '.nl': { reg: 8.99, renew: 8.99, transfer: 8.99 },
+   133→   133→  '.in': { reg: 9.99, renew: 9.99, transfer: 9.99 },
+   134→   134→  '.co.uk': { reg: 7.99, renew: 7.99, transfer: 7.99 },
+   135→   135→  '.org.uk': { reg: 7.99, renew: 7.99, transfer: 7.99 },
+   136→   136→  '.africa': { reg: 14.99, renew: 14.99, transfer: 14.99 },
+   137→   137→  '.shop': { reg: 9.99, renew: 29.99, transfer: 29.99 },
+   138→   138→}
+   139→   139→
+   140→   140→function demoIsAvailable(domain: string): boolean {
+   141→   141→  const lower = domain.toLowerCase()
+   142→   142→  if (lower.includes('taken') || lower.includes('unavailable')) return false
+   143→   143→  if (lower.includes('premium')) return true
+   144→   144→  // Deterministic pseudo-randomness based on string hash
+   145→   145→  const tld = '.' + lower.split('.').slice(1).join('.')
+   146→   146→  if (!DEMO_TLD_PRICES[tld]) return false
+   147→   147→  let hash = 0
+   148→   148→  for (let i = 0; i < lower.length; i++) {
+   149→   149→    hash = (hash << 5) - hash + lower.charCodeAt(i)
+   150→   150→    hash |= 0
+   151→   151→  }
+   152→   152→  // ~60% available
+   153→   153→  return Math.abs(hash) % 10 < 6
+   154→   154→}
+   155→   155→
+   156→   156→function demoIsPremium(domain: string): boolean {
+   157→   157→  const lower = domain.toLowerCase()
+   158→   158→  if (lower.includes('premium')) return true
+   159→   159→  // Short single-word .com / .ai treated as premium
+   160→   160→  const base = lower.split('.')[0]
+   161→   161→  return (base.length <= 4 && (lower.endsWith('.com') || lower.endsWith('.ai')))
+   162→   162→}
+   163→   163→
+   164→   164→// ─── Service class ────────────────────────────────────────────────────────────
+   165→   165→
+   166→   166→class DynadotService {
+   167→   167→  private apiKey: string | null
+   168→   168→
+   169→   169→  constructor() {
+   170→   170→    this.apiKey = process.env.DYNADOT_API_KEY || null
+   171→   171→  }
+   172→   172→
+   173→   173→  get demoMode(): boolean {
+   174→   174→    return !this.apiKey
+   175→   175→  }
+   176→   176→
+   177→   177→  /**
+   178→   178→   * Low-level call to Dynadot with retry + backoff + rate-limit handling.
+   179→   179→   */
+   180→   180→  private async call(
+   181→   181→    params: Record<string, string>,
+   182→   182→    attempt = 0
+   183→   183→  ): Promise<Record<string, unknown>> {
+   184→   184→    if (!this.apiKey) {
+   185→   185→      throw new Error('DYNADOT_API_KEY not configured')
+   186→   186→    }
+   187→   187→    const url = new URL(API_BASE)
+   188→   188→    url.searchParams.set('key', this.apiKey)
+   189→   189→    for (const [k, v] of Object.entries(params)) {
+   190→   190→      url.searchParams.set(k, v)
+   191→   191→    }
+   192→   192→
+   193→   193→    try {
+   194→   194→      const res = await fetch(url.toString(), {
+   195→   195→        method: 'GET',
+   196→   196→        headers: { Accept: 'application/json' },
+   197→   197→      })
+   198→   198→
+   199→   199→      // Rate limited
+   200→   200→      if (res.status === 429) {
+   201→   201→        const retryAfter = parseInt(res.headers.get('retry-after') || '2', 10)
+   202→   202→        if (attempt < MAX_RETRIES) {
+   203→   203→          await this.sleep(retryAfter * 1000)
+   204→   204→          return this.call(params, attempt + 1)
+   205→   205→        }
+   206→   206→        throw new Error('Dynadot rate limit exceeded')
+   207→   207→      }
+   208→   208→
+   209→   209→      // 5xx → retry
+   210→   210→      if (res.status >= 500 && attempt < MAX_RETRIES) {
+   211→   211→        await this.sleep(BASE_DELAY_MS * Math.pow(2, attempt))
+   212→   212→        return this.call(params, attempt + 1)
+   213→   213→      }
+   214→   214→
+   215→   215→      if (!res.ok) {
+   216→   216→        throw new Error(`Dynadot API HTTP ${res.status}: ${await res.text()}`)
+   217→   217→      }
+   218→   218→
+   219→   219→      const json = (await res.json()) as Record<string, unknown>
+   220→   220→
+   221→   221→      // Dynadot returns HTTP 200 but embeds errors in the body.
+   222→   222→      // Errors can appear in ANY top-level *Response envelope, not just "Response"
+   223→   223→      // (e.g. domain_info → DomainInfoResponse, get_ns → GetNsResponse).
+   224→   224→      // Detect IP-authorization errors specifically — these are not
+   225→   225→      // retryable (retrying just hits another unauthorized IP).
+   226→   226→      const envelopes = [
+   227→   227→        json.Response,
+   228→   228→        json.DomainInfoResponse,
+   229→   229→        json.GetNsResponse,
+   230→   230→        json.SetNsResponse,
+   231→   231→        json.SearchResponse,
+   232→   232→      ]
+   233→   233→        .filter(Boolean) as Array<Record<string, unknown>>
+   234→   234→      for (const env of envelopes) {
+   235→   235→        if (env.ResponseCode === '-1' || env.ResponseCode === -1 || env.Status === 'error') {
+   236→   236→          const errMsg = String(env.Error || 'Unknown Dynadot error')
+   237→   237→          if (errMsg.includes('unauthorized ip address')) {
+   238→   238→            // Non-retryable — throw immediately, bypass the catch retry
+   239→   239→            const ipErr = new Error(`Dynadot IP not authorized: ${errMsg}`)
+   240→   240→            ;(ipErr as Error & { noRetry?: boolean }).noRetry = true
+   241→   241→            throw ipErr
+   242→   242→          }
+   243→   243→          // Search errors with "invalid characters" are also non-retryable
+   244→   244→          if (errMsg.includes('invalid characters')) {
+   245→   245→            const charErr = new Error(`Dynadot API error: ${errMsg}`)
+   246→   246→            ;(charErr as Error & { noRetry?: boolean }).noRetry = true
+   247→   247→            throw charErr
+   248→   248→          }
+   249→   249→          throw new Error(`Dynadot API error: ${errMsg}`)
+   250→   250→        }
+   251→   251→      }
+   252→   252→
+   253→   253→      return json
+   254→   254→    } catch (err) {
+   255→   255→      // Network failure → retry (but never retry IP-auth or non-retryable errors)
+   256→   256→      const noRetry = err instanceof Error && (err as Error & { noRetry?: boolean }).noRetry
+   257→   257→      if (noRetry) throw err
+   258→   258→      if (attempt < MAX_RETRIES && !(err instanceof Error && err.message.includes('rate limit'))) {
+   259→   259→        await this.sleep(BASE_DELAY_MS * Math.pow(2, attempt))
+   260→   260→        return this.call(params, attempt + 1)
+   261→   261→      }
+   262→   262→      throw err
+   263→   263→    }
+   264→   264→  }
+   265→   265→
+   266→   266→  private sleep(ms: number): Promise<void> {
+   267→   267→    return new Promise((r) => setTimeout(r, ms))
+   268→   268→  }
+   269→   269→
+   270→   270→  private tldOf(domain: string): string {
+   271→   271→    const parts = domain.toLowerCase().split('.')
+   272→   272→    if (parts.length >= 3 && ['co', 'org', 'com'].includes(parts[parts.length - 2])) {
+   273→   273→      return '.' + parts.slice(-2).join('.')
+   274→   274→    }
+   275→   275→    return '.' + parts[parts.length - 1]
+   276→   276→  }
+   277→   277→
+   278→   278→  // ─── Search ──────────────────────────────────────────────────────────────
+   279→   279→
+   280→   280→  /**
+   281→   281→   * Instant search for a single domain.
+   282→   282→   */
+   283→   283→  async search(domain: string): Promise<DomainSearchResult> {
+   284→   284→    const results = await this.bulkSearch([domain])
+   285→   285→    return results[0]
+   286→   286→  }
+   287→   287→
+   288→   288→  /**
+   289→   289→   * Bulk search across many domains at once.
+   290→   290→   */
+   291→   291→  async bulkSearch(domains: string[]): Promise<DomainSearchResult[]> {
+   292→   292→    const cleaned = domains.map((d) => d.toLowerCase().trim()).filter(Boolean)
+   293→   293→
+   294→   294→    if (this.demoMode) {
+   295→   295→      return cleaned.map((domain) => {
+   296→   296→        const tld = this.tldOf(domain)
+   297→   297→        const prices = DEMO_TLD_PRICES[tld]
+   298→   298→        const available = prices ? demoIsAvailable(domain) : false
+   299→   299→        const premium = demoIsPremium(domain)
+   300→   300→        return {
+   301→   301→          domain,
+   302→   302→          available,
+   303→   303→          premium,
+   304→   304→          registrationPrice: available ? prices?.reg : undefined,
+   305→   305→          renewalPrice: available ? prices?.renew : undefined,
+   306→   306→          transferPrice: available ? prices?.transfer : undefined,
+   307→   307→          currency: 'USD',
+   308→   308→        }
+   309→   309→      })
+   310→   310→    }
+   311→   311→
+   312→   312→    // Dynadot's search API requires separate domain0, domain1, domain2... params.
+   313→   313→    // A single comma-separated domain0 value returns "invalid characters in domain".
+   314→   314→    const searchParams: Record<string, string> = { command: 'search' }
+   315→   315→    cleaned.forEach((d, i) => {
+   316→   316→      searchParams[`domain${i}`] = d
+   317→   317→    })
+   318→   318→    const json = await this.call(searchParams)
+   319→   319→    const out: DomainSearchResult[] = []
+   320→   320→
+   321→   321→    // Dynadot search API returns:
+   322→   322→    //   { SearchResponse: { ResponseCode: "0", SearchResults: [{ DomainName, Status, Available: "yes"|"no", Price?, Premium? }] } }
+   323→   323→    // (Older docs described a Response.domain0 format, so we support both.)
+   324→   324→    const searchResp = json.SearchResponse as
+   325→   325→      | { SearchResults?: Array<Record<string, unknown>> }
+   326→   326→      | undefined
+   327→   327→
+   328→   328→    if (searchResp?.SearchResults && Array.isArray(searchResp.SearchResults)) {
+   329→   329→      for (const item of searchResp.SearchResults) {
+   330→   330→        const name = String(item.DomainName || '')
+   331→   331→        // Dynadot returns Available as "yes"/"no" (string)
+   332→   332→        const available = String(item.Available || '').toLowerCase() === 'yes'
+   333→   333→        const premium = String(item.Premium || '').toLowerCase() === 'yes'
+   334→   334→        const priceStr = item.Price ? String(item.Price) : undefined
+   335→   335→        out.push({
+   336→   336→          domain: name,
+   337→   337→          available,
+   338→   338→          premium,
+   339→   339→          registrationPrice: priceStr ? parseFloat(priceStr) : undefined,
+   340→   340→          currency: 'USD',
+   341→   341→        })
+   342→   342→      }
+   343→   343→    } else {
+   344→   344→      // Fallback: old Dynadot format { Response: { domain0: {...}, domain1: {...} } }
+   345→   345→      const response = (json.Response as Record<string, unknown>) || {}
+   346→   346→      for (const [key, value] of Object.entries(response)) {
+   347→   347→        if (key.startsWith('domain') && typeof value === 'object' && value !== null) {
+   348→   348→          const dv = value as { Name?: string; Available?: string; Price?: string; Premium?: string }
+   349→   349→          const name = dv.Name || ''
+   350→   350→          out.push({
+   351→   351→            domain: name,
+   352→   352→            available: String(dv.Available).toLowerCase() === 'yes',
+   353→   353→            premium: String(dv.Premium).toLowerCase() === 'yes',
+   354→   354→            registrationPrice: dv.Price ? parseFloat(dv.Price) : undefined,
+   355→   355→            currency: 'USD',
+   356→   356→          })
+   357→   357→        }
+   358→   358→      }
+   359→   359→    }
+   360→   360→
+   361→   361→    // Ensure all requested domains have an entry
+   362→   362→    return cleaned.map((d) => {
+   363→   363→      const found = out.find((r) => r.domain.toLowerCase() === d)
+   364→   364→      return (
+   365→   365→        found || {
+   366→   366→          domain: d,
+   367→   367→          available: false,
+   368→   368→          premium: false,
+   369→   369→        }
+   370→   370→      )
+   371→   371→    })
+   372→   372→  }
+   373→   373→
+   374→   374→  /**
+   375→   375→   * TLD suggestions for a base name.
+   376→   376→   */
+   377→   377→  async suggestTlds(baseName: string, tlds?: string[]): Promise<DomainSearchResult[]> {
+   378→   378→    const base = baseName.toLowerCase().split('.')[0]
+   379→   379→    const targetTlds = tlds && tlds.length > 0 ? tlds : Object.keys(DEMO_TLD_PRICES).slice(0, 10)
+   380→   380→    const candidates = targetTlds.map((t) => (t.startsWith('.') ? base + t : base + '.' + t))
+   381→   381→    return this.bulkSearch(candidates)
+   382→   382→  }
+   383→   383→
+   384→   384→  // ─── Register ────────────────────────────────────────────────────────────
+   385→   385→
+   386→   386→  async register(
+   387→   387→    domain: string,
+   388→   388→    duration: number,
+   389→   389→    contacts?: DomainContactInput[]
+   390→   390→  ): Promise<RegisterResult> {
+   391→   391→    if (this.demoMode) {
+   392→   392→      const tld = this.tldOf(domain)
+   393→   393→      const price = DEMO_TLD_PRICES[tld]?.reg ?? 19.99
+   394→   394→      return {
+   395→   395→        success: true,
+   396→   396→        orderId: `demo-order-${Date.now()}`,
+   397→   397→        registrationPrice: price * duration,
+   398→   398→        domain,
+   399→   399→      }
+   400→   400→    }
+   401→   401→
+   402→   402→    const params: Record<string, string> = {
+   403→   403→      command: 'register',
+   404→   404→      domain,
+   405→   405→      duration: String(duration),
+   406→   406→    }
+   407→   407→    if (contacts && contacts.length > 0) {
+   408→   408→      params.contact_info = JSON.stringify(contacts)
+   409→   409→    }
+   410→   410→    const json = await this.call(params)
+   411→   411→    const response = (json.Response as Record<string, unknown>) || {}
+   412→   412→    const status = String(response.Status || '').toLowerCase()
+   413→   413→    return {
+   414→   414→      success: status === 'success' || status === 'register success',
+   415→   415→      orderId: (response.RegisterOrderId as string) || (response.OrderId as string),
+   416→   416→      registrationPrice: response.Price ? parseFloat(String(response.Price)) : undefined,
+   417→   417→      domain,
+   418→   418→    }
+   419→   419→  }
+   420→   420→
+   421→   421→  // ─── Renew ───────────────────────────────────────────────────────────────
+   422→   422→
+   423→   423→  async renew(domain: string, duration: number): Promise<RenewResult> {
+   424→   424→    if (this.demoMode) {
+   425→   425→      const tld = this.tldOf(domain)
+   426→   426→      const price = DEMO_TLD_PRICES[tld]?.renew ?? 19.99
+   427→   427→      const newExpiry = new Date()
+   428→   428→      newExpiry.setFullYear(newExpiry.getFullYear() + duration)
+   429→   429→      return {
+   430→   430→        success: true,
+   431→   431→        orderId: `demo-renew-${Date.now()}`,
+   432→   432→        renewalPrice: price * duration,
+   433→   433→        newExpiry: newExpiry.toISOString(),
+   434→   434→      }
+   435→   435→    }
+   436→   436→
+   437→   437→    const json = await this.call({
+   438→   438→      command: 'renew',
+   439→   439→      domain,
+   440→   440→      duration: String(duration),
+   441→   441→    })
+   442→   442→    const response = (json.Response as Record<string, unknown>) || {}
+   443→   443→    const status = String(response.Status || '').toLowerCase()
+   444→   444→    return {
+   445→   445→      success: status === 'success' || status === 'renew success',
+   446→   446→      orderId: (response.OrderId as string) || undefined,
+   447→   447→      renewalPrice: response.Price ? parseFloat(String(response.Price)) : undefined,
+   448→   448→      newExpiry: response.Expiration ? String(response.Expiration) : undefined,
+   449→   449→    }
+   450→   450→  }
+   451→   451→
+   452→   452→  // ─── Transfer ────────────────────────────────────────────────────────────
+   453→   453→
+   454→   454→  async transfer(domain: string, authCode: string): Promise<TransferResult> {
+   455→   455→    if (this.demoMode) {
+   456→   456→      return {
+   457→   457→        success: true,
+   458→   458→        orderId: `demo-transfer-${Date.now()}`,
+   459→   459→        message: 'Transfer initiated (demo mode)',
+   460→   460→      }
+   461→   461→    }
+   462→   462→
+   463→   463→    const json = await this.call({
+   464→   464→      command: 'transfer',
+   465→   465→      domain,
+   466→   466→      auth: authCode,
+   467→   467→    })
+   468→   468→    const response = (json.Response as Record<string, unknown>) || {}
+   469→   469→    const status = String(response.Status || '').toLowerCase()
+   470→   470→    return {
+   471→   471→      success: status === 'success' || status === 'transfer success',
+   472→   472→      orderId: (response.OrderId as string) || undefined,
+   473→   473→      message: response.Error ? String(response.Error) : 'Transfer initiated',
+   474→   474→    }
+   475→   475→  }
+   476→   476→
+   477→   477→  // ─── Domain info ─────────────────────────────────────────────────────────
+   478→   478→
+   479→   479→  async getDomainInfo(domain: string): Promise<DomainInfo> {
+   480→   480→    if (this.demoMode) {
+   481→   481→      const expiry = new Date()
+   482→   482→      expiry.setFullYear(expiry.getFullYear() + 1)
+   483→   483→      return {
+   484→   484→        domain,
+   485→   485→        status: 'active',
+   486→   486→        expiry: expiry.toISOString(),
+   487→   487→        registeredAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+   488→   488→        nameservers: ['ns1.deployhub.io', 'ns2.deployhub.io'],
+   489→   489→        locked: true,
+   490→   490→        whoisPrivacy: true,
+   491→   491→        autoRenew: true,
+   492→   492→        premium: demoIsPremium(domain),
+   493→   493→      }
+   494→   494→    }
+   495→   495→
+   496→   496→    const json = await this.call({ command: 'domain_info', domain })
+   497→   497→    const resp = (json.DomainInfoResponse as Record<string, unknown>) || {}
+   498→   498→    const info = (resp.DomainInfo || {}) as Record<string, unknown>
+   499→   499→
+   500→   500→    // Expiration / Registration are Unix timestamps in MILLISECONDS
+   501→   501→    const expiryRaw = info.Expiration ? String(info.Expiration) : undefined
+   502→   502→    const expiry = expiryRaw && !isNaN(Number(expiryRaw))
+   503→   503→      ? new Date(Number(expiryRaw)).toISOString()
+   504→   504→      : undefined
+   505→   505→    const regRaw = info.Registration ? String(info.Registration) : undefined
+   506→   506→    const registeredAt = regRaw && !isNaN(Number(regRaw))
+   507→   507→      ? new Date(Number(regRaw)).toISOString()
+   508→   508→      : undefined
+   509→   509→
+   510→   510→    // domain_info returns NameServerSettings (a mode object), NOT hostnames.
+   511→   511→    // Fetch the real hostnames via the separate get_ns command.
+   512→   512→    let nameservers: string[] = []
+   513→   513→    try {
+   514→   514→      const nsJson = await this.call({ command: 'get_ns', domain })
+   515→   515→      const nsResp = (nsJson.GetNsResponse as Record<string, unknown>) || {}
+   516→   516→      const nsHosts = nsResp.NameServer || nsResp.Ns
+   517→   517→      if (Array.isArray(nsHosts)) {
+   518→   518→        nameservers = nsHosts.map((s) => String(s).trim()).filter(Boolean)
+   519→   519→      } else if (nsHosts) {
+   520→   520→        nameservers = String(nsHosts).split(',').map((s) => s.trim()).filter(Boolean)
+   521→   521→      }
+   522→   522→    } catch {
+   523→   523→      // best-effort — other fields are still useful
+   524→   524→    }
+   525→   525→
+   526→   526→    const renewOption = String(info.RenewOption || '').toLowerCase()
+   527→   527→    return {
+   528→   528→      domain,
+   529→   529→      status: String(info.Status || 'unknown'),
+   530→   530→      expiry,
+   531→   531→      registeredAt,
+   532→   532→      nameservers,
+   533→   533→      locked: String(info.Locked || 'no').toLowerCase() === 'yes',
+   534→   534→      whoisPrivacy: String(info.Privacy || 'none').toLowerCase() !== 'none',
+   535→   535→      autoRenew: renewOption === 'auto' || renewOption === 'renew',
+   536→   536→      premium: String(info.isForSale || 'no').toLowerCase() === 'yes',
+   537→   537→    }
+   538→   538→  }
+   539→   539→
+   540→   540→  /**
+   541→   541→   * List domains for the reseller account.
+   542→   542→   */
+   543→   543→  async listDomains(): Promise<DomainInfo[]> {
+   544→   544→    if (this.demoMode) {
+   545→   545→      return []
+   546→   546→    }
+   547→   547→    const json = await this.call({ command: 'list_domain' })
+   548→   548→    const response = (json.Response as Record<string, unknown>) || {}
+   549→   549→    const list = (response.Domains as unknown[]) || []
+   550→   550→    return list.map((item) => {
+   551→   551→      const d = item as Record<string, unknown>
+   552→   552→      return {
+   553→   553→        domain: String(d.Name || ''),
+   554→   554→        status: String(d.Status || 'unknown'),
+   555→   555→        expiry: d.Expiration ? String(d.Expiration) : undefined,
+   556→   556→        nameservers: [],
+   557→   557→        locked: true,
+   558→   558→        whoisPrivacy: true,
+   559→   559→        autoRenew: true,
+   560→   560→        premium: false,
+   561→   561→      } as DomainInfo
+   562→   562→    })
+   563→   563→  }
+   564→   564→
+   565→   565→  // ─── Lock / Unlock ───────────────────────────────────────────────────────
+   566→   566→
+   567→   567→  async lock(domain: string): Promise<{ success: boolean; locked: boolean }> {
+   568→   568→    if (this.demoMode) {
+   569→   569→      return { success: true, locked: true }
+   570→   570→    }
+   571→   571→    const json = await this.call({ command: 'lock', domain })
+   572→   572→    const status = String((json.Response as Record<string, unknown>)?.Status || '').toLowerCase()
+   573→   573→    return { success: status === 'success' || status === 'lock success', locked: true }
+   574→   574→  }
+   575→   575→
+   576→   576→  async unlock(domain: string): Promise<{ success: boolean; locked: boolean }> {
+   577→   577→    if (this.demoMode) {
+   578→   578→      return { success: true, locked: false }
+   579→   579→    }
+   580→   580→    const json = await this.call({ command: 'unlock', domain })
+   581→   581→    const status = String((json.Response as Record<string, unknown>)?.Status || '').toLowerCase()
+   582→   582→    return { success: status === 'success' || status === 'unlock success', locked: false }
+   583→   583→  }
+   584→   584→
+   585→   585→  // ─── Whois privacy ───────────────────────────────────────────────────────
+   586→   586→
+   587→   587→  async enableWhoisPrivacy(domain: string): Promise<{ success: boolean; enabled: boolean }> {
+   588→   588→    if (this.demoMode) {
+   589→   589→      return { success: true, enabled: true }
+   590→   590→    }
+   591→   591→    const json = await this.call({ command: 'whois_privacy', domain, option: 'enable' })
+   592→   592→    const status = String((json.Response as Record<string, unknown>)?.Status || '').toLowerCase()
+   593→   593→    return { success: status === 'success', enabled: true }
+   594→   594→  }
+   595→   595→
+   596→   596→  async disableWhoisPrivacy(domain: string): Promise<{ success: boolean; enabled: boolean }> {
+   597→   597→    if (this.demoMode) {
+   598→   598→      return { success: true, enabled: false }
+   599→   599→    }
+   600→   600→    const json = await this.call({ command: 'whois_privacy', domain, option: 'disable' })
+   601→   601→    const status = String((json.Response as Record<string, unknown>)?.Status || '').toLowerCase()
+   602→   602→    return { success: status === 'success', enabled: false }
+   603→   603→  }
+   604→   604→
+   605→   605→  // ─── EPP / Auth code ─────────────────────────────────────────────────────
+   606→   606→
+   607→   607→  async getAuthCode(domain: string): Promise<{ success: boolean; authCode?: string }> {
+   608→   608→    if (this.demoMode) {
+   609→   609→      // Generate a deterministic-looking demo auth code
+   610→   610→      const code = `DH-${domain.replace(/[^a-z0-9]/gi, '').toUpperCase().slice(0, 6)}-${Date.now().toString(36).toUpperCase()}`
+   611→   611→      return { success: true, authCode: code }
+   612→   612→    }
+   613→   613→    const json = await this.call({ command: 'get_auth_code', domain })
+   614→   614→    const response = (json.Response as Record<string, unknown>) || {}
+   615→   615→    const status = String(response.Status || '').toLowerCase()
+   616→   616→    return {
+   617→   617→      success: status === 'success',
+   618→   618→      authCode: response.AuthCode ? String(response.AuthCode) : undefined,
+   619→   619→    }
+   620→   620→  }
+   621→   621→
+   622→   622→  // ─── Nameservers ─────────────────────────────────────────────────────────
+   623→   623→
+   624→   624→  async setNameservers(domain: string, nameservers: string[]): Promise<{ success: boolean }> {
+   625→   625→    if (this.demoMode) {
+   626→   626→      return { success: true }
+   627→   627→    }
+   628→   628→    const params: Record<string, string> = { command: 'set_ns', domain }
+   629→   629→    nameservers.slice(0, 13).forEach((ns, i) => {
+   630→   630→      params[`ns${i}`] = ns
+   631→   631→    })
+   632→   632→    const json = await this.call(params)
+   633→   633→    const status = String((json.Response as Record<string, unknown>)?.Status || '').toLowerCase()
+   634→   634→    return { success: status === 'success' }
+   635→   635→  }
+   636→   636→
+   637→   637→  // ─── DNS records ─────────────────────────────────────────────────────────
+   638→   638→
+   639→   639→  async setDnsRecords(domain: string, records: DnsRecordInput[]): Promise<{ success: boolean }> {
+   640→   640→    if (this.demoMode) {
+   641→   641→      return { success: true }
+   642→   642→    }
+   643→   643→    const params: Record<string, string> = { command: 'set_dns2', domain }
+   644→   644→    records.slice(0, 10).forEach((r, i) => {
+   645→   645→      params[`main_record_type${i}`] = r.type
+   646→   646→      params[`main_record${i}`] = r.value
+   647→   647→      params[`main_record_name${i}`] = r.name
+   648→   648→      params[`main_record_ttl${i}`] = String(r.ttl || 3600)
+   649→   649→      if (r.priority !== undefined) {
+   650→   650→        params[`main_record_priority${i}`] = String(r.priority)
+   651→   651→      }
+   652→   652→    })
+   653→   653→    const json = await this.call(params)
+   654→   654→    const status = String((json.Response as Record<string, unknown>)?.Status || '').toLowerCase()
+   655→   655→    return { success: status === 'success' }
+   656→   656→  }
+   657→   657→
+   658→   658→  // ─── Contacts ────────────────────────────────────────────────────────────
+   659→   659→
+   660→   660→  async setContacts(
+   661→   661→    domain: string,
+   662→   662→    contacts: DomainContactInput[]
+   663→   663→  ): Promise<{ success: boolean }> {
+   664→   664→    if (this.demoMode) {
+   665→   665→      return { success: true }
+   666→   666→    }
+   667→   667→    const params: Record<string, string> = {
+   668→   668→      command: 'set_contact',
+   669→   669→      domain,
+   670→   670→      contact_info: JSON.stringify(contacts),
+   671→   671→    }
+   672→   672→    const json = await this.call(params)
+   673→   673→    const status = String((json.Response as Record<string, unknown>)?.Status || '').toLowerCase()
+   674→   674→    return { success: status === 'success' }
+   675→   675→  }
+   676→   676→
+   677→   677→  // ─── Auto-renew ──────────────────────────────────────────────────────────
+   678→   678→
+   679→   679→  async enableAutoRenew(domain: string): Promise<{ success: boolean; enabled: boolean }> {
+   680→   680→    if (this.demoMode) {
+   681→   681→      return { success: true, enabled: true }
+   682→   682→    }
+   683→   683→    const json = await this.call({ command: 'set_auto_renew', domain, option: 'on' })
+   684→   684→    const status = String((json.Response as Record<string, unknown>)?.Status || '').toLowerCase()
+   685→   685→    return { success: status === 'success', enabled: true }
+   686→   686→  }
+   687→   687→
+   688→   688→  async disableAutoRenew(domain: string): Promise<{ success: boolean; enabled: boolean }> {
+   689→   689→    if (this.demoMode) {
+   690→   690→      return { success: true, enabled: false }
+   691→   691→    }
+   692→   692→    const json = await this.call({ command: 'set_auto_renew', domain, option: 'off' })
+   693→   693→    const status = String((json.Response as Record<string, unknown>)?.Status || '').toLowerCase()
+   694→   694→    return { success: status === 'success', enabled: false }
+   695→   695→  }
+   696→   696→
+   697→   697→  // ─── Expiration info ─────────────────────────────────────────────────────
+   698→   698→
+   699→   699→  async getExpiration(domain: string): Promise<{ expiry?: string; daysUntilExpiry?: number }> {
+   700→   700→    const info = await this.getDomainInfo(domain)
+   701→   701→    if (!info.expiry) return {}
+   702→   702→    const expiryDate = new Date(info.expiry)
+   703→   703→    const days = Math.ceil((expiryDate.getTime() - Date.now()) / (24 * 60 * 60 * 1000))
+   704→   704→    return { expiry: info.expiry, daysUntilExpiry: days }
+   705→   705→  }
+   706→   706→}
+   707→   707→
+   708→   708→// Export a singleton instance (Service Locator pattern)
+   709→   709→export const dynadotService = new DynadotService()
+   710→   710→export { isDynadotDemoMode }
+   711→   711→

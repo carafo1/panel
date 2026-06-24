@@ -25,6 +25,7 @@ interface WholesalePrice {
 }
 
 export const TLD_WHOLESALE_PRICES: Record<string, WholesalePrice> = {
+  // ── Generic / Popular ────────────────────────────────────────────────
   '.com': { registration: 8.49, renewal: 8.49, transfer: 8.49 },
   '.net': { registration: 10.49, renewal: 10.49, transfer: 10.49 },
   '.org': { registration: 9.49, renewal: 9.49, transfer: 9.49 },
@@ -32,18 +33,80 @@ export const TLD_WHOLESALE_PRICES: Record<string, WholesalePrice> = {
   '.biz': { registration: 11.49, renewal: 11.49, transfer: 11.49 },
   '.co': { registration: 23.49, renewal: 23.49, transfer: 23.49 },
   '.io': { registration: 30.5, renewal: 30.5, transfer: 30.5 },
+  '.me': { registration: 13.49, renewal: 13.49, transfer: 13.49 },
+  '.us': { registration: 7.49, renewal: 7.49, transfer: 7.49 },
+  '.mobi': { registration: 14.49, renewal: 14.49, transfer: 14.49 },
+  '.tv': { registration: 28.49, renewal: 28.49, transfer: 28.49 },
+  '.cc': { registration: 16.49, renewal: 16.49, transfer: 16.49 },
+  '.ws': { registration: 24.49, renewal: 24.49, transfer: 24.49 },
+  '.name': { registration: 9.49, renewal: 9.49, transfer: 9.49 },
+  '.pro': { registration: 14.49, renewal: 14.49, transfer: 14.49 },
+
+  // ── Tech / Developer ─────────────────────────────────────────────────
   '.app': { registration: 13.49, renewal: 13.49, transfer: 13.49 },
   '.dev': { registration: 13.49, renewal: 13.49, transfer: 13.49 },
   '.ai': { registration: 63.49, renewal: 63.49, transfer: 63.49 },
+  '.cloud': { registration: 8.49, renewal: 17.49, transfer: 17.49 },
+  '.tech': { registration: 8.49, renewal: 37.49, transfer: 37.49 },
   '.xyz': { registration: 2.49, renewal: 8.49, transfer: 8.49 },
+  '.codes': { registration: 4.49, renewal: 39.49, transfer: 39.49 },
+  '.host': { registration: 8.49, renewal: 47.49, transfer: 47.49 },
+  '.server': { registration: 8.49, renewal: 27.49, transfer: 27.49 },
+  '.website': { registration: 4.49, renewal: 17.49, transfer: 17.49 },
+  '.systems': { registration: 12.49, renewal: 17.49, transfer: 17.49 },
+  '.software': { registration: 8.49, renewal: 27.49, transfer: 27.49 },
+  '.network': { registration: 8.49, renewal: 17.49, transfer: 17.49 },
+  '.digital': { registration: 4.49, renewal: 27.49, transfer: 27.49 },
+  '.page': { registration: 9.49, renewal: 9.49, transfer: 9.49 },
+  '.tools': { registration: 8.49, renewal: 27.49, transfer: 27.49 },
+  '.code': { registration: 8.49, renewal: 14.49, transfer: 14.49 },
+
+  // ── Business / Commerce ──────────────────────────────────────────────
+  '.store': { registration: 8.49, renewal: 47.49, transfer: 47.49 },
+  '.shop': { registration: 8.49, renewal: 27.49, transfer: 27.49 },
   '.online': { registration: 7.49, renewal: 27.49, transfer: 27.49 },
   '.site': { registration: 6.49, renewal: 27.49, transfer: 27.49 },
-  '.store': { registration: 8.49, renewal: 47.49, transfer: 47.49 },
-  '.tech': { registration: 8.49, renewal: 37.49, transfer: 37.49 },
-  '.cloud': { registration: 8.49, renewal: 17.49, transfer: 17.49 },
+  '.blog': { registration: 7.49, renewal: 24.49, transfer: 24.49 },
+  '.business': { registration: 4.49, renewal: 14.49, transfer: 14.49 },
+  '.company': { registration: 8.49, renewal: 27.49, transfer: 27.49 },
+  '.enterprise': { registration: 8.49, renewal: 27.49, transfer: 27.49 },
+  '.ventures': { registration: 8.49, renewal: 47.49, transfer: 47.49 },
+  '.finance': { registration: 8.49, renewal: 47.49, transfer: 47.49 },
+  '.financial': { registration: 8.49, renewal: 47.49, transfer: 47.49 },
+  '.bank': { registration: 549.49, renewal: 549.49, transfer: 549.49 },
+  '.inc': { registration: 199.49, renewal: 199.49, transfer: 199.49 },
+  '.corp': { registration: 49.49, renewal: 49.49, transfer: 49.49 },
+  '.ltd': { registration: 8.49, renewal: 22.49, transfer: 22.49 },
+  '.group': { registration: 8.49, renewal: 17.49, transfer: 17.49 },
+  '.agency': { registration: 8.49, renewal: 17.49, transfer: 17.49 },
+  '.services': { registration: 8.49, renewal: 27.49, transfer: 27.49 },
+  '.solutions': { registration: 8.49, renewal: 17.49, transfer: 17.49 },
+  '.support': { registration: 8.49, renewal: 17.49, transfer: 17.49 },
+  '.consulting': { registration: 8.49, renewal: 27.49, transfer: 27.49 },
+
+  // ── Lifestyle / Entertainment ────────────────────────────────────────
   '.live': { registration: 8.49, renewal: 22.49, transfer: 22.49 },
-  '.me': { registration: 13.49, renewal: 13.49, transfer: 13.49 },
-  '.us': { registration: 7.49, renewal: 7.49, transfer: 7.49 },
+  '.life': { registration: 8.49, renewal: 24.49, transfer: 24.49 },
+  '.fun': { registration: 4.49, renewal: 17.49, transfer: 17.49 },
+  '.games': { registration: 8.49, renewal: 27.49, transfer: 27.49 },
+  '.game': { registration: 199.49, renewal: 199.49, transfer: 199.49 },
+  '.play': { registration: 8.49, renewal: 27.49, transfer: 27.49 },
+  '.music': { registration: 199.49, renewal: 199.49, transfer: 199.49 },
+  '.art': { registration: 8.49, renewal: 8.49, transfer: 8.49 },
+  '.design': { registration: 24.49, renewal: 32.49, transfer: 32.49 },
+  '.studio': { registration: 8.49, renewal: 24.49, transfer: 24.49 },
+  '.media': { registration: 8.49, renewal: 32.49, transfer: 32.49 },
+  '.news': { registration: 8.49, renewal: 22.49, transfer: 22.49 },
+  '.show': { registration: 8.49, renewal: 27.49, transfer: 27.49 },
+  '.world': { registration: 8.49, renewal: 22.49, transfer: 22.49 },
+  '.today': { registration: 8.49, renewal: 22.49, transfer: 22.49 },
+  '.now': { registration: 8.49, renewal: 22.49, transfer: 22.49 },
+  '.zone': { registration: 8.49, renewal: 27.49, transfer: 27.49 },
+  '.club': { registration: 8.49, renewal: 9.49, transfer: 9.49 },
+  '.buzz': { registration: 8.49, renewal: 27.49, transfer: 27.49 },
+  '.cool': { registration: 8.49, renewal: 17.49, transfer: 17.49 },
+
+  // ── Geography / ccTLD ────────────────────────────────────────────────
   '.ca': { registration: 11.49, renewal: 11.49, transfer: 11.49 },
   '.uk': { registration: 6.49, renewal: 6.49, transfer: 6.49 },
   '.eu': { registration: 6.49, renewal: 6.49, transfer: 6.49 },
@@ -55,7 +118,34 @@ export const TLD_WHOLESALE_PRICES: Record<string, WholesalePrice> = {
   '.co.uk': { registration: 6.49, renewal: 6.49, transfer: 6.49 },
   '.org.uk': { registration: 6.49, renewal: 6.49, transfer: 6.49 },
   '.africa': { registration: 13.49, renewal: 13.49, transfer: 13.49 },
-  '.shop': { registration: 8.49, renewal: 27.49, transfer: 27.49 },
+  '.so': { registration: 49.49, renewal: 49.49, transfer: 49.49 },
+  '.asia': { registration: 11.49, renewal: 11.49, transfer: 11.49 },
+  '.nz': { registration: 24.49, renewal: 24.49, transfer: 24.49 },
+  '.au': { registration: 49.49, renewal: 49.49, transfer: 49.49 },
+  '.ie': { registration: 14.49, renewal: 14.49, transfer: 14.49 },
+  '.es': { registration: 5.49, renewal: 5.49, transfer: 5.49 },
+  '.pt': { registration: 8.49, renewal: 8.49, transfer: 8.49 },
+  '.ch': { registration: 6.49, renewal: 6.49, transfer: 6.49 },
+  '.pl': { registration: 9.49, renewal: 9.49, transfer: 9.49 },
+  '.be': { registration: 5.49, renewal: 5.49, transfer: 5.49 },
+  '.se': { registration: 14.49, renewal: 14.49, transfer: 14.49 },
+  '.at': { registration: 7.49, renewal: 7.49, transfer: 7.49 },
+
+  // ── Community / Social ───────────────────────────────────────────────
+  '.social': { registration: 8.49, renewal: 27.49, transfer: 27.49 },
+  '.community': { registration: 8.49, renewal: 27.49, transfer: 27.49 },
+  '.friends': { registration: 8.49, renewal: 27.49, transfer: 27.49 },
+  '.fan': { registration: 8.49, renewal: 27.49, transfer: 27.49 },
+  '.fans': { registration: 8.49, renewal: 27.49, transfer: 27.49 },
+  '.team': { registration: 8.49, renewal: 22.49, transfer: 22.49 },
+  '.guru': { registration: 8.49, renewal: 27.49, transfer: 27.49 },
+  '.expert': { registration: 8.49, renewal: 47.49, transfer: 47.49 },
+  '.academy': { registration: 8.49, renewal: 27.49, transfer: 27.49 },
+  '.education': { registration: 8.49, renewal: 17.49, transfer: 17.49 },
+  '.school': { registration: 8.49, renewal: 27.49, transfer: 27.49 },
+  '.university': { registration: 8.49, renewal: 32.49, transfer: 32.49 },
+  '.institute': { registration: 8.49, renewal: 17.49, transfer: 17.49 },
+  '.training': { registration: 8.49, renewal: 27.49, transfer: 27.49 },
 }
 
 export interface PricedTld {
@@ -175,12 +265,115 @@ export async function getPriceForDomain(domain: string): Promise<PricedTld | nul
 
 /**
  * Sync prices from Dynadot wholesale list.
- * In demo mode this re-seeds from the defaults; in production it would fetch
- * the latest wholesale pricing from the Dynadot reseller price API.
+ *
+ * REAL MODE (DYNADOT_API_KEY set):
+ *   Performs bulk searches (in chunks of 10 — Dynadot's bulk limit) for a
+ *   guaranteed-available sample domain across every TLD in
+ *   TLD_WHOLESALE_PRICES. Dynadot returns the real Registration + Renewal
+ *   prices via `show_price=1`, which we store as the wholesale price. The
+ *   $6.50 markup is then applied to compute the selling price. TLDs whose
+ *   price can't be fetched fall back to their default wholesale price.
+ *
+ * DEMO MODE (no API key):
+ *   Re-seeds from the TLD_WHOLESALE_PRICES defaults.
+ *
+ * Returns: { synced, demo, fetched, fallback }
+ *   - synced:    total TLDs upserted
+ *   - demo:      true if running in demo mode
+ *   - fetched:   number of TLDs whose price was fetched live from Dynadot
+ *   - fallback:  number of TLDs that fell back to defaults
  */
-export async function syncPrices(updatedById?: string): Promise<{ synced: number; demo: boolean }> {
-  await seedPricing(updatedById)
-  return { synced: Object.keys(TLD_WHOLESALE_PRICES).length, demo: !process.env.DYNADOT_API_KEY }
+export async function syncPrices(
+  updatedById?: string
+): Promise<{ synced: number; demo: boolean; fetched: number; fallback: number }> {
+  // DEMO MODE — just re-seed the defaults.
+  if (!process.env.DYNADOT_API_KEY) {
+    await seedPricing(updatedById)
+    return {
+      synced: Object.keys(TLD_WHOLESALE_PRICES).length,
+      demo: true,
+      fetched: 0,
+      fallback: Object.keys(TLD_WHOLESALE_PRICES).length,
+    }
+  }
+
+  // REAL MODE — fetch live wholesale prices from Dynadot.
+  const allTlds = Object.keys(TLD_WHOLESALE_PRICES)
+  const sampleBase = 'deployhubpricecheck99999' // guaranteed-available sample domain
+  const CHUNK_SIZE = 10 // Dynadot bulk search limit per request
+
+  const livePrices = new Map<
+    string,
+    { registration: number; renewal: number; transfer: number }
+  >()
+
+  // Process TLDs in chunks of 10 to respect Dynadot's bulk search limit.
+  for (let i = 0; i < allTlds.length; i += CHUNK_SIZE) {
+    const chunk = allTlds.slice(i, i + CHUNK_SIZE)
+    const domains = chunk.map((tld) => `${sampleBase}${tld}`)
+    try {
+      // Dynamic import to avoid a circular dependency at module load time
+      // (dynadot-service imports from pricing for tldFromDomain in some paths).
+      const { dynadotService } = await import('./dynadot-service')
+      const results = await dynadotService.bulkSearch(domains)
+      for (const r of results) {
+        if (r.available && typeof r.registrationPrice === 'number') {
+          const tld = tldFromDomain(r.domain)
+          livePrices.set(tld, {
+            registration: r.registrationPrice,
+            renewal: r.renewalPrice ?? r.registrationPrice,
+            transfer: r.transferPrice ?? r.renewalPrice ?? r.registrationPrice,
+          })
+        }
+      }
+    } catch (err) {
+      console.error(
+        `[pricing/sync] Failed to fetch chunk starting at ${i}:`,
+        err instanceof Error ? err.message : err
+      )
+      // Continue to next chunk — partial sync is better than no sync.
+    }
+  }
+
+  // Upsert every TLD: use live price when available, fall back to defaults.
+  let fetched = 0
+  let fallback = 0
+  let synced = 0
+  for (const [tld, defaults] of Object.entries(TLD_WHOLESALE_PRICES)) {
+    const live = livePrices.get(tld)
+    const wholesale = live?.registration ?? defaults.registration
+    const renewalWholesale = live?.renewal ?? defaults.renewal
+    const transferWholesale = live?.transfer ?? defaults.transfer
+    if (live) fetched++
+    else fallback++
+
+    await db.domainPrice.upsert({
+      where: { tld },
+      update: {
+        wholesale,
+        registration: applyMarkup(wholesale),
+        renewal: applyMarkup(renewalWholesale),
+        transfer: applyMarkup(transferWholesale),
+        lastSyncedAt: new Date(),
+        ...(updatedById ? { updatedById } : {}),
+      },
+      create: {
+        tld,
+        wholesale,
+        markup: DEFAULT_MARKUP_USD,
+        registration: applyMarkup(wholesale),
+        renewal: applyMarkup(renewalWholesale),
+        transfer: applyMarkup(transferWholesale),
+        currency: 'USD',
+        active: true,
+        lastSyncedAt: new Date(),
+        ...(updatedById ? { updatedById } : {}),
+      },
+    })
+    synced++
+  }
+
+  return { synced, demo: false, fetched, fallback }
 }
 
 /**

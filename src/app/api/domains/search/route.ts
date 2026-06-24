@@ -33,7 +33,10 @@ export async function GET(request: Request) {
     const domainLower = domain.toLowerCase().trim()
     const tld = tldFromDomain(domainLower)
 
-    // ─── Dynadot availability lookup ────────────────────────────────────
+    // ─── Dynadot availability lookup (REAL — no simulation fallback) ──
+    // In real mode, if Dynadot fails we surface the error honestly rather
+    // than faking availability. In demo mode, dynadotService.search returns
+    // simulated data without throwing.
     let dynadotAvailable: boolean | null = null
     let dynadotError: string | null = null
     let premium = false
@@ -44,6 +47,12 @@ export async function GET(request: Request) {
     } catch (err) {
       dynadotError = err instanceof Error ? err.message : String(err)
       console.error('[domains/search GET] Dynadot lookup failed:', dynadotError)
+      // In real mode, surface the error instead of simulating.
+      if (!isDynadotDemoMode()) {
+        return apiError.serverError(
+          `Dynadot search failed: ${dynadotError}. Domain availability could not be determined.`
+        )
+      }
     }
 
     // ─── Pricing ────────────────────────────────────────────────────────
@@ -52,13 +61,17 @@ export async function GET(request: Request) {
     const renewalPrice = priceRow?.renewal ?? registrationPrice
     const transferPrice = priceRow?.transfer ?? registrationPrice
 
-    // ─── Fallback simulation ────────────────────────────────────────────
+    // ─── Determine availability ─────────────────────────────────────────
+    // Demo mode: fall back to a simple "taken"/"unavailable" keyword check
+    // if Dynadot didn't return a result. Real mode: dynadotAvailable is
+    // always set (or we already returned an error above).
     const simulatedTaken =
       domainLower.includes('taken') || domainLower.includes('unavailable')
     let available: boolean
     if (dynadotAvailable !== null) {
       available = dynadotAvailable
     } else {
+      // Demo-mode fallback only
       available = !simulatedTaken
     }
 
@@ -172,8 +185,19 @@ export async function POST(request: Request) {
     } catch (err) {
       dynadotError = err instanceof Error ? err.message : String(err)
       console.error('[domains/search] Dynadot lookup failed:', dynadotError)
+      // In real mode, surface the error instead of simulating.
+      if (!isDynadotDemoMode()) {
+        return NextResponse.json(
+          {
+            error: `Dynadot search failed: ${dynadotError}`,
+            provider: 'dynadot',
+          },
+          { status: 502 }
+        )
+      }
     }
 
+    // Demo-mode fallback only — real mode already returned above on error.
     const simulatedTaken =
       domainLower.includes('taken') || domainLower.includes('unavailable')
 
@@ -184,6 +208,7 @@ export async function POST(request: Request) {
       available = dynadotAvailable
       price = dynadotPrice ?? TLD_PRICES[tld] ?? 19.99
     } else {
+      // Demo-mode fallback only
       available = !simulatedTaken
       price = available ? TLD_PRICES[tld] ?? 19.99 : null
     }

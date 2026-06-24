@@ -1,6 +1,11 @@
 /**
  * POST /api/pricing/sync
  * Admin-only. Re-syncs wholesale prices from Dynadot and reapplies the $6.50 markup.
+ *
+ * REAL MODE (DYNADOT_API_KEY set): performs live bulk searches against Dynadot
+ * across all 100+ TLDs and stores the real wholesale prices.
+ *
+ * DEMO MODE: re-seeds from the hardcoded defaults.
  */
 import { authenticateRequest } from '@/lib/auth'
 import { db } from '@/lib/db'
@@ -20,8 +25,13 @@ export async function POST(request: Request) {
         userId: user.userId,
         action: 'pricing_sync',
         status: 'success',
-        message: `Synced ${result.synced} TLD prices`,
-        metadata: JSON.stringify({ synced: result.synced, demo: result.demo }),
+        message: `Synced ${result.synced} TLD prices (${result.fetched} live, ${result.fallback} default)`,
+        metadata: JSON.stringify({
+          synced: result.synced,
+          demo: result.demo,
+          fetched: result.fetched,
+          fallback: result.fallback,
+        }),
       },
     })
 
@@ -29,12 +39,14 @@ export async function POST(request: Request) {
       {
         synced: result.synced,
         demoMode: result.demo,
+        fetchedLive: result.fetched,
+        fallback: result.fallback,
         markup: 6.5,
         message: result.demo
           ? 'Prices re-seeded from defaults (demo mode - set DYNADOT_API_KEY for live sync)'
-          : 'Prices synced from Dynadot wholesale list',
+          : `Prices synced live from Dynadot (${result.fetched} live, ${result.fallback} default fallback)`,
       },
-      `Price sync completed (${result.synced} TLDs)`
+      `Price sync completed (${result.synced} TLDs — ${result.fetched} live from Dynadot)`
     )
   } catch (error) {
     console.error('[pricing/sync] error:', error)

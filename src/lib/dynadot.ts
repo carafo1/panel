@@ -86,10 +86,43 @@ interface SearchDomainResult {
   domain: string
   available: boolean
   price?: number
+  registrationPrice?: number
+  renewalPrice?: number
+  transferPrice?: number
+  premium?: boolean
+}
+
+/**
+ * Parse Dynadot's `show_price=1` Price string into structured prices.
+ *
+ * Example input:
+ *   "Registration Price: 10.88 in USD and Renewal price: 10.88 in USD and Domain is not a Premium Domain"
+ *   "Registration Price: 10.88 in USD and Renewal price: 10.88 in USD and Domain is a Premium Domain"
+ *
+ * Returns the registration + renewal prices (transfer = renewal for Dynadot).
+ * Returns nulls if the string can't be parsed.
+ */
+function parseDynadotPriceString(
+  raw: string
+): { registration: number; renewal: number; premium: boolean } | null {
+  if (!raw || typeof raw !== 'string') return null
+  // Extract all "X.XX in USD" prices — registration always comes first, renewal second.
+  const matches = raw.match(/([\d.]+)\s+in\s+USD/gi)
+  if (!matches || matches.length < 1) return null
+  const nums = matches.map((m) => parseFloat(m.replace(/[^\d.]/g, '')))
+  const registration = nums[0] || 0
+  const renewal = nums[1] || registration
+  const premium = /is\s+a\s+Premium/i.test(raw)
+  return { registration, renewal, premium }
 }
 
 /**
  * Search domain availability for one or more domains.
+ *
+ * Uses `show_price=1` so Dynadot returns real Registration + Renewal prices
+ * (the reseller wholesale price we pay) in the `Price` field. The Price field
+ * is a human-readable string like:
+ *   "Registration Price: 10.88 in USD and Renewal price: 10.88 in USD and ..."
  */
 export async function searchDomains(
   domains: string[]
@@ -123,7 +156,12 @@ export async function searchDomains(
 
   // Dynadot's search API requires separate domain0, domain1, domain2... params.
   // A single comma-separated domain0 value returns "invalid characters in domain".
-  const searchParams: Record<string, string> = { command: 'search' }
+  // show_price=1 makes Dynadot return real Registration + Renewal prices.
+  const searchParams: Record<string, string> = {
+    command: 'search',
+    show_price: '1',
+    currency: 'USD',
+  }
   domains.forEach((d, i) => {
     searchParams[`domain${i}`] = d
   })
@@ -138,10 +176,16 @@ export async function searchDomains(
     | undefined
   if (searchResp?.SearchResults && Array.isArray(searchResp.SearchResults)) {
     for (const item of searchResp.SearchResults) {
+      const priceRaw = item.Price ? String(item.Price) : ''
+      const parsed = parseDynadotPriceString(priceRaw)
       results.push({
         domain: String(item.DomainName || ''),
         available: String(item.Available || '').toLowerCase() === 'yes',
-        price: item.Price ? parseFloat(String(item.Price)) : undefined,
+        price: parsed?.registration,
+        registrationPrice: parsed?.registration,
+        renewalPrice: parsed?.renewal,
+        transferPrice: parsed?.renewal, // Dynadot transfer price = renewal price
+        premium: parsed?.premium ?? (String(item.Premium || '').toLowerCase() === 'yes'),
       })
     }
     return results
@@ -155,10 +199,14 @@ export async function searchDomains(
   for (const [key, value] of Object.entries(response)) {
     if (key.startsWith('domain') && typeof value === 'object' && value !== null) {
       const dv = value as { Name?: string; Available?: string; Price?: string }
+      const parsed = parseDynadotPriceString(dv.Price)
       results.push({
         domain: dv.Name || '',
         available: String(dv.Available).toLowerCase() === 'yes',
-        price: dv.Price ? parseFloat(dv.Price) : undefined,
+        price: parsed?.registration ?? (dv.Price ? parseFloat(dv.Price) : undefined),
+        registrationPrice: parsed?.registration,
+        renewalPrice: parsed?.renewal,
+        transferPrice: parsed?.renewal,
       })
     }
   }
