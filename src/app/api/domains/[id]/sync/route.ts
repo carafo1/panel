@@ -133,6 +133,16 @@ export async function POST(
     })
   } catch (error) {
     console.error('Sync domain error:', error)
+    const msg = error instanceof Error ? error.message : 'Internal server error'
+    // Surface Dynadot-specific errors (e.g. "could not find domain in your
+    // account") as 400s so the UI can show the real reason instead of a
+    // generic 500.
+    if (msg.includes('Dynadot API error:') || msg.includes('Dynadot IP not authorized')) {
+      return NextResponse.json(
+        { error: msg.replace('Dynadot API error: ', '') },
+        { status: 400 }
+      )
+    }
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

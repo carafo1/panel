@@ -216,9 +216,45 @@ class DynadotService {
         throw new Error(`Dynadot API HTTP ${res.status}: ${await res.text()}`)
       }
 
-      return (await res.json()) as Record<string, unknown>
+      const json = (await res.json()) as Record<string, unknown>
+
+      // Dynadot returns HTTP 200 but embeds errors in the body.
+      // Errors can appear in ANY top-level *Response envelope, not just "Response"
+      // (e.g. domain_info → DomainInfoResponse, get_ns → GetNsResponse).
+      // Detect IP-authorization errors specifically — these are not
+      // retryable (retrying just hits another unauthorized IP).
+      const envelopes = [
+        json.Response,
+        json.DomainInfoResponse,
+        json.GetNsResponse,
+        json.SetNsResponse,
+        json.SearchResponse,
+      ]
+        .filter(Boolean) as Array<Record<string, unknown>>
+      for (const env of envelopes) {
+        if (env.ResponseCode === '-1' || env.ResponseCode === -1 || env.Status === 'error') {
+          const errMsg = String(env.Error || 'Unknown Dynadot error')
+          if (errMsg.includes('unauthorized ip address')) {
+            // Non-retryable — throw immediately, bypass the catch retry
+            const ipErr = new Error(`Dynadot IP not authorized: ${errMsg}`)
+            ;(ipErr as Error & { noRetry?: boolean }).noRetry = true
+            throw ipErr
+          }
+          // Search errors with "invalid characters" are also non-retryable
+          if (errMsg.includes('invalid characters')) {
+            const charErr = new Error(`Dynadot API error: ${errMsg}`)
+            ;(charErr as Error & { noRetry?: boolean }).noRetry = true
+            throw charErr
+          }
+          throw new Error(`Dynadot API error: ${errMsg}`)
+        }
+      }
+
+      return json
     } catch (err) {
-      // Network failure → retry
+      // Network failure → retry (but never retry IP-auth or non-retryable errors)
+      const noRetry = err instanceof Error && (err as Error & { noRetry?: boolean }).noRetry
+      if (noRetry) throw err
       if (attempt < MAX_RETRIES && !(err instanceof Error && err.message.includes('rate limit'))) {
         await this.sleep(BASE_DELAY_MS * Math.pow(2, attempt))
         return this.call(params, attempt + 1)
@@ -273,24 +309,55 @@ class DynadotService {
       })
     }
 
-    const domainList = cleaned.join(',')
-    const json = await this.call({ command: 'search', domain0: domainList })
-    const response = (json.Response as Record<string, unknown>) || {}
+    // Dynadot's search API requires separate domain0, domain1, domain2... params.
+    // A single comma-separated domain0 value returns "invalid characters in domain".
+    const searchParams: Record<string, string> = { command: 'search' }
+    cleaned.forEach((d, i) => {
+      searchParams[`domain${i}`] = d
+    })
+    const json = await this.call(searchParams)
     const out: DomainSearchResult[] = []
 
-    for (const [key, value] of Object.entries(response)) {
-      if (key.startsWith('domain') && typeof value === 'object' && value !== null) {
-        const dv = value as { Name?: string; Available?: string; Price?: string; Premium?: string }
-        const name = dv.Name || ''
+    // Dynadot search API returns:
+    //   { SearchResponse: { ResponseCode: "0", SearchResults: [{ DomainName, Status, Available: "yes"|"no", Price?, Premium? }] } }
+    // (Older docs described a Response.domain0 format, so we support both.)
+    const searchResp = json.SearchResponse as
+      | { SearchResults?: Array<Record<string, unknown>> }
+      | undefined
+
+    if (searchResp?.SearchResults && Array.isArray(searchResp.SearchResults)) {
+      for (const item of searchResp.SearchResults) {
+        const name = String(item.DomainName || '')
+        // Dynadot returns Available as "yes"/"no" (string)
+        const available = String(item.Available || '').toLowerCase() === 'yes'
+        const premium = String(item.Premium || '').toLowerCase() === 'yes'
+        const priceStr = item.Price ? String(item.Price) : undefined
         out.push({
           domain: name,
-          available: String(dv.Available).toLowerCase() === 'yes',
-          premium: String(dv.Premium).toLowerCase() === 'yes',
-          registrationPrice: dv.Price ? parseFloat(dv.Price) : undefined,
+          available,
+          premium,
+          registrationPrice: priceStr ? parseFloat(priceStr) : undefined,
           currency: 'USD',
         })
       }
+    } else {
+      // Fallback: old Dynadot format { Response: { domain0: {...}, domain1: {...} } }
+      const response = (json.Response as Record<string, unknown>) || {}
+      for (const [key, value] of Object.entries(response)) {
+        if (key.startsWith('domain') && typeof value === 'object' && value !== null) {
+          const dv = value as { Name?: string; Available?: string; Price?: string; Premium?: string }
+          const name = dv.Name || ''
+          out.push({
+            domain: name,
+            available: String(dv.Available).toLowerCase() === 'yes',
+            premium: String(dv.Premium).toLowerCase() === 'yes',
+            registrationPrice: dv.Price ? parseFloat(dv.Price) : undefined,
+            currency: 'USD',
+          })
+        }
+      }
     }
+
     // Ensure all requested domains have an entry
     return cleaned.map((d) => {
       const found = out.find((r) => r.domain.toLowerCase() === d)
@@ -426,20 +493,47 @@ class DynadotService {
       }
     }
 
-    const json = await this.call({ command: 'get_domain_info', domain })
-    const response = (json.Response as Record<string, unknown>) || {}
-    const info = (response.DomainInfo || response) as Record<string, unknown>
-    const ns = info.NameServer as string | string[] | undefined
+    const json = await this.call({ command: 'domain_info', domain })
+    const resp = (json.DomainInfoResponse as Record<string, unknown>) || {}
+    const info = (resp.DomainInfo || {}) as Record<string, unknown>
+
+    // Expiration / Registration are Unix timestamps in MILLISECONDS
+    const expiryRaw = info.Expiration ? String(info.Expiration) : undefined
+    const expiry = expiryRaw && !isNaN(Number(expiryRaw))
+      ? new Date(Number(expiryRaw)).toISOString()
+      : undefined
+    const regRaw = info.Registration ? String(info.Registration) : undefined
+    const registeredAt = regRaw && !isNaN(Number(regRaw))
+      ? new Date(Number(regRaw)).toISOString()
+      : undefined
+
+    // domain_info returns NameServerSettings (a mode object), NOT hostnames.
+    // Fetch the real hostnames via the separate get_ns command.
+    let nameservers: string[] = []
+    try {
+      const nsJson = await this.call({ command: 'get_ns', domain })
+      const nsResp = (nsJson.GetNsResponse as Record<string, unknown>) || {}
+      const nsHosts = nsResp.NameServer || nsResp.Ns
+      if (Array.isArray(nsHosts)) {
+        nameservers = nsHosts.map((s) => String(s).trim()).filter(Boolean)
+      } else if (nsHosts) {
+        nameservers = String(nsHosts).split(',').map((s) => s.trim()).filter(Boolean)
+      }
+    } catch {
+      // best-effort — other fields are still useful
+    }
+
+    const renewOption = String(info.RenewOption || '').toLowerCase()
     return {
       domain,
       status: String(info.Status || 'unknown'),
-      expiry: info.Expiration ? String(info.Expiration) : undefined,
-      registeredAt: info.Registered ? String(info.Registered) : undefined,
-      nameservers: Array.isArray(ns) ? ns : ns ? String(ns).split(',').map((s) => s.trim()) : [],
-      locked: String(info.Locked || 'yes').toLowerCase() === 'yes',
-      whoisPrivacy: String(info.WhoisPrivacy || 'yes').toLowerCase() === 'yes',
-      autoRenew: String(info.AutoRenew || 'yes').toLowerCase() === 'yes',
-      premium: String(info.Premium || 'no').toLowerCase() === 'yes',
+      expiry,
+      registeredAt,
+      nameservers,
+      locked: String(info.Locked || 'no').toLowerCase() === 'yes',
+      whoisPrivacy: String(info.Privacy || 'none').toLowerCase() !== 'none',
+      autoRenew: renewOption === 'auto' || renewOption === 'renew',
+      premium: String(info.isForSale || 'no').toLowerCase() === 'yes',
     }
   }
 

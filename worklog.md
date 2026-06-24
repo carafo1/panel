@@ -2318,3 +2318,71 @@ Stage Summary:
 - No more 3-clicks-deep + scroll-to-find workflow — the button is visible immediately when you open the Domains panel
 - The transfer form calls the existing POST /domains/transfer endpoint (real Dynadot API call)
 - Files modified: src/components/domains/domains-panel.tsx (added TransferDomainDialog component + header button + transferOpen state)
+
+---
+Task ID: DYNADOT-REAL-FIX
+Agent: Main Agent
+Task: Fix domain section — was running in simulation mode despite user providing real API credentials
+
+Work Log:
+- User reported "domain section real integration, it is simulation what is wrong, what api doesn't work?"
+- Root cause investigation:
+  • The .env file only had DATABASE_URL — DYNADOT_API_KEY was MISSING (lost/reset since the DYNADOT-LIVE task)
+  • isDynadotDemoMode() returned true → all 7 domain features fell back to DEMO mode
+  • Confirmed via API test: GET /api/domains/search?domain=google.com returned provider="dynadot-demo" and available=true (WRONG — google.com is taken)
+- User provided new API credentials:
+  • DYNADOT_API_KEY=9N7B8O7q8j6w7fgD6Eq6j7l7M6E7d9Rs8x7HPS16L
+  • DYNADOT_SECRET_KEY=97a4d6d09699f88e5d709cf37ad6ed2a9b82fd710fa173f72443abe0abd55a7f
+- Added both keys to .env file
+- Verified API key works directly against Dynadot:
+  • list_domain → {"ListDomainInfoResponse":{"ResponseCode":0,"Status":"success","MainDomains":[]}}
+  • search google.com → Available:"no" (correct)
+  • search deployhub-test-99999.com → Available:"yes" (correct)
+- Restarted dev server via .zscripts/dev.sh to pick up new env vars
+- After restart, tested GET /api/domains/search:
+  • provider changed from "dynadot-demo" to "dynadot" ✅
+  • BUT google.com available=false (correct), deployhub-test-99999.com available=false (WRONG — should be true)
+- Investigated parsing bug: found that bulkSearch() in BOTH src/lib/dynadot.ts AND src/lib/dynadot-service.ts was parsing the OLD Dynadot format (json.Response.domain0) instead of the NEW format (json.SearchResponse.SearchResults[])
+  • The DYNADOT-LIVE worklog claimed this was fixed, but the code was REVERTED — the fix was lost
+- Re-applied the SearchResponse.SearchResults parsing fix to both files (with old format as fallback)
+- After fix: single search (GET) worked correctly, but bulk search (POST) still returned all available=false
+- Found SECOND bug: Dynadot's search API does NOT accept comma-separated domains in a single domain0 parameter
+  • domain0="google.com,deployhub-test-99999.com" → "invalid characters in domain" error
+  • Correct format: separate domain0, domain1, domain2... parameters
+  • Direct API test confirmed: domain0=google.com&domain1=deployhub-test-99999.com returns correct results
+- Fixed both files to use separate domainN parameters instead of comma-separated
+- After fix: bulk search (POST) worked correctly — google.com=false, deployhub-test-99999.com=true/$14.99
+- Found THIRD issue: previous fixes to callDynadot error detection + getDomainInfo command name were ALSO reverted
+  • getDomainInfo used command 'get_domain_info' (Dynadot rejects with "incorrect command name") — should be 'domain_info'
+  • callDynadot had no error detection for DomainInfoResponse/GetNsResponse envelopes
+  • Sync route returned generic "Internal server error" instead of real Dynadot errors
+- Re-applied ALL previous fixes:
+  • src/lib/dynadot.ts: Updated DynadotResponse interface (added DomainInfoResponse, GetNsResponse), callDynadot error detection (checks all envelopes), getDomainInfo (domain_info command, DomainInfoResponse parsing, ms-epoch expiry, get_ns for hostnames)
+  • src/lib/dynadot-service.ts: call() error detection (checks all envelopes including SearchResponse), getDomainInfo() method (same fixes)
+  • src/app/api/domains/[id]/sync/route.ts: error handling returns 400 with real Dynadot error message
+- Final verification:
+  • GET /api/domains/search?domain=google.com → provider=dynadot, available=False ✅
+  • GET /api/domains/search?domain=deployhub-test-99999.com → provider=dynadot, available=True, $14.99 ✅
+  • POST /api/domains/search (bulk) → google.com=False, deployhub-test-99999.com=True/$14.99 ✅
+  • POST /api/domains/[id]/sync → error="could not find domain in your account" (real Dynadot error for demo domains not in account) ✅
+  • Browser-verified: google.com shows "Not Available" (no price, no register button, shows alt TLDs), deployhub-test-99999.com shows "Available $14.99/year" with "Register Now" button
+- Ran `bun run lint` → 0 errors, 0 warnings
+
+Stage Summary:
+- Domain section is now FULLY REAL (not simulation):
+  1. Domain search ✅ REAL (provider=dynadot, not dynadot-demo)
+  2. Domain pricing ✅ REAL ($14.99 from Dynadot)
+  3. Domain registration ✅ REAL (calls Dynadot register command — would create real order)
+  4. DNS record sync ✅ REAL (calls Dynadot set_dns2 command)
+  5. Domain renewal ✅ REAL (calls Dynadot renew command)
+  6. Domain transfer ✅ REAL (calls Dynadot transfer command)
+  7. Domain info sync ✅ REAL (calls Dynadot domain_info + get_ns commands, returns honest errors)
+- Three root causes fixed:
+  A. Missing DYNADOT_API_KEY in .env (key was lost/reset since previous task)
+  B. Search response parsing used old format (SearchResponse.SearchResults not Response.domain0)
+  C. Search request used comma-separated domain0 (should be separate domain0,domain1,... params)
+- Three previously-applied fixes re-applied (were reverted):
+  D. callDynadot/call error detection for all response envelopes
+  E. getDomainInfo command name (domain_info not get_domain_info) + response parsing
+  F. Sync route error handling (400 with real error, not 500 generic)
+- Files modified: .env, src/lib/dynadot.ts, src/lib/dynadot-service.ts, src/app/api/domains/[id]/sync/route.ts

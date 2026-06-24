@@ -25,12 +25,30 @@ export function isDynadotDemoMode(): boolean {
 }
 
 interface DynadotResponse {
-  // Dynadot JSON envelope
+  // Dynadot JSON envelope — the top-level key varies by command.
+  // Most commands use "Response", but domain_info uses "DomainInfoResponse",
+  // get_ns uses "GetNsResponse", etc.
   Response?: {
     Status?: string
     Error?: string
+    ResponseCode?: string | number
     [k: string]: unknown
   }
+  DomainInfoResponse?: {
+    ResponseCode?: string | number
+    Status?: string
+    Error?: string
+    DomainInfo?: Record<string, unknown>
+  }
+  GetNsResponse?: {
+    ResponseCode?: string | number
+    Status?: string
+    Error?: string
+    NameServer?: string | string[]
+    Ns?: string | string[]
+    [k: string]: unknown
+  }
+  [k: string]: unknown
 }
 
 async function callDynadot(params: Record<string, string>): Promise<DynadotResponse> {
@@ -51,6 +69,16 @@ async function callDynadot(params: Record<string, string>): Promise<DynadotRespo
     throw new Error(`Dynadot API HTTP ${res.status}: ${await res.text()}`)
   }
   const json = (await res.json()) as DynadotResponse
+  // Detect embedded Dynadot body errors (HTTP 200 + ResponseCode -1).
+  // Errors can appear in ANY top-level *Response envelope, not just "Response".
+  const envelopes = [json.Response, json.DomainInfoResponse, json.GetNsResponse].filter(
+    Boolean
+  ) as Array<Record<string, unknown>>
+  for (const env of envelopes) {
+    if (env.Status === 'error' || env.ResponseCode === '-1' || env.ResponseCode === -1) {
+      throw new Error(`Dynadot API error: ${env.Error || 'Unknown error'}`)
+    }
+  }
   return json
 }
 
@@ -93,19 +121,37 @@ export async function searchDomains(
     })
   }
 
-  const domainList = domains.join(',')
-  const json = await callDynadot({
-    command: 'search',
-    domain0: domainList,
+  // Dynadot's search API requires separate domain0, domain1, domain2... params.
+  // A single comma-separated domain0 value returns "invalid characters in domain".
+  const searchParams: Record<string, string> = { command: 'search' }
+  domains.forEach((d, i) => {
+    searchParams[`domain${i}`] = d
   })
+  const json = await callDynadot(searchParams)
 
+  const results: SearchDomainResult[] = []
+
+  // Dynadot search API returns:
+  //   { SearchResponse: { ResponseCode: "0", SearchResults: [{ DomainName, Status, Available: "yes"|"no", Price?, Premium? }] } }
+  const searchResp = json.SearchResponse as
+    | { SearchResults?: Array<Record<string, unknown>> }
+    | undefined
+  if (searchResp?.SearchResults && Array.isArray(searchResp.SearchResults)) {
+    for (const item of searchResp.SearchResults) {
+      results.push({
+        domain: String(item.DomainName || ''),
+        available: String(item.Available || '').toLowerCase() === 'yes',
+        price: item.Price ? parseFloat(String(item.Price)) : undefined,
+      })
+    }
+    return results
+  }
+
+  // Fallback: older Dynadot format { Response: { domain0: {...}, domain1: {...} } }
   const response = json.Response
   if (!response) {
     throw new Error('Dynadot returned no response body')
   }
-
-  const results: SearchDomainResult[] = []
-  // Dynadot returns dynamic keys like "domain0", "domain1", etc.
   for (const [key, value] of Object.entries(response)) {
     if (key.startsWith('domain') && typeof value === 'object' && value !== null) {
       const dv = value as { Name?: string; Available?: string; Price?: string }
@@ -168,6 +214,14 @@ interface DomainInfo {
 
 /**
  * Get info about a registered domain.
+ *
+ * Uses the Dynadot API3 `domain_info` command (NOT `get_domain_info`, which
+ * Dynadot rejects with "incorrect command name"). The response is returned
+ * under the `DomainInfoResponse` envelope (not `Response`).
+ *
+ * Note: `domain_info` returns `NameServerSettings` (a mode object like
+ * "Dynadot Parking"), NOT the actual nameserver hostnames. To get the real
+ * hostnames (ns1.example.com, ...) we make a second `get_ns` call.
  */
 export async function getDomainInfo(domain: string): Promise<DomainInfo> {
   if (isDynadotDemoMode()) {
@@ -181,17 +235,38 @@ export async function getDomainInfo(domain: string): Promise<DomainInfo> {
     }
   }
 
-  const json = await callDynadot({
-    command: 'get_domain_info',
-    domain,
-  })
-  const response = json.Response
-  const info = (response?.DomainInfo || response || {}) as Record<string, unknown>
-  const ns = (info.NameServer as string | string[] | undefined) || []
+  const json = await callDynadot({ command: 'domain_info', domain })
+  const resp = json.DomainInfoResponse
+  const info = resp?.DomainInfo || {}
+
+  // Expiration is a Unix timestamp in MILLISECONDS
+  const expiryRaw = info.Expiration ? String(info.Expiration) : undefined
+  const expiry = expiryRaw && !isNaN(Number(expiryRaw))
+    ? new Date(Number(expiryRaw)).toISOString()
+    : undefined
+
+  // domain_info does not return nameserver hostnames — fetch them via get_ns.
+  let nameservers: string[] = []
+  try {
+    const nsJson = await callDynadot({ command: 'get_ns', domain })
+    const nsResp = nsJson.GetNsResponse
+    const nsHosts = nsResp?.NameServer || nsResp?.Ns
+    if (Array.isArray(nsHosts)) {
+      nameservers = nsHosts.map((s) => String(s).trim()).filter(Boolean)
+    } else if (nsHosts) {
+      nameservers = String(nsHosts)
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+    }
+  } catch {
+    // get_ns is best-effort — status & expiry are still useful on their own
+  }
+
   return {
     status: String(info.Status || 'unknown'),
-    expiry: info.Expiration ? String(info.Expiration) : undefined,
-    nameservers: Array.isArray(ns) ? ns : String(ns).split(',').map((s) => s.trim()),
+    expiry,
+    nameservers,
   }
 }
 
