@@ -15,16 +15,16 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "DeployHub - Hosting & Domain Automation Platform",
-  description: "Modern hosting and domain management platform with automated deployments, DNS management, and billing.",
-  keywords: ["DeployHub", "Next.js", "Hosting", "Domains", "Deployment", "Automation"],
-  authors: [{ name: "DeployHub Team" }],
+  title: "APSAMO Technology - Hosting & Domain Automation Platform",
+  description: "APSAMO Technology — web development, hosting, domain registration, and SaaS platforms. Build, host, and scale your entire online presence.",
+  keywords: ["APSAMO", "APSAMO Technology", "Web Development", "Hosting", "Domains", "Deployment", "SaaS", "Next.js"],
+  authors: [{ name: "APSAMO Technology" }],
   icons: {
-    icon: "/logo.svg",
+    icon: "/apsamo-favicon.svg",
   },
   openGraph: {
-    title: "DeployHub",
-    description: "Hosting & Domain Automation Platform",
+    title: "APSAMO Technology",
+    description: "Hosting & Domain Automation Platform — build, host, and scale your online presence.",
     type: "website",
   },
 };

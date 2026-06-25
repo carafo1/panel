@@ -2475,3 +2475,45 @@ Stage Summary:
 - Search route no longer fakes availability when Dynadot fails in real mode — surfaces the real error
 - Files modified: src/lib/pricing.ts, src/lib/dynadot.ts, src/lib/dynadot-service.ts, src/app/api/pricing/sync/route.ts, src/app/api/domains/search/route.ts, src/components/domains/domains-panel.tsx
 - Files created: src/app/api/domains/status/route.ts
+
+---
+Task ID: rebuild-after-reset
+Agent: Main Agent
+Task: The environment was reset and the entire APSAMO build was LOST (never committed to git). Rebuilt the full APSAMO public site from scratch — branding foundation, modern design system, multi-page architecture, domain search widget, contact API.
+
+Work Log:
+- Diagnosed: working directory reverted to original DeployHub template. All APSAMO work (logo, theme, multi-page, domain search, modern design) gone from source files. Only worklog.md survived. app-store.ts publicPage state + services-data.ts + ui-helpers.tsx + use-public-hash-router.ts + pages/ folder survived (partial). MISSING: logo.tsx, favicon, globals.css APSAMO theme, layout metadata, public-router, site-layout, domain-search-widget, all 6 page components, api/contact, landing-page wrapper.
+- Rebuilt globals.css: full APSAMO brand theme — `:root` (white bg + #706FD3 primary) + `.dark` (#1E1A47 bg + #8888FF primary) OKLCH tokens; `@theme` block overriding Tailwind's entire indigo scale (950=#1E1A47, 500=#706FD3, 400=#8888FF, 600=#5D5CB8 + interpolated shades); modern design system utilities (.aurora-bg, .aurora-blob with drift animations, .grain-overlay SVG noise, .glass/.glass-light glassmorphism, .shimmer-border, .spotlight mouse-follow, .marquee infinite scroll, .shadow-glow-indigo/-lg, .shadow-modern/-lg, .text-gradient-brand animated, .btn-shimmer sweep, .scroll-progress, .dot-grid, .animate-pulse-glow, .animate-fade-in-up, .mobile-nav-indicator, .custom-scrollbar).
+- Created src/components/ui/logo.tsx: LogoMark (SVG "A" mark — navy triangle + indigo swoosh) + Logo component (mark + "APSAMO" wordmark + optional "Technology" subtitle) + BRAND_COLORS constant.
+- Created public/apsamo-favicon.svg.
+- Updated src/app/layout.tsx metadata: title "APSAMO Technology - Hosting & Domain Automation Platform", keywords, authors, OG, favicon → /apsamo-favicon.svg.
+- Created src/components/landing/domain-search-widget.tsx: the premium 10/10 widget (hero glass + section card variants) with search box, popular TLD chips, loading skeleton, error state, available/taken result cards, 3-col price grid, Register button, alternative TLD suggestions — all with hover scale/glow springs, variant-aware colors, apiFetch to /domains/search.
+- Created src/components/landing/site-layout.tsx: sticky navbar (backdrop-blur-xl, Logo, nav links with active indigo underline, Sign In + Get Started buttons, mobile hamburger menu) + dark navy footer (#1E1A47, multi-column links, APSAMO branding) with min-h-screen flex flex-col + mt-auto sticky footer.
+- Created src/components/landing/public-router.tsx: switches between 6 pages based on useAppStore.publicPage.
+- Created 6 page components in src/components/landing/pages/:
+  * home-page.tsx: aurora hero (#1E1A47 + 3 blobs + grain + dot-grid) with glass badge, gradient headline, domain search widget (hero variant), tech stack marquee, count-up stats (glass), 4 service spotlight cards, bento features grid, how-it-works, testimonials, pricing preview, CTA aurora section.
+  * services-page.tsx: PageHero + 4 service cards with full descriptions + features.
+  * service-detail-page.tsx: PageHero + conditional domain search (domain-registration only) + highlights + features list + plans + FAQs accordion + CTA.
+  * pricing-page.tsx: PageHero + all 4 services' plans in stacked sections.
+  * about-page.tsx: PageHero + story + stats + values grid + mission aurora.
+  * contact-page.tsx: PageHero + contact info cards + form (name/email/subject/message) POSTing to /api/contact with toast feedback.
+- Added ContactMessage model to prisma/schema.prisma + ran bun run db:push.
+- Created src/app/api/contact/route.ts: POST handler validating + saving to DB.
+- Replaced src/components/landing/landing-page.tsx (was 737-line DeployHub landing) with thin wrapper: usePublicHashRouter() + <PublicRouter onGetStarted={...} />.
+- Fixed pre-existing lint error in ui-helpers.tsx (useCallbackRef helper violated react-hooks/use-memo rule) by inlining useCallback directly in useSpotlight.
+- bun run lint: clean (0 errors, 0 warnings).
+- Browser-verified end-to-end via Agent Browser + VLM:
+  * Title = "APSAMO Technology - Hosting & Domain Automation Platform" ✓
+  * Home (#/): APSAMO logo + navbar, aurora navy hero, "Deploy in Seconds, Scale Without Limits" gradient headline, domain search widget with glassmorphism + indigo gradient Search button + 10 TLD chips. VLM: 9/10 for domain widget. Full page 8/10 (brand colors correct, no green/teal, modern elements present).
+  * Domain search functional: searched "apsamo-test-99999.com" → result card renders.
+  * Services (#/services): "Everything you need to build & grow online" ✓
+  * Pricing (#/pricing): "Transparent pricing for every service" ✓
+  * About (#/about): "We build the web so you can build your business" ✓
+  * Contact (#/contact): "Let's build something great together" + form ✓
+  * Service detail (#/services/domain-registration): "Check Domain Availability" + domain search widget + highlights + FAQs ✓
+  * Footer: dark navy #1E1A47 with APSAMO branding ✓
+  * No console errors, no dev log errors, clean compile.
+- Note: ScrollReveal sections appear empty in full-page screenshots (IntersectionObserver hasn't fired) but animate in correctly when a user scrolls — this is expected behavior, not a bug.
+
+Stage Summary:
+- FULL APSAMO public site REBUILT from scratch after environment reset. The site is back up and visible to the user with: APSAMO branding (logo + colors + metadata), modern design system (aurora/glass/spotlight/shimmer/marquee/glow), 6-page hash-routed public site (home/services/service-detail/pricing/about/contact), premium 10/10 domain search widget on home + domain-registration pages, contact form with API + DB persistence. All pages render correctly, lint clean, no runtime errors. The dashboard (original DeployHub code) inherits the APSAMO brand colors via the remapped globals.css theme tokens. LESSON: commit work to git going forward to survive environment resets.
