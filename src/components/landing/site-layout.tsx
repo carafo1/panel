@@ -1,20 +1,52 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import Link from 'next/link'
-import { Menu, X, Sparkles } from 'lucide-react'
+import { Menu, X, ChevronDown, Code2, Server, Globe, Layers, ArrowRight } from 'lucide-react'
 import { Logo } from '@/components/ui/logo'
 import { Button } from '@/components/ui/button'
 import { ScrollProgress } from './ui-helpers'
 import { cn } from '@/lib/utils'
-import { useAppStore } from '@/store/app-store'
+import { useAppStore, type PublicPageState } from '@/store/app-store'
 
-const NAV_LINKS = [
+/** Top-level nav entries (Services gets a dropdown). */
+const NAV_LINKS: { label: string; href: string; page: PublicPageState['page'] }[] = [
   { label: 'Home', href: '#/', page: 'home' },
   { label: 'Services', href: '#/services', page: 'services' },
   { label: 'Pricing', href: '#/pricing', page: 'pricing' },
   { label: 'About', href: '#/about', page: 'about' },
   { label: 'Contact', href: '#/contact', page: 'contact' },
+]
+
+/** Services shown in the dropdown + mobile sub-menu. */
+const SERVICE_LINKS = [
+  {
+    label: 'Web Development',
+    href: '#/services/web-development',
+    slug: 'web-development',
+    desc: 'Custom web apps engineered for scale.',
+    icon: Code2,
+  },
+  {
+    label: 'Web Hosting',
+    href: '#/services/web-hosting',
+    slug: 'web-hosting',
+    desc: 'Managed hosting on a global edge network.',
+    icon: Server,
+  },
+  {
+    label: 'Domain Registration',
+    href: '#/services/domain-registration',
+    slug: 'domain-registration',
+    desc: 'Search 100+ TLDs with live pricing.',
+    icon: Globe,
+  },
+  {
+    label: 'SaaS System',
+    href: '#/services/saas-system',
+    slug: 'saas-system',
+    desc: 'Full SaaS platforms — auth, billing, teams.',
+    icon: Layers,
+  },
 ]
 
 interface SiteLayoutProps {
@@ -24,6 +56,7 @@ interface SiteLayoutProps {
 
 export function SiteLayout({ children, onGetStarted }: SiteLayoutProps) {
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [servicesOpen, setServicesOpen] = useState(false)
   const [scrolled, setScrolled] = useState(false)
   const publicPage = useAppStore((s) => s.publicPage)
   const setPublicPage = useAppStore((s) => s.setPublicPage)
@@ -36,6 +69,7 @@ export function SiteLayout({ children, onGetStarted }: SiteLayoutProps) {
   }, [])
 
   const currentPage = publicPage.page === 'service-detail' ? 'services' : publicPage.page
+  const activeServiceSlug = publicPage.page === 'service-detail' ? publicPage.slug : undefined
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
@@ -53,23 +87,112 @@ export function SiteLayout({ children, onGetStarted }: SiteLayoutProps) {
 
             {/* Desktop nav */}
             <nav className="hidden md:flex items-center gap-1">
-              {NAV_LINKS.map((link) => (
-                <a
-                  key={link.page}
-                  href={link.href}
-                  className={cn(
-                    'relative px-3 py-2 text-sm font-medium rounded-md transition-colors',
-                    currentPage === link.page
-                      ? 'text-indigo-600 dark:text-indigo-400'
-                      : 'text-muted-foreground hover:text-foreground'
-                  )}
-                >
-                  {link.label}
-                  {currentPage === link.page && (
-                    <span className="absolute bottom-1 left-1/2 -translate-x-1/2 h-0.5 w-6 rounded-full bg-indigo-500" />
-                  )}
-                </a>
-              ))}
+              {NAV_LINKS.map((link) => {
+                const isActive = currentPage === link.page
+                if (link.page === 'services') {
+                  return (
+                    <div
+                      key={link.page}
+                      className="relative group"
+                      onMouseEnter={() => setServicesOpen(true)}
+                      onMouseLeave={() => setServicesOpen(false)}
+                    >
+                      <a
+                        href={link.href}
+                        onClick={() => setPublicPage({ page: 'services' })}
+                        className={cn(
+                          'relative inline-flex items-center gap-1 px-3 py-2 text-sm font-medium rounded-md transition-colors',
+                          isActive
+                            ? 'text-indigo-600 dark:text-indigo-400'
+                            : 'text-muted-foreground hover:text-foreground'
+                        )}
+                        aria-haspopup="true"
+                        aria-expanded={servicesOpen}
+                      >
+                        {link.label}
+                        <ChevronDown className={cn('size-3.5 transition-transform duration-200', servicesOpen && 'rotate-180')} />
+                        {isActive && (
+                          <span className="absolute bottom-1 left-1/2 -translate-x-1/2 h-0.5 w-6 rounded-full bg-indigo-500" />
+                        )}
+                      </a>
+
+                      {/* Dropdown panel */}
+                      <div
+                        className={cn(
+                          'absolute left-1/2 top-full -translate-x-1/2 pt-2 w-[320px] transition-all duration-200',
+                          servicesOpen
+                            ? 'opacity-100 visible translate-y-0'
+                            : 'opacity-0 invisible -translate-y-1 pointer-events-none'
+                        )}
+                      >
+                        <div className="overflow-hidden rounded-xl border border-border/60 bg-background/95 backdrop-blur-xl shadow-glow-indigo p-2">
+                          <a
+                            href="#/services"
+                            onClick={() => { setPublicPage({ page: 'services' }); setServicesOpen(false) }}
+                            className="flex items-center justify-between rounded-lg px-3 py-2 text-sm font-semibold text-foreground hover:bg-indigo-500/10 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+                          >
+                            All Services
+                            <ArrowRight className="size-3.5" />
+                          </a>
+                          <div className="my-1 h-px bg-border/60" />
+                          {SERVICE_LINKS.map((svc) => {
+                            const Icon = svc.icon
+                            const svcActive = activeServiceSlug === svc.slug
+                            return (
+                              <a
+                                key={svc.slug}
+                                href={svc.href}
+                                onClick={() => { setPublicPage({ page: 'service-detail', slug: svc.slug }); setServicesOpen(false) }}
+                                className={cn(
+                                  'group/svc flex items-start gap-3 rounded-lg px-3 py-2.5 transition-colors',
+                                  svcActive
+                                    ? 'bg-indigo-500/15'
+                                    : 'hover:bg-indigo-500/10'
+                                )}
+                              >
+                                <div className={cn(
+                                  'flex size-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-indigo-700 text-white shadow-glow-indigo transition-transform duration-300 group-hover/svc:scale-110',
+                                  svcActive && 'ring-2 ring-indigo-400/50'
+                                )}>
+                                  <Icon className="size-4" />
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className={cn(
+                                    'flex items-center gap-1.5 text-sm font-semibold',
+                                    svcActive ? 'text-indigo-600 dark:text-indigo-400' : 'text-foreground'
+                                  )}>
+                                    {svc.label}
+                                  </div>
+                                  <p className="text-xs text-muted-foreground leading-snug mt-0.5">{svc.desc}</p>
+                                </div>
+                              </a>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                }
+
+                return (
+                  <a
+                    key={link.page}
+                    href={link.href}
+                    onClick={() => setPublicPage({ page: link.page } as PublicPageState)}
+                    className={cn(
+                      'relative px-3 py-2 text-sm font-medium rounded-md transition-colors',
+                      isActive
+                        ? 'text-indigo-600 dark:text-indigo-400'
+                        : 'text-muted-foreground hover:text-foreground'
+                    )}
+                  >
+                    {link.label}
+                    {isActive && (
+                      <span className="absolute bottom-1 left-1/2 -translate-x-1/2 h-0.5 w-6 rounded-full bg-indigo-500" />
+                    )}
+                  </a>
+                )
+              })}
             </nav>
 
             <div className="hidden md:flex items-center gap-2">
@@ -90,6 +213,7 @@ export function SiteLayout({ children, onGetStarted }: SiteLayoutProps) {
               className="md:hidden inline-flex items-center justify-center size-10 rounded-md text-foreground hover:bg-accent"
               onClick={() => setMobileOpen((v) => !v)}
               aria-label="Toggle menu"
+              aria-expanded={mobileOpen}
             >
               {mobileOpen ? <X className="size-5" /> : <Menu className="size-5" />}
             </button>
@@ -98,23 +222,76 @@ export function SiteLayout({ children, onGetStarted }: SiteLayoutProps) {
 
         {/* Mobile nav */}
         {mobileOpen && (
-          <div className="md:hidden border-t border-border/60 bg-background/95 backdrop-blur-xl">
+          <div className="md:hidden border-t border-border/60 bg-background/95 backdrop-blur-xl max-h-[calc(100vh-4rem)] overflow-y-auto">
             <nav className="mx-auto max-w-7xl px-4 py-3 flex flex-col gap-1">
-              {NAV_LINKS.map((link) => (
-                <a
-                  key={link.page}
-                  href={link.href}
-                  onClick={() => setMobileOpen(false)}
-                  className={cn(
-                    'px-3 py-2.5 text-sm font-medium rounded-md transition-colors',
-                    currentPage === link.page
-                      ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400'
-                      : 'text-muted-foreground hover:text-foreground hover:bg-accent'
-                  )}
-                >
-                  {link.label}
-                </a>
-              ))}
+              {NAV_LINKS.map((link) => {
+                const isActive = currentPage === link.page
+                if (link.page === 'services') {
+                  return (
+                    <div key={link.page}>
+                      <button
+                        onClick={() => setServicesOpen((v) => !v)}
+                        className={cn(
+                          'w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium rounded-md transition-colors',
+                          isActive
+                            ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400'
+                            : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+                        )}
+                        aria-expanded={servicesOpen}
+                      >
+                        <span>{link.label}</span>
+                        <ChevronDown className={cn('size-4 transition-transform duration-200', servicesOpen && 'rotate-180')} />
+                      </button>
+                      {servicesOpen && (
+                        <div className="ml-2 mt-1 mb-2 border-l border-border/60 pl-3 flex flex-col gap-0.5">
+                          <a
+                            href="#/services"
+                            onClick={() => { setPublicPage({ page: 'services' }); setMobileOpen(false) }}
+                            className="px-3 py-2 text-sm font-semibold rounded-md text-foreground hover:bg-indigo-500/10 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+                          >
+                            All Services
+                          </a>
+                          {SERVICE_LINKS.map((svc) => {
+                            const Icon = svc.icon
+                            const svcActive = activeServiceSlug === svc.slug
+                            return (
+                              <a
+                                key={svc.slug}
+                                href={svc.href}
+                                onClick={() => { setPublicPage({ page: 'service-detail', slug: svc.slug }); setMobileOpen(false) }}
+                                className={cn(
+                                  'flex items-center gap-2.5 px-3 py-2 text-sm rounded-md transition-colors',
+                                  svcActive
+                                    ? 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 font-medium'
+                                    : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+                                )}
+                              >
+                                <Icon className="size-4 text-indigo-500 shrink-0" />
+                                {svc.label}
+                              </a>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )
+                }
+                return (
+                  <a
+                    key={link.page}
+                    href={link.href}
+                    onClick={() => { setPublicPage({ page: link.page } as PublicPageState); setMobileOpen(false) }}
+                    className={cn(
+                      'px-3 py-2.5 text-sm font-medium rounded-md transition-colors',
+                      isActive
+                        ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+                    )}
+                  >
+                    {link.label}
+                  </a>
+                )
+              })}
               <div className="flex gap-2 mt-2">
                 <Button variant="outline" size="sm" className="flex-1" onClick={() => { onGetStarted(); setMobileOpen(false) }}>
                   Sign In
@@ -154,16 +331,46 @@ export function SiteLayout({ children, onGetStarted }: SiteLayoutProps) {
             </div>
 
             {[
-              { title: 'Product', links: ['Web Development', 'Web Hosting', 'Domain Registration', 'SaaS System'] },
-              { title: 'Company', links: ['About', 'Contact', 'Pricing', 'Careers'] },
-              { title: 'Resources', links: ['Documentation', 'Blog', 'Status', 'Support'] },
+              {
+                title: 'Product',
+                links: [
+                  { label: 'Web Development', href: '#/services/web-development' },
+                  { label: 'Web Hosting', href: '#/services/web-hosting' },
+                  { label: 'Domain Registration', href: '#/services/domain-registration' },
+                  { label: 'SaaS System', href: '#/services/saas-system' },
+                  { label: 'All Services', href: '#/services' },
+                ],
+              },
+              {
+                title: 'Company',
+                links: [
+                  { label: 'About', href: '#/about' },
+                  { label: 'Contact', href: '#/contact' },
+                  { label: 'Pricing', href: '#/pricing' },
+                  { label: 'Home', href: '#/' },
+                ],
+              },
+              {
+                title: 'Resources',
+                links: [
+                  { label: 'Documentation', href: '#/' },
+                  { label: 'Blog', href: '#/' },
+                  { label: 'Status', href: '#/' },
+                  { label: 'Support', href: '#/contact' },
+                ],
+              },
             ].map((col) => (
               <div key={col.title}>
                 <h4 className="text-sm font-semibold text-white mb-3">{col.title}</h4>
                 <ul className="space-y-2">
                   {col.links.map((link) => (
-                    <li key={link}>
-                      <a href="#/" className="text-sm text-zinc-400 hover:text-indigo-300 transition-colors">{link}</a>
+                    <li key={link.label}>
+                      <a
+                        href={link.href}
+                        className="text-sm text-zinc-400 hover:text-indigo-300 transition-colors"
+                      >
+                        {link.label}
+                      </a>
                     </li>
                   ))}
                 </ul>

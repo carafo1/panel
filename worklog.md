@@ -2545,3 +2545,29 @@ Stage Summary:
 - All pages on-brand (indigo `#1E1A47`/`#706FD3`/`#8888FF`), responsive, accessible (semantic headings, ARIA via shadcn), with sticky footer via SiteLayout.
 - Artifacts: src/components/landing/pages/{web-development-page,hosting-page,domain-page,services-page}.tsx + src/components/landing/public-router.tsx.
 - Screenshots: screenshots/{services-page,web-dev-page,hosting-page,domain-page}.png.
+
+---
+Task ID: menu-links
+Agent: main (Z.ai Code)
+Task: Add the new pages to the menu and as links (user request: "add pages in menu and links").
+
+Work Log:
+- Inspected `site-layout.tsx` (the navbar + footer). Navbar previously had flat links: Home/Services/Pricing/About/Contact. Footer "Product" links all dead-pointed to `#/`.
+- Rebuilt `site-layout.tsx`:
+  - Desktop: converted "Services" into a hover dropdown panel (320px wide) containing "All Services" + the 4 service pages (Web Development, Web Hosting, Domain Registration, SaaS System), each with gradient icon tile, label, and one-line description. Active service is highlighted with a ring + indigo background.
+  - Mobile (hamburger): made "Services" an expandable button revealing a nested sub-menu with the same 5 links + icons.
+  - Wired `setServicesOpen(false)` into dropdown click handlers; removed the route-change `useEffect` (violated `react-hooks/set-state-in-effect` lint rule) — menus now close via click handlers + onMouseLeave.
+  - Footer: rewired "Product" column to real hash routes (web-development / web-hosting / domain-registration / saas-system / services) and "Company" column to about/contact/pricing/home. "Support" now points to contact.
+- Ran `bun run lint` → clean (fixed the set-state-in-effect error).
+- Agent Browser verification:
+  - Desktop: hovered "Services" → dropdown opened showing all 5 links with icons + descriptions; clicked "Web Hosting" → navigated to `#/services/web-hosting`, H1 = "Managed hosting that just works". VLM rated the dropdown 9/10.
+  - Mobile (390×844): opened hamburger, expanded "Services" submenu showing all 5 links, tapped "Web Development" → navigated to `#/services/web-development`, menu auto-closed.
+  - Footer: clicked "Domain Registration" → navigated to `#/services/domain-registration`, H1 = "Find & register the perfect domain".
+  - Zero page errors throughout.
+- Screenshots: screenshots/{navbar-home,navbar-dropdown,mobile-menu}.png.
+
+Stage Summary:
+- All 4 service pages now reachable from: (1) navbar Services dropdown (desktop), (2) mobile Services submenu, (3) footer Product column, plus the existing services index cards and home-page service cards.
+- Active-state highlighting works: the current service is highlighted in the dropdown; "Services" stays underlined when on any service page.
+- No lint errors, no runtime errors, responsive across desktop + mobile.
+- Artifact: src/components/landing/site-layout.tsx.
