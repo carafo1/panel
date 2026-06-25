@@ -2517,3 +2517,31 @@ Work Log:
 
 Stage Summary:
 - FULL APSAMO public site REBUILT from scratch after environment reset. The site is back up and visible to the user with: APSAMO branding (logo + colors + metadata), modern design system (aurora/glass/spotlight/shimmer/marquee/glow), 6-page hash-routed public site (home/services/service-detail/pricing/about/contact), premium 10/10 domain search widget on home + domain-registration pages, contact form with API + DB persistence. All pages render correctly, lint clean, no runtime errors. The dashboard (original DeployHub code) inherits the APSAMO brand colors via the remapped globals.css theme tokens. LESSON: commit work to git going forward to survive environment resets.
+
+---
+Task ID: pages-v2
+Agent: main (Z.ai Code)
+Task: Create dedicated Service page, Hosting page, Domain page, and Web Development page (user request: "create these page Service page, hosting page, domain page, Wed development page.")
+
+Work Log:
+- Read worklog.md to understand prior context (APSAMO site, indigo brand, hash-router architecture).
+- Inspected existing architecture: `public-router.tsx` (hash router), `use-public-hash-router.ts`, `services-data.ts` (4 services), generic `service-detail-page.tsx`, `ui-helpers.tsx` (PageHero/ScrollReveal/StaggerCard/useCountUp), `domain-search-widget.tsx`, `home-page.tsx`.
+- Built NEW dedicated `web-development-page.tsx`: stats bar, tech-stack category grid (Frontend/Backend/Infra/Data), type-safe code showcase (styled terminal card), 5-step dev-process timeline, capabilities bento, pricing (Starter/Growth/Enterprise), FAQs, CTA.
+- Built NEW dedicated `hosting-page.tsx`: count-up infra stats (uptime/edge/deploys/TTFB), 4-step deploy-flow (Git→Build→Deploy→Scale), 8-feature grid, global edge regions list + APSAMO-vs-others benchmarks card, pricing (Hobby/Pro/Business), FAQs, CTA.
+- Built NEW dedicated `domain-page.tsx`: DomainSearchWidget (section variant), full TLD pricing table (12 TLDs with category/desc/price), 6 free-features grid, 4-step lifecycle, popular-TLD plans (.com/.io.dev/.ai), FAQs, CTA.
+- Updated `public-router.tsx`: added a `switch(publicPage.slug)` inside the `service-detail` case to route `web-development`/`web-hosting`/`domain-registration` to their dedicated pages, falling back to generic `ServiceDetailPage` for `saas-system`.
+- Enhanced `services-page.tsx`: added Integrated Workflow 4-step section (Build/Register/Host/Scale), Why-APSAMO split section with checklist, and a CTA section; fixed missing `Button` import.
+- Ran `bun run lint` → clean (no errors/warnings).
+- Verified dev server running (port 3000, HTTP 200), new pages compiled successfully.
+- Agent Browser verification: opened all 4 routes (`#/services`, `#/services/web-development`, `#/services/web-hosting`, `#/services/domain-registration`) — all rendered, zero page errors.
+- VLM evaluation: Web Development 8/10, Hosting 8/10, Domain 8/10 (all "fully rendered, consistent indigo brand, no layout issues, no overlaps").
+- Confirmed DOM on services index: all 4 service cards + workflow steps present (body height 3531px).
+- Tested interactivity: clicked Domain Registration card → navigated to `#/services/domain-registration`, H1 rendered "Find & register the perfect domain" (dedicated page).
+
+Stage Summary:
+- 4 pages delivered as requested: enhanced Services index + 3 brand-new dedicated service pages (Web Development, Hosting, Domain).
+- Each dedicated page is visually distinct with service-specific sections (no longer using the shared generic template for these three flagship services).
+- Routing wired through the existing hash router; SaaS System still uses the generic template (not in scope).
+- All pages on-brand (indigo `#1E1A47`/`#706FD3`/`#8888FF`), responsive, accessible (semantic headings, ARIA via shadcn), with sticky footer via SiteLayout.
+- Artifacts: src/components/landing/pages/{web-development-page,hosting-page,domain-page,services-page}.tsx + src/components/landing/public-router.tsx.
+- Screenshots: screenshots/{services-page,web-dev-page,hosting-page,domain-page}.png.
