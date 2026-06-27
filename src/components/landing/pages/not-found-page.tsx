@@ -3,10 +3,11 @@
 import { Home, Search, ArrowLeft, Sparkles, Headset } from 'lucide-react'
 import { ScrollReveal } from '../ui-helpers'
 import { useAppStore } from '@/store/app-store'
-import { SERVICES } from '../services-data'
+import { useSiteContent, resolveIcon } from '../site-data-context'
 
 export function NotFoundPage() {
   const { setPublicPage } = useAppStore()
+  const { services } = useSiteContent()
 
   return (
     <section className="relative overflow-hidden aurora-bg text-white grain-overlay" style={{ backgroundColor: '#1E1A47' }}>
@@ -59,8 +60,8 @@ export function NotFoundPage() {
           {/* Popular destinations */}
           <ScrollReveal delay={100}>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-left">
-              {SERVICES.map((svc) => {
-                const Icon = svc.icon
+              {services.map((svc) => {
+                const Icon = resolveIcon(svc.iconName)
                 return (
                   <a
                     key={svc.slug}

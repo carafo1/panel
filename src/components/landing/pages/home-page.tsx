@@ -13,6 +13,7 @@ import {
 } from '../ui-helpers'
 import { DomainSearchWidget } from '../domain-search-widget'
 import { useAppStore } from '@/store/app-store'
+import { useSiteContent, resolveIcon } from '../site-data-context'
 
 const TECH_STACK = ['React', 'Next.js', 'TypeScript', 'Node.js', 'Tailwind', 'Prisma', 'Docker', 'Vercel', 'AWS', 'Cloudflare', 'GitHub', 'FastAPI']
 
@@ -56,6 +57,7 @@ interface HomePageProps {
 
 export function HomePage({ onGetStarted }: HomePageProps) {
   const { setPublicPage } = useAppStore()
+  const { services } = useSiteContent()
   const stat0 = useCountUp(STATS[0].value, 2000)
   const stat1 = useCountUp(STATS[1].value, 2000)
   const stat2 = useCountUp(STATS[2].value, 2000)
@@ -166,8 +168,8 @@ export function HomePage({ onGetStarted }: HomePageProps) {
             </div>
           </ScrollReveal>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {SERVICES.map((service, i) => {
-              const Icon = service.icon
+            {services.map((service, i) => {
+              const Icon = resolveIcon(service.iconName)
               return (
                 <StaggerCard key={service.slug} index={i}>
                   <div ref={serviceRefs[i].ref} onMouseMove={serviceRefs[i].onMouseMove} className="spotlight h-full">

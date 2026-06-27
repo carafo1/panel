@@ -1,12 +1,13 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Menu, X, ChevronDown, Code2, Server, Globe, Layers, ArrowRight } from 'lucide-react'
+import { Menu, X, ChevronDown, ArrowRight } from 'lucide-react'
 import { Logo } from '@/components/ui/logo'
 import { Button } from '@/components/ui/button'
 import { ScrollProgress } from './ui-helpers'
 import { cn } from '@/lib/utils'
 import { useAppStore, type PublicPageState } from '@/store/app-store'
+import { useSiteContent, resolveIcon } from './site-data-context'
 
 /** Top-level nav entries (Services gets a dropdown). */
 const NAV_LINKS: { label: string; href: string; page: PublicPageState['page'] }[] = [
@@ -15,38 +16,6 @@ const NAV_LINKS: { label: string; href: string; page: PublicPageState['page'] }[
   { label: 'Pricing', href: '#/pricing', page: 'pricing' },
   { label: 'About', href: '#/about', page: 'about' },
   { label: 'Contact', href: '#/contact', page: 'contact' },
-]
-
-/** Services shown in the dropdown + mobile sub-menu. */
-const SERVICE_LINKS = [
-  {
-    label: 'Web Development',
-    href: '#/services/web-development',
-    slug: 'web-development',
-    desc: 'Custom web apps engineered for scale.',
-    icon: Code2,
-  },
-  {
-    label: 'Web Hosting',
-    href: '#/services/web-hosting',
-    slug: 'web-hosting',
-    desc: 'Managed hosting on a global edge network.',
-    icon: Server,
-  },
-  {
-    label: 'Domain Registration',
-    href: '#/services/domain-registration',
-    slug: 'domain-registration',
-    desc: 'Search 100+ TLDs with live pricing.',
-    icon: Globe,
-  },
-  {
-    label: 'SaaS System',
-    href: '#/services/saas-system',
-    slug: 'saas-system',
-    desc: 'Full SaaS platforms — auth, billing, teams.',
-    icon: Layers,
-  },
 ]
 
 interface SiteLayoutProps {
@@ -60,6 +29,17 @@ export function SiteLayout({ children, onGetStarted }: SiteLayoutProps) {
   const [scrolled, setScrolled] = useState(false)
   const publicPage = useAppStore((s) => s.publicPage)
   const setPublicPage = useAppStore((s) => s.setPublicPage)
+  const { services } = useSiteContent()
+
+  // Derive the dropdown service links from CMS data (with sensible fallbacks
+  // derived from each service's tagline).
+  const SERVICE_LINKS = services.map((svc) => ({
+    label: svc.name,
+    href: `#/services/${svc.slug}`,
+    slug: svc.slug,
+    desc: svc.tagline,
+    icon: resolveIcon(svc.iconName),
+  }))
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8)

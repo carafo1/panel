@@ -47,11 +47,13 @@ import {
   Crown,
   User as UserIcon,
   Building2,
+  LayoutGrid,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/store/auth-store'
 import { PaymentMethodsPanel } from '@/components/admin/payment-methods-panel'
 import { ServersPanel } from '@/components/admin/servers-panel'
+import { CmsPanel } from '@/components/admin/cms-panel'
 
 // ── Types ──────────────────────────────────────────────────────────────
 interface Stats {
@@ -359,8 +361,12 @@ export function AdminPanel() {
       </div>
 
       {/* ── Tabbed sections ────────────────────────────────────────── */}
-      <Tabs defaultValue="users" className="space-y-4">
+      <Tabs defaultValue="content" className="space-y-4">
         <TabsList className="flex flex-wrap">
+          <TabsTrigger value="content">
+            <LayoutGrid className="size-4 mr-1.5" />
+            Content
+          </TabsTrigger>
           <TabsTrigger value="users">Users</TabsTrigger>
           <TabsTrigger value="jobs">Job Queue</TabsTrigger>
           <TabsTrigger value="servers">Servers</TabsTrigger>
@@ -371,6 +377,11 @@ export function AdminPanel() {
             </TabsTrigger>
           )}
         </TabsList>
+
+        {/* ── Content (CMS) Tab ─────────────────────────────────────── */}
+        <TabsContent value="content">
+          <CmsPanel />
+        </TabsContent>
 
         {/* ── Users Tab ──────────────────────────────────────────────── */}
         <TabsContent value="users">

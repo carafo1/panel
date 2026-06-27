@@ -21,7 +21,7 @@ const globalForPrisma = globalThis as unknown as {
  * even if the dev server's Turbopack has cached an older copy from
  * before `prisma db push` regenerated the client.
  */
-const SCHEMA_VERSION = '2025-06-20-vps-ssh-real'
+const SCHEMA_VERSION = '2025-06-25-cms-services'
 
 // Bust the require cache for the generated Prisma client so the latest
 // schema (e.g. the new `stripeCustomerId` column on Subscription) is

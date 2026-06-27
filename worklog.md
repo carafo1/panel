@@ -2608,3 +2608,50 @@ Stage Summary:
 - Artifacts: src/components/landing/pages/{saas-system-page,not-found-page}.tsx, src/components/landing/{public-router,use-public-hash-router,site-layout}.tsx, src/store/app-store.ts.
 - Screenshots: screenshots/{saas-page,saas-modules,saas-arch,saas-integrations,not-found-page}.png.
 - Project is now complete: all pages built, all menu/footer links wired, 404 handled, lint clean, browser-verified.
+
+---
+Task ID: cms-full
+Agent: main (Z.ai Code)
+Task: Full CMS in admin — add/edit/delete services, edit text, full content management of the website (user request: "add in admin that manage all in website like adding, editing, deleting services, editing text, full content management of the website").
+
+Work Log:
+- Audited existing admin architecture: AdminPanel with Users/Jobs/Servers/Payment-Methods tabs, Prisma + SQLite, JWT auth (admin@deployhub.io/admin123), logAudit helper.
+- Added 5 Prisma models to schema.prisma: Service, ServicePlan, ServiceHighlight, ServiceFaq, SiteContent (all with cascade deletes + indexes). Ran `bun run db:push` — generated client + synced DB.
+- Created `src/components/landing/icon-registry.ts`: maps 42 lucide icon names ↔ components, with `resolveIcon()` + `ICON_NAMES` for dropdowns.
+- Created `src/lib/cms.ts` (server-side data layer): `seedServicesIfEmpty()` auto-seeds DB from static `services-data.ts` on first call; `getPublishedServices()`, `getAllServicesForAdmin()`, `getServiceBySlug()`, `getSiteContent()`, `getFullSiteContent()`. Serialises DB rows → plain JSON with icon-name strings.
+- Created API routes:
+  - `GET /api/site/content` (public) — returns {services, content, seeded}.
+  - `GET/POST /api/admin/services` — admin list + create (with nested plans/highlights/faqs).
+  - `GET/PATCH/DELETE /api/admin/services/[id]` — admin single-service CRUD (PATCH replaces nested collections in a transaction; supports partial updates incl. `visible` + `order`).
+  - `GET/PUT /api/admin/site-content` — admin bulk upsert of global text keys.
+  - All admin routes guarded by `requireAdmin()` (JWT + role check) + audit-logged.
+- Created `src/components/landing/site-data-context.tsx`: `SiteDataProvider` fetches `/api/site/content` on mount, falls back to static `SERVICES` seed on error/loading. Exposes `useSiteContent()`, `useServiceBySlug()`, `resolveIcon()`.
+- Wrapped the public site: `landing-page.tsx` now wraps `<PublicRouter>` in `<SiteDataProvider>`.
+- Refactored public consumers to read from CMS context (with static fallback): `services-page.tsx`, `home-page.tsx`, `not-found-page.tsx`, and `site-layout.tsx` (navbar Services dropdown + now uses `services` from context). All use `resolveIcon(service.iconName)` instead of `service.icon`.
+- Built `src/components/admin/cms-panel.tsx` — the full CMS UI:
+  - Services table: icon+name+tagline, slug, plan count, visibility toggle (eye/eye-off), edit (pencil), delete (trash), reorder (up/down arrows).
+  - "New Service" + edit dialog (max-w-3xl, scrollable): Name, Slug, Tagline, Description, Icon dropdown (42 icons with previews), Accent gradient dropdown (8 presets with colour swatches), Features (one-per-line textarea), Visible switch, + nested sections for Pricing Plans / Highlights / FAQs (each with add/remove cards, full field editing).
+  - Delete confirmation dialog.
+  - Site Text editor: key/value rows with textareas, add-field input, save button.
+  - All actions toast feedback; loading skeletons; error handling.
+- Wired into `admin-panel.tsx`: added "Content" tab (default, first position, LayoutGrid icon) rendering `<CmsPanel />`.
+- Bumped `SCHEMA_VERSION` in `src/lib/db.ts` to `2025-06-25-cms-services` so the cached PrismaClient was discarded and the new models picked up.
+- Restarted dev server via detached launcher (setsid + nohup) to survive across bash calls.
+- Seeded DB: 4 services + 12 plans auto-seeded from static data on first API hit.
+- Agent Browser end-to-end verification (logged in as admin@deployhub.io):
+  - CMS panel renders: "Content Management" heading, 4 services in table, Site Text section. VLM 9/10.
+  - CREATE: clicked "New Service", filled all fields (Cloud Consulting), clicked Create → service appeared in admin table (5 rows) AND public /api/site/content (5 services).
+  - EDIT: clicked pencil on the new row, renamed to "Cloud Architecture", saved → table updated.
+  - DELETE: clicked trash, confirmed → service removed from admin table (4 rows) AND public API (4 services).
+  - VISIBILITY TOGGLE: hid Web Development → public API dropped to 3 services; re-enabled → back to 4.
+  - All changes reflected live on the public site without restart.
+- Final state: `bun run lint` clean, server HTTP 200, zero runtime errors.
+
+Stage Summary:
+- Admin can now fully manage all website content: create/edit/delete/reorder services (with nested plans, highlights, FAQs), toggle visibility, and edit global site text — all from a new "Content" tab in the admin panel.
+- Public site reads from the DB via `/api/site/content` (with static fallback), so admin changes go live instantly on refresh.
+- DB auto-seeds from static `services-data.ts` on first run, so there's zero migration step and the site always renders even if the DB is empty.
+- Full audit logging on every CMS mutation (cms.service.create/update/delete, cms.site-content.update).
+- Artifacts: prisma/schema.prisma (5 models), src/lib/cms.ts, src/components/landing/{icon-registry,site-data-context}.tsx, src/app/api/{site/content,admin/services,admin/services/[id],admin/site-content}/route.ts, src/components/admin/cms-panel.tsx, + refactored {services-page,home-page,not-found-page,site-layout,landing-page,admin-panel,db}.tsx.
+- Screenshots: screenshots/{cms-panel,cms-create-dialog}.png.
+- The CMS is complete and fully functional.

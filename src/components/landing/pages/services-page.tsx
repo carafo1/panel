@@ -4,9 +4,9 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { ArrowRight, Check, Sparkles, Layers, Globe, Server, Code2 } from 'lucide-react'
-import { SERVICES } from '../services-data'
 import { PageHero, ScrollReveal, StaggerCard } from '../ui-helpers'
 import { useAppStore } from '@/store/app-store'
+import { useSiteContent, resolveIcon } from '../site-data-context'
 
 const INTEGRATION_STEPS = [
   { icon: Code2, title: 'Build', desc: 'We craft your web app with Next.js & TypeScript.' },
@@ -24,6 +24,7 @@ const WHY = [
 
 export function ServicesPage() {
   const { setPublicPage } = useAppStore()
+  const { services } = useSiteContent()
 
   return (
     <>
@@ -36,8 +37,8 @@ export function ServicesPage() {
       <section className="py-24 bg-background">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {SERVICES.map((service, i) => {
-              const Icon = service.icon
+            {services.map((service, i) => {
+              const Icon = resolveIcon(service.iconName)
               return (
                 <StaggerCard key={service.slug} index={i}>
                   <a

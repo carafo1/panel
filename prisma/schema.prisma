@@ -822,3 +822,80 @@ model ContactMessage {
 
   @@index([createdAt])
 }
+
+// ──────────────────────────────────────────────────────────────────────
+// CMS — Content Management System
+// Admin-managed website content: services, plans, highlights, FAQs, and
+// global site text (hero, stats, etc.). The public site reads from these
+// tables; if empty, it falls back to the static seed in services-data.ts.
+// ──────────────────────────────────────────────────────────────────────
+
+model Service {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  tagline     String
+  description String
+  iconName    String   // lucide icon name, e.g. "Code2"
+  accent      String   // tailwind gradient classes, e.g. "from-indigo-500 to-indigo-400"
+  features    String   // JSON array of strings
+  order       Int      @default(0)
+  visible     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  plans      ServicePlan[]
+  highlights ServiceHighlight[]
+  faqs       ServiceFaq[]
+
+  @@index([order])
+}
+
+model ServicePlan {
+  id          String  @id @default(cuid())
+  serviceId   String
+  name        String
+  price       Float
+  period      String
+  description String
+  features    String  // JSON array of strings
+  popular     Boolean @default(false)
+  order       Int     @default(0)
+  service     Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@index([serviceId])
+  @@index([order])
+}
+
+model ServiceHighlight {
+  id          String  @id @default(cuid())
+  serviceId   String
+  title       String
+  description String
+  iconName    String  // lucide icon name
+  order       Int     @default(0)
+  service     Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@index([serviceId])
+}
+
+model ServiceFaq {
+  id        String  @id @default(cuid())
+  serviceId String
+  question  String
+  answer    String
+  order     Int     @default(0)
+  service   Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@index([serviceId])
+}
+
+model SiteContent {
+  id        String   @id @default(cuid())
+  key       String   @unique  // e.g. "hero.badge", "hero.title", "stats"
+  value     String             // JSON string or plain text
+  updatedAt DateTime @updatedAt
+  updatedBy String?
+
+  @@index([key])
+}
