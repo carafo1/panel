@@ -99,9 +99,9 @@ const ACCENT_PRESETS = [
   'from-indigo-400 to-indigo-600',
   'from-indigo-500 to-indigo-950',
   'from-indigo-500 to-indigo-700',
-  'from-purple-500 to-indigo-500',
-  'from-indigo-600 to-purple-600',
-  'from-violet-500 to-indigo-500',
+  'from-indigo-700 to-indigo-300',
+  'from-indigo-300 to-indigo-700',
+  'from-indigo-400 to-indigo-700',
 ]
 
 // ── Default blank service for the "Create" dialog ──────────────────────
@@ -348,7 +348,7 @@ export function CmsPanel() {
                         <TableCell className="text-center">
                           <button onClick={() => toggleVisible(svc)} className="inline-flex" aria-label="Toggle visibility">
                             {svc.visible ? (
-                              <Eye className="size-4 text-emerald-500" />
+                              <Eye className="size-4 text-indigo-500" />
                             ) : (
                               <EyeOff className="size-4 text-muted-foreground" />
                             )}

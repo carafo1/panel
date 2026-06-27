@@ -213,10 +213,10 @@ export default function OverviewPanel() {
   const projectsPct = Math.round((projectsCount / projectsLimit) * 100)
 
   const barColor = (pct: number) =>
-    pct > 80 ? 'bg-red-500' : pct > 60 ? 'bg-amber-500' : 'bg-emerald-500'
+    pct > 80 ? 'bg-red-500' : pct > 60 ? 'bg-amber-500' : 'bg-indigo-500'
 
   const barBgColor = (pct: number) =>
-    pct > 80 ? 'bg-red-100' : pct > 60 ? 'bg-amber-100' : 'bg-emerald-100'
+    pct > 80 ? 'bg-red-100' : pct > 60 ? 'bg-amber-100' : 'bg-indigo-100'
 
   // Uptime calculation
   const liveCount = deployments.filter((d) => d.status === 'live').length
@@ -226,11 +226,11 @@ export default function OverviewPanel() {
   // Timeline icon/color per type
   const timelineIcon = (type: string) => {
     switch (type) {
-      case 'deployment': return { icon: Rocket, color: 'text-emerald-600', bg: 'bg-emerald-100', dot: 'bg-emerald-500' }
-      case 'domain': return { icon: Globe, color: 'text-amber-600', bg: 'bg-amber-100', dot: 'bg-amber-500' }
-      case 'automation': return { icon: Zap, color: 'text-violet-600', bg: 'bg-violet-100', dot: 'bg-violet-500' }
-      case 'payment': return { icon: CreditCard, color: 'text-cyan-600', bg: 'bg-cyan-100', dot: 'bg-cyan-500' }
-      case 'ssl': return { icon: Shield, color: 'text-green-600', bg: 'bg-green-100', dot: 'bg-green-500' }
+      case 'deployment': return { icon: Rocket, color: 'text-indigo-600', bg: 'bg-indigo-100', dot: 'bg-indigo-500' }
+      case 'domain': return { icon: Globe, color: 'text-indigo-700', bg: 'bg-indigo-100', dot: 'bg-indigo-400' }
+      case 'automation': return { icon: Zap, color: 'text-indigo-600', bg: 'bg-indigo-50', dot: 'bg-indigo-500' }
+      case 'payment': return { icon: CreditCard, color: 'text-indigo-700', bg: 'bg-indigo-50', dot: 'bg-indigo-400' }
+      case 'ssl': return { icon: Shield, color: 'text-indigo-600', bg: 'bg-indigo-100', dot: 'bg-indigo-500' }
       default: return { icon: Activity, color: 'text-gray-600', bg: 'bg-gray-100', dot: 'bg-gray-500' }
     }
   }
@@ -240,7 +240,7 @@ export default function OverviewPanel() {
       case 'live':
       case 'active':
       case 'completed':
-        return <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px] capitalize">{status}</Badge>
+        return <Badge className="bg-indigo-50 text-indigo-700 border-indigo-200 text-[10px] capitalize">{status}</Badge>
       case 'building':
       case 'deploying':
       case 'running':
@@ -260,8 +260,8 @@ export default function OverviewPanel() {
       title: 'Projects',
       value: projectsCount,
       icon: Server,
-      gradient: 'from-emerald-500 to-emerald-600',
-      iconBg: 'bg-emerald-500/20',
+      gradient: 'from-indigo-500 to-indigo-600',
+      iconBg: 'bg-indigo-500/20',
       trend: projectsCount > 0 ? `+${Math.min(projectsCount, 5)} this week` : 'No projects yet',
       trendUp: true,
       tab: 'hosting' as DashboardTab,
@@ -270,8 +270,8 @@ export default function OverviewPanel() {
       title: 'Domains',
       value: domainsCount,
       icon: Globe,
-      gradient: 'from-amber-500 to-amber-600',
-      iconBg: 'bg-amber-500/20',
+      gradient: 'from-indigo-400 to-indigo-500',
+      iconBg: 'bg-indigo-400/20',
       trend: domainsCount > 0 ? `+${Math.min(domainsCount, 3)} this week` : 'No domains yet',
       trendUp: true,
       tab: 'domains' as DashboardTab,
@@ -280,8 +280,8 @@ export default function OverviewPanel() {
       title: 'Deployments',
       value: deploymentsCount,
       icon: Rocket,
-      gradient: 'from-violet-500 to-violet-600',
-      iconBg: 'bg-violet-500/20',
+      gradient: 'from-indigo-500 to-indigo-700',
+      iconBg: 'bg-indigo-500/20',
       trend: deploymentsCount > 0 ? `↑ ${uptimePct}% success` : 'No deployments yet',
       trendUp: uptimePct >= 80,
       tab: 'deployments' as DashboardTab,
@@ -290,8 +290,8 @@ export default function OverviewPanel() {
       title: 'Uptime',
       value: `${uptimePct}%`,
       icon: Activity,
-      gradient: 'from-cyan-500 to-cyan-600',
-      iconBg: 'bg-cyan-500/20',
+      gradient: 'from-indigo-400 to-indigo-600',
+      iconBg: 'bg-indigo-400/20',
       trend: uptimePct >= 99 ? 'Excellent' : uptimePct >= 95 ? 'Good' : 'Needs attention',
       trendUp: uptimePct >= 95,
       tab: 'deployments' as DashboardTab,
@@ -300,10 +300,10 @@ export default function OverviewPanel() {
 
   // Quick actions
   const quickActions = [
-    { label: 'New Project', desc: 'Create hosting project', icon: Server, tab: 'hosting' as DashboardTab, gradient: 'group-hover:from-emerald-500 group-hover:to-teal-500' },
-    { label: 'Register Domain', desc: 'Search & register domains', icon: Globe, tab: 'domains' as DashboardTab, gradient: 'group-hover:from-amber-500 group-hover:to-orange-500' },
-    { label: 'View Deployments', desc: 'Recent deployment history', icon: Rocket, tab: 'deployments' as DashboardTab, gradient: 'group-hover:from-violet-500 group-hover:to-purple-500' },
-    { label: 'Manage Billing', desc: 'Plans & invoices', icon: CreditCard, tab: 'billing' as DashboardTab, gradient: 'group-hover:from-cyan-500 group-hover:to-blue-500' },
+    { label: 'New Project', desc: 'Create hosting project', icon: Server, tab: 'hosting' as DashboardTab, gradient: 'group-hover:from-indigo-500 group-hover:to-indigo-600' },
+    { label: 'Register Domain', desc: 'Search & register domains', icon: Globe, tab: 'domains' as DashboardTab, gradient: 'group-hover:from-indigo-400 group-hover:to-indigo-500' },
+    { label: 'View Deployments', desc: 'Recent deployment history', icon: Rocket, tab: 'deployments' as DashboardTab, gradient: 'group-hover:from-indigo-600 group-hover:to-indigo-700' },
+    { label: 'Manage Billing', desc: 'Plans & invoices', icon: CreditCard, tab: 'billing' as DashboardTab, gradient: 'group-hover:from-indigo-500 group-hover:to-indigo-400' },
   ]
 
   // Max chart value for scaling
@@ -315,14 +315,14 @@ export default function OverviewPanel() {
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2">
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold">
-            <span className="bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent">
+            <span className="bg-gradient-to-r from-indigo-600 to-indigo-600 bg-clip-text text-transparent">
               Welcome back{user?.name ? `, ${user.name}` : ''}!
             </span>
           </h1>
           <p className="text-muted-foreground mt-1">{formatDate()}</p>
         </div>
         {planInfo && (
-          <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 shrink-0 self-start sm:self-auto">
+          <Badge className="bg-indigo-50 text-indigo-700 border-indigo-200 shrink-0 self-start sm:self-auto">
             {planInfo.name} Plan
           </Badge>
         )}
@@ -351,11 +351,11 @@ export default function OverviewPanel() {
                 <p className={`text-2xl font-bold mt-0.5 ${card.title === 'Deployments' && !loading ? 'number-pulse' : ''}`}>{loading ? '...' : card.value}</p>
                 <div className="flex items-center gap-1 mt-1">
                   {card.trendUp ? (
-                    <TrendingUp className="size-3 text-emerald-500" />
+                    <TrendingUp className="size-3 text-indigo-500" />
                   ) : (
                     <TrendingDown className="size-3 text-red-500" />
                   )}
-                  <span className={`text-[11px] font-medium ${card.trendUp ? 'text-emerald-600' : 'text-red-600'}`}>
+                  <span className={`text-[11px] font-medium ${card.trendUp ? 'text-indigo-600' : 'text-red-600'}`}>
                     {card.trend}
                   </span>
                 </div>
@@ -375,7 +375,7 @@ export default function OverviewPanel() {
           </div>
           <div className="flex items-center gap-4 text-xs">
             <div className="flex items-center gap-1.5">
-              <div className="size-2.5 rounded-sm bg-emerald-500" />
+              <div className="size-2.5 rounded-sm bg-indigo-500" />
               <span className="text-muted-foreground">Success</span>
             </div>
             <div className="flex items-center gap-1.5">
@@ -398,7 +398,7 @@ export default function OverviewPanel() {
                   {/* Success bar */}
                   <div className="flex-1 flex flex-col justify-end">
                     <div
-                      className="bg-emerald-500 rounded-t-sm transition-all duration-500 min-h-[2px]"
+                      className="bg-indigo-500 rounded-t-sm transition-all duration-500 min-h-[2px]"
                       style={{ height: `${Math.max(successH, 2)}%` }}
                     />
                   </div>
@@ -486,7 +486,7 @@ export default function OverviewPanel() {
           <h2 className="text-lg font-semibold">Recent Activity</h2>
           <button
             onClick={() => setDashboardTab('deployments')}
-            className="text-xs text-emerald-600 hover:text-emerald-700 font-medium flex items-center gap-0.5 transition-colors"
+            className="text-xs text-indigo-600 hover:text-indigo-700 font-medium flex items-center gap-0.5 transition-colors"
           >
             View all <ChevronRight className="size-3" />
           </button>
@@ -538,11 +538,11 @@ export default function OverviewPanel() {
               <button
                 key={action.label}
                 onClick={() => setDashboardTab(action.tab)}
-                className="group bg-card border rounded-xl p-4 flex items-center gap-3 hover:border-emerald-300 hover:shadow-md transition-all text-left relative overflow-hidden"
+                className="group bg-card border rounded-xl p-4 flex items-center gap-3 hover:border-indigo-300 hover:shadow-md transition-all text-left relative overflow-hidden"
               >
                 {/* Gradient hover overlay */}
                 <div className={`absolute inset-0 bg-gradient-to-br ${action.gradient} opacity-0 group-hover:opacity-[0.06] transition-opacity duration-300`} />
-                <div className="size-9 rounded-lg bg-emerald-50 group-hover:bg-gradient-to-br group-hover:from-emerald-500 group-hover:to-teal-500 flex items-center justify-center text-emerald-600 group-hover:text-white shrink-0 transition-all duration-300">
+                <div className="size-9 rounded-lg bg-indigo-50 group-hover:bg-gradient-to-br group-hover:from-indigo-500 group-hover:to-indigo-500 flex items-center justify-center text-indigo-600 group-hover:text-white shrink-0 transition-all duration-300">
                   <Icon className="size-4" />
                 </div>
                 <div className="relative z-10">

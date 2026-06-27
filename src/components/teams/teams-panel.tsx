@@ -117,7 +117,7 @@ interface TeamDetail {
 
 function RoleBadge({ role }: { role: string }) {
   if (role === 'owner') {
-    return <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 hover:bg-emerald-100"><Crown className="size-3 mr-1" />Owner</Badge>
+    return <Badge className="bg-indigo-100 text-indigo-700 border-indigo-200 hover:bg-indigo-100"><Crown className="size-3 mr-1" />Owner</Badge>
   }
   if (role === 'admin') {
     return <Badge className="bg-amber-100 text-amber-700 border-amber-200 hover:bg-amber-100"><Shield className="size-3 mr-1" />Admin</Badge>
@@ -129,7 +129,7 @@ function ProjectStatusBadge({ status }: { status: string }) {
   switch (status) {
     case 'running':
     case 'live':
-      return <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200">Live</Badge>
+      return <Badge className="bg-indigo-100 text-indigo-700 border-indigo-200">Live</Badge>
     case 'creating':
     case 'building':
     case 'deploying':
@@ -362,7 +362,7 @@ export default function TeamsPanel() {
     if (teamLoading) {
       return (
         <div className="p-6 flex items-center justify-center min-h-[400px]">
-          <Loader2 className="size-8 animate-spin text-emerald-500" />
+          <Loader2 className="size-8 animate-spin text-indigo-500" />
         </div>
       )
     }
@@ -482,7 +482,7 @@ export default function TeamsPanel() {
                     <TableCell>
                       <div className="flex items-center gap-3">
                         <Avatar className="size-8">
-                          <AvatarFallback className="bg-emerald-100 text-emerald-700 text-xs">
+                          <AvatarFallback className="bg-indigo-100 text-indigo-700 text-xs">
                             {member.user.name?.charAt(0).toUpperCase() || '?'}
                           </AvatarFallback>
                         </Avatar>
@@ -707,8 +707,8 @@ export default function TeamsPanel() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="size-10 rounded-lg bg-emerald-100 flex items-center justify-center">
-            <Users className="size-5 text-emerald-600" />
+          <div className="size-10 rounded-lg bg-indigo-100 flex items-center justify-center">
+            <Users className="size-5 text-indigo-600" />
           </div>
           <div>
             <h2 className="text-2xl font-bold">Teams</h2>
@@ -743,13 +743,13 @@ export default function TeamsPanel() {
           {teams.map((team) => (
             <Card
               key={team.id}
-              className="hover:border-emerald-300 transition-colors cursor-pointer group"
+              className="hover:border-indigo-300 transition-colors cursor-pointer group"
               onClick={() => openTeamDetail(team.id)}
             >
               <CardContent className="p-6">
                 <div className="flex items-start justify-between mb-3">
                   <div>
-                    <h3 className="font-semibold text-lg group-hover:text-emerald-600 transition-colors">
+                    <h3 className="font-semibold text-lg group-hover:text-indigo-600 transition-colors">
                       {team.name}
                     </h3>
                     <p className="text-sm text-muted-foreground">{team.slug}</p>
@@ -770,7 +770,7 @@ export default function TeamsPanel() {
                   <Button
                     size="sm"
                     variant="outline"
-                    className="gap-1 group-hover:bg-emerald-50 group-hover:border-emerald-300 group-hover:text-emerald-700 transition-colors"
+                    className="gap-1 group-hover:bg-indigo-50 group-hover:border-indigo-300 group-hover:text-indigo-700 transition-colors"
                   >
                     Manage
                   </Button>

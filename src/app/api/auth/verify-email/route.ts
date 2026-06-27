@@ -39,7 +39,7 @@ export async function GET(request: Request) {
       data: {
         userId: user.id,
         title: 'Email Verified',
-        message: 'Your email address has been verified successfully. Welcome to DeployHub!',
+        message: 'Your email address has been verified successfully. Welcome to APSAMO!',
         type: 'success',
       },
     })

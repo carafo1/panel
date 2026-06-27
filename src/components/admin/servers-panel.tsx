@@ -294,7 +294,7 @@ function formatDateTime(dateStr: string | null): string {
 function ServerStatusBadge({ status }: { status: string }) {
   const map: Record<string, { className: string; dot?: string }> = {
     active: {
-      className: 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400',
+      className: 'bg-indigo-100 text-indigo-700 border-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-400',
     },
     provisioning: {
       className: 'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:text-amber-400',
@@ -322,7 +322,7 @@ function ServerStatusBadge({ status }: { status: string }) {
 
 function HealthDot({ status }: { status: string }) {
   const map: Record<string, string> = {
-    healthy: 'bg-emerald-500',
+    healthy: 'bg-indigo-500',
     degraded: 'bg-amber-500',
     down: 'bg-red-500',
     unknown: 'bg-gray-400',
@@ -364,7 +364,7 @@ function ResourceBar({
       ? 'bg-red-500'
       : percent >= 65
         ? 'bg-amber-500'
-        : 'bg-emerald-500'
+        : 'bg-indigo-500'
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between text-xs">
@@ -407,7 +407,7 @@ function SoftwareBadge({
           <span
             className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] font-medium ${
               installed
-                ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-900/20 dark:text-emerald-400'
+                ? 'border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-900/50 dark:bg-indigo-900/20 dark:text-indigo-400'
                 : 'border-gray-200 bg-gray-50 text-gray-500 dark:border-gray-800 dark:bg-gray-800/30 dark:text-gray-400'
             }`}
           >
@@ -480,7 +480,7 @@ export function ServersPanel() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h3 className="text-lg font-semibold flex items-center gap-2">
-            <ServerIcon className="size-5 text-emerald-600" />
+            <ServerIcon className="size-5 text-indigo-600" />
             Servers
           </h3>
           <p className="text-sm text-muted-foreground">
@@ -506,7 +506,7 @@ export function ServersPanel() {
               setEditingServer(null)
               setEditOpen(true)
             }}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white"
+            className="bg-indigo-600 hover:bg-indigo-700 text-white"
           >
             <Plus className="size-4 mr-1.5" />
             Add Server
@@ -524,8 +524,8 @@ export function ServersPanel() {
       ) : servers.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-16 text-center">
-            <div className="size-14 rounded-full bg-emerald-50 dark:bg-emerald-900/20 flex items-center justify-center mb-3">
-              <ServerIcon className="size-7 text-emerald-600" />
+            <div className="size-14 rounded-full bg-indigo-50 dark:bg-indigo-900/20 flex items-center justify-center mb-3">
+              <ServerIcon className="size-7 text-indigo-600" />
             </div>
             <p className="text-sm font-medium">No servers configured</p>
             <p className="text-xs text-muted-foreground mt-1 max-w-sm">
@@ -538,7 +538,7 @@ export function ServersPanel() {
                 setEditingServer(null)
                 setEditOpen(true)
               }}
-              className="mt-4 bg-emerald-600 hover:bg-emerald-700 text-white"
+              className="mt-4 bg-indigo-600 hover:bg-indigo-700 text-white"
             >
               <Plus className="size-4 mr-1.5" />
               Add Your First Server
@@ -627,8 +627,8 @@ function ServerCard({
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
-            <div className="size-9 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 flex items-center justify-center shrink-0">
-              <ServerIcon className="size-5 text-emerald-600" />
+            <div className="size-9 rounded-lg bg-indigo-50 dark:bg-indigo-900/20 flex items-center justify-center shrink-0">
+              <ServerIcon className="size-5 text-indigo-600" />
             </div>
             <div className="min-w-0">
               <CardTitle className="text-base flex items-center gap-1.5 truncate">
@@ -951,7 +951,7 @@ function EditServerDialog({
       <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/20">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <ServerIcon className="size-5 text-emerald-600" />
+            <ServerIcon className="size-5 text-indigo-600" />
             {isEdit ? 'Edit Server' : 'Add New Server'}
           </DialogTitle>
           <DialogDescription>
@@ -965,7 +965,7 @@ function EditServerDialog({
           {/* Basic Info */}
           <div className="space-y-3">
             <div className="flex items-center gap-2 text-sm font-medium">
-              <Globe className="size-4 text-emerald-600" />
+              <Globe className="size-4 text-indigo-600" />
               Basic Information
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1065,14 +1065,14 @@ function EditServerDialog({
           {/* SSH Connection */}
           <div className="space-y-3">
             <div className="flex items-center gap-2 text-sm font-medium">
-              <Key className="size-4 text-emerald-600" />
+              <Key className="size-4 text-indigo-600" />
               SSH Connection
             </div>
 
             {isEdit && (server?.hasSshKey || server?.hasSshPassword) && (
-              <div className="flex items-start gap-2 rounded-md border border-emerald-200 bg-emerald-50 dark:border-emerald-900/50 dark:bg-emerald-900/10 px-3 py-2 text-xs">
-                <Lock className="size-3.5 text-emerald-600 mt-0.5 shrink-0" />
-                <p className="text-emerald-700 dark:text-emerald-400">
+              <div className="flex items-start gap-2 rounded-md border border-indigo-200 bg-indigo-50 dark:border-indigo-900/50 dark:bg-indigo-900/10 px-3 py-2 text-xs">
+                <Lock className="size-3.5 text-indigo-600 mt-0.5 shrink-0" />
+                <p className="text-indigo-700 dark:text-indigo-400">
                   This server already has{' '}
                   {server.hasSshKey && server.hasSshPassword
                     ? 'an SSH key + password'
@@ -1175,9 +1175,9 @@ function EditServerDialog({
           </div>
 
           {/* Encryption notice */}
-          <div className="flex items-start gap-2 rounded-md border border-emerald-200 bg-emerald-50 dark:border-emerald-900/50 dark:bg-emerald-900/10 px-3 py-2.5 text-xs">
-            <Lock className="size-4 text-emerald-600 mt-0.5 shrink-0" />
-            <p className="text-emerald-700 dark:text-emerald-400">
+          <div className="flex items-start gap-2 rounded-md border border-indigo-200 bg-indigo-50 dark:border-indigo-900/50 dark:bg-indigo-900/10 px-3 py-2.5 text-xs">
+            <Lock className="size-4 text-indigo-600 mt-0.5 shrink-0" />
+            <p className="text-indigo-700 dark:text-indigo-400">
               <span className="font-medium">
                 SSH credentials are encrypted at rest with AES-256-GCM
               </span>{' '}
@@ -1194,7 +1194,7 @@ function EditServerDialog({
           <Button
             onClick={handleSave}
             disabled={saving}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white"
+            className="bg-indigo-600 hover:bg-indigo-700 text-white"
           >
             {saving ? (
               <>
@@ -1256,7 +1256,7 @@ function TestSshDialog({
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Zap className="size-5 text-emerald-600" />
+            <Zap className="size-5 text-indigo-600" />
             Test SSH Connection
           </DialogTitle>
           <DialogDescription>
@@ -1272,7 +1272,7 @@ function TestSshDialog({
         <div className="py-2">
           {loading && (
             <div className="flex flex-col items-center justify-center py-8 text-center">
-              <Loader2 className="size-8 text-emerald-600 animate-spin mb-3" />
+              <Loader2 className="size-8 text-indigo-600 animate-spin mb-3" />
               <p className="text-sm text-muted-foreground">
                 Testing SSH connection...
               </p>
@@ -1288,12 +1288,12 @@ function TestSshDialog({
               <div
                 className={`flex items-start gap-3 rounded-lg border p-4 ${
                   result.ok
-                    ? 'border-emerald-200 bg-emerald-50 dark:border-emerald-900/50 dark:bg-emerald-900/10'
+                    ? 'border-indigo-200 bg-indigo-50 dark:border-indigo-900/50 dark:bg-indigo-900/10'
                     : 'border-red-200 bg-red-50 dark:border-red-900/50 dark:bg-red-900/10'
                 }`}
               >
                 {result.ok ? (
-                  <CheckCircle2 className="size-6 text-emerald-600 shrink-0" />
+                  <CheckCircle2 className="size-6 text-indigo-600 shrink-0" />
                 ) : (
                   <XCircle className="size-6 text-red-600 shrink-0" />
                 )}
@@ -1301,7 +1301,7 @@ function TestSshDialog({
                   <p
                     className={`text-sm font-medium ${
                       result.ok
-                        ? 'text-emerald-700 dark:text-emerald-400'
+                        ? 'text-indigo-700 dark:text-indigo-400'
                         : 'text-red-700 dark:text-red-400'
                     }`}
                   >
@@ -1510,7 +1510,7 @@ function ProvisionDialog({
       <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/20">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Play className="size-5 text-emerald-600" />
+            <Play className="size-5 text-indigo-600" />
             Provisioning {server?.name}
           </DialogTitle>
           <DialogDescription>
@@ -1524,7 +1524,7 @@ function ProvisionDialog({
           {loading && (
             <div className="space-y-3">
               <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                <div className="absolute inset-y-0 left-0 w-1/3 bg-emerald-500 rounded-full animate-[indeterminate_1.5s_ease-in-out_infinite]" />
+                <div className="absolute inset-y-0 left-0 w-1/3 bg-indigo-500 rounded-full animate-[indeterminate_1.5s_ease-in-out_infinite]" />
               </div>
               <style>{`
                 @keyframes indeterminate {
@@ -1534,7 +1534,7 @@ function ProvisionDialog({
               `}</style>
               <div className="flex items-center justify-between text-xs text-muted-foreground">
                 <span className="flex items-center gap-1.5">
-                  <Loader2 className="size-3.5 animate-spin text-emerald-600" />
+                  <Loader2 className="size-3.5 animate-spin text-indigo-600" />
                   Running pipeline...
                 </span>
                 <span className="font-mono tabular-nums">
@@ -1564,7 +1564,7 @@ function ProvisionDialog({
 
               let iconWrapClass = 'bg-muted text-muted-foreground'
               if (status === 'success')
-                iconWrapClass = 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                iconWrapClass = 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400'
               else if (status === 'failed')
                 iconWrapClass = 'bg-red-500/10 text-red-600 dark:text-red-400'
               else if (status === 'skipped')
@@ -1574,7 +1574,7 @@ function ProvisionDialog({
 
               const connectorClass =
                 status === 'success'
-                  ? 'bg-emerald-500/50'
+                  ? 'bg-indigo-500/50'
                   : 'bg-border'
 
               return (
@@ -1610,7 +1610,7 @@ function ProvisionDialog({
                             variant="outline"
                             className={
                               status === 'success'
-                                ? 'text-[10px] bg-emerald-50 text-emerald-700 border-emerald-200'
+                                ? 'text-[10px] bg-indigo-50 text-indigo-700 border-indigo-200'
                                 : status === 'failed'
                                   ? 'text-[10px] bg-red-50 text-red-700 border-red-200'
                                   : 'text-[10px] bg-gray-50 text-gray-600 border-gray-200'
@@ -1648,20 +1648,20 @@ function ProvisionDialog({
             <div
               className={`rounded-lg border p-4 ${
                 result.ok
-                  ? 'border-emerald-200 bg-emerald-50 dark:border-emerald-900/50 dark:bg-emerald-900/10'
+                  ? 'border-indigo-200 bg-indigo-50 dark:border-indigo-900/50 dark:bg-indigo-900/10'
                   : 'border-red-200 bg-red-50 dark:border-red-900/50 dark:bg-red-900/10'
               }`}
             >
               <div className="flex items-center gap-2 mb-3">
                 {result.ok ? (
-                  <CheckCircle2 className="size-5 text-emerald-600" />
+                  <CheckCircle2 className="size-5 text-indigo-600" />
                 ) : (
                   <XCircle className="size-5 text-red-600" />
                 )}
                 <p
                   className={`text-sm font-medium ${
                     result.ok
-                      ? 'text-emerald-700 dark:text-emerald-400'
+                      ? 'text-indigo-700 dark:text-indigo-400'
                       : 'text-red-700 dark:text-red-400'
                   }`}
                 >
@@ -1726,7 +1726,7 @@ function ProvisionDialog({
           {!loading && result && !result.ok && (
             <Button
               onClick={runProvision}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+              className="bg-indigo-600 hover:bg-indigo-700 text-white"
             >
               <RotateCcw className="size-4 mr-2" />
               Retry Provisioning
@@ -1803,7 +1803,7 @@ function StatsDialog({
       <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/20">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Activity className="size-5 text-emerald-600" />
+            <Activity className="size-5 text-indigo-600" />
             Live Stats — {server?.name}
           </DialogTitle>
           <DialogDescription className="flex items-center gap-2 flex-wrap">
@@ -1839,7 +1839,7 @@ function StatsDialog({
 
           {loading && !stats && (
             <div className="flex items-center justify-center py-8">
-              <Loader2 className="size-6 text-emerald-600 animate-spin" />
+              <Loader2 className="size-6 text-indigo-600 animate-spin" />
             </div>
           )}
 
@@ -1922,7 +1922,7 @@ function StatsDialog({
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm flex items-center gap-2">
-                    <Container className="size-4 text-emerald-600" />
+                    <Container className="size-4 text-indigo-600" />
                     Docker Containers
                     <Badge variant="secondary" className="text-[10px] h-5">
                       {stats.containers.length}
@@ -1957,14 +1957,14 @@ function StatsDialog({
                                   <span
                                     className={`inline-flex items-center gap-1 ${
                                       c.status.toLowerCase().startsWith('up')
-                                        ? 'text-emerald-600'
+                                        ? 'text-indigo-600'
                                         : 'text-gray-500'
                                     }`}
                                   >
                                     <span
                                       className={`size-1.5 rounded-full ${
                                         c.status.toLowerCase().startsWith('up')
-                                          ? 'bg-emerald-500'
+                                          ? 'bg-indigo-500'
                                           : 'bg-gray-400'
                                       }`}
                                     />
@@ -2020,7 +2020,7 @@ function MetricCard({
   sublabel?: string
 }) {
   const color =
-    percent >= 85 ? 'text-red-600' : percent >= 65 ? 'text-amber-600' : 'text-emerald-600'
+    percent >= 85 ? 'text-red-600' : percent >= 65 ? 'text-amber-600' : 'text-indigo-600'
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -2120,7 +2120,7 @@ function CaddyfileDialog({
       <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/20">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <FileCode className="size-5 text-emerald-600" />
+            <FileCode className="size-5 text-indigo-600" />
             Caddyfile — {server?.name}
           </DialogTitle>
           <DialogDescription className="font-mono">
@@ -2131,7 +2131,7 @@ function CaddyfileDialog({
         <div className="py-2">
           {loading ? (
             <div className="flex items-center justify-center py-12">
-              <Loader2 className="size-6 text-emerald-600 animate-spin" />
+              <Loader2 className="size-6 text-indigo-600 animate-spin" />
             </div>
           ) : (
             <div className="relative rounded-lg border border-zinc-800 bg-zinc-950 overflow-hidden">
@@ -2139,7 +2139,7 @@ function CaddyfileDialog({
                 <div className="flex items-center gap-1.5">
                   <span className="size-2.5 rounded-full bg-red-500/80" />
                   <span className="size-2.5 rounded-full bg-amber-500/80" />
-                  <span className="size-2.5 rounded-full bg-emerald-500/80" />
+                  <span className="size-2.5 rounded-full bg-indigo-500/80" />
                   <span className="ml-2 text-[10px] text-zinc-500 font-mono">
                     Caddyfile
                   </span>
@@ -2152,7 +2152,7 @@ function CaddyfileDialog({
                 >
                   {copied ? (
                     <>
-                      <CheckCircle2 className="size-3 mr-1 text-emerald-500" />
+                      <CheckCircle2 className="size-3 mr-1 text-indigo-500" />
                       Copied
                     </>
                   ) : (
@@ -2182,7 +2182,7 @@ function CaddyfileDialog({
           <Button
             onClick={handleReload}
             disabled={reloading || loading}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white"
+            className="bg-indigo-600 hover:bg-indigo-700 text-white"
           >
             {reloading ? (
               <>

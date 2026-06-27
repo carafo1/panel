@@ -89,7 +89,7 @@ const DEFAULT_METHODS: Array<{
       instructions:
         'Transfer the amount to the bank account below and email proof of payment to billing@deployhub.io. Your subscription will be activated once the payment is verified.',
       bankName: 'Bank of Example',
-      accountName: 'DeployHub Inc.',
+      accountName: 'APSAMO Inc.',
       accountNumber: '0000-0000-0000',
       iban: '',
       swift: '',
@@ -308,7 +308,7 @@ export async function processPayment(
     try {
       const session = await createCheckoutSession({
         planId: opts.planId,
-        planName: opts.planName || 'DeployHub Purchase',
+        planName: opts.planName || 'APSAMO Purchase',
         amount: Math.round(opts.amount * 100), // Stripe wants cents
         currency: opts.currency,
         successUrl: opts.successUrl,
@@ -370,7 +370,7 @@ export async function processPayment(
       const waafiResult = await createWaafiPayment({
         amount: opts.amount,
         currency: opts.currency.toUpperCase() === 'USD' ? 'USD' : opts.currency,
-        description: `${opts.planName || 'DeployHub'} - ${opts.purchaseType || 'subscription'}`,
+        description: `${opts.planName || 'APSAMO'} - ${opts.purchaseType || 'subscription'}`,
         callbackUrl,
         returnUrl,
         reference,

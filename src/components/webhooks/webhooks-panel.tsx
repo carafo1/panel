@@ -150,15 +150,15 @@ function getEventBadgeColor(eventId: string): string {
   const prefix = eventId.split('.')[0]
   switch (prefix) {
     case 'deployment':
-      return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
+      return 'bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300'
     case 'domain':
       return 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
     case 'project':
-      return 'bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-300'
+      return 'bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300'
     case 'ssl':
-      return 'bg-cyan-100 text-cyan-700 dark:bg-cyan-950 dark:text-cyan-300'
+      return 'bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300'
     case 'payment':
-      return 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300'
+      return 'bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300'
     default:
       return 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'
   }
@@ -533,7 +533,7 @@ export default function WebhooksPanel() {
                 <p className="text-sm font-medium text-muted-foreground">Status</p>
                 <div className="flex items-center gap-2">
                   {selectedWebhook.active ? (
-                    <Badge className="bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+                    <Badge className="bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300">
                       <CheckCircle2 className="mr-1 h-3 w-3" />
                       Active
                     </Badge>
@@ -690,7 +690,7 @@ export default function WebhooksPanel() {
                         <TableCell>
                           <div className="flex items-center gap-1.5">
                             {d.success ? (
-                              <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                              <CheckCircle2 className="h-4 w-4 text-indigo-500" />
                             ) : (
                               <XCircle className="h-4 w-4 text-destructive" />
                             )}
@@ -758,7 +758,7 @@ export default function WebhooksPanel() {
         </div>
         <Button
           onClick={() => setCreateOpen(true)}
-          className="bg-emerald-600 hover:bg-emerald-700 shrink-0"
+          className="bg-indigo-600 hover:bg-indigo-700 shrink-0"
         >
           <Plus className="mr-1.5 h-4 w-4" />
           New Webhook
@@ -769,8 +769,8 @@ export default function WebhooksPanel() {
       {webhooks.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-16 text-center">
-            <div className="mb-4 rounded-full bg-emerald-100 p-4 dark:bg-emerald-950">
-              <Webhook className="h-8 w-8 text-emerald-600 dark:text-emerald-400" />
+            <div className="mb-4 rounded-full bg-indigo-100 p-4 dark:bg-indigo-950">
+              <Webhook className="h-8 w-8 text-indigo-600 dark:text-indigo-400" />
             </div>
             <h3 className="text-lg font-semibold">No webhooks configured</h3>
             <p className="mt-1 max-w-sm text-sm text-muted-foreground">
@@ -779,7 +779,7 @@ export default function WebhooksPanel() {
             </p>
             <Button
               onClick={() => setCreateOpen(true)}
-              className="mt-4 bg-emerald-600 hover:bg-emerald-700"
+              className="mt-4 bg-indigo-600 hover:bg-indigo-700"
             >
               <Plus className="mr-1.5 h-4 w-4" />
               Create Your First Webhook
@@ -800,8 +800,8 @@ export default function WebhooksPanel() {
                   {/* Left: info */}
                   <div className="min-w-0 flex-1 space-y-2">
                     <div className="flex items-center gap-2">
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-emerald-100 dark:bg-emerald-950">
-                        <Webhook className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-indigo-100 dark:bg-indigo-950">
+                        <Webhook className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
                       </div>
                       <div className="min-w-0 flex-1">
                         <h3 className="font-medium leading-tight">{wh.name}</h3>
@@ -860,7 +860,7 @@ export default function WebhooksPanel() {
                           checked={wh.active}
                           onCheckedChange={() => handleToggleActive(wh)}
                           aria-label={`Toggle ${wh.name}`}
-                          className="data-[state=checked]:bg-emerald-600"
+                          className="data-[state=checked]:bg-indigo-600"
                         />
                       )}
                       <span className="text-xs text-muted-foreground">
@@ -905,7 +905,7 @@ export default function WebhooksPanel() {
         <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Webhook className="h-5 w-5 text-emerald-600" />
+              <Webhook className="h-5 w-5 text-indigo-600" />
               Create Webhook
             </DialogTitle>
             <DialogDescription>
@@ -938,7 +938,7 @@ export default function WebhooksPanel() {
                 onChange={(e) => setCreateForm((p) => ({ ...p, url: e.target.value }))}
               />
               <p className="text-xs text-muted-foreground">
-                The URL where DeployHub will send HTTP POST requests.
+                The URL where APSAMO will send HTTP POST requests.
               </p>
             </div>
 
@@ -980,12 +980,12 @@ export default function WebhooksPanel() {
                 {WEBHOOK_EVENTS.map((evt) => (
                   <label
                     key={evt.id}
-                    className="flex items-start gap-3 rounded-lg border p-3 cursor-pointer transition-colors hover:bg-muted/50 has-[:checked]:border-emerald-500 has-[:checked]:bg-emerald-50 dark:has-[:checked]:bg-emerald-950/30"
+                    className="flex items-start gap-3 rounded-lg border p-3 cursor-pointer transition-colors hover:bg-muted/50 has-[:checked]:border-indigo-500 has-[:checked]:bg-indigo-50 dark:has-[:checked]:bg-indigo-950/30"
                   >
                     <Checkbox
                       checked={createForm.events.includes(evt.id)}
                       onCheckedChange={() => toggleEvent(evt.id)}
-                      className="mt-0.5 data-[state=checked]:bg-emerald-600 data-[state=checked]:border-emerald-600"
+                      className="mt-0.5 data-[state=checked]:bg-indigo-600 data-[state=checked]:border-indigo-600"
                     />
                     <div className="space-y-0.5">
                       <p className="text-sm font-medium leading-none">{evt.label}</p>
@@ -1004,7 +1004,7 @@ export default function WebhooksPanel() {
             <Button
               onClick={handleCreate}
               disabled={creating}
-              className="bg-emerald-600 hover:bg-emerald-700"
+              className="bg-indigo-600 hover:bg-indigo-700"
             >
               {creating ? (
                 <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />

@@ -100,14 +100,14 @@ function SidebarNavContent({
             }}
             className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200 ${
               isActive
-                ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400'
                 : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
             }`}
           >
-            <Icon className={`size-4 shrink-0 ${isActive ? 'text-emerald-500' : ''}`} />
+            <Icon className={`size-4 shrink-0 ${isActive ? 'text-indigo-500' : ''}`} />
             <span className="truncate">{item.label}</span>
             {isActive && (
-              <div className="ml-auto size-1.5 rounded-full bg-emerald-500" />
+              <div className="ml-auto size-1.5 rounded-full bg-indigo-500" />
             )}
           </button>
         )
@@ -143,10 +143,10 @@ export function DashboardLayout({ children, activeTab, onTabChange }: DashboardL
     <div className="flex h-full flex-col">
       {/* Logo */}
       <div className="flex items-center gap-2 px-5 py-5">
-        <div className="flex size-9 items-center justify-center rounded-lg bg-emerald-500 text-white">
+        <div className="flex size-9 items-center justify-center rounded-lg bg-indigo-500 text-white">
           <Globe className="size-5" />
         </div>
-        <span className="text-lg font-bold tracking-tight">DeployHub</span>
+        <span className="text-lg font-bold tracking-tight">APSAMO</span>
       </div>
 
       <Separator />
@@ -166,7 +166,7 @@ export function DashboardLayout({ children, activeTab, onTabChange }: DashboardL
       <div className="p-3">
         <div className="flex items-center gap-3 rounded-lg px-3 py-2">
           <Avatar className="size-8">
-            <AvatarFallback className="bg-emerald-100 text-emerald-700 text-xs font-semibold dark:bg-emerald-900 dark:text-emerald-300">
+            <AvatarFallback className="bg-indigo-100 text-indigo-700 text-xs font-semibold dark:bg-indigo-900 dark:text-indigo-300">
               {user ? getInitials(user.name) : 'U'}
             </AvatarFallback>
           </Avatar>
@@ -270,7 +270,7 @@ export function DashboardLayout({ children, activeTab, onTabChange }: DashboardL
               <TooltipTrigger asChild>
                 <Button variant="ghost" size="icon" className="relative">
                   <Bell className="size-4" />
-                  <Badge className="absolute -top-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full bg-emerald-500 p-0 text-[10px] text-white">
+                  <Badge className="absolute -top-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full bg-indigo-500 p-0 text-[10px] text-white">
                     3
                   </Badge>
                   <span className="sr-only">Notifications</span>
@@ -284,7 +284,7 @@ export function DashboardLayout({ children, activeTab, onTabChange }: DashboardL
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon" className="rounded-full">
                   <Avatar className="size-8">
-                    <AvatarFallback className="bg-emerald-100 text-emerald-700 text-xs font-semibold dark:bg-emerald-900 dark:text-emerald-300">
+                    <AvatarFallback className="bg-indigo-100 text-indigo-700 text-xs font-semibold dark:bg-indigo-900 dark:text-indigo-300">
                       {user ? getInitials(user.name) : 'U'}
                     </AvatarFallback>
                   </Avatar>

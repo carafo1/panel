@@ -189,10 +189,10 @@ function Dashboard() {
       >
         {/* Logo */}
         <div className="flex items-center gap-2.5 px-4 py-4 border-b">
-          <div className="size-8 rounded-lg bg-emerald-600 flex items-center justify-center">
+          <div className="size-8 rounded-lg bg-indigo-600 flex items-center justify-center">
             <Rocket className="size-4 text-white" />
           </div>
-          <span className="font-bold text-lg tracking-tight">DeployHub</span>
+          <span className="font-bold text-lg tracking-tight">APSAMO</span>
           <Button
             variant="ghost"
             size="icon"
@@ -217,13 +217,13 @@ function Dashboard() {
                 }}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                   isActive
-                    ? 'bg-emerald-600/10 text-emerald-600 dark:text-emerald-400'
+                    ? 'bg-indigo-600/10 text-indigo-600 dark:text-indigo-400'
                     : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                 }`}
               >
                 <Icon className="size-4" />
                 {item.label}
-                {isActive && <div className="ml-auto size-1.5 rounded-full bg-emerald-500" />}
+                {isActive && <div className="ml-auto size-1.5 rounded-full bg-indigo-500" />}
               </button>
             )
           })}
@@ -232,8 +232,8 @@ function Dashboard() {
         {/* User section */}
         <div className="p-3 border-t">
           <div className="flex items-center gap-3 px-3 py-2">
-            <div className="size-9 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
-              <span className="text-sm font-semibold text-emerald-700">
+            <div className="size-9 rounded-full bg-indigo-100 flex items-center justify-center shrink-0">
+              <span className="text-sm font-semibold text-indigo-700">
                 {user?.name?.charAt(0)?.toUpperCase() || 'U'}
               </span>
             </div>
@@ -267,7 +267,7 @@ function Dashboard() {
             {dashboardTab === 'deployments' && <Badge variant="outline" className="text-[10px] hidden sm:inline-flex">CI/CD</Badge>}
             {dashboardTab === 'github' && <Badge variant="outline" className="text-[10px] hidden sm:inline-flex">Repos</Badge>}
             {dashboardTab === 'monitoring' && <Badge variant="outline" className="text-[10px] hidden sm:inline-flex">Uptime</Badge>}
-            {dashboardTab === 'provisioning' && <Badge variant="outline" className="text-[10px] hidden sm:inline-flex bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30">Auto</Badge>}
+            {dashboardTab === 'provisioning' && <Badge variant="outline" className="text-[10px] hidden sm:inline-flex bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/30">Auto</Badge>}
           </div>
           <div className="ml-auto flex items-center gap-2">
             <button
@@ -309,8 +309,8 @@ function Dashboard() {
             )}
             {/* Verification in progress */}
             {verifying && (
-              <div className="mb-4 flex items-center gap-2 p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg text-blue-300 text-sm">
-                <div className="size-4 animate-spin rounded-full border-2 border-blue-400 border-t-transparent" />
+              <div className="mb-4 flex items-center gap-2 p-3 bg-indigo-500/10 border border-indigo-500/30 rounded-lg text-indigo-300 text-sm">
+                <div className="size-4 animate-spin rounded-full border-2 border-indigo-400 border-t-transparent" />
                 Verifying your email...
               </div>
             )}
@@ -321,7 +321,7 @@ function Dashboard() {
 
           {/* Footer */}
           <footer className="border-t px-4 py-4 text-center text-xs text-muted-foreground mt-auto">
-            © 2025 DeployHub. All rights reserved. · Automated Hosting & Domain Platform
+            © 2025 APSAMO. All rights reserved. · Automated Hosting & Domain Platform
           </footer>
         </div>
 
@@ -337,7 +337,7 @@ function Dashboard() {
                   onClick={() => setDashboardTab(item.id)}
                   className={`flex flex-col items-center justify-center gap-0.5 px-3 py-2 rounded-lg min-w-[56px] transition-all duration-200 mobile-nav-indicator ${
                     isActive
-                      ? 'text-emerald-600 dark:text-emerald-400 active scale-105'
+                      ? 'text-indigo-600 dark:text-indigo-400 active scale-105'
                       : 'text-muted-foreground hover:text-foreground'
                   }`}
                 >
@@ -429,8 +429,8 @@ export default function Home() {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="flex flex-col items-center gap-3">
-          <div className="size-10 animate-spin rounded-full border-4 border-emerald-600 border-t-transparent" />
-          <p className="text-sm text-muted-foreground">Loading DeployHub...</p>
+          <div className="size-10 animate-spin rounded-full border-4 border-indigo-600 border-t-transparent" />
+          <p className="text-sm text-muted-foreground">Loading APSAMO...</p>
         </div>
       </div>
     )

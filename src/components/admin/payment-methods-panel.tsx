@@ -182,7 +182,7 @@ function ConfigDialog({
       <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Icon className="size-5 text-emerald-600" />
+            <Icon className="size-5 text-indigo-600" />
             Configure {method.displayName}
           </DialogTitle>
           <DialogDescription>
@@ -277,7 +277,7 @@ function ConfigDialog({
           <Button
             onClick={handleSave}
             disabled={loading}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white"
+            className="bg-indigo-600 hover:bg-indigo-700 text-white"
           >
             {loading ? (
               <span className="flex items-center gap-2">
@@ -406,7 +406,7 @@ export function PaymentMethodsPanel() {
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
               <CardTitle className="flex items-center gap-2">
-                <CreditCard className="size-5 text-emerald-600" />
+                <CreditCard className="size-5 text-indigo-600" />
                 Payment Methods
               </CardTitle>
               <CardDescription>
@@ -421,7 +421,7 @@ export function PaymentMethodsPanel() {
                     ? 'bg-red-100 text-red-700 border-red-200'
                     : activeCount === 1
                       ? 'bg-yellow-100 text-yellow-700 border-yellow-200'
-                      : 'bg-emerald-100 text-emerald-700 border-emerald-200'
+                      : 'bg-indigo-100 text-indigo-700 border-indigo-200'
                 }
               >
                 {activeCount} active
@@ -464,7 +464,7 @@ export function PaymentMethodsPanel() {
               key={m.method}
               className={
                 m.active
-                  ? 'border-emerald-200'
+                  ? 'border-indigo-200'
                   : 'opacity-90'
               }
             >
@@ -474,7 +474,7 @@ export function PaymentMethodsPanel() {
                     <div
                       className={`size-10 rounded-lg flex items-center justify-center ${
                         m.active
-                          ? 'bg-emerald-50 text-emerald-600'
+                          ? 'bg-indigo-50 text-indigo-600'
                           : 'bg-muted text-muted-foreground'
                       }`}
                     >
@@ -509,7 +509,7 @@ export function PaymentMethodsPanel() {
                     variant="outline"
                     className={
                       m.active
-                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                        ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
                         : 'bg-gray-50 text-gray-600 border-gray-200'
                     }
                   >

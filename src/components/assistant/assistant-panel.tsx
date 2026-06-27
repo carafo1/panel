@@ -33,7 +33,7 @@ interface ChatMessage {
 const QUICK_PROMPTS = [
   { label: 'Help me deploy my first project', icon: Rocket, prompt: 'Help me deploy my first project. What steps do I need to follow?' },
   { label: 'Configure DNS for my domain', icon: Globe, prompt: 'How do I configure DNS for my domain? What records do I need?' },
-  { label: 'Explain CI/CD pipelines', icon: GitMerge, prompt: 'Explain CI/CD pipelines and how they work in DeployHub.' },
+  { label: 'Explain CI/CD pipelines', icon: GitMerge, prompt: 'Explain CI/CD pipelines and how they work in APSAMO.' },
   { label: 'Troubleshoot deployment failure', icon: AlertTriangle, prompt: 'My deployment failed. How can I troubleshoot deployment failures?' },
   { label: 'Best practices for production', icon: Shield, prompt: 'What are the best practices for deploying applications to production?' },
 ]
@@ -52,7 +52,7 @@ function renderMarkdown(text: string) {
   })
 
   // Inline code
-  html = html.replace(/`([^`]+)`/g, '<code class="bg-muted px-1.5 py-0.5 rounded text-sm font-mono text-emerald-700 dark:text-emerald-400">$1</code>')
+  html = html.replace(/`([^`]+)`/g, '<code class="bg-muted px-1.5 py-0.5 rounded text-sm font-mono text-indigo-700 dark:text-indigo-400">$1</code>')
 
   // Bold
   html = html.replace(/\*\*([^*]+)\*\*/g, '<strong class="font-semibold">$1</strong>')
@@ -194,7 +194,7 @@ export default function AssistantPanel() {
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
-          <div className="size-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-lg shadow-emerald-500/20">
+          <div className="size-10 rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-500/20">
             <Sparkles className="size-5 text-white" />
           </div>
           <div>
@@ -234,14 +234,14 @@ export default function AssistantPanel() {
             {messages.length === 0 ? (
               /* Empty state with quick prompts */
               <div className="flex flex-col items-center justify-center py-12 px-4">
-                <div className="size-16 rounded-2xl bg-gradient-to-br from-emerald-500/20 to-teal-500/20 flex items-center justify-center mb-4">
-                  <Bot className="size-8 text-emerald-600 dark:text-emerald-400" />
+                <div className="size-16 rounded-2xl bg-gradient-to-br from-indigo-500/20 to-indigo-500/20 flex items-center justify-center mb-4">
+                  <Bot className="size-8 text-indigo-600 dark:text-indigo-400" />
                 </div>
                 <h3 className="text-lg font-semibold mb-1">
                   How can I help you?
                 </h3>
                 <p className="text-sm text-muted-foreground text-center max-w-md mb-6">
-                  I&apos;m your DeployHub AI assistant. Ask me anything about hosting, domains, deployments, CI/CD, or cloud infrastructure.
+                  I&apos;m your APSAMO AI assistant. Ask me anything about hosting, domains, deployments, CI/CD, or cloud infrastructure.
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-lg">
                   {QUICK_PROMPTS.map((prompt) => {
@@ -253,8 +253,8 @@ export default function AssistantPanel() {
                         disabled={isLoading}
                         className="flex items-center gap-2.5 p-3 rounded-lg border border-border/60 bg-card hover:bg-muted/50 transition-colors text-left group"
                       >
-                        <div className="size-8 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0 group-hover:bg-emerald-500/20 transition-colors">
-                          <Icon className="size-4 text-emerald-600 dark:text-emerald-400" />
+                        <div className="size-8 rounded-lg bg-indigo-500/10 flex items-center justify-center shrink-0 group-hover:bg-indigo-500/20 transition-colors">
+                          <Icon className="size-4 text-indigo-600 dark:text-indigo-400" />
                         </div>
                         <span className="text-sm font-medium leading-snug">
                           {prompt.label}
@@ -275,20 +275,20 @@ export default function AssistantPanel() {
                     }`}
                   >
                     {msg.role === 'assistant' && (
-                      <div className="size-7 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shrink-0 mt-1">
+                      <div className="size-7 rounded-lg bg-gradient-to-br from-indigo-500 to-indigo-600 flex items-center justify-center shrink-0 mt-1">
                         <Bot className="size-3.5 text-white" />
                       </div>
                     )}
                     <div
                       className={`max-w-[80%] sm:max-w-[70%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
                         msg.role === 'user'
-                          ? 'bg-emerald-600 text-white rounded-br-md'
+                          ? 'bg-indigo-600 text-white rounded-br-md'
                           : 'bg-muted/80 text-foreground rounded-bl-md'
                       }`}
                     >
                       {msg.role === 'assistant' ? (
                         <div
-                          className="prose prose-sm dark:prose-invert max-w-none [&_pre]:bg-muted [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-2 [&_pre]:overflow-x-auto [&_code]:text-emerald-700 [&_code]:dark:text-emerald-400 [&_code]:bg-muted [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-sm [&_code]:font-mono"
+                          className="prose prose-sm dark:prose-invert max-w-none [&_pre]:bg-muted [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-2 [&_pre]:overflow-x-auto [&_code]:text-indigo-700 [&_code]:dark:text-indigo-400 [&_code]:bg-muted [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-sm [&_code]:font-mono"
                           dangerouslySetInnerHTML={{
                             __html: renderMarkdown(msg.content),
                           }}
@@ -308,14 +308,14 @@ export default function AssistantPanel() {
                 {/* Typing indicator */}
                 {isLoading && (
                   <div className="flex gap-2.5 justify-start">
-                    <div className="size-7 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shrink-0 mt-1">
+                    <div className="size-7 rounded-lg bg-gradient-to-br from-indigo-500 to-indigo-600 flex items-center justify-center shrink-0 mt-1">
                       <Bot className="size-3.5 text-white" />
                     </div>
                     <div className="bg-muted/80 rounded-2xl rounded-bl-md px-4 py-3">
                       <div className="flex items-center gap-1.5">
-                        <div className="size-2 rounded-full bg-emerald-500 animate-[bounce_1s_ease-in-out_infinite]" />
-                        <div className="size-2 rounded-full bg-emerald-500 animate-[bounce_1s_ease-in-out_0.15s_infinite]" />
-                        <div className="size-2 rounded-full bg-emerald-500 animate-[bounce_1s_ease-in-out_0.3s_infinite]" />
+                        <div className="size-2 rounded-full bg-indigo-500 animate-[bounce_1s_ease-in-out_infinite]" />
+                        <div className="size-2 rounded-full bg-indigo-500 animate-[bounce_1s_ease-in-out_0.15s_infinite]" />
+                        <div className="size-2 rounded-full bg-indigo-500 animate-[bounce_1s_ease-in-out_0.3s_infinite]" />
                       </div>
                     </div>
                   </div>
@@ -335,13 +335,13 @@ export default function AssistantPanel() {
               onChange={(e) => setInput(e.target.value)}
               placeholder="Ask about hosting, deployment, DNS..."
               disabled={isLoading}
-              className="flex-1 h-10 rounded-lg border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex-1 h-10 rounded-lg border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
             />
             <Button
               type="submit"
               size="icon"
               disabled={!input.trim() || isLoading}
-              className="size-10 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white shrink-0"
+              className="size-10 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white shrink-0"
             >
               {isLoading ? (
                 <Loader2 className="size-4 animate-spin" />

@@ -215,10 +215,10 @@ const STAGE_TYPES: {
     emoji: '🧪',
     icon: TestTube,
     defaultCommand: 'npm test',
-    color: 'text-sky-600 dark:text-sky-400',
-    accent: 'border-sky-400 dark:border-sky-600',
-    border: 'border-sky-300 dark:border-sky-700',
-    bg: 'bg-sky-50 dark:bg-sky-950/30',
+    color: 'text-indigo-600 dark:text-indigo-400',
+    accent: 'border-indigo-400 dark:border-indigo-600',
+    border: 'border-indigo-300 dark:border-indigo-700',
+    bg: 'bg-indigo-50 dark:bg-indigo-950/30',
   },
   {
     type: 'deploy',
@@ -226,10 +226,10 @@ const STAGE_TYPES: {
     emoji: '🚀',
     icon: Rocket,
     defaultCommand: 'npm run deploy',
-    color: 'text-emerald-600 dark:text-emerald-400',
-    accent: 'border-emerald-400 dark:border-emerald-600',
-    border: 'border-emerald-300 dark:border-emerald-700',
-    bg: 'bg-emerald-50 dark:bg-emerald-950/30',
+    color: 'text-indigo-600 dark:text-indigo-400',
+    accent: 'border-indigo-400 dark:border-indigo-600',
+    border: 'border-indigo-300 dark:border-indigo-700',
+    bg: 'bg-indigo-50 dark:bg-indigo-950/30',
   },
   {
     type: 'package',
@@ -248,10 +248,10 @@ const STAGE_TYPES: {
     emoji: '🔍',
     icon: Search,
     defaultCommand: 'npx eslint .',
-    color: 'text-violet-600 dark:text-violet-400',
-    accent: 'border-violet-400 dark:border-violet-600',
-    border: 'border-violet-300 dark:border-violet-700',
-    bg: 'bg-violet-50 dark:bg-violet-950/30',
+    color: 'text-indigo-600 dark:text-indigo-400',
+    accent: 'border-indigo-400 dark:border-indigo-600',
+    border: 'border-indigo-300 dark:border-indigo-700',
+    bg: 'bg-indigo-50 dark:bg-indigo-950/30',
   },
   {
     type: 'notify',
@@ -259,10 +259,10 @@ const STAGE_TYPES: {
     emoji: '📧',
     icon: Mail,
     defaultCommand: 'curl -X POST $WEBHOOK_URL',
-    color: 'text-pink-600 dark:text-pink-400',
-    accent: 'border-pink-400 dark:border-pink-600',
-    border: 'border-pink-300 dark:border-pink-700',
-    bg: 'bg-pink-50 dark:bg-pink-950/30',
+    color: 'text-indigo-600 dark:text-indigo-400',
+    accent: 'border-indigo-400 dark:border-indigo-600',
+    border: 'border-indigo-300 dark:border-indigo-700',
+    bg: 'bg-indigo-50 dark:bg-indigo-950/30',
   },
   {
     type: 'custom',
@@ -364,7 +364,7 @@ function formatDuration(seconds: number | null | undefined): string {
 function getStatusColor(status: string): string {
   switch (status) {
     case 'success':
-      return 'bg-emerald-500'
+      return 'bg-indigo-500'
     case 'failed':
       return 'bg-red-500'
     case 'running':
@@ -372,7 +372,7 @@ function getStatusColor(status: string): string {
     case 'cancelled':
       return 'bg-gray-400'
     case 'active':
-      return 'bg-emerald-500'
+      return 'bg-indigo-500'
     case 'paused':
       return 'bg-amber-500'
     case 'draft':
@@ -428,7 +428,7 @@ function StageTypeIcon({ type, className }: { type: string; className?: string }
 function PipelineStatusBadge({ status }: { status: string }) {
   const config: Record<string, { label: string; className: string }> = {
     draft: { label: 'Draft', className: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300 border-gray-200 dark:border-gray-700' },
-    active: { label: 'Active', className: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' },
+    active: { label: 'Active', className: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800' },
     paused: { label: 'Paused', className: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 border-amber-200 dark:border-amber-800' },
   }
   const c = config[status] || config.draft
@@ -447,7 +447,7 @@ function RunStatusBadge({ status }: { status: string }) {
     success: {
       label: 'Success',
       icon: <CheckCircle2 className="size-3" />,
-      className: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
+      className: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300',
     },
     failed: {
       label: 'Failed',
@@ -490,7 +490,7 @@ function StagePickerDialog({
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Plus className="size-5 text-emerald-600" />
+            <Plus className="size-5 text-indigo-600" />
             Add Stage
           </DialogTitle>
           <DialogDescription>
@@ -693,7 +693,7 @@ function StageConfigDialogInner({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={handleSave} className="bg-emerald-600 hover:bg-emerald-700">
+          <Button onClick={handleSave} className="bg-indigo-600 hover:bg-indigo-700">
             Save Configuration
           </Button>
         </DialogFooter>
@@ -1076,15 +1076,15 @@ function HorizontalRunProgress({
               glow: '',
             },
             running: {
-              border: 'border-sky-400 dark:border-sky-600',
-              bg: 'bg-sky-50 dark:bg-sky-950/30',
-              dot: 'bg-sky-500',
-              glow: 'ring-2 ring-sky-400/30',
+              border: 'border-indigo-400 dark:border-indigo-600',
+              bg: 'bg-indigo-50 dark:bg-indigo-950/30',
+              dot: 'bg-indigo-500',
+              glow: 'ring-2 ring-indigo-400/30',
             },
             success: {
-              border: 'border-emerald-400 dark:border-emerald-600',
-              bg: 'bg-emerald-50 dark:bg-emerald-950/30',
-              dot: 'bg-emerald-500',
+              border: 'border-indigo-400 dark:border-indigo-600',
+              bg: 'bg-indigo-50 dark:bg-indigo-950/30',
+              dot: 'bg-indigo-500',
               glow: '',
             },
             failed: {
@@ -1106,11 +1106,11 @@ function HorizontalRunProgress({
 
           const statusIcon =
             stage.status === 'success' ? (
-              <CheckCircle2 className="size-4 text-emerald-500" />
+              <CheckCircle2 className="size-4 text-indigo-500" />
             ) : stage.status === 'failed' ? (
               <XCircle className="size-4 text-red-500" />
             ) : stage.status === 'running' ? (
-              <Loader2 className="size-4 text-sky-500 animate-spin" />
+              <Loader2 className="size-4 text-indigo-500 animate-spin" />
             ) : stage.status === 'skipped' ? (
               <Clock className="size-4 text-yellow-500" />
             ) : (
@@ -1122,7 +1122,7 @@ function HorizontalRunProgress({
               <button
                 type="button"
                 onClick={() => onSelectStage(isSelected ? null : index)}
-                className={`relative w-48 rounded-xl border-2 p-3 transition-all hover:shadow-md text-left ${st.border} ${st.bg} ${st.glow} ${isSelected ? 'ring-2 ring-emerald-500/50 shadow-lg' : ''}`}
+                className={`relative w-48 rounded-xl border-2 p-3 transition-all hover:shadow-md text-left ${st.border} ${st.bg} ${st.glow} ${isSelected ? 'ring-2 ring-indigo-500/50 shadow-lg' : ''}`}
               >
                 {/* Status indicator */}
                 <div className="absolute -top-1.5 -left-1.5">
@@ -1163,13 +1163,13 @@ function HorizontalRunProgress({
                 <div className="flex items-center h-28 px-0.5">
                   <div className="flex items-center">
                     <div className={`w-5 h-0.5 ${
-                      stage.status === 'success' ? 'bg-emerald-300 dark:bg-emerald-700' :
-                      stage.status === 'running' ? 'bg-sky-300 dark:bg-sky-700' :
+                      stage.status === 'success' ? 'bg-indigo-300 dark:bg-indigo-700' :
+                      stage.status === 'running' ? 'bg-indigo-300 dark:bg-indigo-700' :
                       'bg-border'
                     }`} />
                     <ArrowRight className={`size-3 -ml-0.5 ${
-                      stage.status === 'success' ? 'text-emerald-400' :
-                      stage.status === 'running' ? 'text-sky-400' :
+                      stage.status === 'success' ? 'text-indigo-400' :
+                      stage.status === 'running' ? 'text-indigo-400' :
                       'text-muted-foreground'
                     }`} />
                   </div>
@@ -1207,11 +1207,11 @@ function RunTimeline({
       {stageResults.map((stage, index) => {
         const statusIcon =
           stage.status === 'success' ? (
-            <CheckCircle2 className="size-5 text-emerald-500" />
+            <CheckCircle2 className="size-5 text-indigo-500" />
           ) : stage.status === 'failed' ? (
             <XCircle className="size-5 text-red-500" />
           ) : stage.status === 'running' ? (
-            <Loader2 className="size-5 text-sky-500 animate-spin" />
+            <Loader2 className="size-5 text-indigo-500 animate-spin" />
           ) : stage.status === 'skipped' ? (
             <Clock className="size-5 text-yellow-500" />
           ) : (
@@ -1220,11 +1220,11 @@ function RunTimeline({
 
         const statusBg =
           stage.status === 'success'
-            ? 'bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800'
+            ? 'bg-indigo-50 dark:bg-indigo-950/20 border-indigo-200 dark:border-indigo-800'
             : stage.status === 'failed'
               ? 'bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-800'
               : stage.status === 'running'
-                ? 'bg-sky-50 dark:bg-sky-950/20 border-sky-200 dark:border-sky-800'
+                ? 'bg-indigo-50 dark:bg-indigo-950/20 border-indigo-200 dark:border-indigo-800'
                 : 'bg-gray-50 dark:bg-gray-900/20 border-gray-200 dark:border-gray-800'
 
         const isExpanded = expandedStage === index
@@ -1238,7 +1238,7 @@ function RunTimeline({
               </button>
               {index < stageResults.length - 1 && (
                 <div className={`w-px flex-1 min-h-[24px] my-1 ${
-                  stage.status === 'success' ? 'bg-emerald-300 dark:bg-emerald-700' :
+                  stage.status === 'success' ? 'bg-indigo-300 dark:bg-indigo-700' :
                   stage.status === 'failed' ? 'bg-red-300 dark:bg-red-700' :
                   'bg-border'
                 }`} />
@@ -1298,11 +1298,11 @@ function PipelineFlowchart({ stages }: { stages: PipelineStage[] }) {
       <div className="flex items-center gap-0 min-w-max">
         {/* Start node */}
         <div className="flex items-center">
-          <div className="w-10 h-10 rounded-full bg-emerald-100 dark:bg-emerald-900/40 border-2 border-emerald-400 dark:border-emerald-600 flex items-center justify-center">
-            <Play className="size-4 text-emerald-600 dark:text-emerald-400" />
+          <div className="w-10 h-10 rounded-full bg-indigo-100 dark:bg-indigo-900/40 border-2 border-indigo-400 dark:border-indigo-600 flex items-center justify-center">
+            <Play className="size-4 text-indigo-600 dark:text-indigo-400" />
           </div>
-          <div className="w-8 h-0.5 bg-emerald-300 dark:bg-emerald-700" />
-          <ArrowRight className="size-4 text-emerald-400 -ml-0.5" />
+          <div className="w-8 h-0.5 bg-indigo-300 dark:bg-indigo-700" />
+          <ArrowRight className="size-4 text-indigo-400 -ml-0.5" />
         </div>
 
         {stages.map((stage, index) => {
@@ -1675,7 +1675,7 @@ export default function PipelinesPanel() {
           </div>
           <Button
             onClick={() => setCreateDialogOpen(true)}
-            className="bg-emerald-600 hover:bg-emerald-700"
+            className="bg-indigo-600 hover:bg-indigo-700"
           >
             <Plus className="size-4 mr-1.5" />
             New Pipeline
@@ -1693,7 +1693,7 @@ export default function PipelinesPanel() {
               </p>
               <Button
                 onClick={() => setCreateDialogOpen(true)}
-                className="bg-emerald-600 hover:bg-emerald-700"
+                className="bg-indigo-600 hover:bg-indigo-700"
               >
                 <Plus className="size-4 mr-1.5" />
                 Create Pipeline
@@ -1718,7 +1718,7 @@ export default function PipelinesPanel() {
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
-                        <GitMerge className="size-4 text-emerald-600 shrink-0" />
+                        <GitMerge className="size-4 text-indigo-600 shrink-0" />
                         <h3 className="font-semibold truncate">{pipeline.name}</h3>
                         <PipelineStatusBadge status={pipeline.status} />
                       </div>
@@ -1934,7 +1934,7 @@ export default function PipelinesPanel() {
               <Button
                 size="sm"
                 onClick={() => handleStatusChange(selectedPipeline, 'active')}
-                className="bg-emerald-600 hover:bg-emerald-700 h-8"
+                className="bg-indigo-600 hover:bg-indigo-700 h-8"
               >
                 <Play className="size-3.5 mr-1" />
                 Activate
@@ -1946,7 +1946,7 @@ export default function PipelinesPanel() {
                   size="sm"
                   onClick={() => handleTriggerRun(selectedPipeline)}
                   disabled={triggeringRun}
-                  className="bg-emerald-600 hover:bg-emerald-700 h-8"
+                  className="bg-indigo-600 hover:bg-indigo-700 h-8"
                 >
                   {triggeringRun ? (
                     <Loader2 className="size-3.5 mr-1 animate-spin" />
@@ -1970,7 +1970,7 @@ export default function PipelinesPanel() {
               <Button
                 size="sm"
                 onClick={() => handleStatusChange(selectedPipeline, 'active')}
-                className="bg-emerald-600 hover:bg-emerald-700 h-8"
+                className="bg-indigo-600 hover:bg-indigo-700 h-8"
               >
                 <Play className="size-3.5 mr-1" />
                 Resume
@@ -2041,7 +2041,7 @@ export default function PipelinesPanel() {
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm flex items-center gap-2">
-                <Zap className="size-3.5 text-emerald-600" />
+                <Zap className="size-3.5 text-indigo-600" />
                 Trigger Configuration
               </CardTitle>
             </CardHeader>
@@ -2098,7 +2098,7 @@ export default function PipelinesPanel() {
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-base flex items-center gap-2">
-                  <GitMerge className="size-4 text-emerald-600" />
+                  <GitMerge className="size-4 text-indigo-600" />
                   Pipeline Flowchart
                 </CardTitle>
               </CardHeader>
@@ -2111,7 +2111,7 @@ export default function PipelinesPanel() {
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-base flex items-center gap-2">
-                  <Clock className="size-4 text-emerald-600" />
+                  <Clock className="size-4 text-indigo-600" />
                   Recent Runs
                 </CardTitle>
               </CardHeader>
@@ -2175,9 +2175,9 @@ export default function PipelinesPanel() {
                                         <TooltipTrigger asChild>
                                           <div
                                             className={`h-1.5 flex-1 min-w-3 rounded-full ${
-                                              sStatus === 'success' ? 'bg-emerald-500' :
+                                              sStatus === 'success' ? 'bg-indigo-500' :
                                               sStatus === 'failed' ? 'bg-red-500' :
-                                              sStatus === 'running' ? 'bg-sky-500 animate-pulse' :
+                                              sStatus === 'running' ? 'bg-indigo-500 animate-pulse' :
                                               sStatus === 'skipped' ? 'bg-yellow-500' :
                                               'bg-gray-300 dark:bg-gray-700'
                                             }`}
@@ -2215,7 +2215,7 @@ export default function PipelinesPanel() {
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-base flex items-center gap-2">
-                    <Settings className="size-4 text-emerald-600" />
+                    <Settings className="size-4 text-indigo-600" />
                     Pipeline Stages
                   </CardTitle>
                   <Button
@@ -2253,7 +2253,7 @@ export default function PipelinesPanel() {
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-base flex items-center gap-2">
-                  <Clock className="size-4 text-emerald-600" />
+                  <Clock className="size-4 text-indigo-600" />
                   Run History
                 </CardTitle>
               </CardHeader>
@@ -2372,7 +2372,7 @@ export default function PipelinesPanel() {
                 size="sm"
                 onClick={() => handleTriggerRun(selectedPipeline)}
                 disabled={triggeringRun}
-                className="bg-emerald-600 hover:bg-emerald-700 h-8"
+                className="bg-indigo-600 hover:bg-indigo-700 h-8"
               >
                 {triggeringRun ? (
                   <Loader2 className="size-3.5 mr-1 animate-spin" />
@@ -2433,7 +2433,7 @@ export default function PipelinesPanel() {
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
-              <GitMerge className="size-4 text-emerald-600" />
+              <GitMerge className="size-4 text-indigo-600" />
               Stage Progress
             </CardTitle>
           </CardHeader>
@@ -2449,7 +2449,7 @@ export default function PipelinesPanel() {
 
         {/* Selected Stage Detail */}
         {selectedRunStage !== null && stageResults[selectedRunStage] && (
-          <Card className="border-emerald-200 dark:border-emerald-800">
+          <Card className="border-indigo-200 dark:border-indigo-800">
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-base flex items-center gap-2">
@@ -2496,7 +2496,7 @@ export default function PipelinesPanel() {
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
-              <GitMerge className="size-4 text-emerald-600" />
+              <GitMerge className="size-4 text-indigo-600" />
               Stage Results
             </CardTitle>
           </CardHeader>
@@ -2515,7 +2515,7 @@ export default function PipelinesPanel() {
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
-              <Settings className="size-4 text-emerald-600" />
+              <Settings className="size-4 text-indigo-600" />
               Raw Output
             </CardTitle>
           </CardHeader>
@@ -2542,7 +2542,7 @@ export default function PipelinesPanel() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <GitMerge className="size-5 text-emerald-600" />
+              <GitMerge className="size-5 text-indigo-600" />
               Create Pipeline
             </DialogTitle>
             <DialogDescription>
@@ -2606,7 +2606,7 @@ export default function PipelinesPanel() {
             <Button
               onClick={handleCreatePipeline}
               disabled={creating || !newPipelineName.trim() || !newPipelineProjectId}
-              className="bg-emerald-600 hover:bg-emerald-700"
+              className="bg-indigo-600 hover:bg-indigo-700"
             >
               {creating ? (
                 <>

@@ -98,9 +98,9 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
 // ── Status badge ───────────────────────────────────────────────────────
 const STATUS_CONFIG: Record<string, { className: string; label: string }> = {
   queued: { className: 'bg-yellow-100 text-yellow-700 border-yellow-200', label: 'Queued' },
-  building: { className: 'bg-blue-100 text-blue-700 border-blue-200', label: 'Building' },
-  deploying: { className: 'bg-purple-100 text-purple-700 border-purple-200', label: 'Deploying' },
-  live: { className: 'bg-emerald-100 text-emerald-700 border-emerald-200', label: 'Live' },
+  building: { className: 'bg-indigo-100 text-indigo-700 border-indigo-200', label: 'Building' },
+  deploying: { className: 'bg-indigo-100 text-indigo-700 border-indigo-200', label: 'Deploying' },
+  live: { className: 'bg-indigo-100 text-indigo-700 border-indigo-200', label: 'Live' },
   failed: { className: 'bg-red-100 text-red-700 border-red-200', label: 'Failed' },
   rolled_back: { className: 'bg-gray-100 text-gray-600 border-gray-200', label: 'Rolled Back' },
 }
@@ -202,7 +202,7 @@ ${ts} > Live at https://${deployment.project?.subdomain || 'myapp'}.deployhub.io
 
 function colorizeLogLine(line: string): React.ReactNode {
   if (line.includes('✓') || line.includes('successful') || line.includes('Live at')) {
-    return <span className="text-emerald-400">{line}</span>
+    return <span className="text-indigo-400">{line}</span>
   }
   if (line.includes('✗') || line.includes('Error') || line.includes('failed')) {
     return <span className="text-red-400">{line}</span>
@@ -501,23 +501,23 @@ export function DeploymentsPanel() {
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div className="space-y-1">
                 <CardTitle className="flex items-center gap-2">
-                  <Rocket className="size-5 text-emerald-600" />
+                  <Rocket className="size-5 text-indigo-600" />
                   {detail.project.name}
                   {/* Live status indicator */}
                   {isAnimating && (
-                    <span className="flex items-center gap-1 text-sm text-emerald-600 ml-1">
+                    <span className="flex items-center gap-1 text-sm text-indigo-600 ml-1">
                       <span className="relative flex size-2">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                        <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
+                        <span className="relative inline-flex size-2 rounded-full bg-indigo-500" />
                       </span>
                       Active
                     </span>
                   )}
                   {isLive && (
-                    <span className="flex items-center gap-1 text-sm text-emerald-600 ml-1">
+                    <span className="flex items-center gap-1 text-sm text-indigo-600 ml-1">
                       <span className="relative flex size-2">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                        <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
+                        <span className="relative inline-flex size-2 rounded-full bg-indigo-500" />
                       </span>
                       Live
                     </span>
@@ -613,7 +613,7 @@ export function DeploymentsPanel() {
                     href={detail.deployUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-sm font-mono text-emerald-600 hover:underline flex items-center gap-1"
+                    className="text-sm font-mono text-indigo-600 hover:underline flex items-center gap-1"
                   >
                     {detail.deployUrl}
                     <ExternalLink className="size-3" />
@@ -628,20 +628,20 @@ export function DeploymentsPanel() {
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
-              <Terminal className="size-4 text-emerald-600" />
+              <Terminal className="size-4 text-indigo-600" />
               Build Logs
               {isAnimating && (
-                <span className="flex items-center gap-1 text-sm text-emerald-600 ml-2">
+                <span className="flex items-center gap-1 text-sm text-indigo-600 ml-2">
                   <span className="relative flex size-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                    <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
+                    <span className="relative inline-flex size-2 rounded-full bg-indigo-500" />
                   </span>
                   Live
                 </span>
               )}
               {/* WebSocket connection indicator */}
               {isAnimating && (
-                <span className={`flex items-center gap-1 text-xs ml-auto px-2 py-0.5 rounded-full ${isLiveConnected ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400'}`}>
+                <span className={`flex items-center gap-1 text-xs ml-auto px-2 py-0.5 rounded-full ${isLiveConnected ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400' : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400'}`}>
                   {isLiveConnected ? (
                     <>
                       <Wifi className="size-3" />
@@ -666,10 +666,10 @@ export function DeploymentsPanel() {
                 <div className="size-3 rounded-full bg-green-500/80" />
                 <span className="ml-2 text-xs text-zinc-500 font-mono">build log — {detail.project.name}</span>
                 {useLiveLogs && (
-                  <span className="ml-auto text-xs text-emerald-400 font-mono flex items-center gap-1">
+                  <span className="ml-auto text-xs text-indigo-400 font-mono flex items-center gap-1">
                     <span className="relative flex size-1.5">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                      <span className="relative inline-flex size-1.5 rounded-full bg-emerald-500" />
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
+                      <span className="relative inline-flex size-1.5 rounded-full bg-indigo-500" />
                     </span>
                     {liveLogs.length} lines
                   </span>
@@ -694,7 +694,7 @@ export function DeploymentsPanel() {
             <span>Created: {new Date(detail.createdAt).toLocaleString()}</span>
             <span>Updated: {new Date(detail.updatedAt).toLocaleString()}</span>
             {useLiveLogs && (
-              <span className="ml-auto text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+              <span className="ml-auto text-indigo-600 dark:text-indigo-400 flex items-center gap-1">
                 <Wifi className="size-3" />
                 Real-time
               </span>
@@ -775,19 +775,19 @@ export function DeploymentsPanel() {
                 </Badge>
               </TabsTrigger>
               <TabsTrigger value="live" className="gap-1">
-                <CheckCircle2 className="size-3.5 text-emerald-500" />
+                <CheckCircle2 className="size-3.5 text-indigo-500" />
                 Live
                 {counts.live > 0 && (
-                  <Badge variant="secondary" className="ml-1 h-5 min-w-5 text-[10px] px-1.5 bg-emerald-100 text-emerald-700">
+                  <Badge variant="secondary" className="ml-1 h-5 min-w-5 text-[10px] px-1.5 bg-indigo-100 text-indigo-700">
                     {counts.live}
                   </Badge>
                 )}
               </TabsTrigger>
               <TabsTrigger value="building" className="gap-1">
-                <Loader2 className="size-3.5 text-blue-500" />
+                <Loader2 className="size-3.5 text-indigo-500" />
                 Building
                 {counts.building > 0 && (
-                  <Badge variant="secondary" className="ml-1 h-5 min-w-5 text-[10px] px-1.5 bg-blue-100 text-blue-700">
+                  <Badge variant="secondary" className="ml-1 h-5 min-w-5 text-[10px] px-1.5 bg-indigo-100 text-indigo-700">
                     {counts.building}
                   </Badge>
                 )}
@@ -845,7 +845,7 @@ export function DeploymentsPanel() {
                           {filteredDeployments.map((d) => (
                             <TableRow
                               key={d.id}
-                              className="cursor-pointer hover:bg-emerald-50/50 dark:hover:bg-emerald-950/20 transition-colors"
+                              className="cursor-pointer hover:bg-indigo-50/50 dark:hover:bg-indigo-950/20 transition-colors"
                               onClick={() => setSelectedId(d.id)}
                             >
                               <TableCell className="font-medium">

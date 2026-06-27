@@ -2795,3 +2795,578 @@ Stage Summary:
 - Admin can: CRUD services (with nested plans/highlights/FAQs), toggle visibility, reorder, AND edit ALL text on every public page via a structured 11-group "Pages & Text" editor.
 - Every public page (home, services index, 4 dedicated service pages, pricing, about, contact, navbar, footer) reads from the CMS — admin edits go live instantly on refresh.
 - Both core workflows verified in browser: text editing (hero title) and service editing (plan price) both propagate to the public site.
+
+---
+Task ID: 3-a
+Agent: general-purpose
+Task: Fix ALL wrong colors AND "DeployHub" brand text in `/home/z/my-project/src/app/page.tsx` — migrate the dashboard sidebar/topbar/footer/loading-screen from emerald/teal/green/blue to APSAMO brand colors (indigo), and replace user-facing "DeployHub" text with "APSAMO". Keep technical identifiers (deployhub_token, deployhub_onboarding_complete, deployhub:open-command-palette event name, *.deployhub.io subdomains, DeployHub- code prefixes) unchanged.
+
+Work Log:
+- Read tail of worklog.md to understand prior work (CMS-complete verified; subagent tasks 2-a/2-b done; landing page already migrated).
+- Read full src/app/page.tsx (479 lines) and mapped every spot listed in the task spec, plus scanned for any additional brand-colored classes.
+- Applied 9 atomic edits via MultiEdit to src/app/page.tsx:
+  1. Logo (L192): `bg-emerald-600` → `bg-indigo-600`
+  2. Logo brand text (L195): `DeployHub` → `APSAMO`
+  3. Desktop sidebar active nav (L220): `bg-emerald-600/10 text-emerald-600 dark:text-emerald-400` → `bg-indigo-600/10 text-indigo-600 dark:text-indigo-400`
+  4. Desktop active dot (L226): `bg-emerald-500` → `bg-indigo-500`
+  5. User avatar bg (L235): `bg-emerald-100` → `bg-indigo-100`
+  6. User avatar text (L236): `text-emerald-700` → `text-indigo-700`
+  7. Provisioning "Auto" badge (L270): `bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30` → `bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/30`
+  8. Email verification banner (L312-313): `bg-blue-500/10 border border-blue-500/30 text-blue-300` + `border-blue-400` → `bg-indigo-500/10 border border-indigo-500/30 text-indigo-300` + `border-indigo-400`
+  9. Footer copyright (L324): `© 2025 DeployHub. All rights reserved. · Automated Hosting & Domain Platform` → `© 2025 APSAMO. All rights reserved. · Automated Hosting & Domain Platform`
+  10. Mobile bottom-nav active state (L340): `text-emerald-600 dark:text-emerald-400` → `text-indigo-600 dark:text-indigo-400`
+  11. Loading spinner border (L432): `border-emerald-600` → `border-indigo-600`
+  12. Loading text (L433): `Loading DeployHub...` → `Loading APSAMO...`
+- Verified with Grep that NO remaining `emerald*`, `teal-*`, `green-*`, `blue-{50,100,300,400,500,600,700}` classes or user-facing `DeployHub` text exist in the file.
+- Verified with Grep (case-insensitive `deployhub`) that the 5 remaining matches are all technical identifiers (2× `deployhub:open-command-palette` custom event, 3× `deployhub_onboarding_complete` localStorage key) — correctly preserved per the task spec.
+- Left the Rocket icon at the logo as-is (task spec said "if appropriate" and Rocket still symbolizes deployment/launch for the platform — priority was brand text + colors).
+- Ran `cd /home/z/my-project && bun run lint` — exit code 0, no errors, no warnings (clean).
+
+Stage Summary:
+- `/home/z/my-project/src/app/page.tsx` dashboard now uses APSAMO brand colors exclusively: all emerald/teal/green/blue brand classes migrated to indigo (matching shade numbers); status colors (red/yellow/amber/orange) and theme tokens (bg-background, bg-card, text-foreground, text-muted-foreground) untouched.
+- User-facing "DeployHub" strings replaced with "APSAMO" in three spots: sidebar logo span, footer copyright, and loading screen text.
+- Technical identifiers preserved unchanged: `deployhub_onboarding_complete` localStorage key (3 references), `deployhub:open-command-palette` custom event (2 references).
+- Lint: 0 errors, 0 warnings.
+- Files modified: src/app/page.tsx (12 substitutions across 9 edit operations).
+
+---
+Task ID: 3-b
+Agent: general-purpose
+Task: Fix ALL wrong colors AND "DeployHub" brand text in `/home/z/my-project/src/components/admin/` folder — migrate admin-panel.tsx, cms-panel.tsx, servers-panel.tsx, payment-methods-panel.tsx from emerald/teal/green/blue to APSAMO brand colors (indigo), and replace user-facing "DeployHub" text with "APSAMO". Keep technical identifiers (deployhub_token localStorage key) unchanged.
+
+Work Log:
+- Read tail of worklog.md (Task 3-a context: dashboard sidebar/topbar/footer/loading-screen already migrated to indigo; technical identifiers preserved; lint clean).
+- Read all 4 target files end-to-end:
+  * admin-panel.tsx (619 lines): emerald + blue refs in ROLE_STYLES (admin/client badges), JobStatusBadge (processing/completed), stat-card colors, active-subscription badge, active job-filter button, role-change check icon.
+  * cms-panel.tsx (850 lines): single emerald ref on the Eye icon shown when a CMS service is visible (line 351).
+  * servers-panel.tsx (2200+ lines): emerald refs across ServerStatusBadge, HealthDot, SoftwareBadge, header card, empty state, server cards, SSH dialog (Lock notice), Test-SSH dialog, Provision pipeline (7 steps), Server Stats dialog, Caddyfile dialog, CPU/mem/disk percent thresholds.
+  * payment-methods-panel.tsx (551 lines): emerald refs on Config dialog icon + save button, header card icon, "active count" badge, active-method card border + icon bg + "Active" badge.
+- Grep-confirmed there are NO `green-*`, `teal-*`, or `blue-*` references anywhere in the admin folder other than the 6 blue refs in admin-panel.tsx; NO user-facing "DeployHub" text — the only `deployhub` strings are the 4 `deployhub_token` localStorage keys (technical identifier, correctly preserved).
+- Applied MultiEdit per file with `replace_all: true` per shade. Order matters: 3-digit shades (emerald-100/200/400/500/600/700/900) MUST be processed before `emerald-50` because "emerald-50" is a substring of "emerald-500" — if done out of order, `emerald-500` would corrupt to `indigo-5000`.
+
+  admin-panel.tsx (8 replace_all edits):
+    * emerald-100 → indigo-100
+    * emerald-200 → indigo-200
+    * emerald-600 → indigo-600
+    * emerald-700 → indigo-700
+    * emerald-50  → indigo-50
+    * blue-100    → indigo-100
+    * blue-200    → indigo-200
+    * blue-700    → indigo-700
+    Migrated: ROLE_STYLES.admin role badge, ROLE_STYLES.client role badge, JobStatusBadge.processing, JobStatusBadge.completed, 4× stat-card icon colors, 4× stat-card bg, role-change CheckCircle2, active-subscription plan badge, active job-filter Button.
+    NOTE: After migration, the `admin` and `client` role badges share the same `bg-indigo-100 text-indigo-700 border-indigo-200` styling — this is an unavoidable consequence of the strict emerald→indigo + blue→indigo mapping rule; distinct role colours are now provided only by `super_admin` (purple) vs `user` (gray). Did not silently preserve distinct shades since the task explicitly lists all emerald + blue shades → indigo.
+    NOTE: `super_admin` role badge uses purple-100/700/200 — NOT in the mapping rules — left untouched. `user` role badge uses gray-100/700/200 — NOT in mapping rules — left untouched.
+
+  cms-panel.tsx (1 edit):
+    * emerald-500 → indigo-500
+    Migrated: Eye icon shown when a CMS service row is visible (line 351). EyeOff (hidden state) stays text-muted-foreground. The Eye icon was not a strict up/down status dot — it is a visibility toggle accent — so converted to indigo per the "brand preference is indigo throughout" rule.
+
+  servers-panel.tsx (8 replace_all edits, ordered 3-digit-first to avoid emerald-50/emerald-500 substring clash):
+    * emerald-100 → indigo-100
+    * emerald-200 → indigo-200
+    * emerald-400 → indigo-400
+    * emerald-500 → indigo-500   ← CRITICAL: must run before emerald-50
+    * emerald-600 → indigo-600
+    * emerald-700 → indigo-700
+    * emerald-900 → indigo-900
+    * emerald-50  → indigo-50    ← LAST
+    Migrated across 47 lines: ServerStatusBadge.active, HealthDot.healthy (was bg-emerald-500 solid status dot — converted to bg-indigo-500 per strict emerald→indigo mapping; the KEEP exception for `bg-green-500` solid status dots applies to green-* only, not emerald-*), ServerIcon accents, header buttons (bg-emerald-600 hover:bg-emerald-700), SSH encryption notice cards (border-emerald-200 bg-emerald-50), Test-SSH dialog, Provision 7-step pipeline (success step indicator + active border + CheckCircle2 + iconWrap), Caddyfile reload indicator, Server Stats dialog (live metrics, container list, CPU/mem/disk percent threshold `text-emerald-600` for healthy range), ResourcePercent healthy color.
+    KEEP decisions preserved (untouched): `bg-red-500` (down status dot, error), `bg-amber-500` (degraded status dot, warning), `bg-amber-100/700/200` (provisioning status, amber 500 threshold for warning range), `bg-gray-400` (unknown status), `bg-yellow-100/700/200` (single-active warning), `bg-red-100/700/200` (error banners), all `text-muted-foreground` / `bg-muted` / `bg-background` / `bg-card` theme tokens.
+
+  payment-methods-panel.tsx (5 replace_all edits):
+    * emerald-100 → indigo-100
+    * emerald-200 → indigo-200
+    * emerald-600 → indigo-600
+    * emerald-700 → indigo-700
+    * emerald-50  → indigo-50
+    Migrated: ConfigDialog dialog-title icon, ConfigDialog save button (bg-emerald-600 hover:bg-emerald-700), header card title icon, "X active" count badge (when >1 active), active-method card border (border-emerald-200), active-method icon wrapper bg (bg-emerald-50 text-emerald-600), "Active" status badge (bg-emerald-50 text-emerald-700 border-emerald-200).
+    KEEP decisions preserved: `bg-red-100/700/200` (no-active error state), `bg-yellow-100/700/200` (single-active warning), `bg-gray-50/600/200` (disabled method badge), `border-red-300 bg-red-50/40` (zero-active header card), `bg-red-50 text-red-700 border-red-200` (error message box).
+
+- DeployHub brand text: 0 user-facing replacements needed. The only `DeployHub` strings in the admin folder are the 4 `localStorage.getItem('deployhub_token')` calls (one per file) — these are technical identifiers per the task spec and were correctly preserved unchanged.
+
+- Verified with Grep that NO remaining `emerald*`, `teal-*`, `green-*`, `blue-(50..900)` classes exist anywhere under `src/components/admin/` (0 matches).
+- Verified with Grep that the only remaining `deployhub` strings in admin folder are the 4 `deployhub_token` localStorage references (technical, preserved).
+- Ran `cd /home/z/my-project && bun run lint` — exit code 0, no errors, no warnings (clean).
+
+Stage Summary:
+- ALL admin-panel/cms-panel/servers-panel/payment-methods-panel brand colors migrated to APSAMO indigo (matching shade numbers). Status colors (red/yellow/amber/orange/gray) and theme tokens (bg-background, bg-card, bg-muted, text-foreground, text-muted-foreground) untouched.
+- No user-facing "DeployHub" text in admin folder — nothing to replace. All 4 `deployhub_token` localStorage references preserved as technical identifiers.
+- Lint: 0 errors, 0 warnings.
+- Files modified: src/components/admin/admin-panel.tsx (8 replace_all shade substitutions covering 15 lines / 26 class refs), src/components/admin/cms-panel.tsx (1 substitution), src/components/admin/servers-panel.tsx (8 substitutions covering 47 lines / ~70 class refs), src/components/admin/payment-methods-panel.tsx (5 substitutions covering 7 lines / ~15 class refs).
+- Tricky call: emerald-50 MUST be processed AFTER emerald-500 in any file that contains both, because "emerald-50" is a substring of "emerald-500" and out-of-order replace_all would corrupt `emerald-500` → `indigo-5000`. (servers-panel.tsx contains both; admin-panel.tsx and payment-methods-panel.tsx contain emerald-50 but not emerald-500; cms-panel.tsx contains only emerald-500.)
+- Tricky call: ROLE_STYLES `admin` and `client` role badges now look identical (both `bg-indigo-100 text-indigo-700 border-indigo-200`) since both emerald and blue map to indigo. Did not silently preserve distinct shades — followed the explicit mapping rules verbatim. If distinct role colors are desired, super_admin (purple) and user (gray) are still distinct; admin/client could be re-differentiated in a follow-up by introducing a second brand shade.
+- Tricky call: HealthDot.healthy was `bg-emerald-500` solid (server status dot). The task's KEEP exception is for `bg-green-500` solid status dots only (not `bg-emerald-500`), so converted to `bg-indigo-500` per the strict emerald→indigo mapping. If a strict green dot is desired for "healthy server", that's a one-line change to `bg-green-500`.
+
+---
+Task ID: 3-c
+Agent: general-purpose
+Task: Fix colors + DeployHub branding in core dashboard files (overview-panel, dashboard-layout, hosting-panel, deployments-panel, domains-panel, billing-panel) — migrate emerald/teal/green/blue to APSAMO brand indigo, and replace user-facing "DeployHub" text with "APSAMO". Keep technical identifiers (deployhub_token, deployhub_pending_checkout, deployhub:command:* events, *.deployhub.io subdomains) unchanged.
+
+Work Log:
+- Read tail of worklog.md to absorb Task 3-a (sidebar/topbar/footer/loading-screen already migrated; substring-trap rule documented: emerald-500 MUST be processed before emerald-50) and Task 3-b (admin folder migrated; ROLE_STYLES tricky call noted where admin/client badges collapsed to identical indigo styling).
+- Read all 6 target files end-to-end. Used `grep -oE '(emerald|teal|green|blue)-[0-9]+' | sort -u` per file to enumerate every unique shade present so the MultiEdit substitution list could be built precisely. Files and unique shade inventories:
+  * overview-panel.tsx (560 lines): emerald-{50,100,200,300,500,600,700}, teal-{500,600}, green-{100,500,600}, blue-{500}, 0 DeployHub refs
+  * dashboard-layout.tsx (331 lines): emerald-{100,300,400,500,600,700,900}, 1 DeployHub ref (sidebar logo brand text)
+  * hosting-panel.tsx (3442 lines): emerald-{50,100,200,300,400,500,600,700,800,900,950}, green-{500} (build-log legend only), blue-{600} (RotateCcw icon)
+  * deployments-panel.tsx (892 lines): emerald-{50,100,200,400,500,600,700,900,950}, green-{500} (build-log legend only), blue-{100,200,500,700}
+  * domains-panel.tsx (2050 lines): emerald-{50,100,300,400,500,600,700,900,950}, blue-{400,500,600,700}, 0 DeployHub refs
+  * billing-panel.tsx (1233 lines): emerald-{50,100,200,500,600,700,900}, 0 DeployHub refs
+- Extended the explicit task shade list with `emerald-950 → indigo-950` (Tailwind 4 includes this shade; hosting-panel/deployments-panel/domains-panel all use it for dark-mode hover backgrounds). This is a 1:1 logical extension of the documented emerald→indigo mapping rule and avoids leaving orphaned emerald-950 dark-mode classes that would break the "no emerald anywhere" verification step.
+- Applied MultiEdit per file with `replace_all: true` per shade. CRITICAL ordering rule (from Task 3-a/3-b): process 3-digit shades first (emerald-100/200/300/400/500/600/700/800/900/950), then `emerald-50` LAST — otherwise `emerald-50` would match the prefix of `emerald-500` and corrupt it to `indigo-5000`. Same substring-trap rule applied to blue/green where applicable, though in practice none of these files contain blue-50 or green-50 so no trap was triggered for those color families.
+
+  overview-panel.tsx — 13 replace_all substitutions:
+    teal-600→indigo-600, teal-500→indigo-500, green-100→indigo-100, green-500→indigo-500, green-600→indigo-600, blue-500→indigo-500, emerald-100→indigo-100, emerald-200→indigo-200, emerald-300→indigo-300, emerald-500→indigo-500, emerald-600→indigo-600, emerald-700→indigo-700, emerald-50→indigo-50 (last).
+    Migrated: barColor healthy range + barBgColor healthy range bg, timelineIcon 'deployment' accent color set (text/bg/dot), timelineIcon 'ssl' accent color set (text/bg/dot — formerly green-*), statusBadge live/active/completed, statCards Projects gradient + iconBg, quickActions New Project gradient (group-hover:from-emerald-500 group-hover:to-teal-500 → indigo), welcome-header H1 gradient (from-emerald-600 to-teal-600 → indigo), planInfo name badge, TrendingUp icon + trend text, deployment-activity chart legend dot + success bar, "View all" link color, quickAction card hover border, quickAction icon wrapper (bg + group-hover gradient + text color).
+    KEEP decisions preserved: `bg-red-500`/`bg-amber-500`/`bg-red-100`/`bg-amber-100` thresholds in barColor/barBgColor (status colors), `text-red-500`/`text-red-600` for TrendingDown, `bg-amber-*`/`border-amber-200`/`text-amber-700` for 'building/deploying/running/pending' status badge, `bg-red-*`/`border-red-200`/`text-red-700` for 'failed/rolled_back' status badge, all `text-muted-foreground`/`bg-card`/`bg-background` theme tokens, plus `text-violet-600`/`bg-violet-100`/`dot:bg-violet-500` (automation timeline), `text-cyan-600`/`bg-cyan-100`/`dot:bg-cyan-500` (payment timeline), `text-amber-600`/`bg-amber-100`/`dot:bg-amber-500` (domain timeline), `text-gray-600`/`bg-gray-100`/`dot:bg-gray-500` (default timeline) — these are NOT in the emerald/teal/green/blue mapping rule, left untouched.
+    Tricky call: timelineIcon 'deployment' and timelineIcon 'ssl' both end up with identical indigo accent sets (`text-indigo-600 bg-indigo-100 dot:bg-indigo-500`) since both emerald and green map to indigo. Did not silently preserve distinct shades — followed the explicit mapping rules verbatim, matching the Task 3-b precedent for ROLE_STYLES admin/client badges.
+
+  dashboard-layout.tsx — 8 edits (7 color shades + 1 brand text):
+    emerald-100→indigo-100, emerald-300→indigo-300, emerald-400→indigo-400, emerald-500→indigo-500, emerald-600→indigo-600, emerald-700→indigo-700, emerald-900→indigo-900, plus `<span className="text-lg font-bold tracking-tight">DeployHub</span>` → `<span className="text-lg font-bold tracking-tight">APSAMO</span>`.
+    Migrated: desktop+mobile sidebar active-nav state (bg-indigo-500/10 text-indigo-600 dark:text-indigo-400), active-tab icon (text-indigo-500), active-tab trailing dot (bg-indigo-500), sidebar logo box (bg-indigo-500), sidebar logo brand text "DeployHub" → "APSAMO", both user-avatar AvatarFallbacks (bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300), notifications Badge on the bell icon (bg-indigo-500).
+    No KEEP exceptions triggered — file had no status-color or theme-token conflicts.
+
+  hosting-panel.tsx — 12 replace_all substitutions:
+    emerald-100→indigo-100, emerald-200→indigo-200, emerald-300→indigo-300, emerald-400→indigo-400, emerald-500→indigo-500, emerald-600→indigo-600, emerald-700→indigo-700, emerald-800→indigo-800, emerald-900→indigo-900, emerald-950→indigo-950, emerald-50→indigo-50 (last), blue-600→indigo-600.
+    Migrated across ~60+ class refs / ~50 lines: statusColor for 'running/live' badges, frameworkIcon 'nextjs' icon, deployStatusIcon 'live' CheckCircle2, colorizeLogLine success branch, project-card selected/hover states, framework-radio selected/hover states, plan-radio selected/hover states, terminal-card title + streaming-dot, project-card ssl/autoDeploy status dots (bg-emerald-500 → bg-indigo-500), deployment status dot for active project (bg-emerald-500 → bg-indigo-500), Table hover row backgrounds (hover:bg-emerald-50/50 dark:hover:bg-emerald-950/20), Settings/Container/Shield/Key/Github/RefreshCw/GitCommit icon colors, all primary CTA buttons (bg-emerald-600 hover:bg-emerald-700), env-var row 'Active' badge, secrets 'Active' badge, GitHub connection active state, environment-card selected state, bulk-action "Restart All" RotateCcw icon (was text-blue-600), filter "active" CheckCircle2 indicators, sticky bulk-action bar (border/bg/icon/text), empty-state Rocket icon + heading text, project-detail CTA buttons.
+    KEEP decisions preserved:
+    * `bg-green-500/80` at L765 — build-log viewer tri-color legend dot (red/yellow/green = error/warning/success). Per the "solid bg-green-500 status dot CAN be kept" rule, this is a strict semantic status indicator within a red/yellow/green legend where green has clear meaning. KEPT as bg-green-500/80. Did not run a `green-500 → indigo-500` replace_all for this file at all (the only green-* occurrence is this legend dot).
+    * All `bg-red-500`/`bg-yellow-500`/`bg-amber-500`/`bg-red-*`/`bg-yellow-*`/`bg-amber-*`/`bg-orange-*`/`bg-purple-*`/`bg-sky-*`/`bg-lime-*`/`bg-cyan-*`/`bg-zinc-*`/`bg-gray-*` (status colors not in the migration list — left untouched).
+    * All `text-muted-foreground`/`bg-card`/`bg-background`/`bg-border`/`bg-accent`/`text-accent-foreground` theme tokens.
+    * `bg-emerald-500` solid status dots for SSL/autoDeploy/active-deployment indicators converted to `bg-indigo-500` (strict emerald→indigo mapping). The "CAN stay green" exception is permissive — chose indigo for visual consistency with the user complaint "still the system not change the colors".
+
+  deployments-panel.tsx — 13 replace_all substitutions:
+    emerald-100→indigo-100, emerald-200→indigo-200, emerald-400→indigo-400, emerald-500→indigo-500, emerald-600→indigo-600, emerald-700→indigo-700, emerald-900→indigo-900, emerald-950→indigo-950, emerald-50→indigo-50 (last), blue-100→indigo-100, blue-200→indigo-200, blue-500→indigo-500, blue-700→indigo-700.
+    Migrated: STATUS_CONFIG.live badge (`bg-emerald-100 text-emerald-700 border-emerald-200` → indigo), STATUS_CONFIG.building badge (was blue → indigo), colorizeLogLine success branch (text-emerald-400 → text-indigo-400), Rocket icon for active deployment, live-streaming "Active" dot+text (animate-ping bg-emerald-400 + bg-emerald-500 → indigo), "Live" badge dot+text, WebSocket-connected "Streaming" badge (was bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 → indigo), Building-tab Loader2 icon (was text-emerald-500 → indigo), Building-tab count badge (was bg-blue-100 text-blue-700 → indigo), tabs-loading Loader2 spinner, Table row hover bg, "Rollback" link hover text color, detail-card active-deployment status indicator, footer build-log "Live" status dot.
+    KEEP decisions preserved:
+    * `bg-green-500/80` at L666 — build-log viewer tri-color legend dot (same tri-color semantic as hosting-panel L765). KEPT as bg-green-500/80.
+    * All red/yellow/amber/orange/purple/gray/zinc status colors.
+    * All theme tokens.
+    * L200 `Live at https://${deployment.project?.subdomain || 'myapp'}.deployhub.io` — this is a `*.deployhub.io` subdomain URL (technical identifier per task spec). PRESERVED unchanged.
+    * `deployhub_token` localStorage key (3 refs) — technical identifier preserved.
+    * The "Live"/"Active" deployment status dots (`bg-emerald-500` → `bg-indigo-500`) — converted to indigo per strict mapping. The "CAN stay green" rule is permissive; chose indigo for brand consistency. The existing `bg-green-500/80` legend dot above is the only intentional green keep.
+
+  domains-panel.tsx — 13 replace_all substitutions:
+    emerald-100→indigo-100, emerald-300→indigo-300, emerald-400→indigo-400, emerald-500→indigo-500, emerald-600→indigo-600, emerald-700→indigo-700, emerald-900→indigo-900, emerald-950→indigo-950, emerald-50→indigo-50 (last), blue-400→indigo-400, blue-500→indigo-500, blue-600→indigo-600, blue-700→indigo-700.
+    Migrated: statusColor for 'active' (was emerald → indigo), statusColor for 'transferring' (was blue → indigo), transfer-info banner (was border-blue-500/30 bg-blue-500/5 text-blue-700 → indigo), feature-status 'LIVE' badge (bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300 → indigo), allLive card state (border-emerald-500/50 bg-emerald-50/50 dark:bg-emerald-950/20 → indigo), various accent icons and hover states.
+    KEEP decisions preserved:
+    * `mail.deployhub.io` at L1105 — MX target subdomain (technical identifier). PRESERVED unchanged.
+    * All `bg-amber-*`/`bg-red-*`/`bg-gray-*` status colors (pending, expired, suspended, deleted, error states).
+    * All theme tokens.
+    * `bg-purple-100`/`text-purple-*` and other unmapped brand colors (deploying state) — left untouched.
+    Tricky call: statusColor 'active' and statusColor 'transferring' both end up with indigo styling since both emerald and blue map to indigo. Did not silently preserve distinct shades — followed the explicit mapping rules verbatim, matching the Task 3-b/3-c precedent.
+
+  billing-panel.tsx — 7 replace_all substitutions:
+    emerald-100→indigo-100, emerald-200→indigo-200, emerald-500→indigo-500, emerald-600→indigo-600, emerald-700→indigo-700, emerald-900→indigo-900, emerald-50→indigo-50 (last).
+    Migrated: PaymentStatusBadge.completed (bg-emerald-100 text-emerald-700 border-emerald-200 → indigo), purchase-type radio hover+active bg, Server icon in success dialog, "Review" link text color, "Active Plan" header card (border-emerald-200 bg-emerald-50/50 → indigo), plan-title heading (text-emerald-900 → text-indigo-900), plus all other accent colors and CTAs in the file.
+    KEEP decisions preserved:
+    * `bg-yellow-100`/`text-yellow-700`/`border-yellow-200` (Pending status), `bg-red-100`/`text-red-700`/`border-red-200` (Failed status), `bg-gray-100`/`text-gray-700`/`border-gray-200` (Refunded status), `bg-orange-100`/`text-orange-700`/`border-orange-200` (Past Due status) — all status colors left untouched.
+    * All theme tokens.
+    * `deployhub_token` localStorage key (1 ref) — technical identifier preserved.
+    * `deployhub_pending_checkout` sessionStorage key (1 ref) — technical identifier preserved.
+    * `my-awesome-project.deployhub.io` example subdomain URL at L645 — `*.deployhub.io` subdomain (technical identifier) preserved.
+    Tricky call: PaymentStatusBadge 'completed' was emerald — converted to indigo per strict mapping. The "CAN stay green" rule for success badges (like "Payment Completed") is permissive; chose indigo for visual consistency since the user complaint was "still the system not change the colors".
+
+- DeployHub brand text: 1 user-facing replacement (dashboard-layout.tsx L149 sidebar logo "DeployHub" → "APSAMO"). The remaining ~12 `deployhub` strings across all 6 files are all technical identifiers (`deployhub_token` localStorage × 4 refs in overview/hosting/deployments/billing; `deployhub:command:create-project` custom event × 2 refs in hosting-panel; `*.deployhub.io` subdomains × 3 refs in deployments-panel L200, domains-panel L1105 mail.deployhub.io, billing-panel L645 my-awesome-project.deployhub.io; `deployhub_pending_checkout` sessionStorage × 1 ref in billing-panel L362) — all correctly preserved per the task spec.
+
+- Verified with Grep that NO remaining `emerald*`, `teal-*`, `green-(?!500/80)`, or `blue-*` classes exist anywhere across the 6 target files (0 matches per file).
+- Verified with Grep that the only remaining `deployhub` strings across all 6 files are the technical identifiers listed above — no user-facing brand text remains.
+- Verified the 2 intentionally-kept `bg-green-500/80` build-log legend dots are still present at hosting-panel.tsx L765 and deployments-panel.tsx L666 (semantic success indicator in red/yellow/green tri-color legend).
+- Verified dashboard-layout.tsx L149 now reads `<span className="text-lg font-bold tracking-tight">APSAMO</span>`.
+- Ran `cd /home/z/my-project && bun run lint` — exit code 0, no errors, no warnings (clean).
+
+Stage Summary:
+- ALL 6 core dashboard files (overview-panel, dashboard-layout, hosting-panel, deployments-panel, domains-panel, billing-panel) brand colors migrated to APSAMO indigo (matching shade numbers). Status colors (red/yellow/amber/orange/purple/gray/zinc/sky/lime/cyan/violet — only red/yellow/amber/orange are in the KEEP list per task spec, but the others were left untouched since they aren't in the emerald/teal/green/blue mapping rule and aren't user-complaint targets) and theme tokens (bg-background, bg-card, bg-muted, text-foreground, text-muted-foreground) untouched.
+- 1 user-facing "DeployHub" → "APSAMO" replacement (dashboard-layout.tsx sidebar logo).
+- 12 technical `deployhub` identifiers preserved unchanged (deployhub_token ×4, deployhub:command:create-project ×2, *.deployhub.io ×3, deployhub_pending_checkout ×1, plus 2 more I should mention: actually 4+2+3+1 = 10; recount: overview-panel L52 deployhub_token (1), hosting-panel L249 deployhub_token + L2923-2924 deployhub:command:create-project event add/remove (3), deployments-panel L82/L323 deployhub_token + L200 *.deployhub.io (3), domains-panel L1105 mail.deployhub.io (1), billing-panel L143 deployhub_token + L362 deployhub_pending_checkout + L645 *.deployhub.io (3) = 11 total technical identifiers preserved).
+- Lint: 0 errors, 0 warnings.
+- Files modified: 
+  * src/components/dashboard/overview-panel.tsx (13 replace_all shade substitutions covering 18+ class refs)
+  * src/components/dashboard/dashboard-layout.tsx (7 color shades + 1 brand text = 8 edits covering 8 class refs / 1 brand string)
+  * src/components/hosting/hosting-panel.tsx (12 shade substitutions covering ~60+ class refs / ~50 lines)
+  * src/components/deployments/deployments-panel.tsx (13 shade substitutions covering ~26 class refs)
+  * src/components/domains/domains-panel.tsx (13 shade substitutions covering ~46 class refs)
+  * src/components/billing/billing-panel.tsx (7 shade substitutions covering ~43 class refs)
+- Intentionally-kept green: 2 instances of `bg-green-500/80` build-log legend dots (hosting-panel L765, deployments-panel L666) — these are part of a red/yellow/green tri-color legend where green has clear "success" semantic meaning. Per the task's "solid bg-green-500 status dot CAN be kept" rule, these were preserved. All other `bg-emerald-500` solid status dots (deployment "Live"/"Active" indicators, SSL-enabled dots, auto-deploy dots) were converted to `bg-indigo-500` per strict emerald→indigo mapping — the "CAN stay green" rule is permissive not mandatory, and the user complaint "still the system not change the colors" prioritized visual brand consistency.
+- Tricky call: emerald-50 MUST be processed AFTER emerald-500 in any file containing both (substring trap — "emerald-50" is a prefix of "emerald-500" and out-of-order replace_all would corrupt `emerald-500` → `indigo-5000`). All 5 files containing both emerald-50 and emerald-500 (overview-panel, hosting-panel, deployments-panel, domains-panel, billing-panel) were processed with emerald-500 BEFORE emerald-50.
+- Tricky call: emerald-950 was added to the substitution list (not explicitly in the task shade mapping) because Tailwind 4 ships it as a standard shade and hosting-panel/deployments-panel/domains-panel use it for dark-mode hover backgrounds. Mapped emerald-950 → indigo-950 (logical 1:1 extension of the documented emerald→indigo rule). Without this, dark-mode hover backgrounds would have remained emerald-950 and broken the "no emerald anywhere" verification.
+- Tricky call: timelineIcon 'deployment' and timelineIcon 'ssl' in overview-panel now share identical indigo accent sets (both were emerald/green respectively, both map to indigo). Same for statusColor 'active' (was emerald) and statusColor 'transferring' (was blue) in domains-panel, and STATUS_CONFIG 'live' (was emerald) vs 'building' (was blue) in deployments-panel. Did not silently preserve distinct shades — followed the explicit mapping rules verbatim, matching the Task 3-b precedent.
+- Tricky call: PaymentStatusBadge 'completed' was emerald — converted to indigo per strict mapping rather than keeping it green as a "Payment Completed success indicator". The "CAN stay green" rule for success badges is permissive; chose indigo for brand consistency per user complaint.
+
+---
+Task ID: 3-d
+Agent: general-purpose
+Task: Fix colors + DeployHub branding in supplementary dashboard panels (provisioning, pipelines, teams, notifications, github, audit-log, settings, uptime, assistant, webhooks, analytics, templates, onboarding-wizard, command-palette, auth-modal, web-development-page) — migrate emerald/teal/green/blue to APSAMO brand indigo, and replace user-facing "DeployHub" text with "APSAMO". Keep technical identifiers (deployhub_token, deployhub_notification_prefs, deployhub:command:* events, deployhub:open-command-palette, *.deployhub.io subdomains, X-DeployHub-Signature header, deployhub-backup-codes.txt filename, example webhook URL paths) unchanged.
+
+Work Log:
+- Read tail of worklog.md to absorb Task 3-a (sidebar/topbar/footer/loading-screen migrated; substring-trap rule: emerald-500 MUST be processed before emerald-50), Task 3-b (admin folder migrated; ROLE_STYLES tricky call where admin/client badges collapsed to identical indigo styling; HealthDot.healthy bg-emerald-500 converted to bg-indigo-500 per strict mapping — KEEP exception is permissive only), and Task 3-c (core dashboard files migrated; bg-green-500/80 build-log legend dots preserved as tri-color semantic exception; statusColor 'active'/'transferring' both collapse to indigo; PaymentStatusBadge 'completed' converted to indigo per strict mapping).
+- Enumerated every unique shade per file via `rg -o '(emerald|teal|green|blue)-[0-9]+' | sort -u` and every DeployHub ref via `rg -i deployhub -n`. Per-file shade + brand-text inventories:
+  * provisioning-panel.tsx (2091 lines): emerald-{300,400,500,600,700}, blue-{400,500,600}, 0 DeployHub refs
+  * pipelines-panel.tsx (2662 lines): emerald-{50,100,200,300,400,500,600,700,800,900,950}, 0 DeployHub refs
+  * teams-panel.tsx (817 lines): emerald-{50,100,200,300,500,600,700}, 0 DeployHub refs
+  * notification-center.tsx (309 lines): emerald-{500,600}, blue-{500}, 0 DeployHub refs
+  * github-panel.tsx (1718 lines): emerald-{50,100,200,300,400,500,600,700,800,900,950}, blue-{100,400,700,900}, green-{100,400,700,900}, 0 DeployHub refs
+  * audit-log-panel.tsx (542 lines): emerald-{100,600,700}, blue-{100,500,700}, 0 DeployHub refs
+  * settings-panel.tsx (1337 lines): emerald-{50,100,300,400,600,700,800}, 3 user-facing DeployHub refs (L324 backup-codes file-content header, L955 API keys description, L1052 create-API-key description) + 4 technical refs (L115 deployhub_token localStorage, L332 deployhub-backup-codes.txt filename, L1161/L1178 deployhub_notification_prefs localStorage)
+  * uptime-panel.tsx (1160 lines): emerald-{400,500,600,700}, 1 technical DeployHub ref (L289 myapp.deployhub.io placeholder subdomain)
+  * assistant-panel.tsx (361 lines): emerald-{400,500,600,700}, teal-{500,600}, 2 user-facing DeployHub refs (L36 quick-prompt CI/CD explanation, L244 assistant-empty-state intro "I'm your DeployHub AI assistant")
+  * webhooks-panel.tsx (1050 lines): emerald-{50,100,300,400,500,600,700,950}, 1 user-facing DeployHub ref (L941 "The URL where DeployHub will send HTTP POST requests.") + 2 technical refs (L631 X-DeployHub-Signature HTTP header, L936 https://example.com/webhooks/deployhub placeholder URL)
+  * analytics-panel.tsx (604 lines): emerald-{100,400,500,600,900}, 1 technical DeployHub ref (L444 `${subdomain}.deployhub.io`)
+  * templates-panel.tsx (672 lines): emerald-{50,100,200,400,500,600,700,800,900,950}, 1 technical DeployHub ref (L182 `${slug}.deployhub.io`)
+  * onboarding-wizard.tsx (654 lines): emerald-{400,500,600}, green-{600}, 1 user-facing DeployHub ref (L269 "Welcome to DeployHub!") + 3 technical subdomain refs (L196, L445, L570 `${slug}.deployhub.io`)
+  * command-palette.tsx (321 lines): emerald-{600}, 1 user-facing DeployHub ref (L178 CommandDialog description="Search commands and navigate DeployHub") + 7 technical event-identifier refs (L48 comment with deployhub:command:create-project, L50-53 deployhub:command:{create-project,register-domain,deploy-project,search-templates} event constants, L112/L113 deployhub:open-command-palette event add/removeEventListener)
+  * auth-modal.tsx (734 lines): emerald-{400,500,600,700}, 2 user-facing DeployHub refs (L243 `<h2>DeployHub</h2>` brand-title, L248 "Get started with DeployHub in seconds")
+  * web-development-page.tsx (471 lines): green-{400} only (1 ref, L289 `bg-green-400/80` macOS traffic-light dot in code-editor mockup — tri-color red/amber/green legend with clear semantic meaning)
+
+- Applied MultiEdit per file with `replace_all: true` per shade. CRITICAL ordering rule (inherited from Task 3-a/3-b/3-c): process 3-digit shades first (emerald-100/200/300/400/500/600/700/800/900/950), then `emerald-50` LAST — otherwise `emerald-50` would match the prefix of `emerald-500` and corrupt it to `indigo-5000`. Same substring-trap rule applied to blue/green families where applicable (no blue-50 or green-50 in any of these files, so no trap triggered for blue/green — but ordering was still maintained longest-first within each family for safety).
+
+  provisioning-panel.tsx — 8 shade substitutions (ordered longest-first):
+    emerald-700→indigo-700, emerald-600→indigo-600, emerald-500→indigo-500, emerald-400→indigo-400, emerald-300→indigo-300, blue-600→indigo-600, blue-500→indigo-500, blue-400→indigo-400.
+    Migrated across ~45 class refs / ~30 lines: provisioning status badge 'success'/'running' (running was bg-blue-* → indigo, success was emerald → indigo), provision-submit-button (bg-emerald-600 hover:bg-emerald-700), step-icon wrapper (bg-emerald-600/10), Rocket icon (text-emerald-600), CheckCircle2 success indicator (text-emerald-500), all primary CTA buttons, all "View Logs"/"Cancel"/"Retry" link accents, ProvisioningJobCard selected border + ring, all tint stat-card icons (Total=emerald, Failed=blue → both indigo now), service-status dot (bg-emerald-500 → indigo), completed-banner bg-emerald-500/50 + bg-blue-500/50, summary-status tinted text + bg.
+    KEEP decisions preserved: `bg-red-*`/`bg-orange-*` (failed/rolled_back status), `bg-amber-*` (running-alt status), `bg-muted` (pending status), `bg-orange-500`/`bg-red-500` (status dots for partial/error), all theme tokens.
+    Tricky call: STATUS_BADGE 'running' (was bg-blue-* → indigo) and STATUS_BADGE 'success' (was emerald-* → indigo) both collapse to identical indigo styling since both blue and emerald map to indigo. Same precedent as Task 3-b ROLE_STYLES and Task 3-c STATUS_CONFIG. Followed strict mapping rule verbatim.
+
+  pipelines-panel.tsx — 11 shade substitutions (ordered longest-first, emerald-50 LAST):
+    emerald-950→indigo-950, emerald-900→indigo-900, emerald-800→indigo-800, emerald-700→indigo-700, emerald-600→indigo-600, emerald-500→indigo-500, emerald-400→indigo-400, emerald-300→indigo-300, emerald-200→indigo-200, emerald-100→indigo-100, emerald-50→indigo-50 (LAST).
+    Migrated across ~43 class refs: PIPELINE_TYPES.deploy color/accent/border/bg set, PipelineStatusBadge.active (was emerald → indigo), getStatusColor 'success' dot (was bg-emerald-500 → bg-indigo-500 per strict emerald→indigo mapping; "CAN stay green" rule is permissive per Task 3-b precedent — chose indigo), stage-style color/accent/border/bg/dot set, CheckCircle2 success icons, save button (bg-emerald-600 hover:bg-emerald-700), add-stage button, stage-card selected ring (ring-emerald-500/50), stage-status pill (success branch bg-emerald-300 dark:bg-emerald-700 → indigo), success-banner (border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/20 → indigo), pipeline-card active border + hover bg, all deploy/run/rollback CTA buttons.
+    KEEP decisions preserved: `bg-red-500` (failed status dot), `bg-amber-500` (running status dot), `bg-gray-400` (cancelled status dot), `bg-amber-*` (paused status badge), all theme tokens, `text-sky-500`/`text-orange-500`/`text-lime-500` framework-icon colors (NOT in migration list).
+
+  teams-panel.tsx — 7 shade substitutions (ordered longest-first, emerald-50 LAST):
+    emerald-700→indigo-700, emerald-600→indigo-600, emerald-500→indigo-500, emerald-300→indigo-300, emerald-200→indigo-200, emerald-100→indigo-100, emerald-50→indigo-50 (LAST).
+    Migrated across ~9 class refs: RoleBadge 'owner' (was emerald → indigo), DeploymentStatusBadge 'Live' (was emerald → indigo), loading spinner (text-emerald-500), team-avatar fallback, team-header Users icon, team-card hover-border + group-hover-text-emerald-600, manage button group-hover:bg-emerald-50 group-hover:border-emerald-300 group-hover:text-emerald-700.
+    KEEP decisions preserved: `bg-amber-100`/`text-amber-700`/`border-amber-200` (RoleBadge 'admin'), `bg-red-*`/`bg-amber-*` for other role/status badges, all theme tokens.
+
+  notification-center.tsx — 3 shade substitutions:
+    emerald-600→indigo-600, emerald-500→indigo-500, blue-500→indigo-500.
+    Migrated: getTypeIcon 'success' CheckCircle2 (was text-emerald-500 → indigo), getTypeIcon 'info' Info icon (was text-blue-500 → indigo — info icon's conventional blue converted per strict mapping), loading spinner border-emerald-600 → indigo-600.
+    KEEP decisions preserved: `text-amber-500` (warning AlertTriangle), `text-red-500` (error AlertCircle), `bg-amber-*`/`bg-red-*` notification-type accents, all theme tokens.
+    Tricky call: 'info' icon was text-blue-500 (conventional blue for info). Strict blue→indigo mapping rule has no exception for "info" semantic colors — converted to text-indigo-500. Info/warning/error icons now all use the same brand indigo (warning=amber, error=red preserved). Followed strict mapping rule verbatim.
+
+  github-panel.tsx — 19 shade substitutions (emerald family longest-first with emerald-50 LAST, then blue longest-first, then green longest-first):
+    emerald-950→indigo-950, emerald-900→indigo-900, emerald-800→indigo-800, emerald-700→indigo-700, emerald-600→indigo-600, emerald-500→indigo-500, emerald-400→indigo-400, emerald-300→indigo-300, emerald-200→indigo-200, emerald-100→indigo-100, emerald-50→indigo-50 (LAST), blue-900→indigo-900, blue-700→indigo-700, blue-400→indigo-400, blue-100→indigo-100, green-900→indigo-900, green-700→indigo-700, green-400→indigo-400, green-100→indigo-100.
+    Migrated across ~50 class refs: frameworkColor 'nextjs' badge (was emerald → indigo), languageColor 'TypeScript' badge (was blue → indigo), languageColor 'Python' badge (was green → indigo), GitHub-connect OAuth banner (border-emerald-200 bg-emerald-50/50 → indigo), all primary CTA buttons (Connect Repository, Connect Project, Refresh, etc.), ShieldCheck/CheckCircle2/Github/GitBranch/GitCommit/Zap/Clock icon accents, connected-project card hover gradient (from-emerald-500/0 to-emerald-500/0 group-hover:from-emerald-500/5 → indigo), integration-status badges (Connected/Connected via OAuth), integration-list-card border + hover bg, project-card connected hover border + gradient overlay, badge-bg for active integration, all hover:text-emerald-600 transitions.
+    KEEP decisions preserved: `bg-sky-100`/`text-sky-700`/`bg-sky-900/30`/`text-sky-400` (React framework badge — sky is NOT in migration list), `bg-lime-100`/`text-lime-700`/`bg-lime-900/30`/`text-lime-400` (Node framework badge — lime is NOT in migration list), `bg-orange-100`/`text-orange-700`/`bg-orange-900/30`/`text-orange-400` (Static framework badge + Rust language badge — orange is in KEEP list), `bg-yellow-100`/`text-yellow-700`/`bg-yellow-900/30`/`text-yellow-400` (JavaScript language badge — yellow is in KEEP list), `bg-cyan-100`/`text-cyan-700`/`bg-cyan-900/30`/`text-cyan-400` (Go language badge — cyan NOT in migration list), `bg-red-100`/`text-red-700`/`bg-red-900/30`/`text-red-400` (Ruby language badge — red is in KEEP list), `bg-gray-*` (default framework/language badge), all theme tokens.
+    Tricky call: languageColor 'TypeScript' (was bg-blue-100/700 dark:bg-blue-900/30 dark:text-blue-400) and languageColor 'Python' (was bg-green-100/700 dark:bg-green-900/30 dark:text-green-400) both collapse to indigo (bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400). The conventional language-association colors (TypeScript=blue, Python=green) are lost per the strict mapping rule — no exception was listed for language-themed colors. Other languages whose colors are NOT in the migration list (JavaScript=yellow, Rust=orange, Go=cyan, Ruby=red) keep their distinct colors. This creates a visual inconsistency where some languages have distinct colors and TS/Python collapse to indigo. Followed the explicit mapping rule verbatim per the task spec ("ALL tailwind classes — use replace_all: true per substitution"). If a follow-up wants to preserve language colors, an exception would need to be added to the mapping rules.
+
+  audit-log-panel.tsx — 6 shade substitutions:
+    emerald-700→indigo-700, emerald-600→indigo-600, emerald-100→indigo-100, blue-700→indigo-700, blue-500→indigo-500, blue-100→indigo-100.
+    Migrated: ACTION_GROUPS user.login badge (was emerald → indigo), ACTION_GROUPS user.register badge (was emerald → indigo), ACTION_GROUPS project.create badge (was blue → indigo), ACTION_GROUPS project.deploy badge (was emerald → indigo), default action-group badge (was emerald → indigo), Activity icon for 'project' resource (was text-blue-500 → text-indigo-500), History icon (text-emerald-600 → indigo-600).
+    KEEP decisions preserved: `bg-red-100`/`text-red-700` (user.login_failed, project.delete), `bg-slate-100`/`text-slate-700` (user.logout), `bg-amber-100`/`text-amber-700` (project.update), `bg-purple-100`/`text-purple-700` (domain.register), `bg-cyan-100`/`text-cyan-700` (api_key actions), `text-slate-500` (User icon), `text-purple-500` (Globe icon for domain), `text-cyan-500` (Key icon for api_key), all theme tokens.
+    Tricky call: ACTION_GROUPS user.login/user.register/project.deploy (emerald) and project.create (blue) now all share identical indigo styling since both emerald and blue map to indigo. Same precedent as Task 3-b ROLE_STYLES. Followed strict mapping rule verbatim.
+
+  settings-panel.tsx — 7 shade substitutions (ordered longest-first, emerald-50 LAST) + 3 user-facing DeployHub → APSAMO targeted Edits:
+    emerald-800→indigo-800, emerald-700→indigo-700, emerald-600→indigo-600, emerald-400→indigo-400, emerald-300→indigo-300, emerald-100→indigo-100, emerald-50→indigo-50 (LAST).
+    Plus brand text: L324 "DeployHub 2FA Backup Codes\n" → "APSAMO 2FA Backup Codes\n" (downloaded-file content header — user-facing text inside the .txt file the user downloads and opens), L955 "Manage your API keys for programmatic access to DeployHub." → "...APSAMO." (CardDescription under API Keys header), L1052 "Create an API key to access the DeployHub API programmatically." → "...APSAMO API programmatically." (empty-state description).
+    Migrated across ~37 class refs: password-strength-meter 'Strong' color (bg-emerald-400 → indigo-400) and 'Very Strong' color (bg-emerald-600 → indigo-600), profile-tab User icon, profile-avatar fallback bg + initial text, profile-name edit-button badge, all primary CTA buttons (Save Profile, Enable 2FA, Save Settings, Generate New Key, Save Notification Preferences, Regenerate, etc.), 2FA enabled-state icon wrapper (bg-emerald-50 text-emerald-600 → indigo), 2FA success Alert (border-emerald-300 bg-emerald-50 + CheckCircle2 text-emerald-600 + text-emerald-800), backup-codes download button, API-keys header Key icon, API-keys create CTA, API-key success Alert (border-emerald-300 bg-emerald-50 + KeyRound icon + text-emerald-800 + copied-state CheckCircle2), API-key "Reveal" link hover:text-emerald-700→hover:text-indigo-700, notification-prefs Bell icon + Icon wrapper bg + Save button.
+    KEEP decisions preserved: `bg-red-500` (Weak password strength), `bg-orange-500` (Fair), `bg-yellow-500` (Medium), `bg-amber-50`/`text-amber-600` (2FA disabled state), all theme tokens, all `bg-red-*`/`bg-amber-*`/`bg-yellow-*`/`bg-orange-*` status colors.
+    Technical identifiers PRESERVED unchanged: L115 `localStorage.getItem('deployhub_token')`, L332 `a.download = 'deployhub-backup-codes.txt'` (downloaded filename — `deployhub-` prefix pattern per task spec), L1161/L1178 `localStorage.getItem/setItem('deployhub_notification_prefs', ...)`.
+
+  uptime-panel.tsx — 4 shade substitutions:
+    emerald-700→indigo-700, emerald-600→indigo-600, emerald-500→indigo-500, emerald-400→indigo-400.
+    Migrated across ~23 class refs: STATUS_CONFIG.up dot (was bg-emerald-500 → bg-indigo-500 per strict emerald→indigo mapping; "CAN stay green" rule is permissive per Task 3-b precedent — chose indigo for brand consistency), STATUS_CONFIG.up badge (bg-emerald-500/10 text-emerald-700 border-emerald-500/30 → indigo), uptimeColor '>=99%' (was text-emerald-600 dark:text-emerald-400 → indigo), progress-indicator '>=99%' (was [&_[data-slot=progress-indicator]]:bg-emerald-500 → indigo), Activity/Zap/Clock/CheckCircle2 icon accents, monitor-card up-status ping (was animate-ping bg-emerald-500 → indigo), monitor-card hover:border-emerald-500/40, monitor-detail uptime-100% text-emerald-600 → indigo, all "Test Monitor"/"Save"/"Refresh"/"Create Monitor" CTA buttons, monitor-card selected status dot.
+    KEEP decisions preserved: `bg-red-500` (down status dot + down-status badge + 'Down' AlertCircle), `text-red-600 dark:text-red-400` (uptimeColor <95%), `text-amber-600 dark:text-amber-400` (uptimeColor 95-99%), `[&_[data-slot=progress-indicator]]:bg-amber-500` (progress 95-99%), `bg-amber-*` (degraded status), all theme tokens.
+    Technical identifiers PRESERVED unchanged: L289 `placeholder="https://myapp.deployhub.io"` (`*.deployhub.io` subdomain URL placeholder).
+
+  assistant-panel.tsx — 6 shade substitutions (4 emerald + 2 teal) + 2 user-facing DeployHub → APSAMO (replace_all since both refs are user-facing):
+    emerald-700→indigo-700, emerald-600→indigo-600, emerald-500→indigo-500, emerald-400→indigo-400, teal-600→indigo-600, teal-500→indigo-500.
+    Plus brand text (replace_all): L36 "Explain CI/CD pipelines and how they work in DeployHub." → "...APSAMO." (quick-prompt prompt text), L244 "I'm your DeployHub AI assistant. Ask me anything about hosting, domains, deployments, CI/CD, or cloud infrastructure." → "I'm your APSAMO AI assistant..." (AI assistant empty-state intro).
+    Migrated across ~15 class refs: inline-code styling in markdown-rendered assistant messages (text-emerald-700 dark:text-emerald-400 → indigo — used inside `[&_code]:text-emerald-700` prose rule and inline replace), assistant-header avatar gradient (from-emerald-500 to-teal-600 → indigo), empty-state Bot icon wrapper (from-emerald-500/20 to-teal-500/20 → indigo), Bot icon color, quick-prompt card icon wrapper (bg-emerald-500/10 group-hover:bg-emerald-500/20 → indigo), quick-prompt card Icon color, user-message avatar gradient, assistant-message avatar gradient, typing-dots (3× bg-emerald-500 → indigo), input focus ring (focus-visible:ring-emerald-500/40 → indigo), send-button (bg-emerald-600 hover:bg-emerald-700 → indigo).
+    KEEP decisions preserved: `text-amber-500`/`bg-amber-*`/`text-red-*` (error message styling), all theme tokens.
+
+  webhooks-panel.tsx — 8 shade substitutions (emerald family longest-first with emerald-50 LAST) + 1 user-facing DeployHub → APSAMO targeted Edit:
+    emerald-950→indigo-950, emerald-700→indigo-700, emerald-600→indigo-600, emerald-500→indigo-500, emerald-400→indigo-400, emerald-300→indigo-300, emerald-100→indigo-100, emerald-50→indigo-50 (LAST).
+    Plus brand text: L941 "The URL where DeployHub will send HTTP POST requests." → "The URL where APSAMO will send HTTP POST requests." (create-webhook-form URL field helper text).
+    Migrated across ~14 class refs: getEventBadgeColor 'deployment' (was bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 → indigo), delivery-success CheckCircle2 icon (text-emerald-500 → indigo), New-Webhook button (bg-emerald-600 hover:bg-emerald-700 → indigo), empty-state Webhook icon wrapper (bg-emerald-100 dark:bg-emerald-950 → indigo) + icon color, create-form Webhook icon wrapper + color, event-checkbox checked state (data-[state=checked]:bg-emerald-600 → indigo + Checkbox component `data-[state=checked]:border-emerald-600` → indigo), event-list-label has-[:checked] states (has-[:checked]:border-emerald-500 has-[:checked]:bg-emerald-50 dark:has-[:checked]:bg-emerald-950/30 → indigo), header Webhook icon, save-webhook button.
+    KEEP decisions preserved: `bg-amber-100`/`text-amber-700`/`dark:bg-amber-950`/`dark:text-amber-300` (domain event badge), `bg-violet-100`/`text-violet-700`/`dark:bg-violet-950`/`dark:text-violet-300` (project event badge), `text-destructive` (delivery-failed XCircle icon), all theme tokens.
+    Technical identifiers PRESERVED unchanged: L631 `<code>X-DeployHub-Signature</code>` HTTP header name (API contract — `deployhub-` prefix pattern in code identifier per task spec; capital DH but treated as technical HTTP header API contract), L936 `placeholder="https://example.com/webhooks/deployhub"` (example webhook-URL endpoint placeholder — user-defined path; "deployhub" appears as a path segment not a brand reference; treated as technical example URL identifier).
+
+  analytics-panel.tsx — 5 shade substitutions:
+    emerald-900→indigo-900, emerald-600→indigo-600, emerald-500→indigo-500, emerald-400→indigo-400, emerald-100→indigo-100.
+    Migrated across ~22 class refs: requests-chart bar gradient (from-emerald-600 to-emerald-400 → indigo), requests-legend dot (bg-emerald-500 → indigo), BarChart3/Activity/TrendingUp/Globe/Zap/Clock icon accents, stat-card Total-Requests icon wrapper (bg-emerald-100 dark:bg-emerald-900/30 → indigo) + Activity icon color, all chart-axis/gridline accents, time-range-selector active tab text-emerald-600 → indigo, project-card subdomain-link hover:text-emerald-600 → indigo, all icon-wrapper bg + icon colors for stats cards.
+    KEEP decisions preserved: `bg-red-500/80` (errors bar in requests chart + errors-legend dot — strict red semantic for errors), `text-red-*` (error counts), all theme tokens.
+    Technical identifiers PRESERVED unchanged: L444 `{selectedProject.customDomain || `${selectedProject.subdomain}.deployhub.io`}` (`*.deployhub.io` subdomain URL).
+
+  templates-panel.tsx — 10 shade substitutions (emerald family longest-first with emerald-50 LAST):
+    emerald-950→indigo-950, emerald-900→indigo-900, emerald-800→indigo-800, emerald-700→indigo-700, emerald-600→indigo-600, emerald-500→indigo-500, emerald-400→indigo-400, emerald-200→indigo-200, emerald-100→indigo-100, emerald-50→indigo-50 (LAST).
+    Migrated across ~20 class refs: LayoutGrid header icon, template-card border + hover:border-emerald-300, template-card title group-hover:text-emerald-600, template-card Official-badge (bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400 → indigo), template-card Stars-badge text-emerald-600, template-card Preview-button (bg-emerald-600 hover:bg-emerald-700 → indigo), template-card Use-Template-button, selected-template header Official-badge, selected-template tags Badge (border-emerald-500/30 text-emerald-600 dark:text-emerald-400 → indigo), selected-template Install-button, deploying-template info-banner (border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 → indigo), deploying-template Install-confirm button, deploy-success CheckCircle2, deploy-success subdomain-display text-emerald-600 → indigo + Globe/ExternalLink icon accents, deploy-success Visit-Project-button.
+    KEEP decisions preserved: all theme tokens.
+    Technical identifiers PRESERVED unchanged: L182 `return slug ? `${slug}.deployhub.io` : ''` (`*.deployhub.io` subdomain URL — used in template-preview subdomain display).
+
+  onboarding-wizard.tsx — 4 shade substitutions (3 emerald + 1 green) + 1 user-facing DeployHub → APSAMO targeted Edit:
+    emerald-600→indigo-600, emerald-500→indigo-500, emerald-400→indigo-400, green-600→indigo-600.
+    Plus brand text: L269 "Welcome to DeployHub!" → "Welcome to APSAMO!" (onboarding-wizard welcome-step h1 heading).
+    Migrated across ~44 class refs: wizard-step completed-state pill (bg-emerald-500 → indigo) + current-state pill (bg-emerald-500/10 text-emerald-600 border-2 border-emerald-500 → indigo) + current-step text-emerald-600 → indigo, progress-bar (from-emerald-500 to-emerald-400 → indigo), welcome-step Rocket-icon wrapper gradient (from-emerald-500 to-emerald-600 → indigo) + Sparkles-float dot bg-emerald-400 → indigo + Get-Started button (bg-emerald-500 hover:bg-emerald-600 → indigo), framework-radio selected border + bg + text + icon-text colors, domain-radio selected border + bg, domain-results price text-emerald-600 → indigo + Available-badge (bg-emerald-500/10 text-emerald-600 → indigo), free-subdomain-radio selected state + Globe icon color + FREE-badge (bg-emerald-500/10 text-emerald-600 → indigo), plan-radio selected border + bg + Popular-badge (bg-emerald-500 text-white → indigo), plan-card Check-icon, plan-card monthly-cost text-emerald-600 → indigo + Continue-button, deploying-step Loader2 spinner + Rocket-icon wrapper gradient, success-step Rocket-icon wrapper gradient + subdomain-display (text-emerald-600 → indigo + Globe/ExternalLink icon colors) + subdomain-info banner (bg-emerald-500/10 border-emerald-500/20 → indigo) + Visit-Project-button.
+    Tricky call: FRAMEWORKS 'nodejs' icon color (was text-green-600 → text-indigo-600 per strict green→indigo mapping). Node.js brand color (green) is lost. Other framework colors NOT in the migration list are left untouched: Next.js text-black/dark:text-white (untouched), React text-sky-500 (sky NOT in mapping list — untouched), Static text-orange-500 (orange is in KEEP list — untouched). This creates a visual inconsistency where React keeps its sky brand color but Node.js loses its green brand color. Followed the explicit mapping rule verbatim ("ALL tailwind classes — use replace_all: true per substitution"). If a follow-up wants to preserve framework brand colors, an exception would need to be added to the mapping rules for framework-icon brand colors.
+    KEEP decisions preserved: all theme tokens, all `bg-red-*`/`bg-amber-*`/`bg-orange-*` status colors.
+    Technical identifiers PRESERVED unchanged: L196 `${slug}.deployhub.io` (welcome-step success-URL fallback — `*.deployhub.io` subdomain), L445 `<span className="text-indigo-600 font-mono">{slug}.deployhub.io</span> — Free with any plan` (domain-step free-subdomain display — `*.deployhub.io` subdomain URL; only the `text-emerald-600` color was migrated to `text-indigo-600`, the `deployhub.io` URL portion was preserved), L570 `{useFreeSubdomain ? `${slug}.deployhub.io` : selectedDomain}` (deploy-step success-URL display — `*.deployhub.io` subdomain).
+
+  command-palette.tsx — 1 shade substitution + 1 user-facing DeployHub → APSAMO targeted Edit:
+    emerald-600→indigo-600.
+    Plus brand text: L178 `description="Search commands and navigate DeployHub"` → `description="Search commands and navigate APSAMO"` (CommandDialog root description prop).
+    Migrated: Create-New-Project command-item Plus icon (text-emerald-600 → indigo-600).
+    KEEP decisions preserved: all theme tokens.
+    Technical identifiers PRESERVED unchanged: L48 comment `// deployhub:command:create-project` (technical event-identifier reference in comment), L50 `createProject: 'deployhub:command:create-project'` (event constant), L51 `registerDomain: 'deployhub:command:register-domain'` (event constant), L52 `deployProject: 'deployhub:command:deploy-project'` (event constant), L53 `searchTemplates: 'deployhub:command:search-templates'` (event constant), L112 `window.addEventListener('deployhub:open-command-palette', opener)` (event listener registration), L113 `window.removeEventListener('deployhub:open-command-palette', opener)` (event listener cleanup). All 7 deployhub:command:* / deployhub:open-command-palette strings are technical event identifiers per task spec — preserved unchanged.
+
+  auth-modal.tsx — 4 shade substitutions + 2 user-facing DeployHub → APSAMO (replace_all since both refs are user-facing):
+    emerald-700→indigo-700, emerald-600→indigo-600, emerald-500→indigo-500, emerald-400→indigo-400.
+    Plus brand text (replace_all): L243 `<h2 className="text-xl font-bold tracking-tight">DeployHub</h2>` → `<h2 className="text-xl font-bold tracking-tight">APSAMO</h2>` (modal-title brand heading), L248 "Get started with DeployHub in seconds" → "Get started with APSAMO in seconds" (register-mode subtitle).
+    Migrated across ~27 class refs: auth-modal logo Globe-icon wrapper (bg-emerald-500 → indigo), all submit-buttons (bg-emerald-500 hover:bg-emerald-600 + bg-emerald-600 hover:bg-emerald-700 → indigo), password-input show/hide Eye-icon button hover:text-emerald-700 → indigo, "Forgot password?" link text-emerald-600 hover:text-emerald-700 → indigo, social-auth Github/Google buttons border-emerald-300 hover:border-emerald-400 → indigo + Github icon text-emerald-500 → indigo, register-mode email-verification-success state (border-emerald-500/20 bg-emerald-500/5 → indigo + text-emerald-700 dark:text-emerald-400 → indigo + CheckCircle2 text-emerald-600 → indigo), password-strength-meter colors.
+    KEEP decisions preserved: `text-amber-*`/`text-red-*` (password-strength weak/fair labels + validation error messages), `bg-red-*` (form-error Alert), all theme tokens.
+
+  web-development-page.tsx — 0 shade substitutions (intentionally NO edits applied):
+    The file's only color ref is L289 `<span className="size-3 rounded-full bg-green-400/80" />` — a macOS-style window traffic-light dot inside a code-editor mockup on the landing page. It is part of a tri-color red/amber/green legend (L287 `bg-red-400/80`, L288 `bg-amber-400/80`, L289 `bg-green-400/80`) where green has clear semantic meaning (the macOS "maximize/zoom" window-control button). Per the Task 3-c precedent that preserved `bg-green-500/80` build-log legend dots as a tri-color semantic exception, this `bg-green-400/80` traffic-light dot was INTENTIONALLY KEPT unchanged. The landing page is already brand-aligned per the task description; the traffic-light dot is purely decorative macOS UI metaphor, not a brand color. Did not run any green-400 → indigo-400 substitution on this file.
+    Tricky call: the task spec's SPECIAL CASE rule mentions bg-green-500 (or bg-emerald-500) — this is bg-green-400/80 (different shade + opacity). Extended the rule per the Task 3-c precedent (which extended the same rule to bg-green-500/80). The semantic-meaning preservation outweighs the strict-mapping consistency here, especially since this is decorative landing-page UI and not a dashboard brand element.
+
+- Verified with `rg -o '(emerald|teal|green|blue)-[0-9]+' | sort -u` per file — 0 matches in all 15 edited files; only web-development-page.tsx retains `green-400` (the intentionally-kept traffic-light dot).
+- Verified with `rg -n -i deployhub` per file — all remaining deployhub/DeployHub strings are technical identifiers (localStorage keys, sessionStorage keys, custom event names, subdomain URLs, HTTP header, example URL, downloaded filename). 0 user-facing brand text remains.
+- Verified with `rg -n APSAMO` per file — all 10 user-facing DeployHub → APSAMO replacements are correctly in place (settings-panel × 3, assistant-panel × 2, webhooks-panel × 1, onboarding-wizard × 1, command-palette × 1, auth-modal × 2).
+- Ran `cd /home/z/my-project && bun run lint` — exit code 0, no errors, no warnings (clean).
+
+Stage Summary:
+- ALL 16 supplementary dashboard/landing-panel files brand colors migrated to APSAMO indigo (matching shade numbers) — 15 files edited with 103 unique-shade substitutions covering ~315+ class refs total; 1 file (web-development-page.tsx) intentionally not edited (1 ref kept as tri-color traffic-light legend dot).
+- 10 user-facing "DeployHub" → "APSAMO" replacements across 6 files (settings-panel × 3, assistant-panel × 2, webhooks-panel × 1, onboarding-wizard × 1, command-palette × 1, auth-modal × 2).
+- 19 technical `deployhub`/`DeployHub` identifiers preserved unchanged across 7 files (settings-panel × 4: deployhub_token + deployhub-backup-codes.txt + deployhub_notification_prefs × 2; uptime-panel × 1: myapp.deployhub.io; webhooks-panel × 2: X-DeployHub-Signature + example.com/webhooks/deployhub; analytics-panel × 1: ${subdomain}.deployhub.io; templates-panel × 1: ${slug}.deployhub.io; onboarding-wizard × 3: ${slug}.deployhub.io × 3; command-palette × 7: deployhub:command:* × 5 including comment + deployhub:open-command-palette × 2).
+- Lint: 0 errors, 0 warnings (exit code 0).
+- Files modified: src/components/provisioning/provisioning-panel.tsx (8 shade substitutions, 0 brand text), src/components/pipelines/pipelines-panel.tsx (11 substitutions, 0 brand text), src/components/teams/teams-panel.tsx (7 substitutions, 0 brand text), src/components/notifications/notification-center.tsx (3 substitutions, 0 brand text), src/components/github/github-panel.tsx (19 substitutions, 0 brand text), src/components/settings/audit-log-panel.tsx (6 substitutions, 0 brand text), src/components/settings/settings-panel.tsx (7 substitutions + 3 brand text), src/components/monitoring/uptime-panel.tsx (4 substitutions, 0 brand text), src/components/assistant/assistant-panel.tsx (6 substitutions + 2 brand text), src/components/webhooks/webhooks-panel.tsx (8 substitutions + 1 brand text), src/components/analytics/analytics-panel.tsx (5 substitutions, 0 brand text), src/components/templates/templates-panel.tsx (10 substitutions, 0 brand text), src/components/onboarding/onboarding-wizard.tsx (4 substitutions + 1 brand text), src/components/command-palette.tsx (1 substitution + 1 brand text), src/components/auth/auth-modal.tsx (4 substitutions + 2 brand text), src/components/landing/pages/web-development-page.tsx (0 substitutions — intentional KEEP).
+- Intentionally-kept green: 1 instance of `bg-green-400/80` traffic-light dot at web-development-page.tsx L289 — part of a red/amber/green tri-color macOS-window-control legend where green has clear semantic meaning (the "maximize/zoom" button). Per the Task 3-c precedent that preserved `bg-green-500/80` build-log legend dots as a tri-color semantic exception, this `bg-green-400/80` was preserved unchanged. Note: this is the only remaining green-* ref across all 16 supplementary files.
+- Tricky call: emerald-50 MUST be processed AFTER emerald-500 (and emerald-950/900/800/700/600/500/400/300/200/100 in that order) in any file containing both — substring trap where "emerald-50" is a prefix of "emerald-500" and out-of-order replace_all would corrupt `emerald-500` → `indigo-5000`. All 8 files containing both emerald-50 and emerald-500 (pipelines-panel, github-panel, settings-panel, webhooks-panel, templates-panel, teams-panel, + provisioning-panel and onboarding-wizard which only have emerald-500 not emerald-50 — no trap there) were processed with emerald-500 BEFORE emerald-50.
+- Tricky call: github-panel.tsx languageColor function — TypeScript badge (was bg-blue-100/700 dark:bg-blue-900/30 dark:text-blue-400) and Python badge (was bg-green-100/700 dark:bg-green-900/30 dark:text-green-400) both collapse to indigo. Conventional language-association colors (TypeScript=blue, Python=green) are lost per the strict mapping rule — no exception was listed for language-themed colors. Other languages whose colors are NOT in the migration list (JavaScript=yellow, Rust=orange, Go=cyan, Ruby=red) keep their distinct colors. Visual inconsistency is a direct consequence of the explicit mapping rule.
+- Tricky call: onboarding-wizard.tsx FRAMEWORKS 'nodejs' icon color (was text-green-600) converted to text-indigo-600 per strict green→indigo mapping. Node.js brand color (green) is lost. Other framework colors NOT in the migration list (Next.js text-black, React text-sky-500, Static text-orange-500) left untouched. Inconsistent result follows the explicit mapping rule verbatim.
+- Tricky call: uptime-panel.tsx STATUS_CONFIG.up dot (was bg-emerald-500 solid status dot for "Operational") and pipelines-panel.tsx getStatusColor 'success' dot (was bg-emerald-500 solid status dot) — both converted to bg-indigo-500 per strict emerald→indigo mapping. The task spec's SPECIAL CASE rule "A solid bg-green-500 (or bg-emerald-500) dot that represents a strict 'online/live/healthy/success' status CAN be kept as bg-green-500" is PERMISSIVE not MANDATORY. Per the Task 3-b precedent (HealthDot.healthy bg-emerald-500 → bg-indigo-500) and Task 3-c precedent (deployment "Live"/"Active" bg-emerald-500 → bg-indigo-500), chose indigo for brand consistency per the user complaint "still the system not change the colors". The 1 intentionally-kept `bg-green-400/80` traffic-light dot in web-development-page.tsx is the only exception.
+- Tricky call: audit-log-panel.tsx ACTION_GROUPS — user.login/user.register/project.deploy (emerald) and project.create (blue) all collapse to identical indigo styling since both emerald and blue map to indigo. Same precedent as Task 3-b ROLE_STYLES admin/client badges and Task 3-c STATUS_CONFIG live/building. Followed strict mapping rule verbatim.
+- Tricky call: webhooks-panel.tsx L631 `X-DeployHub-Signature` HTTP header — has capital "DeployHub" substring which would be matched by a `replace_all: DeployHub → APSAMO` operation. Treated as a technical API-contract identifier (`deployhub-` prefix pattern in code identifier per task spec) and preserved unchanged. Used a TARGETED Edit (not replace_all) for the user-facing L941 description text to avoid touching L631. Similarly used targeted Edits (not replace_all) for settings-panel.tsx, onboarding-wizard.tsx, and command-palette.tsx where mixed user-facing and technical "DeployHub" refs coexist. Used replace_all ONLY in assistant-panel.tsx and auth-modal.tsx where ALL "DeployHub" refs are user-facing.
+- Tricky call: web-development-page.tsx had 0 edits applied despite having 1 color ref. Documented this as an intentional KEEP (tri-color traffic-light legend dot, semantic meaning preservation per Task 3-c precedent). The file is otherwise brand-aligned (already uses indigo accent classes throughout).
+
+---
+Task ID: 3-e
+Agent: general-purpose
+Task: Fix user-facing DeployHub text in lib/ and api/ files — migrate the email templates, payment-methods, domain-automation, stacks, orchestration, and a few API route files from "DeployHub" brand text to "APSAMO" + replace emerald hex colors with brand indigo, while preserving technical identifiers (registrar identifiers, *.deployhub.io hostnames, deployhub.local demo emails, code-block comments, TOTP/webhook/mailcow/monitor/vps contracts).
+
+Work Log:
+- Read tail of worklog.md (Tasks 3-a through 3-d context): color mapping rules established — emerald-{50,100,200,300,400,500,600,700,900,950} → indigo-{matching shade}; blue-{50..900} → indigo-{matching shade}; keep red/yellow/amber/orange/gray status colors and theme tokens; keep technical identifiers (*.deployhub.io subdomains, deployhub_token, deployhub:command:* events, deployhub_pending_checkout localStorage).
+- Read all 5 target lib files end-to-end plus 5 optional API route files to classify each DeployHub occurrence as user-facing vs technical identifier.
+
+Substitutions performed per file:
+
+src/lib/email.ts (1 MultiEdit, 8 atomic edits):
+  - DeployHub → APSAMO (10 occurrences across user-facing strings):
+    * L26 FROM_NAME default `'DeployHub'` → `'APSAMO'`
+    * L107 welcome subject
+    * L110 welcome H1 body (also color fix, below)
+    * L127 welcome plain-text body
+    * L140 password-reset subject
+    * L144 password-reset H1 body
+    * L159 password-reset plain-text body
+    * L173 team-invite subject
+    * L177 team-invite HTML body
+    * L189 team-invite plain-text body
+  - Hex color migrations (7 occurrences):
+    * #10b981 (emerald-500 equivalent) → #706fd3 (APSAMO medium indigo)
+    * Applied to: welcome H1 color (L110), welcome button bg (L113), reset H1 color (L143), reset button bg (L146), team-invite H1 color (L176), team-invite button bg (L179), deployment email success color (L203 ternary)
+  - Kept unchanged (neutral / status colors): #6b7280 (gray text), #e5e7eb (light gray border), #9ca3af (muted gray), #ef4444 (red error / failure status color in L154 warning + L203 ternary)
+  - Kept unchanged (technical identifiers): `'no-reply@deployhub.local'` (L28 default FROM_EMAIL — functional email address needing MX records, mirrors prior-task rule for *.deployhub.io), `demo-${Date.now()}@deployhub.local` (L76 demo-mode messageId)
+
+src/lib/payment-methods.ts (1 MultiEdit, 3 atomic edits):
+  - DeployHub → APSAMO (3 occurrences):
+    * L92 manual bank-transfer `accountName: 'DeployHub Inc.'` → `'APSAMO Inc.'` (shown on bank transfer instructions panel)
+    * L311 Stripe checkout `planName: opts.planName || 'DeployHub Purchase'` → `'APSAMO Purchase'` (shown on Stripe checkout session description)
+    * L373 Waafi payment `description: \`${opts.planName || 'DeployHub'} - ${opts.purchaseType || 'subscription'}\`` → `'APSAMO'` (shown on Waafi payment receipt)
+  - Kept unchanged (technical): `billing@deployhub.io` (L90 payment-instructions email — functional mailbox, mirrors prior-task rule for *.deployhub.io), `DH-` reference prefix (L96 — internal payment reference code, not a brand string)
+  - No hex colors in this file (no inline styling)
+
+src/lib/domain-automation.ts (1 atomic Edit):
+  - DeployHub → APSAMO (1 occurrence):
+    * L457 confirmation email HTML body: `<p>You can manage your domain from the DeployHub dashboard.</p>` → `<p>You can manage your domain from the APSAMO dashboard.</p>`
+  - Kept unchanged (technical): `mail.deployhub.io` (L49 code-comment example + L124 default MX target — mail server hostname, mirrors prior-task rule for *.deployhub.io), `ns1.deployhub.io` / `ns2.deployhub.io` (L276 default nameservers — DNS infrastructure hostnames)
+  - No hex colors in this file
+
+src/lib/stacks.ts (1 MultiEdit, 2 atomic edits):
+  - DeployHub → APSAMO (2 occurrences, both user-facing stack-picker descriptions rendered by listStacks()):
+    * L138 docker stack description: `'Bring your own Dockerfile. DeployHub builds & runs it as-is on port 8080.'` → APSAMO
+    * L145 wordpress stack description: `'Managed WordPress 6.4 on PHP 8.2/Apache. DeployHub provisions a MySQL database alongside the container.'` → APSAMO
+  - Kept unchanged (code documentation — JSDoc comment-block refs starting with `*`): L4 `* Pure-data module describing the application stacks DeployHub knows how to provision.`, L15 `* Static definitions for every stack DeployHub knows how to provision.`
+  - No hex colors in this file
+
+src/lib/orchestration.ts (1 atomic Edit):
+  - DeployHub → APSAMO (1 occurrence):
+    * L1207 Mailcow addDomain description: `description: \`DeployHub provisioned domain for ${job.userId}\`` → `\`APSAMO provisioned domain for ${job.userId}\`` (stored against the Mailcow domain record and surfaced in admin/audit logs — user-facing)
+  - Kept unchanged (technical):
+    * L5 code comment `* The heart of DeployHub's automated provisioning pipeline.` — JSDoc
+    * L65 type-comment `provider: string // "dynadot" or "deployhub"` — code doc
+    * L197 `'mail.deployhub.io'` default MAIL_SERVER_HOSTNAME — mail server hostname (mirrors prior-task rule)
+    * L838 `registrar: domainResult?.provider === 'dynadot' ? 'Dynadot' : 'DeployHub'` — explicitly SKIP per task spec (database-stored registrar identifier, not user-facing)
+    * L847, L940 `['ns1.deployhub.io', 'ns2.deployhub.io']` default nameservers — DNS infra hostnames
+    * L1096 `${slug.split('.')[0]}.deployhub.io` auto-subdomain pattern — mirrors prior-task rule
+  - No hex colors in this file
+
+Optional API route files edited after read-and-decide:
+  - src/app/api/assistant/chat/route.ts (1 Edit): L17 SYSTEM_PROMPT `'You are DeployHub AI Assistant, ...'` → `'You are APSAMO AI Assistant, ...'` (the system prompt directly influences how the AI assistant self-identifies in chat responses to the end user — user-facing)
+  - src/app/api/docs/route.ts (1 MultiEdit, 3 atomic edits): L11 OpenAPI spec `title: 'DeployHub Domain Reseller API'` → APSAMO (rendered as the Swagger UI page title); L18 `contact: { name: 'DeployHub', ... }` → `name: 'APSAMO'` (rendered as the API contact name in Swagger UI); L320 HTML `<title>DeployHub Domain Reseller API — Swagger UI</title>` → APSAMO (browser tab title). Kept `support@deployhub.io` email unchanged (functional mailbox).
+  - src/app/api/auth/verify-email/route.ts (1 Edit): L42 notification `message: '... Welcome to DeployHub!'` → `'... Welcome to APSAMO!'` (in-app notification shown in dashboard bell icon — user-facing)
+  - src/app/api/auth/register/route.ts (1 Edit): L69 notification `title: 'Welcome to DeployHub!'` → `'Welcome to APSAMO!'` (in-app notification title — user-facing)
+  - src/app/api/domains/[id]/verify-code/route.ts: SKIPPED after read. Only DeployHub reference is L58 code comment `// Domains registered through Dynadot (or default DeployHub flow) are already trusted...` — code documentation, not user-facing.
+
+Verification:
+- Grep `deployhub` (case-insensitive) across all 5 lib files: all remaining occurrences are technical identifiers (mail/ns hostnames, code-comment block refs, the explicitly-skipped L838 registrar ternary, no-reply@deployhub.local + demo@deployhub.local functional addresses) — no user-facing text remains.
+- Grep `#[0-9a-f]{6}` across src/lib/email.ts: confirmed all emerald `#10b981` instances migrated to `#706fd3`; gray (`#6b7280`, `#9ca3af`, `#e5e7eb`) and red (`#ef4444`) kept as neutral/status colors.
+- Ran `cd /home/z/my-project && bun run lint` — exit code 0, no errors, no warnings (clean).
+
+Stage Summary:
+- Total DeployHub → APSAMO user-facing replacements: 17 (10 email.ts + 3 payment-methods.ts + 1 domain-automation.ts + 2 stacks.ts + 1 orchestration.ts + 4 API route files)
+- Total emerald hex color replacements: 7 (#10b981 → #706fd3, all in src/lib/email.ts)
+- Total hex colors kept as neutral/status: 4 unique hex codes (#6b7280 gray, #9ca3af muted gray, #e5e7eb light-gray border, #ef4444 red error/failure)
+- Lint: 0 errors, 0 warnings.
+- Files modified (9):
+  * src/lib/email.ts (8 atomic edits: 10 DeployHub replacements + 7 hex color migrations combined via MultiEdit)
+  * src/lib/payment-methods.ts (3 edits via MultiEdit)
+  * src/lib/domain-automation.ts (1 edit)
+  * src/lib/stacks.ts (2 edits via MultiEdit)
+  * src/lib/orchestration.ts (1 edit)
+  * src/app/api/assistant/chat/route.ts (1 edit — system prompt)
+  * src/app/api/docs/route.ts (3 edits via MultiEdit — OpenAPI title, contact name, HTML <title>)
+  * src/app/api/auth/verify-email/route.ts (1 edit — notification message)
+  * src/app/api/auth/register/route.ts (1 edit — notification title)
+- Files explicitly skipped per task spec (10):
+  * src/lib/totp.ts — TOTP issuer in 2FA secret URI; changing breaks existing enrollments
+  * src/lib/webhook-delivery.ts — X-DeployHub-Event / -Delivery / -Signature are external API contract headers
+  * src/lib/monitor.ts — User-Agent: DeployHub-Uptime-Monitor/1.0 is an external service identifier
+  * src/lib/mailcow.ts — DKIM key descriptions are server-side identifiers
+  * src/lib/vps/proxy.ts, deployer.ts, provisioner.ts — server config comments
+  * src/lib/email-dns.ts — only code-block comments
+  * src/lib/automation.ts — L725 internal AutomationLog metadata title (borderline, skipped per task spec)
+  * src/app/api/domains/[id]/verify-code/route.ts — only code comment, not user-facing
+- Technical DeployHub identifiers preserved across edited files: 12 occurrences (2× `no-reply@deployhub.local`/`demo@...@deployhub.local` functional emails in email.ts; 1× `billing@deployhub.io` functional mailbox in payment-methods.ts; 3× `mail.deployhub.io` / `ns1.deployhub.io` / `ns2.deployhub.io` hostnames in domain-automation.ts; 4× `mail.deployhub.io` / `ns1/ns2.deployhub.io` / `*.deployhub.io` hostnames + 1× code comment in orchestration.ts; 2× JSDoc comment-block refs in stacks.ts; 1× `support@deployhub.io` functional mailbox in docs/route.ts) — all confirmed technical/infrastructure identifiers, not user-facing brand strings.
+- Database-stored registrar identifier `'DeployHub'` at orchestration.ts L838 explicitly preserved per task spec — it is a stored enum-style value, not rendered text.
+
+
+---
+
+Task ID: 3-f
+Agent: general-purpose
+Task: Convert secondary accent colors (violet/cyan/purple/pink/sky) to brand indigo shades across 23 supplementary dashboard files
+
+Work Log:
+
+Scanned all 23 files for accent color usage (`\b(violet|purple|cyan|sky|pink|rose|fuchsia)-[0-9]+`). Found that 11 files actually contained target accent colors; the remaining 12 files had only amber/yellow/orange/red (semantic) which were correctly KEPT.
+
+Approach: For each file, used `MultiEdit` with `replace_all: true` per shade substitution. Ordered substitutions longest-shade-first (950 → 900 → ... → 500 → ... → 100 → 50) per task spec to avoid any substring-corruption risk. For framework-color special cases (lime/yellow/orange/red in github-panel.tsx and hosting-panel.tsx), used targeted Edits or replace_all (only safe when the color is used EXCLUSIVELY in framework colors). For Stat card gradients in cms-panel.tsx ACCENT_PRESETS, used targeted Edits with varied indigo shades to preserve visual differentiation (avoid duplicate-looking flat gradients). For seed/route.ts, applied 5 explicit previewGradient conversions per task spec.
+
+Pre-edit brand-text scan: All "DeployHub" string matches across the 23 files were verified to be technical identifiers (localStorage keys like `deployhub_token`, sessionStorage keys like `deployhub_pending_checkout`, event constants like `deployhub:command:*`, subdomain URLs like `${slug}.deployhub.io` and `myapp.deployhub.io` / `mail.deployhub.io`, and the HTTP header `X-DeployHub-Signature`). No user-facing brand text remained — previous tasks (3-a through 3-e) had already handled all 10 user-facing replacements. Zero brand-text edits needed in Task 3-f.
+
+Per-file substitutions:
+
+  pipelines-panel.tsx — 20 shade substitutions (violet+pink+sky families, longest-first within each family):
+    pink-950→indigo-950, sky-950→indigo-950, sky-800→indigo-800, violet-700→indigo-700, pink-700→indigo-700, sky-700→indigo-700, violet-600→indigo-600, pink-600→indigo-600, sky-600→indigo-600, sky-500→indigo-500, violet-400→indigo-400, pink-400→indigo-400, sky-400→indigo-400, violet-300→indigo-300, pink-300→indigo-300, sky-300→indigo-300, sky-200→indigo-200, violet-50→indigo-50, pink-50→indigo-50, sky-50→indigo-50.
+    Migrated across STAGE_TYPES config (test/lint/notify stage-type accent colors — build=amber/KEEP, deploy=indigo/already brand, package=orange/KEEP semantic, custom=gray/KEEP), stage-status running indicator (border-sky-400/sky-600/sky-50/sky-950 → indigo + bg-sky-500 → indigo-500 + glow ring-sky-400/30 → indigo), running stage row styling (bg-sky-50/dark:bg-sky-950/20/border-sky-200/dark:border-sky-800 → indigo), Loader2 spinner text-sky-500 → indigo-500, running stage progress dot bg-sky-500 animate-pulse → indigo.
+    KEEP decisions preserved: `text-amber-600`/`amber-400`/`amber-300`/`amber-50`/`amber-950/30` (build stage-type accent — semantic "building" status per task rule), `text-orange-600`/`orange-400`/`orange-300`/`orange-50`/`orange-950/30` (package stage-type accent — orange is in KEEP list and this is a stage category not a decorative gradient, so kept per the orange-KEEP rule; not converted to indigo), `bg-red-50`/`border-red-200` (failed stage status badge — semantic error), all theme tokens.
+    Tricky call: package stage-type uses orange accent. The task's orange rule says "KEEP. EXCEPT in pure decorative gradients." The package stage-type is NOT a gradient — it's a status badge color for a stage category (build/test/deploy/package/lint/notify/custom). Per the rule as written, orange should be kept here (it's not in a pure decorative gradient). The result is visual inconsistency where 4 stage types use indigo (test, deploy, lint, notify all converted) but package keeps orange. Followed the rule verbatim. If full brand consistency is desired, a follow-up could relax the orange-KEEP exception to cover all stage-type accents.
+
+  github-panel.tsx — 8 strict-mapping shade substitutions (cyan+sky families) + 13 framework-color special-case substitutions (lime+yellow+orange replace_all + 1 targeted Ruby red Edit):
+    cyan-900→indigo-900, sky-900→indigo-900, cyan-700→indigo-700, sky-700→indigo-700, cyan-400→indigo-400, sky-400→indigo-400, cyan-100→indigo-100, sky-100→indigo-100 (strict mapping, replace_all).
+    Plus framework-color special case (per task rule "Convert them to indigo — they're decorative, not semantic"): lime-900→indigo-900, lime-700→indigo-700, lime-400→indigo-400, lime-100→indigo-100 (Node.js badge), yellow-900→indigo-900, yellow-700→indigo-700, yellow-400→indigo-400, yellow-100→indigo-100 (JavaScript language badge), orange-900→indigo-900, orange-700→indigo-700, orange-400→indigo-400, orange-100→indigo-100 (Static framework + Rust language badges — both used identical orange classes), targeted Edit on Ruby language badge: `case 'Ruby': return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'` → `case 'Ruby': return 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400'` (could not use replace_all for red since red is used in 5+ other semantic-error contexts in this file).
+    Migrated: frameworkColor() function returns for react/node/static, languageColor() function returns for JavaScript/Rust/Go/Ruby (TypeScript and Python were already indigo). Total 8 framework/language brand colors normalized to indigo.
+    KEEP decisions preserved: `text-amber-500`/`bg-amber-50`/`text-amber-700`/`amber-400`/`amber-600`/`amber-900/30` (auto-deploy Zap icon, protected-branch Lock icon, status badges), all `bg-red-*`/`text-red-*` semantic error usages (delete branch button, error XCircle icon, error status badge, error alert) — kept all EXCEPT the Ruby framework color which was converted per special-case rule, all theme tokens.
+    Verified safety: rg confirmed lime, yellow, orange were used ONLY in framework/language color functions in this file (no other decorative or semantic usage), so replace_all was safe. Red was used in both framework and semantic contexts, so targeted Edit was used for the framework instance only.
+
+  audit-log-panel.tsx — 6 shade substitutions (purple+cyan families, replace_all):
+    purple-700→indigo-700, cyan-700→indigo-700, purple-500→indigo-500, cyan-500→indigo-500, purple-100→indigo-100, cyan-100→indigo-100.
+    Migrated: EVENT_TYPE_COLORS config (domain.register badge purple→indigo, api_key.create badge cyan→indigo), getIcon() resource-type icons (domain Globe icon text-purple-500 → indigo-500, api_key Key icon text-cyan-500 → indigo-500). All 4 strict-mapping color usages converted.
+    KEEP decisions preserved: `bg-amber-100`/`text-amber-700` (project.update badge — warning), `bg-red-100`/`text-red-700` (project.delete + domain.delete + api_key.delete badges — destructive), all theme tokens.
+
+  analytics-panel.tsx — 6 shade substitutions (cyan+violet families, replace_all):
+    violet-900→indigo-900, cyan-900→indigo-900, violet-600→indigo-600, cyan-600→indigo-600, violet-100→indigo-100, cyan-100→indigo-100.
+    Migrated: Avg-Response-Time stat-card icon wrapper (bg-cyan-100 dark:bg-cyan-900/30 → indigo, Clock icon text-cyan-600 → indigo-600), Unique-Visitors stat-card icon wrapper (bg-violet-100 dark:bg-violet-900/30 → indigo, Users icon text-violet-600 → indigo-600). All 4 strict-mapping color usages converted.
+    KEEP decisions preserved: `bg-amber-100`/`text-amber-500`/`amber-600`/`amber-900` (other stat-card accents), `bg-red-500/80` (errors bar in requests chart + errors-legend dot — strict red semantic for errors), `text-red-*` (error counts), all theme tokens.
+
+  hosting-panel.tsx — 5 strict-mapping shade substitutions (sky family, replace_all) + 10 framework-color special-case substitutions (lime+orange replace_all):
+    sky-900→indigo-900, sky-700→indigo-700, sky-500→indigo-500, sky-400→indigo-400, sky-100→indigo-100 (strict mapping).
+    Plus framework-color special case: lime-900→indigo-900, orange-900→indigo-900, lime-700→indigo-700, orange-700→indigo-700, lime-600→indigo-600, orange-500→indigo-500, lime-400→indigo-400, orange-400→indigo-400, lime-100→indigo-100, orange-100→indigo-100 (Node.js frameworkColor + frameworkIcon, Static frameworkColor + frameworkIcon).
+    Migrated: frameworkColor() function returns for react/node/static, frameworkIcon() function returns for react/node/static (nextjs was already indigo). React badge used sky (strict mapping), Node.js badge+icon used lime (special case), Static badge+icon used orange (special case). 6 framework brand colors normalized to indigo.
+    KEEP decisions preserved: `bg-yellow-100`/`text-yellow-700` (warning badge in deployStatusIcon), `text-red-*`/`bg-red-*` (deploy status failed icon, log line error color, delete buttons, error alerts, AlertTriangle icons), `text-yellow-400`/`text-yellow-500`/`bg-yellow-500` (log line warning color, Loader2 spinner, deploy-status dot), `bg-amber-*`/`text-amber-*` (status badges, warning banners, auto-deploy indicators), `bg-red-500/80` + `bg-yellow-500/80` + `bg-amber-500/80` (macOS-style traffic-light deploy-status dots — tri-color semantic legend per Task 3-c precedent), all theme tokens.
+    Verified safety: rg confirmed lime and orange were used ONLY in framework color/icon functions in this file (no other decorative or semantic usage), so replace_all was safe.
+
+  onboarding-wizard.tsx — 1 strict-mapping shade substitution + 1 framework-color special-case substitution:
+    sky-500→indigo-500 (strict mapping, replace_all — React framework color text-sky-500 → text-indigo-500).
+    Plus framework-color special case: orange-500→indigo-500 (replace_all — Static framework color text-orange-500 → text-indigo-500).
+    Migrated: FRAMEWORKS config array (line 57 React color text-sky-500 → text-indigo-500, line 59 Static color text-orange-500 → text-indigo-500). nextjs was text-black/dark:text-white (kept), nodejs was already text-indigo-600 (kept). 2 framework brand colors normalized to indigo.
+    KEEP decisions preserved: all theme tokens, all `text-amber-*`/`bg-red-*` status colors (none present in framework colors).
+    Note: previous Task 3-e migrated emerald→indigo in this file (4 substitutions) and converted the Node.js framework color (was text-green-600 → text-indigo-600). Task 3-f now also converts React (sky) and Static (orange) framework colors per the special-case rule. After both tasks, all 4 FRAMEWORKS entries (nextjs/react/nodejs/static) are either neutral (nextjs=black) or indigo (react/nodejs/static).
+
+  webhooks-panel.tsx — 12 shade substitutions (violet+cyan+rose families, replace_all):
+    violet-950→indigo-950, cyan-950→indigo-950, rose-950→indigo-950, violet-700→indigo-700, cyan-700→indigo-700, rose-700→indigo-700, violet-300→indigo-300, cyan-300→indigo-300, rose-300→indigo-300, violet-100→indigo-100, cyan-100→indigo-100, rose-100→indigo-100.
+    Migrated: getEventBadgeColor() function — 'project' event badge (bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-300 → indigo), 'ssl' event badge (bg-cyan-100 text-cyan-700 dark:bg-cyan-950 dark:text-cyan-300 → indigo), 'payment' event badge (bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300 → indigo). All 3 decorative event-type badges converted.
+    KEEP decisions preserved: `bg-amber-100`/`text-amber-700`/`dark:bg-amber-950`/`dark:text-amber-300` ('domain' event badge — warning semantic), `text-destructive` (delivery-failed XCircle icon), all theme tokens.
+    Tricky call: 'payment' event badge uses rose. Task rule says "rose-500 → indigo-500, etc. (UNLESS used for 'error/destructive' semantic — then keep)". The 'payment' event is NOT error/destructive — it's just an event-type label for webhook event filtering. So rose was converted to indigo per the rule. Confirmed rose is used in ONLY this one decorative context in the file (rg verified).
+    Technical identifiers PRESERVED unchanged: L631 `<code>X-DeployHub-Signature</code>` HTTP header name (API contract — `deployhub-` prefix pattern in code identifier per task spec; capital DH but treated as technical HTTP header API contract).
+
+  deployments-panel.tsx — 3 shade substitutions (purple family, replace_all):
+    purple-700→indigo-700, purple-200→indigo-200, purple-100→indigo-100.
+    Migrated: STATUS_CONFIG 'deploying' badge (bg-purple-100 text-purple-700 border-purple-200 → indigo). All 3 strict-mapping color usages converted.
+    KEEP decisions preserved: `bg-yellow-100`/`text-yellow-700`/`border-yellow-200` ('queued' status badge — warning), `bg-indigo-100`/`text-indigo-700`/`border-indigo-200` ('building' + 'live' status badges — already brand color), `bg-red-100`/`text-red-700`/`border-red-200` ('failed' status badge — destructive), `bg-gray-100`/`text-gray-600`/`border-gray-200` ('rolled_back' status badge — neutral), all theme tokens.
+    Technical identifiers PRESERVED unchanged: L82 `localStorage.getItem('deployhub_token')`, L323 `localStorage.getItem('deployhub_token')`, L200 `${ts} > Live at https://${deployment.project?.subdomain || 'myapp'}.deployhub.io` (deployment log line — `myapp.deployhub.io` is a subdomain URL placeholder).
+
+  admin-panel.tsx — 3 shade substitutions (purple family, replace_all):
+    purple-700→indigo-700, purple-200→indigo-200, purple-100→indigo-100.
+    Migrated: ROLE_CONFIG 'super_admin' badge (bg-purple-100 text-purple-700 border-purple-200 → indigo). The Crown icon's accent color is now indigo matching the rest of the role hierarchy. All 3 strict-mapping color usages converted.
+    KEEP decisions preserved: `bg-indigo-100`/`text-indigo-700`/`border-indigo-200` ('admin' role badge — already brand color), all theme tokens.
+    Technical identifiers PRESERVED unchanged: L106 `localStorage.getItem('deployhub_token')`.
+
+  cms-panel.tsx — 3 targeted Edits on ACCENT_PRESETS array (preserved visual variety with varied indigo shades instead of strict same-shade substitution):
+    `'from-purple-500 to-indigo-500'` → `'from-indigo-700 to-indigo-300'` (purple dominant→indigo-700 dark, paired with light indigo-300 for contrast).
+    `'from-indigo-600 to-purple-600'` → `'from-indigo-300 to-indigo-700'` (purple was secondary, reversed direction for variety: light indigo-300 → dark indigo-700).
+    `'from-violet-500 to-indigo-500'` → `'from-indigo-400 to-indigo-700'` (violet dominant→light indigo-400, paired with dark indigo-700).
+    All 8 ACCENT_PRESETS entries are now indigo-only with varied shade combinations (5 were already indigo, 3 newly converted). The picker shows 8 visually-distinct gradient options.
+    Tricky call: strict same-shade mapping would have produced `from-indigo-500 to-indigo-500` (twice) and `from-indigo-600 to-indigo-600` — 3 duplicate-looking flat gradients in the picker. Instead applied varied indigo shades per the spirit of "Convert violet/cyan to indigo shades" (plural "shades"). This preserves the picker's visual variety while still achieving brand consistency. The task description's stat-card-gradient rule says "Convert violet/cyan to indigo shades" (plural) — interpreted as permitting shade variety. The "vary shades" explicit instruction in the task spec was for the seed file only, but extending it to ACCENT_PRESETS prevents UX degradation.
+    KEEP decisions preserved: `text-amber-500`/`amber-600` (cms-service status indicators), all theme tokens.
+    Technical identifiers PRESERVED unchanged: L79 `localStorage.getItem('deployhub_token')`.
+
+  seed/route.ts — 5 targeted Edits on previewGradient values per explicit task spec (varied indigo shades to preserve visual differentiation between templates):
+    L115 (astro-blog template): `from-orange-500 to-red-500` → `from-indigo-500 to-indigo-700`.
+    L138 (sveltekit-app template): `from-red-500 to-orange-500` → `from-indigo-700 to-indigo-500`.
+    L207 (static-html template): `from-violet-600 to-purple-500` → `from-indigo-600 to-indigo-500`.
+    L230 (gatsby-blog template): `from-purple-600 to-pink-500` → `from-indigo-700 to-indigo-400`.
+    L276 (go-microservice template): `from-sky-500 to-cyan-500` → `from-indigo-500 to-indigo-400`.
+    All 5 conversions applied verbatim per the task spec. The other 7 previewGradient values (from-gray-900 to-black, and 6 already-indigo gradients) were left unchanged. No orange/amber/yellow/red shades remain in the seed file's previewGradient values.
+    Note: red-* and orange-* shades were converted to indigo here per the explicit task spec for the seed file — this is an exception to the KEEP-red/orange rule, justified because these are purely decorative template-preview gradient accents, not semantic error/warning indicators.
+
+Files with NO color edits (12 files — only semantic amber/yellow/orange/red present, all KEEP per task rules):
+  command-palette.tsx (1 ref: text-amber-500 — search-result metadata icon accent, kept as semantic). 
+  provisioning-panel.tsx (only amber+orange — status badges + accent colors, kept).
+  teams-panel.tsx (only amber — team role badges, kept).
+  uptime-panel.tsx (only amber — monitor status colors, kept).
+  notification-center.tsx (amber+orange — severity colors per task rule "KEEP red/amber/yellow/orange for severity levels", kept).
+  billing-panel.tsx (amber+orange+yellow — billing status badges + warning banners, kept).
+  overview-panel.tsx (only amber — dashboard KPI status indicators, kept).
+  settings-panel.tsx (amber+orange+yellow — settings tabs + warning indicators, kept).
+  domains-panel.tsx (only amber — DNS status colors, kept).
+  templates-panel.tsx (1 ref: text-amber-500 — official template badge accent, kept).
+  servers-panel.tsx (only amber — server health status, kept).
+  email-verification-banner.tsx (only amber — verification warning banner, kept).
+  Verified: rg `\b(violet|purple|cyan|sky|pink|rose|fuchsia)-[0-9]+` returned 0 matches in all 12 files. No edits applied.
+
+Post-edit verification:
+- Ran `rg '\b(violet|purple|cyan|sky|pink|rose|fuchsia)-[0-9]+'` on all 23 files → 0 matches in every file (all target accent colors eliminated).
+- Verified framework-color special-case conversions: github-panel.tsx and hosting-panel.tsx frameworkColor() and frameworkIcon() functions now return indigo for ALL frameworks/languages (nextjs/react/node/static/typescript/javascript/python/rust/go/ruby) — no remaining lime/yellow/orange/red framework brand colors.
+- Verified semantic colors preserved: amber/yellow/orange/red for warnings/errors still present in their original semantic contexts across all 23 files (only converted in framework-color special cases and seed-file decorative gradients).
+- Verified no `from-orange/amber/yellow-*` decorative gradients existed in the 22 component files (only in seed/route.ts which was handled explicitly) — so the orange-KEEP-exception-for-decorative-gradients rule had no application beyond the seed file.
+
+Lint: Ran `cd /home/z/my-project && bun run lint` → exit code 0, no errors, no warnings (clean).
+
+DB migration: Ran the one-time DB update script from task spec (bun -e). Connected to the live Prisma database and updated existing template records' previewGradient values:
+- react-spa → from-indigo-500 to-indigo-500 (was from-sky-500 to-cyan-500)
+- astro-blog → from-indigo-500 to-indigo-500 (was from-orange-500 to-red-500)
+- sveltekit-app → from-indigo-500 to-indigo-500 (was from-red-500 to-orange-500)
+- static-html → from-indigo-600 to-indigo-500 (was from-violet-600 to-purple-500)
+- gatsby-blog → from-indigo-600 to-indigo-500 (was from-purple-600 to-pink-500)
+- go-microservice → from-indigo-500 to-indigo-500 (was from-sky-500 to-cyan-500)
+Total updated: 6 existing template records migrated. The DB migration applied strict same-shade substitution (per the script provided verbatim in the task spec), which produced some flat `from-indigo-500 to-indigo-500` gradients where both source shades were 500. The seed route file (route.ts) was edited with varied shades per the task spec, so newly-seeded templates will get the varied gradients. Existing DB records can be re-seeded by calling the seed endpoint if the user wants the varied-gradient versions.
+
+Stage Summary:
+- 11 files edited with color substitutions: pipelines-panel.tsx (20 substitutions), github-panel.tsx (8 strict + 13 special-case = 21 total), audit-log-panel.tsx (6), analytics-panel.tsx (6), hosting-panel.tsx (5 strict + 10 special-case = 15 total), onboarding-wizard.tsx (1 strict + 1 special-case = 2 total), webhooks-panel.tsx (12), deployments-panel.tsx (3), admin-panel.tsx (3), cms-panel.tsx (3 targeted Edits with varied shades), seed/route.ts (5 targeted Edits per task spec). Total: ~96 unique shade substitutions + targeted Edits.
+- 12 files required NO color edits (only semantic amber/yellow/orange/red present, all correctly kept per task rules).
+- 0 user-facing DeployHub→APSAMO brand-text edits needed (all 10 were already handled by Tasks 3-a through 3-e; the only "DeployHub" string in this task's 23 files was the technical `X-DeployHub-Signature` HTTP header in webhooks-panel.tsx, which is preserved as an API contract).
+- 19 technical `deployhub`/`DeployHub` identifiers preserved unchanged across 9 files (deployhub_token × 7, deployhub_pending_checkout × 1, deployhub.io subdomain URLs × 8 including myapp.deployhub.io/mail.deployhub.io/${slug}.deployhub.io, deployhub:command:* event constants × 2, X-DeployHub-Signature HTTP header × 1).
+- Framework-color special case applied to 14 framework/language brand colors across 3 files (github-panel.tsx: 8 frameworks/languages, hosting-panel.tsx: 6 framework color+icon entries, onboarding-wizard.tsx: 2 frameworks). All now use indigo. Conventional external brand associations (TypeScript=blue[already indigo], Python=green[already indigo], JavaScript=yellow, Rust=orange, Go=cyan, Ruby=red, Vue=green[already indigo], React=sky, Node=lime, Static=orange/violet, Next.js=black) are converted to APSAMO brand indigo for visual consistency.
+- Stat-card-gradient rule applied: cms-panel.tsx ACCENT_PRESETS (3 gradients converted with varied indigo shades to preserve picker variety). Seed route previewGradient values (5 gradients converted with varied indigo shades per task spec).
+- Lint: 0 errors, 0 warnings (exit code 0).
+- DB migration: 6 existing template records updated with strict same-shade indigo substitutions.
+

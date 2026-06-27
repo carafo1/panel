@@ -231,9 +231,9 @@ function statusBadgeClass(status: JobStatus | StepStatus): string {
     case 'pending':
       return 'bg-muted text-muted-foreground border-border'
     case 'running':
-      return 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30'
+      return 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/30'
     case 'success':
-      return 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+      return 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/30'
     case 'failed':
       return 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/30'
     case 'rolled_back':
@@ -326,7 +326,7 @@ function CopyButton({
       }}
     >
       {copied ? (
-        <CheckCircle2 className="size-3.5 text-emerald-500" />
+        <CheckCircle2 className="size-3.5 text-indigo-500" />
       ) : (
         <Copy className="size-3.5" />
       )}
@@ -478,8 +478,8 @@ function NewProvisioningDialog({
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <div className="size-7 rounded-lg bg-emerald-600/10 flex items-center justify-center">
-              <Rocket className="size-4 text-emerald-600 dark:text-emerald-400" />
+            <div className="size-7 rounded-lg bg-indigo-600/10 flex items-center justify-center">
+              <Rocket className="size-4 text-indigo-600 dark:text-indigo-400" />
             </div>
             New Automated Provisioning
           </DialogTitle>
@@ -512,7 +512,7 @@ function NewProvisioningDialog({
               <div
                 className={`text-xs flex items-start gap-1.5 ${
                   domainCheck.available
-                    ? 'text-emerald-600 dark:text-emerald-400'
+                    ? 'text-indigo-600 dark:text-indigo-400'
                     : 'text-muted-foreground'
                 }`}
               >
@@ -542,7 +542,7 @@ function NewProvisioningDialog({
                     key={s.domain}
                     type="button"
                     onClick={() => setDomain(s.domain)}
-                    className="text-xs px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 transition-colors"
+                    className="text-xs px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/20 transition-colors"
                   >
                     {s.domain}
                     {s.price ? ` · $${s.price.toFixed(2)}` : ''}
@@ -573,14 +573,14 @@ function NewProvisioningDialog({
                       onClick={() => setStack(s.id)}
                       className={`flex items-start gap-3 p-3 rounded-lg border text-left transition-all ${
                         active
-                          ? 'border-emerald-500 bg-emerald-500/5 ring-1 ring-emerald-500/30'
-                          : 'border-border hover:border-emerald-500/40 hover:bg-muted/50'
+                          ? 'border-indigo-500 bg-indigo-500/5 ring-1 ring-indigo-500/30'
+                          : 'border-border hover:border-indigo-500/40 hover:bg-muted/50'
                       }`}
                     >
                       <div
                         className={`size-8 rounded-md flex items-center justify-center shrink-0 ${
                           active
-                            ? 'bg-emerald-600 text-white'
+                            ? 'bg-indigo-600 text-white'
                             : 'bg-muted text-muted-foreground'
                         }`}
                       >
@@ -590,7 +590,7 @@ function NewProvisioningDialog({
                         <div className="flex items-center gap-1.5">
                           <span className="text-sm font-medium">{s.name}</span>
                           {active && (
-                            <CheckCircle2 className="size-3.5 text-emerald-500" />
+                            <CheckCircle2 className="size-3.5 text-indigo-500" />
                           )}
                         </div>
                         <p className="text-xs text-muted-foreground line-clamp-2">
@@ -607,7 +607,7 @@ function NewProvisioningDialog({
           {/* Toggles */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="flex items-start gap-3 p-3 rounded-lg border border-border">
-              <Server className="size-5 text-emerald-600 dark:text-emerald-400 mt-0.5" />
+              <Server className="size-5 text-indigo-600 dark:text-indigo-400 mt-0.5" />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between">
                   <Label htmlFor="prov-hosting" className="cursor-pointer">
@@ -625,7 +625,7 @@ function NewProvisioningDialog({
               </div>
             </div>
             <div className="flex items-start gap-3 p-3 rounded-lg border border-border">
-              <Mail className="size-5 text-emerald-600 dark:text-emerald-400 mt-0.5" />
+              <Mail className="size-5 text-indigo-600 dark:text-indigo-400 mt-0.5" />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between">
                   <Label htmlFor="prov-email" className="cursor-pointer">
@@ -677,7 +677,7 @@ function NewProvisioningDialog({
             <Separator className="my-2" />
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium">Total today</span>
-              <span className="text-lg font-bold text-emerald-600 dark:text-emerald-400">
+              <span className="text-lg font-bold text-indigo-600 dark:text-indigo-400">
                 ${totalPrice.toFixed(2)}
               </span>
             </div>
@@ -691,7 +691,7 @@ function NewProvisioningDialog({
           <Button
             onClick={handleSubmit}
             disabled={!canSubmit}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white"
+            className="bg-indigo-600 hover:bg-indigo-700 text-white"
           >
             {submitting ? (
               <>
@@ -750,9 +750,9 @@ function PipelineStepRow({
   }
 
   if (status === 'running') {
-    iconWrapClass = 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
+    iconWrapClass = 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400'
   } else if (status === 'success') {
-    iconWrapClass = 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+    iconWrapClass = 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400'
   } else if (status === 'failed') {
     iconWrapClass = 'bg-red-500/10 text-red-600 dark:text-red-400'
   } else if (status === 'skipped') {
@@ -763,9 +763,9 @@ function PipelineStepRow({
 
   const connectorClass =
     status === 'success'
-      ? 'bg-emerald-500/50'
+      ? 'bg-indigo-500/50'
       : status === 'running'
-        ? 'bg-blue-500/50'
+        ? 'bg-indigo-500/50'
         : 'bg-border'
 
   return (
@@ -883,7 +883,7 @@ function PipelineProgress({ steps }: { steps: ProvisioningStep[] }) {
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
-          <Sparkles className="size-4 text-emerald-600 dark:text-emerald-400" />
+          <Sparkles className="size-4 text-indigo-600 dark:text-indigo-400" />
           Pipeline Progress
         </CardTitle>
         <CardDescription>
@@ -925,7 +925,7 @@ function StatusResultCard({
 }) {
   const headerTint =
     status === 'success'
-      ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-500/10'
+      ? 'text-indigo-600 dark:text-indigo-400 bg-indigo-500/10'
       : status === 'fail'
         ? 'text-red-600 dark:text-red-400 bg-red-500/10'
         : 'text-muted-foreground bg-muted'
@@ -940,7 +940,7 @@ function StatusResultCard({
             <CardTitle className="text-sm">{title}</CardTitle>
           </div>
           {status === 'success' && (
-            <CheckCircle2 className="size-5 text-emerald-500" />
+            <CheckCircle2 className="size-5 text-indigo-500" />
           )}
           {status === 'fail' && <XCircle className="size-5 text-red-500" />}
           {status === 'skipped' && (
@@ -1047,7 +1047,7 @@ function DnsResultCard({ result }: { result: ProvisioningResult }) {
         </div>
         <div className="flex items-center gap-2">
           {s.propagationVerified ? (
-            <Badge className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30">
+            <Badge className="bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/30">
               <ShieldCheck className="size-3" />
               Propagation verified
             </Badge>
@@ -1088,7 +1088,7 @@ function HostingResultCard({ result }: { result: ProvisioningResult }) {
                 href={s.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 hover:underline"
+                className="inline-flex items-center gap-1 text-indigo-600 dark:text-indigo-400 hover:underline"
               >
                 {s.url}
                 <ExternalLink className="size-3" />
@@ -1105,7 +1105,7 @@ function HostingResultCard({ result }: { result: ProvisioningResult }) {
             variant="outline"
             className={
               s.sslEnabled
-                ? 'text-emerald-600 dark:text-emerald-400 border-emerald-500/30 bg-emerald-500/5'
+                ? 'text-indigo-600 dark:text-indigo-400 border-indigo-500/30 bg-indigo-500/5'
                 : 'text-muted-foreground'
             }
           >
@@ -1116,7 +1116,7 @@ function HostingResultCard({ result }: { result: ProvisioningResult }) {
             variant="outline"
             className={
               s.healthChecked
-                ? 'text-emerald-600 dark:text-emerald-400 border-emerald-500/30 bg-emerald-500/5'
+                ? 'text-indigo-600 dark:text-indigo-400 border-indigo-500/30 bg-indigo-500/5'
                 : 'text-muted-foreground'
             }
           >
@@ -1168,7 +1168,7 @@ function EmailResultCard({ result }: { result: ProvisioningResult }) {
         </div>
         <div className="flex flex-wrap gap-1.5">
           {s.dkimConfigured && (
-            <Badge className="text-emerald-600 dark:text-emerald-400 border-emerald-500/30 bg-emerald-500/10">
+            <Badge className="text-indigo-600 dark:text-indigo-400 border-indigo-500/30 bg-indigo-500/10">
               <ShieldCheck className="size-3" />
               DKIM configured
             </Badge>
@@ -1188,7 +1188,7 @@ function EmailResultCard({ result }: { result: ProvisioningResult }) {
               href={s.webmailUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400 hover:underline px-2 py-0.5"
+              className="inline-flex items-center gap-1 text-xs text-indigo-600 dark:text-indigo-400 hover:underline px-2 py-0.5"
             >
               Webmail
               <ExternalLink className="size-3" />
@@ -1304,7 +1304,7 @@ function CredentialsCard({ result }: { result: ProvisioningResult }) {
                   href={c.domain.managementUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 hover:underline"
+                  className="inline-flex items-center gap-1 text-indigo-600 dark:text-indigo-400 hover:underline"
                 >
                   Open
                   <ExternalLink className="size-3" />
@@ -1353,7 +1353,7 @@ function CredentialsCard({ result }: { result: ProvisioningResult }) {
                     href={c.hosting.adminUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 hover:underline break-all"
+                    className="inline-flex items-center gap-1 text-indigo-600 dark:text-indigo-400 hover:underline break-all"
                   >
                     {c.hosting.adminUrl}
                     <ExternalLink className="size-3 shrink-0" />
@@ -1424,7 +1424,7 @@ function CredentialsCard({ result }: { result: ProvisioningResult }) {
                   href={c.email.webmail}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-xs text-emerald-600 dark:text-emerald-400 hover:underline break-all"
+                  className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline break-all"
                 >
                   {c.email.webmail}
                 </a>
@@ -1457,7 +1457,7 @@ function OverallBanner({
         : XCircle
   const tint =
     status === 'success'
-      ? 'border-emerald-500/40 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300'
+      ? 'border-indigo-500/40 bg-indigo-500/5 text-indigo-700 dark:text-indigo-300'
       : status === 'partial'
         ? 'border-amber-500/40 bg-amber-500/5 text-amber-700 dark:text-amber-300'
         : 'border-red-500/40 bg-red-500/5 text-red-700 dark:text-red-300'
@@ -1624,8 +1624,8 @@ function JobDetailView({
         </Button>
         <div className="flex-1 min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <div className="size-8 rounded-md bg-emerald-600/10 flex items-center justify-center shrink-0">
-              <Icon className="size-4 text-emerald-600 dark:text-emerald-400" />
+            <div className="size-8 rounded-md bg-indigo-600/10 flex items-center justify-center shrink-0">
+              <Icon className="size-4 text-indigo-600 dark:text-indigo-400" />
             </div>
             <h2 className="text-lg font-semibold truncate">{job.domainName}</h2>
             <StatusBadge status={job.status} />
@@ -1812,8 +1812,8 @@ function JobsList({
     return (
       <Card className="border-dashed">
         <CardContent className="py-12 flex flex-col items-center text-center">
-          <div className="size-12 rounded-full bg-emerald-600/10 flex items-center justify-center mb-3">
-            <Rocket className="size-6 text-emerald-600 dark:text-emerald-400" />
+          <div className="size-12 rounded-full bg-indigo-600/10 flex items-center justify-center mb-3">
+            <Rocket className="size-6 text-indigo-600 dark:text-indigo-400" />
           </div>
           <h3 className="text-base font-semibold">No provisioning jobs yet</h3>
           <p className="text-sm text-muted-foreground mt-1 max-w-sm">
@@ -1821,7 +1821,7 @@ function JobsList({
             configure DNS, deploy hosting, and provision email in one click.
           </p>
           <Button
-            className="mt-4 bg-emerald-600 hover:bg-emerald-700 text-white"
+            className="mt-4 bg-indigo-600 hover:bg-indigo-700 text-white"
             onClick={onNew}
           >
             <Zap className="size-4" />
@@ -1912,8 +1912,8 @@ function JobsList({
                 onClick={() => onSelect(job)}
                 className="w-full text-left p-3 hover:bg-muted/30 transition-colors flex items-center gap-3"
               >
-                <div className="size-9 rounded-md bg-emerald-600/10 flex items-center justify-center shrink-0">
-                  <Icon className="size-4 text-emerald-600 dark:text-emerald-400" />
+                <div className="size-9 rounded-md bg-indigo-600/10 flex items-center justify-center shrink-0">
+                  <Icon className="size-4 text-indigo-600 dark:text-indigo-400" />
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
@@ -2009,8 +2009,8 @@ export default function ProvisioningPanel() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-            <div className="size-8 rounded-lg bg-emerald-600/10 flex items-center justify-center">
-              <Rocket className="size-5 text-emerald-600 dark:text-emerald-400" />
+            <div className="size-8 rounded-lg bg-indigo-600/10 flex items-center justify-center">
+              <Rocket className="size-5 text-indigo-600 dark:text-indigo-400" />
             </div>
             Automated Provisioning
           </h1>
@@ -2019,7 +2019,7 @@ export default function ProvisioningPanel() {
           </p>
         </div>
         <Button
-          className="bg-emerald-600 hover:bg-emerald-700 text-white"
+          className="bg-indigo-600 hover:bg-indigo-700 text-white"
           onClick={() => setDialogOpen(true)}
         >
           <Zap className="size-4" />
@@ -2031,19 +2031,19 @@ export default function ProvisioningPanel() {
       {!loading && jobs.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[
-            { label: 'Total', value: jobs.length, icon: Rocket, tint: 'text-emerald-600 dark:text-emerald-400 bg-emerald-600/10', spin: false },
+            { label: 'Total', value: jobs.length, icon: Rocket, tint: 'text-indigo-600 dark:text-indigo-400 bg-indigo-600/10', spin: false },
             {
               label: 'Running',
               value: jobs.filter((j) => j.status === 'running' || j.status === 'pending').length,
               icon: Loader2,
-              tint: 'text-blue-600 dark:text-blue-400 bg-blue-600/10',
+              tint: 'text-indigo-600 dark:text-indigo-400 bg-indigo-600/10',
               spin: true,
             },
             {
               label: 'Succeeded',
               value: jobs.filter((j) => j.status === 'success').length,
               icon: CheckCircle2,
-              tint: 'text-emerald-600 dark:text-emerald-400 bg-emerald-600/10',
+              tint: 'text-indigo-600 dark:text-indigo-400 bg-indigo-600/10',
               spin: false,
             },
             {

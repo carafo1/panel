@@ -232,7 +232,7 @@ function getMethodIcon(method: string, icon: string | null): React.ElementType {
 // ── Status badge helper ────────────────────────────────────────────────
 function PaymentStatusBadge({ status }: { status: string }) {
   const map: Record<string, { className: string; label: string }> = {
-    completed: { className: 'bg-emerald-100 text-emerald-700 border-emerald-200', label: 'Completed' },
+    completed: { className: 'bg-indigo-100 text-indigo-700 border-indigo-200', label: 'Completed' },
     pending: { className: 'bg-yellow-100 text-yellow-700 border-yellow-200', label: 'Pending' },
     failed: { className: 'bg-red-100 text-red-700 border-red-200', label: 'Failed' },
     refunded: { className: 'bg-gray-100 text-gray-700 border-gray-200', label: 'Refunded' },
@@ -464,7 +464,7 @@ function CheckoutDialog({
             ) : (
               <>
                 <DialogHeader>
-                  <DialogTitle className="flex items-center gap-2 text-emerald-700">
+                  <DialogTitle className="flex items-center gap-2 text-indigo-700">
                     <Check className="size-5" />
                     Purchase Complete!
                   </DialogTitle>
@@ -473,18 +473,18 @@ function CheckoutDialog({
                   </DialogDescription>
                 </DialogHeader>
 
-                <div className="space-y-3 rounded-lg border p-4 bg-emerald-50/50">
+                <div className="space-y-3 rounded-lg border p-4 bg-indigo-50/50">
                   {success.project && (
                     <div className="flex items-start gap-3">
-                      <Server className="size-5 text-emerald-600 mt-0.5 shrink-0" />
+                      <Server className="size-5 text-indigo-600 mt-0.5 shrink-0" />
                       <div>
                         <p className="font-medium text-sm">Project Created</p>
                         <p className="text-sm text-muted-foreground">{success.project.name}</p>
-                        <p className="text-xs text-emerald-600 mt-1">
+                        <p className="text-xs text-indigo-600 mt-1">
                           https://{success.project.subdomain}
                         </p>
                         {success.project.customDomain && (
-                          <p className="text-xs text-emerald-600">
+                          <p className="text-xs text-indigo-600">
                             Custom: {success.project.customDomain}
                           </p>
                         )}
@@ -494,11 +494,11 @@ function CheckoutDialog({
 
                   {success.domain && (
                     <div className="flex items-start gap-3">
-                      <Globe className="size-5 text-emerald-600 mt-0.5 shrink-0" />
+                      <Globe className="size-5 text-indigo-600 mt-0.5 shrink-0" />
                       <div>
                         <p className="font-medium text-sm">Domain Registered</p>
                         <p className="text-sm text-muted-foreground">{success.domain.name}</p>
-                        <p className="text-xs text-emerald-600 mt-1">
+                        <p className="text-xs text-indigo-600 mt-1">
                           Status: {success.domain.status}
                         </p>
                       </div>
@@ -507,10 +507,10 @@ function CheckoutDialog({
 
                   {success.deployment && (
                     <div className="flex items-start gap-3">
-                      <Package className="size-5 text-emerald-600 mt-0.5 shrink-0" />
+                      <Package className="size-5 text-indigo-600 mt-0.5 shrink-0" />
                       <div>
                         <p className="font-medium text-sm">Initial Deployment</p>
-                        <p className="text-xs text-emerald-600 mt-1">
+                        <p className="text-xs text-indigo-600 mt-1">
                           Status: {success.deployment.status} | Branch: {success.deployment.branch}
                         </p>
                       </div>
@@ -519,7 +519,7 @@ function CheckoutDialog({
 
                   {success.subscription && (
                     <div className="flex items-start gap-3">
-                      <CreditCard className="size-5 text-emerald-600 mt-0.5 shrink-0" />
+                      <CreditCard className="size-5 text-indigo-600 mt-0.5 shrink-0" />
                       <div>
                         <p className="font-medium text-sm">Subscription Active</p>
                         <p className="text-sm text-muted-foreground">
@@ -531,7 +531,7 @@ function CheckoutDialog({
                 </div>
 
                 <DialogFooter>
-                  <Button onClick={handleClose} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+                  <Button onClick={handleClose} className="bg-indigo-600 hover:bg-indigo-700 text-white">
                     Done
                   </Button>
                 </DialogFooter>
@@ -543,7 +543,7 @@ function CheckoutDialog({
           <div className="space-y-5">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
-                <Icon className="size-5 text-emerald-600" />
+                <Icon className="size-5 text-indigo-600" />
                 {planDefinition.name} Plan Checkout
               </DialogTitle>
               <DialogDescription>
@@ -576,34 +576,34 @@ function CheckoutDialog({
               >
                 <Label
                   htmlFor="type-hosting"
-                  className={`flex flex-col items-center gap-1.5 rounded-lg border p-3 cursor-pointer transition-colors hover:bg-emerald-50 ${
-                    purchaseType === 'hosting' ? 'border-emerald-500 bg-emerald-50' : ''
+                  className={`flex flex-col items-center gap-1.5 rounded-lg border p-3 cursor-pointer transition-colors hover:bg-indigo-50 ${
+                    purchaseType === 'hosting' ? 'border-indigo-500 bg-indigo-50' : ''
                   }`}
                 >
                   <RadioGroupItem value="hosting" id="type-hosting" className="sr-only" />
-                  <Server className="size-5 text-emerald-600" />
+                  <Server className="size-5 text-indigo-600" />
                   <span className="text-xs font-medium text-center">Hosting Only</span>
                   <span className="text-xs text-muted-foreground">${plan.price}/mo</span>
                 </Label>
                 <Label
                   htmlFor="type-domain"
-                  className={`flex flex-col items-center gap-1.5 rounded-lg border p-3 cursor-pointer transition-colors hover:bg-emerald-50 ${
-                    purchaseType === 'domain' ? 'border-emerald-500 bg-emerald-50' : ''
+                  className={`flex flex-col items-center gap-1.5 rounded-lg border p-3 cursor-pointer transition-colors hover:bg-indigo-50 ${
+                    purchaseType === 'domain' ? 'border-indigo-500 bg-indigo-50' : ''
                   }`}
                 >
                   <RadioGroupItem value="domain" id="type-domain" className="sr-only" />
-                  <Globe className="size-5 text-emerald-600" />
+                  <Globe className="size-5 text-indigo-600" />
                   <span className="text-xs font-medium text-center">Domain Only</span>
                   <span className="text-xs text-muted-foreground">$12.99/yr</span>
                 </Label>
                 <Label
                   htmlFor="type-both"
-                  className={`flex flex-col items-center gap-1.5 rounded-lg border p-3 cursor-pointer transition-colors hover:bg-emerald-50 ${
-                    purchaseType === 'both' ? 'border-emerald-500 bg-emerald-50' : ''
+                  className={`flex flex-col items-center gap-1.5 rounded-lg border p-3 cursor-pointer transition-colors hover:bg-indigo-50 ${
+                    purchaseType === 'both' ? 'border-indigo-500 bg-indigo-50' : ''
                   }`}
                 >
                   <RadioGroupItem value="both" id="type-both" className="sr-only" />
-                  <Package className="size-5 text-emerald-600" />
+                  <Package className="size-5 text-indigo-600" />
                   <span className="text-xs font-medium text-center">Hosting + Domain</span>
                   <span className="text-xs text-muted-foreground">${(plan.price + 12.99).toFixed(2)}</span>
                 </Label>
@@ -704,8 +704,8 @@ function CheckoutDialog({
                       <Label
                         key={m.method}
                         htmlFor={`pm-${m.method}`}
-                        className={`flex flex-col items-center gap-1.5 rounded-lg border p-3 cursor-pointer transition-colors hover:bg-emerald-50 ${
-                          isSelected ? 'border-emerald-500 bg-emerald-50' : ''
+                        className={`flex flex-col items-center gap-1.5 rounded-lg border p-3 cursor-pointer transition-colors hover:bg-indigo-50 ${
+                          isSelected ? 'border-indigo-500 bg-indigo-50' : ''
                         }`}
                       >
                         <RadioGroupItem
@@ -713,7 +713,7 @@ function CheckoutDialog({
                           id={`pm-${m.method}`}
                           className="sr-only"
                         />
-                        <MethodIcon className="size-5 text-emerald-600" />
+                        <MethodIcon className="size-5 text-indigo-600" />
                         <span className="text-xs font-medium text-center leading-tight">
                           {m.displayName}
                         </span>
@@ -732,9 +732,9 @@ function CheckoutDialog({
             </div>
 
             {/* Total */}
-            <div className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50/50 p-3">
+            <div className="flex items-center justify-between rounded-lg border border-indigo-200 bg-indigo-50/50 p-3">
               <span className="text-sm font-medium">Total</span>
-              <span className="text-lg font-bold text-emerald-700">
+              <span className="text-lg font-bold text-indigo-700">
                 ${calculateTotal().toFixed(2)}
                 {purchaseType !== 'domain' ? '/mo' : '/yr'}
               </span>
@@ -753,7 +753,7 @@ function CheckoutDialog({
                   paymentMethods.length === 0 ||
                   !selectedMethod
                 }
-                className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                className="bg-indigo-600 hover:bg-indigo-700 text-white"
               >
                 {loading ? (
                   <span className="flex items-center gap-2">
@@ -909,7 +909,7 @@ export function BillingPanel() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <CreditCard className="size-5 text-emerald-600" />
+            <CreditCard className="size-5 text-indigo-600" />
             Current Plan
           </CardTitle>
           <CardDescription>Your active subscription details</CardDescription>
@@ -917,16 +917,16 @@ export function BillingPanel() {
         <CardContent>
           {subscription ? (
             <div className="space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 rounded-lg border border-emerald-200 bg-emerald-50/50 p-4">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 rounded-lg border border-indigo-200 bg-indigo-50/50 p-4">
                 <div className="space-y-1">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="text-lg font-semibold text-emerald-900">
+                    <h3 className="text-lg font-semibold text-indigo-900">
                       {subscription.plan?.name || 'Active Plan'}
                     </h3>
                     <Badge
                       className={
                         subscription.status === 'active'
-                          ? 'bg-emerald-600 text-white border-emerald-600'
+                          ? 'bg-indigo-600 text-white border-indigo-600'
                           : subscription.status === 'past_due'
                           ? 'bg-red-100 text-red-700 border-red-200'
                           : subscription.status === 'pending'
@@ -943,22 +943,22 @@ export function BillingPanel() {
                         : 'Active'}
                     </Badge>
                     {subscription.stripeSubId && (
-                      <Badge variant="outline" className="bg-white/70 border-emerald-200 text-emerald-700 gap-1">
+                      <Badge variant="outline" className="bg-white/70 border-indigo-200 text-indigo-700 gap-1">
                         <ShieldCheck className="size-3" />
                         Stripe
                       </Badge>
                     )}
                   </div>
-                  <p className="text-sm text-emerald-700">
+                  <p className="text-sm text-indigo-700">
                     ${subscription.plan?.price || '—'}/month
                   </p>
-                  <p className="text-xs text-emerald-600">
+                  <p className="text-xs text-indigo-600">
                     {subscription.cancelAtPeriodEnd
                       ? `Cancels on ${new Date(subscription.currentPeriodEnd).toLocaleDateString()}`
                       : `Renews ${new Date(subscription.currentPeriodEnd).toLocaleDateString()}`}
                   </p>
                 </div>
-                <div className="flex items-center gap-2 text-emerald-700">
+                <div className="flex items-center gap-2 text-indigo-700">
                   <Check className="size-4" />
                   <span className="text-sm">All features included</span>
                 </div>
@@ -1031,7 +1031,7 @@ export function BillingPanel() {
                   const el = document.getElementById('plan-comparison')
                   el?.scrollIntoView({ behavior: 'smooth' })
                 }}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                className="bg-indigo-600 hover:bg-indigo-700 text-white"
               >
                 Choose a Plan
                 <ArrowRight className="size-4 ml-1" />
@@ -1057,13 +1057,13 @@ export function BillingPanel() {
                 key={def.slug}
                 className={`relative flex flex-col ${
                   def.highlight
-                    ? 'border-2 border-emerald-500 shadow-emerald-100 shadow-lg'
+                    ? 'border-2 border-indigo-500 shadow-indigo-100 shadow-lg'
                     : ''
                 }`}
               >
                 {def.highlight && (
                   <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                    <Badge className="bg-emerald-600 text-white border-emerald-600 px-3 py-1 text-xs">
+                    <Badge className="bg-indigo-600 text-white border-indigo-600 px-3 py-1 text-xs">
                       POPULAR
                     </Badge>
                   </div>
@@ -1072,7 +1072,7 @@ export function BillingPanel() {
                   <div className="flex items-center gap-2">
                     <div
                       className={`size-9 rounded-lg flex items-center justify-center ${
-                        def.highlight ? 'bg-emerald-100 text-emerald-600' : 'bg-muted text-muted-foreground'
+                        def.highlight ? 'bg-indigo-100 text-indigo-600' : 'bg-muted text-muted-foreground'
                       }`}
                     >
                       <Icon className="size-5" />
@@ -1091,7 +1091,7 @@ export function BillingPanel() {
                   <ul className="space-y-2">
                     {def.features.map((f) => (
                       <li key={f} className="flex items-center gap-2 text-sm">
-                        <Check className="size-4 text-emerald-500 shrink-0" />
+                        <Check className="size-4 text-indigo-500 shrink-0" />
                         {f}
                       </li>
                     ))}
@@ -1106,7 +1106,7 @@ export function BillingPanel() {
                     <Button
                       className={`w-full ${
                         def.highlight
-                          ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                          ? 'bg-indigo-600 hover:bg-indigo-700 text-white'
                           : ''
                       }`}
                       variant={def.highlight ? 'default' : 'outline'}
@@ -1156,7 +1156,7 @@ export function BillingPanel() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <CreditCard className="size-5 text-emerald-600" />
+            <CreditCard className="size-5 text-indigo-600" />
             Payment History
           </CardTitle>
           <CardDescription>Your recent transactions</CardDescription>

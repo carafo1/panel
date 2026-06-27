@@ -113,9 +113,9 @@ type Tab = 'search' | 'domains' | 'invoices' | 'pricing' | 'admin'
 
 function statusColor(status: string): string {
   switch (status) {
-    case 'active': return 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+    case 'active': return 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border-indigo-500/30'
     case 'pending': case 'pending_verification': return 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30'
-    case 'transferring': return 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30'
+    case 'transferring': return 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border-indigo-500/30'
     case 'expired': case 'suspended': case 'deleted': return 'bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/30'
     default: return 'bg-gray-500/15 text-gray-600 dark:text-gray-400 border-gray-500/30'
   }
@@ -151,7 +151,7 @@ export default function DomainsPanel() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h2 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-            <Globe className="h-6 w-6 text-emerald-500" />
+            <Globe className="h-6 w-6 text-indigo-500" />
             Domain Reseller
           </h2>
           <p className="text-sm text-muted-foreground mt-1">
@@ -289,7 +289,7 @@ function SearchTab({ onRegistered }: { onRegistered: () => void }) {
           <div className="flex items-center justify-between">
             <div>
               <CardTitle className="flex items-center gap-2">
-                <Search className="h-5 w-5 text-emerald-500" />
+                <Search className="h-5 w-5 text-indigo-500" />
                 Domain Search
               </CardTitle>
               <CardDescription>Instant availability with registration, renewal &amp; transfer pricing</CardDescription>
@@ -369,7 +369,7 @@ function SearchTab({ onRegistered }: { onRegistered: () => void }) {
                           </TableCell>
                           <TableCell>
                             {r.available ? (
-                              <Badge className="bg-emerald-500/15 text-emerald-600 border-emerald-500/30">Available</Badge>
+                              <Badge className="bg-indigo-500/15 text-indigo-600 border-indigo-500/30">Available</Badge>
                             ) : (
                               <Badge variant="secondary">Taken</Badge>
                             )}
@@ -441,7 +441,7 @@ function SearchResultCard({
 
   return (
     <div className="space-y-4">
-      <div className={`rounded-lg border p-4 ${result.available ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-red-500/30 bg-red-500/5'}`}>
+      <div className={`rounded-lg border p-4 ${result.available ? 'border-indigo-500/30 bg-indigo-500/5' : 'border-red-500/30 bg-red-500/5'}`}>
         <div className="flex items-start justify-between">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
@@ -453,7 +453,7 @@ function SearchResultCard({
               )}
             </div>
             {result.available ? (
-              <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
+              <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400">
                 <CheckCircle2 className="h-4 w-4" />
                 <span className="text-sm font-medium">Available</span>
                 <Badge variant="outline" className="ml-2">{result.provider}</Badge>
@@ -467,7 +467,7 @@ function SearchResultCard({
           </div>
           {result.available && result.registrationPrice && (
             <div className="text-right">
-              <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
+              <div className="text-2xl font-bold text-indigo-600 dark:text-indigo-400">
                 ${result.registrationPrice}
               </div>
               <div className="text-xs text-muted-foreground">/year</div>
@@ -530,7 +530,7 @@ function SearchResultCard({
                 >
                   <div className="flex items-center gap-2">
                     {s.available ? (
-                      <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                      <CheckCircle2 className="h-4 w-4 text-indigo-500" />
                     ) : (
                       <XCircle className="h-4 w-4 text-muted-foreground" />
                     )}
@@ -539,7 +539,7 @@ function SearchResultCard({
                   </div>
                   <div className="flex items-center gap-2">
                     {s.available && (
-                      <span className="text-sm font-mono text-emerald-600">${s.registrationPrice}</span>
+                      <span className="text-sm font-mono text-indigo-600">${s.registrationPrice}</span>
                     )}
                     {s.available && (
                       <Button
@@ -578,7 +578,7 @@ function RegisterDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <ShoppingBag className="h-5 w-5 text-emerald-500" />
+            <ShoppingBag className="h-5 w-5 text-indigo-500" />
             Register {domain}
           </DialogTitle>
           <DialogDescription>
@@ -615,10 +615,10 @@ function RegisterDialog({
             <Separator />
             <div className="flex justify-between font-semibold">
               <span>Total</span>
-              <span className="text-emerald-600">${total}</span>
+              <span className="text-indigo-600">${total}</span>
             </div>
           </div>
-          <div className="rounded-md border border-blue-500/30 bg-blue-500/5 p-3 text-xs text-muted-foreground">
+          <div className="rounded-md border border-indigo-500/30 bg-indigo-500/5 p-3 text-xs text-muted-foreground">
             After payment, the system will: register via Dynadot → configure nameservers →
             set DNS records → save to database → create invoice → generate audit log → send confirmation email.
           </div>
@@ -676,7 +676,7 @@ function TransferDomainDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Send className="h-5 w-5 text-blue-500" />
+            <Send className="h-5 w-5 text-indigo-500" />
             Transfer Domain
           </DialogTitle>
           <DialogDescription>
@@ -705,8 +705,8 @@ function TransferDomainDialog({
               className="font-mono"
             />
           </div>
-          <div className="rounded-md border border-blue-500/30 bg-blue-500/5 p-3 text-xs text-muted-foreground space-y-1">
-            <div className="flex items-center gap-1.5 font-medium text-blue-700 dark:text-blue-400">
+          <div className="rounded-md border border-indigo-500/30 bg-indigo-500/5 p-3 text-xs text-muted-foreground space-y-1">
+            <div className="flex items-center gap-1.5 font-medium text-indigo-700 dark:text-indigo-400">
               <AlertTriangle className="h-3.5 w-3.5" />
               Before transferring
             </div>
@@ -788,14 +788,14 @@ function DomainsListTab({ onSelect }: { onSelect: (id: string) => void }) {
         return (
           <Card
             key={d.id}
-            className="cursor-pointer hover:border-emerald-500/40 hover:shadow-md transition-all"
+            className="cursor-pointer hover:border-indigo-500/40 hover:shadow-md transition-all"
             onClick={() => onSelect(d.id)}
           >
             <CardHeader className="pb-3">
               <div className="flex items-start justify-between">
                 <div className="min-w-0 flex-1">
                   <CardTitle className="text-base truncate flex items-center gap-2">
-                    <Globe className="h-4 w-4 text-emerald-500 flex-shrink-0" />
+                    <Globe className="h-4 w-4 text-indigo-500 flex-shrink-0" />
                     <span className="truncate">{d.name}</span>
                   </CardTitle>
                   <div className="flex items-center gap-2 mt-2 flex-wrap">
@@ -918,7 +918,7 @@ function DomainDetail({
           <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
             <div>
               <CardTitle className="text-2xl flex items-center gap-2">
-                <Globe className="h-6 w-6 text-emerald-500" />
+                <Globe className="h-6 w-6 text-indigo-500" />
                 {domain.name}
               </CardTitle>
               <div className="flex items-center gap-2 mt-2 flex-wrap">
@@ -990,11 +990,11 @@ function DomainDetail({
 
 function OverviewSection({ domain }: { domain: Domain }) {
   const stats = [
-    { label: 'Status', value: domain.status, icon: Globe, color: 'text-emerald-500' },
-    { label: 'Registrar', value: domain.registrar, icon: Server, color: 'text-blue-500' },
-    { label: 'Auto-Renew', value: domain.autoRenew ? 'Enabled' : 'Disabled', icon: RefreshCw, color: domain.autoRenew ? 'text-emerald-500' : 'text-muted-foreground' },
-    { label: 'WHOIS Privacy', value: domain.whoisPrivacy ? 'Enabled' : 'Disabled', icon: Shield, color: domain.whoisPrivacy ? 'text-emerald-500' : 'text-muted-foreground' },
-    { label: 'Registrar Lock', value: domain.locked ? 'Locked' : 'Unlocked', icon: Lock, color: domain.locked ? 'text-emerald-500' : 'text-amber-500' },
+    { label: 'Status', value: domain.status, icon: Globe, color: 'text-indigo-500' },
+    { label: 'Registrar', value: domain.registrar, icon: Server, color: 'text-indigo-500' },
+    { label: 'Auto-Renew', value: domain.autoRenew ? 'Enabled' : 'Disabled', icon: RefreshCw, color: domain.autoRenew ? 'text-indigo-500' : 'text-muted-foreground' },
+    { label: 'WHOIS Privacy', value: domain.whoisPrivacy ? 'Enabled' : 'Disabled', icon: Shield, color: domain.whoisPrivacy ? 'text-indigo-500' : 'text-muted-foreground' },
+    { label: 'Registrar Lock', value: domain.locked ? 'Locked' : 'Unlocked', icon: Lock, color: domain.locked ? 'text-indigo-500' : 'text-amber-500' },
     { label: 'Premium', value: domain.premium ? 'Yes' : 'No', icon: Sparkles, color: domain.premium ? 'text-amber-500' : 'text-muted-foreground' },
   ]
   return (
@@ -1060,7 +1060,7 @@ function NameserversSection({ domain, onUpdated }: { domain: Domain; onUpdated: 
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-lg">
-          <Server className="h-5 w-5 text-emerald-500" />
+          <Server className="h-5 w-5 text-indigo-500" />
           Custom Nameservers
         </CardTitle>
         <CardDescription>Set the authoritative nameservers for this domain (2–13 allowed)</CardDescription>
@@ -1155,7 +1155,7 @@ function DnsSection({ domain, onUpdated }: { domain: Domain; onUpdated: () => vo
         <div className="flex items-center justify-between">
           <div>
             <CardTitle className="flex items-center gap-2 text-lg">
-              <Database className="h-5 w-5 text-emerald-500" />
+              <Database className="h-5 w-5 text-indigo-500" />
               DNS Records
             </CardTitle>
             <CardDescription>A, AAAA, CNAME, MX, TXT, SRV, CAA, NS</CardDescription>
@@ -1225,7 +1225,7 @@ function DnsSection({ domain, onUpdated }: { domain: Domain; onUpdated: () => vo
           <DialogContent>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
-                <Mail className="h-5 w-5 text-emerald-500" /> Generate Email DNS Records
+                <Mail className="h-5 w-5 text-indigo-500" /> Generate Email DNS Records
               </DialogTitle>
               <DialogDescription>
                 Automatically adds SPF, DKIM, DMARC &amp; MX records for email delivery.
@@ -1295,7 +1295,7 @@ function SecuritySection({ domain, onUpdated }: { domain: Domain; onUpdated: () 
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-lg">
-            <Shield className="h-5 w-5 text-emerald-500" /> Security &amp; Privacy
+            <Shield className="h-5 w-5 text-indigo-500" /> Security &amp; Privacy
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -1374,8 +1374,8 @@ function SecurityToggle({
   return (
     <div className="flex items-center justify-between">
       <div className="flex items-start gap-3">
-        <div className={`mt-0.5 rounded-md p-1.5 ${checked ? 'bg-emerald-500/15' : 'bg-muted'}`}>
-          <Icon className={`h-4 w-4 ${checked ? 'text-emerald-500' : 'text-muted-foreground'}`} />
+        <div className={`mt-0.5 rounded-md p-1.5 ${checked ? 'bg-indigo-500/15' : 'bg-muted'}`}>
+          <Icon className={`h-4 w-4 ${checked ? 'text-indigo-500' : 'text-muted-foreground'}`} />
         </div>
         <div>
           <div className="font-medium text-sm">{title}</div>
@@ -1440,7 +1440,7 @@ function RenewTransferSection({ domain, onUpdated }: { domain: Domain; onUpdated
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-lg">
-            <RefreshCw className="h-5 w-5 text-emerald-500" /> Renew Domain
+            <RefreshCw className="h-5 w-5 text-indigo-500" /> Renew Domain
           </CardTitle>
           <CardDescription>Extend the registration period</CardDescription>
         </CardHeader>
@@ -1474,7 +1474,7 @@ function RenewTransferSection({ domain, onUpdated }: { domain: Domain; onUpdated
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-lg">
-            <Send className="h-5 w-5 text-blue-500" /> Transfer Domain
+            <Send className="h-5 w-5 text-indigo-500" /> Transfer Domain
           </CardTitle>
           <CardDescription>Bring a domain from another registrar</CardDescription>
         </CardHeader>
@@ -1515,7 +1515,7 @@ function LogsSection({ logs }: { logs: DomainLog[] }) {
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-lg">
-          <Clock className="h-5 w-5 text-emerald-500" /> Activity Log
+          <Clock className="h-5 w-5 text-indigo-500" /> Activity Log
         </CardTitle>
         <CardDescription>Last {logs.length} events</CardDescription>
       </CardHeader>
@@ -1525,7 +1525,7 @@ function LogsSection({ logs }: { logs: DomainLog[] }) {
             <div key={log.id} className="flex items-start gap-3 rounded-md border p-2.5 text-sm">
               <div className="mt-0.5">
                 {log.status === 'success' ? (
-                  <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                  <CheckCircle2 className="h-4 w-4 text-indigo-500" />
                 ) : log.status === 'failed' ? (
                   <XCircle className="h-4 w-4 text-red-500" />
                 ) : (
@@ -1593,7 +1593,7 @@ function InvoicesTab() {
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-lg">
-          <FileText className="h-5 w-5 text-emerald-500" /> Invoices
+          <FileText className="h-5 w-5 text-indigo-500" /> Invoices
         </CardTitle>
       </CardHeader>
       <CardContent>
@@ -1616,7 +1616,7 @@ function InvoicesTab() {
                   <TableCell>{inv.domainName || '—'}</TableCell>
                   <TableCell className="text-right font-mono">${inv.total} {inv.currency}</TableCell>
                   <TableCell>
-                    <Badge variant="outline" className={inv.status === 'paid' ? 'bg-emerald-500/15 text-emerald-600 border-emerald-500/30' : ''}>
+                    <Badge variant="outline" className={inv.status === 'paid' ? 'bg-indigo-500/15 text-indigo-600 border-indigo-500/30' : ''}>
                       {inv.status}
                     </Badge>
                   </TableCell>
@@ -1646,7 +1646,7 @@ function InvoiceDetail({ invoice, onBack }: { invoice: Invoice; onBack: () => vo
             <CardTitle>Invoice {invoice.number}</CardTitle>
             <CardDescription>{new Date(invoice.createdAt).toLocaleDateString()}</CardDescription>
           </div>
-          <Badge variant="outline" className={invoice.status === 'paid' ? 'bg-emerald-500/15 text-emerald-600 border-emerald-500/30' : ''}>
+          <Badge variant="outline" className={invoice.status === 'paid' ? 'bg-indigo-500/15 text-indigo-600 border-indigo-500/30' : ''}>
             {invoice.status}
           </Badge>
         </CardHeader>
@@ -1678,7 +1678,7 @@ function InvoiceDetail({ invoice, onBack }: { invoice: Invoice; onBack: () => vo
               <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span className="font-mono">${invoice.total}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Tax</span><span className="font-mono">$0.00</span></div>
               <Separator />
-              <div className="flex justify-between font-bold text-base"><span>Total</span><span className="font-mono text-emerald-600">${invoice.total} {invoice.currency}</span></div>
+              <div className="flex justify-between font-bold text-base"><span>Total</span><span className="font-mono text-indigo-600">${invoice.total} {invoice.currency}</span></div>
             </div>
           </div>
           <Button variant="outline" onClick={() => window.print()}>
@@ -1733,7 +1733,7 @@ function PricingTab({ isAdmin }: { isAdmin: boolean }) {
           <div className="flex items-center justify-between">
             <div>
               <CardTitle className="flex items-center gap-2 text-lg">
-                <BadgeDollarSign className="h-5 w-5 text-emerald-500" /> Domain Pricing
+                <BadgeDollarSign className="h-5 w-5 text-indigo-500" /> Domain Pricing
               </CardTitle>
               <CardDescription>
                 {info && (
@@ -1771,7 +1771,7 @@ function PricingTab({ isAdmin }: { isAdmin: boolean }) {
                       <TableCell className="font-mono font-medium">{p.tld}</TableCell>
                       <TableCell className="text-right font-mono text-muted-foreground">${p.wholesale.toFixed(2)}</TableCell>
                       <TableCell className="text-right font-mono text-amber-600">+${p.markup.toFixed(2)}</TableCell>
-                      <TableCell className="text-right font-mono font-semibold text-emerald-600">${p.registration.toFixed(2)}</TableCell>
+                      <TableCell className="text-right font-mono font-semibold text-indigo-600">${p.registration.toFixed(2)}</TableCell>
                       <TableCell className="text-right font-mono">${p.renewal.toFixed(2)}</TableCell>
                       <TableCell className="text-right font-mono">${p.transfer.toFixed(2)}</TableCell>
                     </TableRow>
@@ -1839,7 +1839,7 @@ function AdminTab({ onSelect }: { onSelect: (id: string) => void }) {
           <div className="flex items-center justify-between">
             <div>
               <CardTitle className="flex items-center gap-2 text-lg">
-                <Shield className="h-5 w-5 text-emerald-500" /> All Domains (Admin)
+                <Shield className="h-5 w-5 text-indigo-500" /> All Domains (Admin)
               </CardTitle>
               <CardDescription>{domains.length} domains across all users</CardDescription>
             </div>
@@ -1869,7 +1869,7 @@ function AdminTab({ onSelect }: { onSelect: (id: string) => void }) {
                     <TableRow key={d.id}>
                       <TableCell>
                         <button className="font-medium hover:underline flex items-center gap-1" onClick={() => onSelect(d.id)}>
-                          <Globe className="h-3 w-3 text-emerald-500" />
+                          <Globe className="h-3 w-3 text-indigo-500" />
                           {d.name}
                           {d.premium && <Sparkles className="h-3 w-3 text-amber-500" />}
                         </button>
@@ -1959,13 +1959,13 @@ function IntegrationStatusCard() {
   const hasSimulated = data && data.summary.simulated > 0
 
   const statusIcon = (s: FeatureStatus['status']) => {
-    if (s === 'live') return <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+    if (s === 'live') return <CheckCircle2 className="h-4 w-4 text-indigo-500" />
     if (s === 'simulated') return <XCircle className="h-4 w-4 text-amber-500" />
     return <AlertTriangle className="h-4 w-4 text-red-500" />
   }
 
   const statusBadge = (s: FeatureStatus['status']) => {
-    if (s === 'live') return <Badge className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">LIVE</Badge>
+    if (s === 'live') return <Badge className="bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">LIVE</Badge>
     if (s === 'simulated') return <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">SIMULATED</Badge>
     return <Badge className="bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300">ERROR</Badge>
   }
@@ -1973,7 +1973,7 @@ function IntegrationStatusCard() {
   return (
     <Card className={
       allLive
-        ? 'border-emerald-500/50 bg-emerald-50/50 dark:bg-emerald-950/20'
+        ? 'border-indigo-500/50 bg-indigo-50/50 dark:bg-indigo-950/20'
         : hasErrors
         ? 'border-red-500/50 bg-red-50/50 dark:bg-red-950/20'
         : 'border-amber-500/50 bg-amber-50/50 dark:bg-amber-950/20'
@@ -1985,7 +1985,7 @@ function IntegrationStatusCard() {
               <Zap className="h-5 w-5 text-amber-500" />
               Domain Integration Status
               {allLive && (
-                <Badge className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+                <Badge className="bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
                   All Live
                 </Badge>
               )}

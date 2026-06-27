@@ -236,16 +236,16 @@ export function AuthModal({ mode, onModeChange, onClose }: AuthModalProps) {
         {/* Header */}
         <div className="text-center pt-8 pb-4 px-6">
           <div className="mx-auto mb-3 flex items-center justify-center gap-2">
-            <div className="flex size-10 items-center justify-center rounded-lg bg-emerald-500 text-white">
+            <div className="flex size-10 items-center justify-center rounded-lg bg-indigo-500 text-white">
               <Globe className="size-5" />
             </div>
           </div>
-          <h2 className="text-xl font-bold tracking-tight">DeployHub</h2>
+          <h2 className="text-xl font-bold tracking-tight">APSAMO</h2>
           <p className="text-sm text-muted-foreground mt-1">
             {mode === 'login'
               ? 'Sign in to manage your hosting and domains'
               : mode === 'register'
-                ? 'Get started with DeployHub in seconds'
+                ? 'Get started with APSAMO in seconds'
                 : mode === 'forgot-password'
                   ? 'Enter your email to receive a reset link'
                   : mode === 'two-factor'
@@ -284,7 +284,7 @@ export function AuthModal({ mode, onModeChange, onClose }: AuthModalProps) {
               </div>
               <Button
                 type="submit"
-                className="mt-2 w-full bg-emerald-500 hover:bg-emerald-600 text-white"
+                className="mt-2 w-full bg-indigo-500 hover:bg-indigo-600 text-white"
                 disabled={isLoading}
               >
                 {isLoading ? (
@@ -304,7 +304,7 @@ export function AuthModal({ mode, onModeChange, onClose }: AuthModalProps) {
                     setForgotToken('')
                     onModeChange('forgot-password')
                   }}
-                  className="text-sm font-medium text-emerald-600 hover:text-emerald-700 hover:underline"
+                  className="text-sm font-medium text-indigo-600 hover:text-indigo-700 hover:underline"
                   disabled={isLoading}
                 >
                   Forgot password?
@@ -314,7 +314,7 @@ export function AuthModal({ mode, onModeChange, onClose }: AuthModalProps) {
                   <button
                     type="button"
                     onClick={() => onModeChange('register')}
-                    className="font-medium text-emerald-600 hover:text-emerald-700 hover:underline"
+                    className="font-medium text-indigo-600 hover:text-indigo-700 hover:underline"
                     disabled={isLoading}
                   >
                     Sign up
@@ -328,8 +328,8 @@ export function AuthModal({ mode, onModeChange, onClose }: AuthModalProps) {
             <div className="flex flex-col gap-4">
               {/* Shield icon */}
               <div className="flex justify-center">
-                <div className="flex size-12 items-center justify-center rounded-full bg-emerald-500/10">
-                  <Shield className="size-6 text-emerald-600" />
+                <div className="flex size-12 items-center justify-center rounded-full bg-indigo-500/10">
+                  <Shield className="size-6 text-indigo-600" />
                 </div>
               </div>
 
@@ -363,7 +363,7 @@ export function AuthModal({ mode, onModeChange, onClose }: AuthModalProps) {
 
                   <Button
                     type="submit"
-                    className="mt-2 w-full bg-emerald-500 hover:bg-emerald-600 text-white"
+                    className="mt-2 w-full bg-indigo-500 hover:bg-indigo-600 text-white"
                     disabled={isLoading || twoFactorCode.length !== 6}
                   >
                     {isLoading ? (
@@ -380,7 +380,7 @@ export function AuthModal({ mode, onModeChange, onClose }: AuthModalProps) {
                     <button
                       type="button"
                       onClick={() => setShowBackupInput(true)}
-                      className="text-sm font-medium text-emerald-600 hover:text-emerald-700 hover:underline"
+                      className="text-sm font-medium text-indigo-600 hover:text-indigo-700 hover:underline"
                       disabled={isLoading}
                     >
                       Use a backup code instead
@@ -429,7 +429,7 @@ export function AuthModal({ mode, onModeChange, onClose }: AuthModalProps) {
 
                   <Button
                     type="submit"
-                    className="mt-2 w-full bg-emerald-500 hover:bg-emerald-600 text-white"
+                    className="mt-2 w-full bg-indigo-500 hover:bg-indigo-600 text-white"
                     disabled={isLoading || !backupCode.trim()}
                   >
                     {isLoading ? (
@@ -462,12 +462,12 @@ export function AuthModal({ mode, onModeChange, onClose }: AuthModalProps) {
             registerSuccess ? (
               <div className="flex flex-col gap-4">
                 <div className="flex justify-center">
-                  <div className="flex size-12 items-center justify-center rounded-full bg-emerald-500/10">
-                    <CheckCircle2 className="size-6 text-emerald-600" />
+                  <div className="flex size-12 items-center justify-center rounded-full bg-indigo-500/10">
+                    <CheckCircle2 className="size-6 text-indigo-600" />
                   </div>
                 </div>
-                <div className="rounded-lg border bg-emerald-500/5 border-emerald-500/20 p-4 space-y-2 text-center">
-                  <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
+                <div className="rounded-lg border bg-indigo-500/5 border-indigo-500/20 p-4 space-y-2 text-center">
+                  <p className="text-sm font-medium text-indigo-700 dark:text-indigo-400">
                     Check your email for verification
                   </p>
                   <p className="text-xs text-muted-foreground">
@@ -478,7 +478,7 @@ export function AuthModal({ mode, onModeChange, onClose }: AuthModalProps) {
                 </div>
                 <Button
                   type="button"
-                  className="w-full bg-emerald-500 hover:bg-emerald-600 text-white"
+                  className="w-full bg-indigo-500 hover:bg-indigo-600 text-white"
                   onClick={() => {
                     setRegisterSuccess(false)
                     setRegisterName('')
@@ -495,7 +495,7 @@ export function AuthModal({ mode, onModeChange, onClose }: AuthModalProps) {
                   <button
                     type="button"
                     onClick={() => setRegisterSuccess(false)}
-                    className="font-medium text-emerald-600 hover:text-emerald-700 hover:underline"
+                    className="font-medium text-indigo-600 hover:text-indigo-700 hover:underline"
                   >
                     try a different email
                   </button>
@@ -554,7 +554,7 @@ export function AuthModal({ mode, onModeChange, onClose }: AuthModalProps) {
                 </div>
                 <Button
                   type="submit"
-                  className="mt-2 w-full bg-emerald-500 hover:bg-emerald-600 text-white"
+                  className="mt-2 w-full bg-indigo-500 hover:bg-indigo-600 text-white"
                   disabled={isLoading}
                 >
                   {isLoading ? (
@@ -571,7 +571,7 @@ export function AuthModal({ mode, onModeChange, onClose }: AuthModalProps) {
                   <button
                     type="button"
                     onClick={() => onModeChange('login')}
-                    className="font-medium text-emerald-600 hover:text-emerald-700 hover:underline"
+                    className="font-medium text-indigo-600 hover:text-indigo-700 hover:underline"
                     disabled={isLoading}
                   >
                     Sign in
@@ -584,8 +584,8 @@ export function AuthModal({ mode, onModeChange, onClose }: AuthModalProps) {
           {mode === 'forgot-password' && (
             <form onSubmit={handleForgotPassword} className="flex flex-col gap-4">
               <div className="flex justify-center">
-                <div className="flex size-12 items-center justify-center rounded-full bg-emerald-500/10">
-                  <Mail className="size-6 text-emerald-600" />
+                <div className="flex size-12 items-center justify-center rounded-full bg-indigo-500/10">
+                  <Mail className="size-6 text-indigo-600" />
                 </div>
               </div>
               <div className="flex flex-col gap-2">
@@ -601,8 +601,8 @@ export function AuthModal({ mode, onModeChange, onClose }: AuthModalProps) {
                 />
               </div>
               {forgotSuccess && (
-                <div className="rounded-lg border bg-emerald-500/5 border-emerald-500/20 p-4 space-y-2 text-center">
-                  <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
+                <div className="rounded-lg border bg-indigo-500/5 border-indigo-500/20 p-4 space-y-2 text-center">
+                  <p className="text-sm font-medium text-indigo-700 dark:text-indigo-400">
                     Check your email
                   </p>
                   <p className="text-xs text-muted-foreground">
@@ -623,7 +623,7 @@ export function AuthModal({ mode, onModeChange, onClose }: AuthModalProps) {
               {!forgotSuccess && (
                 <Button
                   type="submit"
-                  className="mt-2 w-full bg-emerald-500 hover:bg-emerald-600 text-white"
+                  className="mt-2 w-full bg-indigo-500 hover:bg-indigo-600 text-white"
                   disabled={isLoading}
                 >
                   {isLoading ? (
@@ -644,7 +644,7 @@ export function AuthModal({ mode, onModeChange, onClose }: AuthModalProps) {
                     setForgotToken('')
                     onModeChange('login')
                   }}
-                  className="font-medium text-emerald-600 hover:text-emerald-700 hover:underline"
+                  className="font-medium text-indigo-600 hover:text-indigo-700 hover:underline"
                   disabled={isLoading}
                 >
                   Back to sign in
@@ -656,8 +656,8 @@ export function AuthModal({ mode, onModeChange, onClose }: AuthModalProps) {
           {mode === 'reset-password' && (
             <form onSubmit={handleResetPassword} className="flex flex-col gap-4">
               <div className="flex justify-center">
-                <div className="flex size-12 items-center justify-center rounded-full bg-emerald-500/10">
-                  <KeyRound className="size-6 text-emerald-600" />
+                <div className="flex size-12 items-center justify-center rounded-full bg-indigo-500/10">
+                  <KeyRound className="size-6 text-indigo-600" />
                 </div>
               </div>
               <div className="flex flex-col gap-2">
@@ -697,7 +697,7 @@ export function AuthModal({ mode, onModeChange, onClose }: AuthModalProps) {
               </div>
               <Button
                 type="submit"
-                className="mt-2 w-full bg-emerald-500 hover:bg-emerald-600 text-white"
+                className="mt-2 w-full bg-indigo-500 hover:bg-indigo-600 text-white"
                 disabled={isLoading}
               >
                 {isLoading ? (
@@ -718,7 +718,7 @@ export function AuthModal({ mode, onModeChange, onClose }: AuthModalProps) {
                     setResetConfirmPassword('')
                     onModeChange('login')
                   }}
-                  className="font-medium text-emerald-600 hover:text-emerald-700 hover:underline"
+                  className="font-medium text-indigo-600 hover:text-indigo-700 hover:underline"
                   disabled={isLoading}
                 >
                   Back to sign in

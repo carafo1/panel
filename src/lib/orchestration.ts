@@ -1204,7 +1204,7 @@ async function provisionEmail(
   // 1. Add the domain to Mailcow.
   const addDomainResult = await addDomain({
     domain: domainName,
-    description: `DeployHub provisioned domain for ${job.userId}`,
+    description: `APSAMO provisioned domain for ${job.userId}`,
     mailboxes: 10,
     aliases: 20,
     quota: 1024,

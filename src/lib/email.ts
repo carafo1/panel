@@ -23,7 +23,7 @@ interface SendEmailResult {
   demo?: boolean
 }
 
-const FROM_NAME = process.env.SMTP_FROM_NAME || 'DeployHub'
+const FROM_NAME = process.env.SMTP_FROM_NAME || 'APSAMO'
 const FROM_EMAIL =
   process.env.SMTP_FROM_EMAIL || 'no-reply@deployhub.local'
 
@@ -104,13 +104,13 @@ export async function sendWelcomeEmail(
 ): Promise<SendEmailResult> {
   return sendEmail({
     to: email,
-    subject: 'Welcome to DeployHub - please verify your email',
+    subject: 'Welcome to APSAMO - please verify your email',
     html: `
       <div style="font-family: -apple-system, sans-serif; max-width: 560px; margin: auto; padding: 32px;">
-        <h1 style="color: #10b981;">Welcome to DeployHub, ${name}!</h1>
+        <h1 style="color: #706fd3;">Welcome to APSAMO, ${name}!</h1>
         <p>We're excited to have you on board. Before you can start deploying, please verify your email address:</p>
         <p style="text-align: center; margin: 32px 0;">
-          <a href="${verificationUrl}" style="background: #10b981; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
+          <a href="${verificationUrl}" style="background: #706fd3; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
             Verify Email
           </a>
         </p>
@@ -124,7 +124,7 @@ export async function sendWelcomeEmail(
         </p>
       </div>
     `,
-    text: `Welcome to DeployHub, ${name}!\n\nPlease verify your email by visiting: ${verificationUrl}`,
+    text: `Welcome to APSAMO, ${name}!\n\nPlease verify your email by visiting: ${verificationUrl}`,
   })
 }
 
@@ -137,13 +137,13 @@ export async function sendPasswordResetEmail(
 ): Promise<SendEmailResult> {
   return sendEmail({
     to: email,
-    subject: 'Reset your DeployHub password',
+    subject: 'Reset your APSAMO password',
     html: `
       <div style="font-family: -apple-system, sans-serif; max-width: 560px; margin: auto; padding: 32px;">
-        <h1 style="color: #10b981;">Password reset request</h1>
-        <p>We received a request to reset your DeployHub password. Click the button below to choose a new password:</p>
+        <h1 style="color: #706fd3;">Password reset request</h1>
+        <p>We received a request to reset your APSAMO password. Click the button below to choose a new password:</p>
         <p style="text-align: center; margin: 32px 0;">
-          <a href="${resetUrl}" style="background: #10b981; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
+          <a href="${resetUrl}" style="background: #706fd3; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
             Reset Password
           </a>
         </p>
@@ -156,7 +156,7 @@ export async function sendPasswordResetEmail(
         </p>
       </div>
     `,
-    text: `Reset your DeployHub password by visiting: ${resetUrl}\n\nThis link expires in 1 hour.`,
+    text: `Reset your APSAMO password by visiting: ${resetUrl}\n\nThis link expires in 1 hour.`,
   })
 }
 
@@ -170,13 +170,13 @@ export async function sendTeamInvitationEmail(
 ): Promise<SendEmailResult> {
   return sendEmail({
     to: email,
-    subject: `You've been invited to join "${teamName}" on DeployHub`,
+    subject: `You've been invited to join "${teamName}" on APSAMO`,
     html: `
       <div style="font-family: -apple-system, sans-serif; max-width: 560px; margin: auto; padding: 32px;">
-        <h1 style="color: #10b981;">Team invitation</h1>
-        <p>You've been invited to collaborate on the team <strong>${teamName}</strong> on DeployHub.</p>
+        <h1 style="color: #706fd3;">Team invitation</h1>
+        <p>You've been invited to collaborate on the team <strong>${teamName}</strong> on APSAMO.</p>
         <p style="text-align: center; margin: 32px 0;">
-          <a href="${inviteUrl}" style="background: #10b981; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
+          <a href="${inviteUrl}" style="background: #706fd3; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
             Accept Invitation
           </a>
         </p>
@@ -186,7 +186,7 @@ export async function sendTeamInvitationEmail(
         </p>
       </div>
     `,
-    text: `You've been invited to join "${teamName}" on DeployHub.\n\nAccept: ${inviteUrl}`,
+    text: `You've been invited to join "${teamName}" on APSAMO.\n\nAccept: ${inviteUrl}`,
   })
 }
 
@@ -200,7 +200,7 @@ export async function sendDeploymentEmail(
   url?: string
 ): Promise<SendEmailResult> {
   const isSuccess = status === 'live' || status === 'success'
-  const color = isSuccess ? '#10b981' : '#ef4444'
+  const color = isSuccess ? '#706fd3' : '#ef4444'
   const icon = isSuccess ? '✅' : '⚠️'
 
   return sendEmail({

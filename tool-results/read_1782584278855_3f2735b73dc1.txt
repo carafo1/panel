@@ -1,0 +1,2002 @@
+     1→'use client'
+     2→
+     3→/**
+     4→ * ServersPanel — comprehensive admin Server Management UI.
+     5→ *
+     6→ * Features:
+     7→ *  1. Server list (card grid with status / health / resource bars / software
+     8→ *     badges / OS info / project count / relative timestamps / action buttons)
+     9→ *  2. Add/Edit Server dialog (basic info + SSH connection + AES-256-GCM notice)
+    10→ *  3. Test SSH dialog (success/failure + OS/Docker/Caddy info + troubleshooting)
+    11→ *  4. Provision dialog (7-step pipeline with running/success/failed indicators)
+    12→ *  5. Server Stats dialog (live CPU/mem/disk/load/uptime + Docker container list)
+    13→ *  6. Caddyfile dialog (monospace viewer + copy + reload)
+    14→ *  7. Delete confirmation (disabled when projectCount > 0)
+    15→ *
+    16→ * Uses the same `apiFetch` pattern as the rest of the project — bearer token
+    17→ * pulled from localStorage and passed as an Authorization header. All API
+    18→ * paths are relative (Caddy gateway handles routing).
+    19→ */
+    20→
+    21→import { useState, useEffect, useCallback, useRef } from 'react'
+    22→import { toast } from 'sonner'
+    23→import {
+    24→  Card,
+    25→  CardContent,
+    26→  CardDescription,
+    27→  CardHeader,
+    28→  CardTitle,
+    29→} from '@/components/ui/card'
+    30→import { Button } from '@/components/ui/button'
+    31→import { Input } from '@/components/ui/input'
+    32→import { Label } from '@/components/ui/label'
+    33→import { Badge } from '@/components/ui/badge'
+    34→import { Progress } from '@/components/ui/progress'
+    35→import { Skeleton } from '@/components/ui/skeleton'
+    36→import { Separator } from '@/components/ui/separator'
+    37→import { Switch } from '@/components/ui/switch'
+    38→import { Textarea } from '@/components/ui/textarea'
+    39→import {
+    40→  Dialog,
+    41→  DialogContent,
+    42→  DialogDescription,
+    43→  DialogFooter,
+    44→  DialogHeader,
+    45→  DialogTitle,
+    46→} from '@/components/ui/dialog'
+    47→import {
+    48→  AlertDialog,
+    49→  AlertDialogAction,
+    50→  AlertDialogCancel,
+    51→  AlertDialogContent,
+    52→  AlertDialogDescription,
+    53→  AlertDialogFooter,
+    54→  AlertDialogHeader,
+    55→  AlertDialogTitle,
+    56→} from '@/components/ui/alert-dialog'
+    57→import {
+    58→  Select,
+    59→  SelectContent,
+    60→  SelectItem,
+    61→  SelectTrigger,
+    62→  SelectValue,
+    63→} from '@/components/ui/select'
+    64→import {
+    65→  Tooltip,
+    66→  TooltipContent,
+    67→  TooltipProvider,
+    68→  TooltipTrigger,
+    69→} from '@/components/ui/tooltip'
+    70→import {
+    71→  Server as ServerIcon,
+    72→  Globe,
+    73→  Cpu,
+    74→  HardDrive,
+    75→  MemoryStick,
+    76→  Shield,
+    77→  ShieldCheck,
+    78→  Terminal,
+    79→  RefreshCw,
+    80→  Trash2,
+    81→  Edit,
+    82→  Plus,
+    83→  CheckCircle2,
+    84→  XCircle,
+    85→  AlertTriangle,
+    86→  Activity,
+    87→  Network,
+    88→  Lock,
+    89→  Key,
+    90→  FileCode,
+    91→  Play,
+    92→  RotateCcw,
+    93→  Eye,
+    94→  EyeOff,
+    95→  Copy,
+    96→  Zap,
+    97→  MapPin,
+    98→  Loader2,
+    99→  Clock,
+   100→  Container,
+   101→} from 'lucide-react'
+   102→
+   103→// ─── Types ──────────────────────────────────────────────────────────────
+   104→
+   105→interface Server {
+   106→  id: string
+   107→  name: string
+   108→  ip: string
+   109→  provider: string
+   110→  status: string
+   111→  cpuCores: number
+   112→  ramGB: number
+   113→  storageGB: number
+   114→  bandwidthGB: number
+   115→  usedRamGB: number
+   116→  usedStorageGB: number
+   117→  region: string
+   118→  sshHost: string
+   119→  sshPort: number
+   120→  sshUser: string
+   121→  hasSshKey: boolean
+   122→  hasSshPassword: boolean
+   123→  sshFingerprint: string | null
+   124→  dockerInstalled: boolean
+   125→  caddyInstalled: boolean
+   126→  firewallConfigured: boolean
+   127→  caddyVersion: string | null
+   128→  dockerVersion: string | null
+   129→  osInfo: string | null
+   130→  lastProvisionedAt: string | null
+   131→  lastHealthCheckAt: string | null
+   132→  healthStatus: string
+   133→  deployedPublicKey: string | null
+   134→  projectCount: number
+   135→  ramUsagePercent: number
+   136→  storageUsagePercent: number
+   137→  createdAt: string
+   138→  updatedAt: string
+   139→}
+   140→
+   141→interface ProvisionStepResult {
+   142→  step: string
+   143→  status: 'success' | 'failed' | 'skipped'
+   144→  message: string
+   145→  logs: string
+   146→  durationMs: number
+   147→}
+   148→
+   149→interface ProvisionResult {
+   150→  ok: boolean
+   151→  steps: ProvisionStepResult[]
+   152→  finalStatus: string
+   153→  dockerVersion?: string
+   154→  caddyVersion?: string
+   155→  osInfo?: string
+   156→  detectedCpuCores?: number
+   157→  detectedRamGB?: number
+   158→  detectedStorageGB?: number
+   159→  error?: string
+   160→}
+   161→
+   162→interface TestResult {
+   163→  ok: boolean
+   164→  info?: {
+   165→    host: string
+   166→    port: number
+   167→    username: string
+   168→    authMethod: string
+   169→    osInfo: string
+   170→    dockerVersion: string
+   171→    caddyVersion: string
+   172→  }
+   173→  error?: string
+   174→}
+   175→
+   176→interface ServerStats {
+   177→  serverId: string
+   178→  demo: boolean
+   179→  timestamp: string
+   180→  cpu: {
+   181→    cpuCount: number
+   182→    busyPercent: number
+   183→    userPercent: number
+   184→    systemPercent: number
+   185→    idlePercent: number
+   186→  }
+   187→  memory: {
+   188→    totalMB: number
+   189→    usedMB: number
+   190→    freeMB: number
+   191→    availableMB: number
+   192→    usedPercent: number
+   193→  }
+   194→  disk: {
+   195→    filesystem: string
+   196→    size: string
+   197→    used: string
+   198→    available: string
+   199→    usePercent: number
+   200→    mountedOn: string
+   201→  }
+   202→  loadAvg: {
+   203→    load1: number
+   204→    load5: number
+   205→    load15: number
+   206→  }
+   207→  uptime: {
+   208→    uptimeString: string
+   209→    users: number
+   210→  }
+   211→  containers: Array<{ name: string; status: string; ports: string }>
+   212→  containerStats?: Array<{
+   213→    name: string
+   214→    cpuPercent: number
+   215→    memUsage: string
+   216→    memPercent: number
+   217→  }>
+   218→  error?: string
+   219→}
+   220→
+   221→// ─── API helper ─────────────────────────────────────────────────────────
+   222→function authHeaders(): Record<string, string> {
+   223→  const token =
+   224→    typeof window !== 'undefined'
+   225→      ? localStorage.getItem('deployhub_token')
+   226→      : null
+   227→  return {
+   228→    'Content-Type': 'application/json',
+   229→    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+   230→  }
+   231→}
+   232→
+   233→// ─── Helpers ────────────────────────────────────────────────────────────
+   234→
+   235→const PROVIDERS = [
+   236→  'netcup',
+   237→  'hetzner',
+   238→  'digitalocean',
+   239→  'vultr',
+   240→  'linode',
+   241→  'ovh',
+   242→  'contabo',
+   243→  'aws',
+   244→  'gcp',
+   245→  'azure',
+   246→  'other',
+   247→] as const
+   248→
+   249→const PROVISION_STEPS: Array<{
+   250→  name: string
+   251→  label: string
+   252→  icon: React.ElementType
+   253→}> = [
+   254→  { name: 'connect', label: 'SSH Connect', icon: Network },
+   255→  { name: 'system_update', label: 'System Update', icon: RefreshCw },
+   256→  { name: 'install_docker', label: 'Install Docker', icon: Container },
+   257→  { name: 'install_caddy', label: 'Install Caddy', icon: Globe },
+   258→  { name: 'configure_firewall', label: 'Configure Firewall', icon: Shield },
+   259→  { name: 'setup_directories', label: 'Setup Directories', icon: HardDrive },
+   260→  { name: 'detect_resources', label: 'Detect Resources', icon: Cpu },
+   261→]
+   262→
+   263→function timeAgo(dateStr: string | null): string {
+   264→  if (!dateStr) return 'never'
+   265→  const seconds = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000)
+   266→  if (seconds < 0) return 'just now'
+   267→  if (seconds < 60) return `${seconds}s ago`
+   268→  const minutes = Math.floor(seconds / 60)
+   269→  if (minutes < 60) return `${minutes}m ago`
+   270→  const hours = Math.floor(minutes / 60)
+   271→  if (hours < 24) return `${hours}h ago`
+   272→  const days = Math.floor(hours / 24)
+   273→  if (days < 30) return `${days}d ago`
+   274→  return new Date(dateStr).toLocaleDateString()
+   275→}
+   276→
+   277→function formatDateTime(dateStr: string | null): string {
+   278→  if (!dateStr) return '—'
+   279→  try {
+   280→    return new Date(dateStr).toLocaleString('en-US', {
+   281→      month: 'short',
+   282→      day: 'numeric',
+   283→      year: 'numeric',
+   284→      hour: '2-digit',
+   285→      minute: '2-digit',
+   286→    })
+   287→  } catch {
+   288→    return dateStr
+   289→  }
+   290→}
+   291→
+   292→// ─── Status badges ──────────────────────────────────────────────────────
+   293→
+   294→function ServerStatusBadge({ status }: { status: string }) {
+   295→  const map: Record<string, { className: string; dot?: string }> = {
+   296→    active: {
+   297→      className: 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400',
+   298→    },
+   299→    provisioning: {
+   300→      className: 'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:text-amber-400',
+   301→      dot: 'animate-pulse',
+   302→    },
+   303→    maintenance: {
+   304→      className: 'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:text-amber-400',
+   305→    },
+   306→    offline: {
+   307→      className: 'bg-red-100 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-400',
+   308→    },
+   309→  }
+   310→  const cfg = map[status] || {
+   311→    className: 'bg-gray-100 text-gray-700 border-gray-200 dark:bg-gray-800/30 dark:text-gray-400',
+   312→  }
+   313→  return (
+   314→    <Badge variant="outline" className={cfg.className}>
+   315→      {cfg.dot && (
+   316→        <span className={`size-1.5 rounded-full bg-current mr-1.5 ${cfg.dot}`} />
+   317→      )}
+   318→      {status.charAt(0).toUpperCase() + status.slice(1)}
+   319→    </Badge>
+   320→  )
+   321→}
+   322→
+   323→function HealthDot({ status }: { status: string }) {
+   324→  const map: Record<string, string> = {
+   325→    healthy: 'bg-emerald-500',
+   326→    degraded: 'bg-amber-500',
+   327→    down: 'bg-red-500',
+   328→    unknown: 'bg-gray-400',
+   329→  }
+   330→  return (
+   331→    <TooltipProvider>
+   332→      <Tooltip>
+   333→        <TooltipTrigger asChild>
+   334→          <span
+   335→            className={`inline-block size-2 rounded-full ${map[status] || map.unknown} ${
+   336→              status === 'degraded' ? 'animate-pulse' : ''
+   337→            }`}
+   338→            aria-label={`Health: ${status}`}
+   339→          />
+   340→        </TooltipTrigger>
+   341→        <TooltipContent>
+   342→          <span className="capitalize">Health: {status}</span>
+   343→        </TooltipContent>
+   344→      </Tooltip>
+   345→    </TooltipProvider>
+   346→  )
+   347→}
+   348→
+   349→function ResourceBar({
+   350→  icon: Icon,
+   351→  label,
+   352→  value,
+   353→  sublabel,
+   354→  percent,
+   355→}: {
+   356→  icon: React.ElementType
+   357→  label: string
+   358→  value: string
+   359→  sublabel?: string
+   360→  percent: number
+   361→}) {
+   362→  const color =
+   363→    percent >= 85
+   364→      ? 'bg-red-500'
+   365→      : percent >= 65
+   366→        ? 'bg-amber-500'
+   367→        : 'bg-emerald-500'
+   368→  return (
+   369→    <div className="space-y-1">
+   370→      <div className="flex items-center justify-between text-xs">
+   371→        <span className="flex items-center gap-1 text-muted-foreground">
+   372→          <Icon className="size-3" />
+   373→          {label}
+   374→        </span>
+   375→        <span className="font-medium tabular-nums">
+   376→          {value}
+   377→          {sublabel && (
+   378→            <span className="text-muted-foreground ml-1">{sublabel}</span>
+   379→          )}
+   380→        </span>
+   381→      </div>
+   382→      <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-muted">
+   383→        <div
+   384→          className={`absolute left-0 top-0 h-full rounded-full ${color} transition-all`}
+   385→          style={{ width: `${Math.min(100, Math.max(0, percent))}%` }}
+   386→        />
+   387→      </div>
+   388→    </div>
+   389→  )
+   390→}
+   391→
+   392→function SoftwareBadge({
+   393→  installed,
+   394→  label,
+   395→  version,
+   396→  icon: Icon,
+   397→}: {
+   398→  installed: boolean
+   399→  label: string
+   400→  version?: string | null
+   401→  icon: React.ElementType
+   402→}) {
+   403→  return (
+   404→    <TooltipProvider>
+   405→      <Tooltip>
+   406→        <TooltipTrigger asChild>
+   407→          <span
+   408→            className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] font-medium ${
+   409→              installed
+   410→                ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-900/20 dark:text-emerald-400'
+   411→                : 'border-gray-200 bg-gray-50 text-gray-500 dark:border-gray-800 dark:bg-gray-800/30 dark:text-gray-400'
+   412→            }`}
+   413→          >
+   414→            <Icon className="size-3" />
+   415→            {label}
+   416→            {installed && version && (
+   417→              <span className="font-mono text-[9px] opacity-70">
+   418→                {version.split(' ')[0]}
+   419→              </span>
+   420→            )}
+   421→          </span>
+   422→        </TooltipTrigger>
+   423→        <TooltipContent>
+   424→          {installed
+   425→            ? version
+   426→              ? `${label}: ${version}`
+   427→              : `${label} installed`
+   428→            : `${label} not installed`}
+   429→        </TooltipContent>
+   430→      </Tooltip>
+   431→    </TooltipProvider>
+   432→  )
+   433→}
+   434→
+   435→// ─── Main component ─────────────────────────────────────────────────────
+   436→
+   437→export function ServersPanel() {
+   438→  const [servers, setServers] = useState<Server[]>([])
+   439→  const [loading, setLoading] = useState(true)
+   440→  const [refreshing, setRefreshing] = useState(false)
+   441→
+   442→  // Dialogs
+   443→  const [editOpen, setEditOpen] = useState(false)
+   444→  const [editingServer, setEditingServer] = useState<Server | null>(null)
+   445→  const [testDialog, setTestDialog] = useState<Server | null>(null)
+   446→  const [provisionDialog, setProvisionDialog] = useState<Server | null>(null)
+   447→  const [statsDialog, setStatsDialog] = useState<Server | null>(null)
+   448→  const [caddyDialog, setCaddyDialog] = useState<Server | null>(null)
+   449→  const [deleteServer, setDeleteServer] = useState<Server | null>(null)
+   450→
+   451→  const fetchServers = useCallback(async () => {
+   452→    try {
+   453→      const res = await fetch('/api/admin/servers', { headers: authHeaders() })
+   454→      const data = await res.json()
+   455→      if (!res.ok) {
+   456→        toast.error(data.error || 'Failed to load servers')
+   457→        return
+   458→      }
+   459→      setServers(data.servers || [])
+   460→    } catch {
+   461→      toast.error('Network error')
+   462→    } finally {
+   463→      setLoading(false)
+   464→      setRefreshing(false)
+   465→    }
+   466→  }, [])
+   467→
+   468→  useEffect(() => {
+   469→    fetchServers()
+   470→  }, [fetchServers])
+   471→
+   472→  const handleRefresh = () => {
+   473→    setRefreshing(true)
+   474→    fetchServers()
+   475→  }
+   476→
+   477→  return (
+   478→    <div className="space-y-4">
+   479→      {/* Header */}
+   480→      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+   481→        <div>
+   482→          <h3 className="text-lg font-semibold flex items-center gap-2">
+   483→            <ServerIcon className="size-5 text-emerald-600" />
+   484→            Servers
+   485→          </h3>
+   486→          <p className="text-sm text-muted-foreground">
+   487→            {servers.length} server{servers.length !== 1 ? 's' : ''} ·{' '}
+   488→            {servers.reduce((sum, s) => sum + s.projectCount, 0)} projects
+   489→          </p>
+   490→        </div>
+   491→        <div className="flex gap-2">
+   492→          <Button
+   493→            variant="outline"
+   494→            size="sm"
+   495→            onClick={handleRefresh}
+   496→            disabled={refreshing}
+   497→          >
+   498→            <RefreshCw
+   499→              className={`size-4 mr-1.5 ${refreshing ? 'animate-spin' : ''}`}
+   500→            />
+   501→            Refresh
+   502→          </Button>
+   503→          <Button
+   504→            size="sm"
+   505→            onClick={() => {
+   506→              setEditingServer(null)
+   507→              setEditOpen(true)
+   508→            }}
+   509→            className="bg-emerald-600 hover:bg-emerald-700 text-white"
+   510→          >
+   511→            <Plus className="size-4 mr-1.5" />
+   512→            Add Server
+   513→          </Button>
+   514→        </div>
+   515→      </div>
+   516→
+   517→      {/* Server list */}
+   518→      {loading ? (
+   519→        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+   520→          {Array.from({ length: 3 }).map((_, i) => (
+   521→            <Skeleton key={i} className="h-72 rounded-xl" />
+   522→          ))}
+   523→        </div>
+   524→      ) : servers.length === 0 ? (
+   525→        <Card>
+   526→          <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+   527→            <div className="size-14 rounded-full bg-emerald-50 dark:bg-emerald-900/20 flex items-center justify-center mb-3">
+   528→              <ServerIcon className="size-7 text-emerald-600" />
+   529→            </div>
+   530→            <p className="text-sm font-medium">No servers configured</p>
+   531→            <p className="text-xs text-muted-foreground mt-1 max-w-sm">
+   532→              Add your first VPS to start hosting projects. Each server runs Docker + Caddy
+   533→              for zero-config deployments.
+   534→            </p>
+   535→            <Button
+   536→              size="sm"
+   537→              onClick={() => {
+   538→                setEditingServer(null)
+   539→                setEditOpen(true)
+   540→              }}
+   541→              className="mt-4 bg-emerald-600 hover:bg-emerald-700 text-white"
+   542→            >
+   543→              <Plus className="size-4 mr-1.5" />
+   544→              Add Your First Server
+   545→            </Button>
+   546→          </CardContent>
+   547→        </Card>
+   548→      ) : (
+   549→        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+   550→          {servers.map((server) => (
+   551→            <ServerCard
+   552→              key={server.id}
+   553→              server={server}
+   554→              onTest={() => setTestDialog(server)}
+   555→              onProvision={() => setProvisionDialog(server)}
+   556→              onStats={() => setStatsDialog(server)}
+   557→              onCaddy={() => setCaddyDialog(server)}
+   558→              onEdit={() => {
+   559→                setEditingServer(server)
+   560→                setEditOpen(true)
+   561→              }}
+   562→              onDelete={() => setDeleteServer(server)}
+   563→            />
+   564→          ))}
+   565→        </div>
+   566→      )}
+   567→
+   568→      {/* Dialogs */}
+   569→      <EditServerDialog
+   570→        open={editOpen}
+   571→        server={editingServer}
+   572→        onClose={() => setEditOpen(false)}
+   573→        onSaved={() => {
+   574→          setEditOpen(false)
+   575→          fetchServers()
+   576→        }}
+   577→      />
+   578→
+   579→      <TestSshDialog server={testDialog} onClose={() => setTestDialog(null)} />
+   580→
+   581→      <ProvisionDialog
+   582→        server={provisionDialog}
+   583→        onClose={() => setProvisionDialog(null)}
+   584→        onCompleted={fetchServers}
+   585→      />
+   586→
+   587→      <StatsDialog server={statsDialog} onClose={() => setStatsDialog(null)} />
+   588→
+   589→      <CaddyfileDialog
+   590→        server={caddyDialog}
+   591→        onClose={() => setCaddyDialog(null)}
+   592→      />
+   593→
+   594→      <DeleteServerDialog
+   595→        server={deleteServer}
+   596→        onClose={() => setDeleteServer(null)}
+   597→        onDeleted={() => {
+   598→          setDeleteServer(null)
+   599→          fetchServers()
+   600→        }}
+   601→      />
+   602→    </div>
+   603→  )
+   604→}
+   605→
+   606→// ─── Server Card ────────────────────────────────────────────────────────
+   607→
+   608→function ServerCard({
+   609→  server,
+   610→  onTest,
+   611→  onProvision,
+   612→  onStats,
+   613→  onCaddy,
+   614→  onEdit,
+   615→  onDelete,
+   616→}: {
+   617→  server: Server
+   618→  onTest: () => void
+   619→  onProvision: () => void
+   620→  onStats: () => void
+   621→  onCaddy: () => void
+   622→  onEdit: () => void
+   623→  onDelete: () => void
+   624→}) {
+   625→  return (
+   626→    <Card className="flex flex-col">
+   627→      <CardHeader className="pb-3">
+   628→        <div className="flex items-start justify-between gap-2">
+   629→          <div className="flex items-center gap-2 min-w-0">
+   630→            <div className="size-9 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 flex items-center justify-center shrink-0">
+   631→              <ServerIcon className="size-5 text-emerald-600" />
+   632→            </div>
+   633→            <div className="min-w-0">
+   634→              <CardTitle className="text-base flex items-center gap-1.5 truncate">
+   635→                {server.name}
+   636→                <HealthDot status={server.healthStatus} />
+   637→              </CardTitle>
+   638→              <CardDescription className="flex items-center gap-2 text-xs font-mono">
+   639→                <span>{server.ip}</span>
+   640→              </CardDescription>
+   641→            </div>
+   642→          </div>
+   643→          <ServerStatusBadge status={server.status} />
+   644→        </div>
+   645→        <div className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground mt-1">
+   646→          <span className="flex items-center gap-1">
+   647→            <Network className="size-3" />
+   648→            {server.provider}
+   649→          </span>
+   650→          {server.region && (
+   651→            <span className="flex items-center gap-1">
+   652→              <MapPin className="size-3" />
+   653→              {server.region}
+   654→            </span>
+   655→          )}
+   656→          <span className="flex items-center gap-1">
+   657→            <Container className="size-3" />
+   658→            {server.projectCount} project{server.projectCount !== 1 ? 's' : ''}
+   659→          </span>
+   660→        </div>
+   661→      </CardHeader>
+   662→
+   663→      <CardContent className="flex-1 space-y-3">
+   664→        {/* Resource bars */}
+   665→        <div className="space-y-2">
+   666→          <ResourceBar
+   667→            icon={Cpu}
+   668→            label="CPU"
+   669→            value={`${server.cpuCores} vCPU`}
+   670→            percent={0}
+   671→          />
+   672→          <ResourceBar
+   673→            icon={MemoryStick}
+   674→            label="RAM"
+   675→            value={`${server.usedRamGB}/${server.ramGB} GB`}
+   676→            percent={server.ramUsagePercent}
+   677→          />
+   678→          <ResourceBar
+   679→            icon={HardDrive}
+   680→            label="Storage"
+   681→            value={`${server.usedStorageGB}/${server.storageGB} GB`}
+   682→            percent={server.storageUsagePercent}
+   683→          />
+   684→        </div>
+   685→
+   686→        {/* Software badges */}
+   687→        <div className="flex flex-wrap gap-1.5 pt-1">
+   688→          <SoftwareBadge
+   689→            installed={server.dockerInstalled}
+   690→            label="Docker"
+   691→            version={server.dockerVersion}
+   692→            icon={Container}
+   693→          />
+   694→          <SoftwareBadge
+   695→            installed={server.caddyInstalled}
+   696→            label="Caddy"
+   697→            version={server.caddyVersion}
+   698→            icon={Globe}
+   699→          />
+   700→          <SoftwareBadge
+   701→            installed={server.firewallConfigured}
+   702→            label="Firewall"
+   703→            icon={ShieldCheck}
+   704→          />
+   705→        </div>
+   706→
+   707→        {/* OS info */}
+   708→        {server.osInfo && (
+   709→          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground truncate">
+   710→            <Terminal className="size-3 shrink-0" />
+   711→            <span className="truncate font-mono">{server.osInfo}</span>
+   712→          </div>
+   713→        )}
+   714→
+   715→        {/* Timestamps */}
+   716→        <div className="grid grid-cols-2 gap-2 pt-1 border-t text-[10px] text-muted-foreground">
+   717→          <div>
+   718→            <span className="block opacity-70">Provisioned</span>
+   719→            <span className="flex items-center gap-1">
+   720→              <Clock className="size-2.5" />
+   721→              {timeAgo(server.lastProvisionedAt)}
+   722→            </span>
+   723→          </div>
+   724→          <div>
+   725→            <span className="block opacity-70">Health check</span>
+   726→            <span className="flex items-center gap-1">
+   727→              <Activity className="size-2.5" />
+   728→              {timeAgo(server.lastHealthCheckAt)}
+   729→            </span>
+   730→          </div>
+   731→        </div>
+   732→
+   733→        {/* Actions */}
+   734→        <Separator />
+   735→        <div className="grid grid-cols-3 gap-1.5">
+   736→          <TooltipButton
+   737→            icon={Zap}
+   738→            label="Test SSH"
+   739→            onClick={onTest}
+   740→            variant="outline"
+   741→          />
+   742→          <TooltipButton
+   743→            icon={Play}
+   744→            label="Provision"
+   745→            onClick={onProvision}
+   746→            variant="outline"
+   747→          />
+   748→          <TooltipButton
+   749→            icon={Activity}
+   750→            label="Stats"
+   751→            onClick={onStats}
+   752→            variant="outline"
+   753→          />
+   754→          <TooltipButton
+   755→            icon={FileCode}
+   756→            label="Caddyfile"
+   757→            onClick={onCaddy}
+   758→            variant="outline"
+   759→          />
+   760→          <TooltipButton
+   761→            icon={Edit}
+   762→            label="Edit"
+   763→            onClick={onEdit}
+   764→            variant="outline"
+   765→          />
+   766→          <TooltipButton
+   767→            icon={Trash2}
+   768→            label="Delete"
+   769→            onClick={onDelete}
+   770→            variant="outline"
+   771→            disabled={server.projectCount > 0}
+   772→            danger
+   773→          />
+   774→        </div>
+   775→      </CardContent>
+   776→    </Card>
+   777→  )
+   778→}
+   779→
+   780→function TooltipButton({
+   781→  icon: Icon,
+   782→  label,
+   783→  onClick,
+   784→  variant = 'outline',
+   785→  disabled = false,
+   786→  danger = false,
+   787→}: {
+   788→  icon: React.ElementType
+   789→  label: string
+   790→  onClick: () => void
+   791→  variant?: 'outline' | 'default'
+   792→  disabled?: boolean
+   793→  danger?: boolean
+   794→}) {
+   795→  return (
+   796→    <TooltipProvider>
+   797→      <Tooltip>
+   798→        <TooltipTrigger asChild>
+   799→          <Button
+   800→            variant={variant}
+   801→            size="sm"
+   802→            onClick={onClick}
+   803→            disabled={disabled}
+   804→            className={`h-8 px-2 text-xs ${
+   805→              danger
+   806→                ? 'hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20'
+   807→                : ''
+   808→            }`}
+   809→          >
+   810→            <Icon className="size-3.5 mr-1" />
+   811→            <span className="hidden sm:inline">{label}</span>
+   812→          </Button>
+   813→        </TooltipTrigger>
+   814→        <TooltipContent>{label}</TooltipContent>
+   815→      </Tooltip>
+   816→    </TooltipProvider>
+   817→  )
+   818→}
+   819→
+   820→// ─── Add/Edit Server Dialog ─────────────────────────────────────────────
+   821→
+   822→function EditServerDialog({
+   823→  open,
+   824→  server,
+   825→  onClose,
+   826→  onSaved,
+   827→}: {
+   828→  open: boolean
+   829→  server: Server | null
+   830→  onClose: () => void
+   831→  onSaved: () => void
+   832→}) {
+   833→  const isEdit = !!server
+   834→  const [saving, setSaving] = useState(false)
+   835→
+   836→  // Form state
+   837→  const [name, setName] = useState('')
+   838→  const [ip, setIp] = useState('')
+   839→  const [provider, setProvider] = useState<string>('hetzner')
+   840→  const [region, setRegion] = useState('')
+   841→  const [cpuCores, setCpuCores] = useState('2')
+   842→  const [ramGB, setRamGB] = useState('4')
+   843→  const [storageGB, setStorageGB] = useState('80')
+   844→  const [bandwidthGB, setBandwidthGB] = useState('1000')
+   845→  const [sshHost, setSshHost] = useState('')
+   846→  const [sshPort, setSshPort] = useState('22')
+   847→  const [sshUser, setSshUser] = useState('root')
+   848→  const [sshPassword, setSshPassword] = useState('')
+   849→  const [sshPrivateKey, setSshPrivateKey] = useState('')
+   850→  const [showPassword, setShowPassword] = useState(false)
+   851→  const [showKey, setShowKey] = useState(false)
+   852→
+   853→  // Sync form whenever dialog opens or target server changes
+   854→  useEffect(() => {
+   855→    if (open) {
+   856→      if (server) {
+   857→        setName(server.name)
+   858→        setIp(server.ip)
+   859→        setProvider(server.provider || 'hetzner')
+   860→        setRegion(server.region || '')
+   861→        setCpuCores(String(server.cpuCores))
+   862→        setRamGB(String(server.ramGB))
+   863→        setStorageGB(String(server.storageGB))
+   864→        setBandwidthGB(String(server.bandwidthGB))
+   865→        setSshHost(server.sshHost || server.ip)
+   866→        setSshPort(String(server.sshPort || 22))
+   867→        setSshUser(server.sshUser || 'root')
+   868→      } else {
+   869→        // Reset for "create"
+   870→        setName('')
+   871→        setIp('')
+   872→        setProvider('hetzner')
+   873→        setRegion('')
+   874→        setCpuCores('2')
+   875→        setRamGB('4')
+   876→        setStorageGB('80')
+   877→        setBandwidthGB('1000')
+   878→        setSshHost('')
+   879→        setSshPort('22')
+   880→        setSshUser('root')
+   881→      }
+   882→      setSshPassword('')
+   883→      setSshPrivateKey('')
+   884→      setShowPassword(false)
+   885→      setShowKey(false)
+   886→    }
+   887→  }, [open, server])
+   888→
+   889→  // Auto-default sshHost to ip when creating
+   890→  useEffect(() => {
+   891→    if (!isEdit && !sshHost && ip) {
+   892→      setSshHost(ip)
+   893→    }
+   894→  }, [ip, sshHost, isEdit])
+   895→
+   896→  const handleSave = async () => {
+   897→    // Validation per spec: name + ip + cpuCores + ramGB + storageGB required
+   898→    if (!name.trim()) return toast.error('Server name is required')
+   899→    if (!ip.trim()) return toast.error('IP address is required')
+   900→    const cpu = parseInt(cpuCores, 10)
+   901→    const ram = parseFloat(ramGB)
+   902→    const storage = parseFloat(storageGB)
+   903→    if (!Number.isFinite(cpu) || cpu <= 0) return toast.error('CPU cores must be a positive number')
+   904→    if (!Number.isFinite(ram) || ram <= 0) return toast.error('RAM (GB) must be a positive number')
+   905→    if (!Number.isFinite(storage) || storage <= 0) return toast.error('Storage (GB) must be a positive number')
+   906→
+   907→    setSaving(true)
+   908→    try {
+   909→      const body: Record<string, unknown> = {
+   910→        name: name.trim(),
+   911→        ip: ip.trim(),
+   912→        provider,
+   913→        region: region.trim() || 'unknown',
+   914→        cpuCores: cpu,
+   915→        ramGB: ram,
+   916→        storageGB: storage,
+   917→        bandwidthGB: parseFloat(bandwidthGB) || 1000,
+   918→        sshHost: sshHost.trim() || ip.trim(),
+   919→        sshPort: parseInt(sshPort, 10) || 22,
+   920→        sshUser: sshUser.trim() || 'root',
+   921→      }
+   922→      if (sshPassword) body.sshPassword = sshPassword
+   923→      if (sshPrivateKey) body.sshPrivateKey = sshPrivateKey
+   924→
+   925→      const url = isEdit
+   926→        ? `/api/admin/servers/${server!.id}`
+   927→        : '/api/admin/servers'
+   928→      const method = isEdit ? 'PATCH' : 'POST'
+   929→
+   930→      const res = await fetch(url, {
+   931→        method,
+   932→        headers: authHeaders(),
+   933→        body: JSON.stringify(body),
+   934→      })
+   935→      const data = await res.json()
+   936→      if (!res.ok) {
+   937→        toast.error(data.error || `Failed to ${isEdit ? 'update' : 'create'} server`)
+   938→        return
+   939→      }
+   940→      toast.success(isEdit ? 'Server updated' : 'Server created successfully')
+   941→      onSaved()
+   942→    } catch {
+   943→      toast.error('Network error')
+   944→    } finally {
+   945→      setSaving(false)
+   946→    }
+   947→  }
+   948→
+   949→  return (
+   950→    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+   951→      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/20">
+   952→        <DialogHeader>
+   953→          <DialogTitle className="flex items-center gap-2">
+   954→            <ServerIcon className="size-5 text-emerald-600" />
+   955→            {isEdit ? 'Edit Server' : 'Add New Server'}
+   956→          </DialogTitle>
+   957→          <DialogDescription>
+   958→            {isEdit
+   959→              ? `Update configuration for ${server?.name}`
+   960→              : 'Register a new VPS to host projects. SSH credentials are encrypted at rest.'}
+   961→          </DialogDescription>
+   962→        </DialogHeader>
+   963→
+   964→        <div className="space-y-6 py-2">
+   965→          {/* Basic Info */}
+   966→          <div className="space-y-3">
+   967→            <div className="flex items-center gap-2 text-sm font-medium">
+   968→              <Globe className="size-4 text-emerald-600" />
+   969→              Basic Information
+   970→            </div>
+   971→            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+   972→              <div className="space-y-1.5">
+   973→                <Label htmlFor="srv-name">Name *</Label>
+   974→                <Input
+   975→                  id="srv-name"
+   976→                  placeholder="prod-web-01"
+   977→                  value={name}
+   978→                  onChange={(e) => setName(e.target.value)}
+   979→                />
+   980→              </div>
+   981→              <div className="space-y-1.5">
+   982→                <Label htmlFor="srv-ip">IP Address *</Label>
+   983→                <Input
+   984→                  id="srv-ip"
+   985→                  placeholder="203.0.113.10"
+   986→                  value={ip}
+   987→                  onChange={(e) => setIp(e.target.value)}
+   988→                  className="font-mono text-sm"
+   989→                />
+   990→              </div>
+   991→              <div className="space-y-1.5">
+   992→                <Label htmlFor="srv-provider">Provider</Label>
+   993→                <Select value={provider} onValueChange={setProvider}>
+   994→                  <SelectTrigger id="srv-provider">
+   995→                    <SelectValue placeholder="Select provider" />
+   996→                  </SelectTrigger>
+   997→                  <SelectContent>
+   998→                    {PROVIDERS.map((p) => (
+   999→                      <SelectItem key={p} value={p} className="capitalize">
+  1000→                        {p}
+  1001→                      </SelectItem>
+  1002→                    ))}
+  1003→                  </SelectContent>
+  1004→                </Select>
+  1005→              </div>
+  1006→              <div className="space-y-1.5">
+  1007→                <Label htmlFor="srv-region">Region</Label>
+  1008→                <Input
+  1009→                  id="srv-region"
+  1010→                  placeholder="fra1 / nyc3 / eu-central"
+  1011→                  value={region}
+  1012→                  onChange={(e) => setRegion(e.target.value)}
+  1013→                />
+  1014→              </div>
+  1015→              <div className="space-y-1.5">
+  1016→                <Label htmlFor="srv-cpu">CPU Cores *</Label>
+  1017→                <Input
+  1018→                  id="srv-cpu"
+  1019→                  type="number"
+  1020→                  min="1"
+  1021→                  placeholder="2"
+  1022→                  value={cpuCores}
+  1023→                  onChange={(e) => setCpuCores(e.target.value)}
+  1024→                />
+  1025→              </div>
+  1026→              <div className="space-y-1.5">
+  1027→                <Label htmlFor="srv-ram">RAM (GB) *</Label>
+  1028→                <Input
+  1029→                  id="srv-ram"
+  1030→                  type="number"
+  1031→                  min="0.5"
+  1032→                  step="0.5"
+  1033→                  placeholder="4"
+  1034→                  value={ramGB}
+  1035→                  onChange={(e) => setRamGB(e.target.value)}
+  1036→                />
+  1037→              </div>
+  1038→              <div className="space-y-1.5">
+  1039→                <Label htmlFor="srv-storage">Storage (GB) *</Label>
+  1040→                <Input
+  1041→                  id="srv-storage"
+  1042→                  type="number"
+  1043→                  min="1"
+  1044→                  placeholder="80"
+  1045→                  value={storageGB}
+  1046→                  onChange={(e) => setStorageGB(e.target.value)}
+  1047→                />
+  1048→              </div>
+  1049→              <div className="space-y-1.5">
+  1050→                <Label htmlFor="srv-bw">Bandwidth (GB/mo)</Label>
+  1051→                <Input
+  1052→                  id="srv-bw"
+  1053→                  type="number"
+  1054→                  min="0"
+  1055→                  placeholder="1000"
+  1056→                  value={bandwidthGB}
+  1057→                  onChange={(e) => setBandwidthGB(e.target.value)}
+  1058→                />
+  1059→              </div>
+  1060→            </div>
+  1061→          </div>
+  1062→
+  1063→          <Separator />
+  1064→
+  1065→          {/* SSH Connection */}
+  1066→          <div className="space-y-3">
+  1067→            <div className="flex items-center gap-2 text-sm font-medium">
+  1068→              <Key className="size-4 text-emerald-600" />
+  1069→              SSH Connection
+  1070→            </div>
+  1071→
+  1072→            {isEdit && (server?.hasSshKey || server?.hasSshPassword) && (
+  1073→              <div className="flex items-start gap-2 rounded-md border border-emerald-200 bg-emerald-50 dark:border-emerald-900/50 dark:bg-emerald-900/10 px-3 py-2 text-xs">
+  1074→                <Lock className="size-3.5 text-emerald-600 mt-0.5 shrink-0" />
+  1075→                <p className="text-emerald-700 dark:text-emerald-400">
+  1076→                  This server already has{' '}
+  1077→                  {server.hasSshKey && server.hasSshPassword
+  1078→                    ? 'an SSH key + password'
+  1079→                    : server.hasSshKey
+  1080→                      ? 'an SSH key'
+  1081→                      : 'an SSH password'}{' '}
+  1082→                  on file. Leave the fields below blank to keep the existing
+  1083→                  credentials, or enter new values to replace them.
+  1084→                </p>
+  1085→              </div>
+  1086→            )}
+  1087→
+  1088→            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+  1089→              <div className="space-y-1.5">
+  1090→                <Label htmlFor="srv-ssh-host">SSH Host</Label>
+  1091→                <Input
+  1092→                  id="srv-ssh-host"
+  1093→                  placeholder="defaults to IP"
+  1094→                  value={sshHost}
+  1095→                  onChange={(e) => setSshHost(e.target.value)}
+  1096→                  className="font-mono text-sm"
+  1097→                />
+  1098→              </div>
+  1099→              <div className="space-y-1.5">
+  1100→                <Label htmlFor="srv-ssh-port">SSH Port</Label>
+  1101→                <Input
+  1102→                  id="srv-ssh-port"
+  1103→                  type="number"
+  1104→                  min="1"
+  1105→                  max="65535"
+  1106→                  placeholder="22"
+  1107→                  value={sshPort}
+  1108→                  onChange={(e) => setSshPort(e.target.value)}
+  1109→                  className="font-mono text-sm"
+  1110→                />
+  1111→              </div>
+  1112→              <div className="space-y-1.5 sm:col-span-2">
+  1113→                <Label htmlFor="srv-ssh-user">SSH User</Label>
+  1114→                <Input
+  1115→                  id="srv-ssh-user"
+  1116→                  placeholder="root"
+  1117→                  value={sshUser}
+  1118→                  onChange={(e) => setSshUser(e.target.value)}
+  1119→                  className="font-mono text-sm"
+  1120→                />
+  1121→              </div>
+  1122→              <div className="space-y-1.5 sm:col-span-2">
+  1123→                <Label htmlFor="srv-ssh-pass">SSH Password</Label>
+  1124→                <div className="relative">
+  1125→                  <Input
+  1126→                    id="srv-ssh-pass"
+  1127→                    type={showPassword ? 'text' : 'password'}
+  1128→                    placeholder={
+  1129→                      isEdit && server?.hasSshPassword
+  1130→                        ? '•••••••• (leave blank to keep current)'
+  1131→                        : 'Enter password'
+  1132→                    }
+  1133→                    value={sshPassword}
+  1134→                    onChange={(e) => setSshPassword(e.target.value)}
+  1135→                    className="font-mono text-sm pr-10"
+  1136→                  />
+  1137→                  <button
+  1138→                    type="button"
+  1139→                    onClick={() => setShowPassword((v) => !v)}
+  1140→                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+  1141→                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+  1142→                  >
+  1143→                    {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+  1144→                  </button>
+  1145→                </div>
+  1146→              </div>
+  1147→              <div className="space-y-1.5 sm:col-span-2">
+  1148→                <Label htmlFor="srv-ssh-key">SSH Private Key (PEM)</Label>
+  1149→                <div className="relative">
+  1150→                  <Textarea
+  1151→                    id="srv-ssh-key"
+  1152→                    placeholder={
+  1153→                      isEdit && server?.hasSshKey
+  1154→                        ? '-----BEGIN OPENSSH PRIVATE KEY-----\n••• (leave blank to keep current)\n-----END OPENSSH PRIVATE KEY-----'
+  1155→                        : '-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----'
+  1156→                    }
+  1157→                    value={sshPrivateKey}
+  1158→                    onChange={(e) => setSshPrivateKey(e.target.value)}
+  1159→                    className="font-mono text-xs min-h-[120px] max-h-[200px] pr-10"
+  1160→                  />
+  1161→                  <button
+  1162→                    type="button"
+  1163→                    onClick={() => setShowKey((v) => !v)}
+  1164→                    className="absolute right-2 top-2 text-muted-foreground hover:text-foreground"
+  1165→                    aria-label={showKey ? 'Hide key' : 'Show key'}
+  1166→                  >
+  1167→                    {showKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+  1168→                  </button>
+  1169→                </div>
+  1170→                <p className="text-[10px] text-muted-foreground">
+  1171→                  Paste the full PEM contents including the BEGIN/END markers.
+  1172→                </p>
+  1173→              </div>
+  1174→            </div>
+  1175→          </div>
+  1176→
+  1177→          {/* Encryption notice */}
+  1178→          <div className="flex items-start gap-2 rounded-md border border-emerald-200 bg-emerald-50 dark:border-emerald-900/50 dark:bg-emerald-900/10 px-3 py-2.5 text-xs">
+  1179→            <Lock className="size-4 text-emerald-600 mt-0.5 shrink-0" />
+  1180→            <p className="text-emerald-700 dark:text-emerald-400">
+  1181→              <span className="font-medium">
+  1182→                SSH credentials are encrypted at rest with AES-256-GCM
+  1183→              </span>{' '}
+  1184→              and never displayed again after saving. Only boolean presence
+  1185→              flags are returned by the API.
+  1186→            </p>
+  1187→          </div>
+  1188→        </div>
+  1189→
+  1190→        <DialogFooter>
+  1191→          <Button variant="outline" onClick={onClose} disabled={saving}>
+  1192→            Cancel
+  1193→          </Button>
+  1194→          <Button
+  1195→            onClick={handleSave}
+  1196→            disabled={saving}
+  1197→            className="bg-emerald-600 hover:bg-emerald-700 text-white"
+  1198→          >
+  1199→            {saving ? (
+  1200→              <>
+  1201→                <Loader2 className="size-4 mr-2 animate-spin" />
+  1202→                {isEdit ? 'Saving...' : 'Creating...'}
+  1203→              </>
+  1204→            ) : (
+  1205→              <>
+  1206→                <CheckCircle2 className="size-4 mr-2" />
+  1207→                {isEdit ? 'Save Changes' : 'Create Server'}
+  1208→              </>
+  1209→            )}
+  1210→          </Button>
+  1211→        </DialogFooter>
+  1212→      </DialogContent>
+  1213→    </Dialog>
+  1214→  )
+  1215→}
+  1216→
+  1217→// ─── Test SSH Dialog ────────────────────────────────────────────────────
+  1218→
+  1219→function TestSshDialog({
+  1220→  server,
+  1221→  onClose,
+  1222→}: {
+  1223→  server: Server | null
+  1224→  onClose: () => void
+  1225→}) {
+  1226→  const [loading, setLoading] = useState(false)
+  1227→  const [result, setResult] = useState<TestResult | null>(null)
+  1228→
+  1229→  const runTest = useCallback(async () => {
+  1230→    if (!server) return
+  1231→    setLoading(true)
+  1232→    setResult(null)
+  1233→    try {
+  1234→      const res = await fetch(`/api/admin/servers/${server.id}/test`, {
+  1235→        method: 'POST',
+  1236→        headers: authHeaders(),
+  1237→      })
+  1238→      const data = await res.json()
+  1239→      setResult(data)
+  1240→    } catch {
+  1241→      setResult({ ok: false, error: 'Network error' })
+  1242→    } finally {
+  1243→      setLoading(false)
+  1244→    }
+  1245→  }, [server])
+  1246→
+  1247→  useEffect(() => {
+  1248→    if (server) {
+  1249→      setResult(null)
+  1250→      runTest()
+  1251→    }
+  1252→  }, [server, runTest])
+  1253→
+  1254→  return (
+  1255→    <Dialog open={!!server} onOpenChange={(v) => !v && onClose()}>
+  1256→      <DialogContent className="sm:max-w-lg">
+  1257→        <DialogHeader>
+  1258→          <DialogTitle className="flex items-center gap-2">
+  1259→            <Zap className="size-5 text-emerald-600" />
+  1260→            Test SSH Connection
+  1261→          </DialogTitle>
+  1262→          <DialogDescription>
+  1263→            {server && (
+  1264→              <>
+  1265→                Connecting to <span className="font-mono">{server.name}</span>{' '}
+  1266→                ({server.sshHost}:{server.sshPort})
+  1267→              </>
+  1268→            )}
+  1269→          </DialogDescription>
+  1270→        </DialogHeader>
+  1271→
+  1272→        <div className="py-2">
+  1273→          {loading && (
+  1274→            <div className="flex flex-col items-center justify-center py-8 text-center">
+  1275→              <Loader2 className="size-8 text-emerald-600 animate-spin mb-3" />
+  1276→              <p className="text-sm text-muted-foreground">
+  1277→                Testing SSH connection...
+  1278→              </p>
+  1279→              <p className="text-xs text-muted-foreground mt-1">
+  1280→                This can take up to 20 seconds.
+  1281→              </p>
+  1282→            </div>
+  1283→          )}
+  1284→
+  1285→          {!loading && result && (
+  1286→            <div className="space-y-4">
+  1287→              {/* Success / Failure banner */}
+  1288→              <div
+  1289→                className={`flex items-start gap-3 rounded-lg border p-4 ${
+  1290→                  result.ok
+  1291→                    ? 'border-emerald-200 bg-emerald-50 dark:border-emerald-900/50 dark:bg-emerald-900/10'
+  1292→                    : 'border-red-200 bg-red-50 dark:border-red-900/50 dark:bg-red-900/10'
+  1293→                }`}
+  1294→              >
+  1295→                {result.ok ? (
+  1296→                  <CheckCircle2 className="size-6 text-emerald-600 shrink-0" />
+  1297→                ) : (
+  1298→                  <XCircle className="size-6 text-red-600 shrink-0" />
+  1299→                )}
+  1300→                <div className="flex-1 min-w-0">
+  1301→                  <p
+  1302→                    className={`text-sm font-medium ${
+  1303→                      result.ok
+  1304→                        ? 'text-emerald-700 dark:text-emerald-400'
+  1305→                        : 'text-red-700 dark:text-red-400'
+  1306→                    }`}
+  1307→                  >
+  1308→                    {result.ok ? 'Connection successful' : 'Connection failed'}
+  1309→                  </p>
+  1310→                  {result.error && (
+  1311→                    <p className="text-xs text-red-700 dark:text-red-400 mt-1 break-all">
+  1312→                      {result.error}
+  1313→                    </p>
+  1314→                  )}
+  1315→                </div>
+  1316→              </div>
+  1317→
+  1318→              {/* Success details */}
+  1319→              {result.ok && result.info && (
+  1320→                <div className="space-y-2 text-sm">
+  1321→                  <DetailRow
+  1322→                    icon={Network}
+  1323→                    label="Host"
+  1324→                    value={`${result.info.host}:${result.info.port}`}
+  1325→                    mono
+  1326→                  />
+  1327→                  <DetailRow
+  1328→                    icon={Key}
+  1329→                    label="User"
+  1330→                    value={result.info.username}
+  1331→                    mono
+  1332→                  />
+  1333→                  <DetailRow
+  1334→                    icon={Lock}
+  1335→                    label="Auth Method"
+  1336→                    value={
+  1337→                      result.info.authMethod === 'private-key'
+  1338→                        ? 'Private Key'
+  1339→                        : result.info.authMethod === 'password'
+  1340→                          ? 'Password'
+  1341→                          : 'SSH Agent'
+  1342→                    }
+  1343→                  />
+  1344→                  <DetailRow
+  1345→                    icon={Terminal}
+  1346→                    label="OS"
+  1347→                    value={result.info.osInfo || 'Unknown'}
+  1348→                  />
+  1349→                  <DetailRow
+  1350→                    icon={Container}
+  1351→                    label="Docker"
+  1352→                    value={result.info.dockerVersion || 'Not installed'}
+  1353→                    mono
+  1354→                  />
+  1355→                  <DetailRow
+  1356→                    icon={Globe}
+  1357→                    label="Caddy"
+  1358→                    value={result.info.caddyVersion || 'Not installed'}
+  1359→                    mono
+  1360→                  />
+  1361→                </div>
+  1362→              )}
+  1363→
+  1364→              {/* Failure troubleshooting */}
+  1365→              {!result.ok && (
+  1366→                <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-900/10 p-3 text-xs">
+  1367→                  <p className="font-medium text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
+  1368→                    <AlertTriangle className="size-3.5" />
+  1369→                    Troubleshooting tips
+  1370→                  </p>
+  1371→                  <ul className="mt-2 space-y-1 text-amber-700 dark:text-amber-400 list-disc list-inside">
+  1372→                    <li>Verify the IP/host and SSH port are correct.</li>
+  1373→                    <li>Ensure the SSH service is running on the server.</li>
+  1374→                    <li>Check that the user has shell access (not sftp-only).</li>
+  1375→                    <li>If using a key, make sure it has correct permissions (chmod 600).</li>
+  1376→                    <li>Confirm UFW/firewall allows inbound on port 22.</li>
+  1377→                  </ul>
+  1378→                </div>
+  1379→              )}
+  1380→
+  1381→              <Button
+  1382→                variant="outline"
+  1383→                size="sm"
+  1384→                onClick={runTest}
+  1385→                disabled={loading}
+  1386→                className="w-full"
+  1387→              >
+  1388→                <RefreshCw className="size-4 mr-2" />
+  1389→                Retry Test
+  1390→              </Button>
+  1391→            </div>
+  1392→          )}
+  1393→        </div>
+  1394→
+  1395→        <DialogFooter>
+  1396→          <Button variant="outline" onClick={onClose}>
+  1397→            Close
+  1398→          </Button>
+  1399→        </DialogFooter>
+  1400→      </DialogContent>
+  1401→    </Dialog>
+  1402→  )
+  1403→}
+  1404→
+  1405→function DetailRow({
+  1406→  icon: Icon,
+  1407→  label,
+  1408→  value,
+  1409→  mono = false,
+  1410→}: {
+  1411→  icon: React.ElementType
+  1412→  label: string
+  1413→  value: string
+  1414→  mono?: boolean
+  1415→}) {
+  1416→  return (
+  1417→    <div className="flex items-start gap-2 py-1">
+  1418→      <Icon className="size-3.5 text-muted-foreground mt-0.5 shrink-0" />
+  1419→      <span className="text-xs text-muted-foreground w-24 shrink-0">{label}</span>
+  1420→      <span className={`text-xs flex-1 break-all ${mono ? 'font-mono' : ''}`}>
+  1421→        {value}
+  1422→      </span>
+  1423→    </div>
+  1424→  )
+  1425→}
+  1426→
+  1427→// ─── Provision Dialog ───────────────────────────────────────────────────
+  1428→
+  1429→function ProvisionDialog({
+  1430→  server,
+  1431→  onClose,
+  1432→  onCompleted,
+  1433→}: {
+  1434→  server: Server | null
+  1435→  onClose: () => void
+  1436→  onCompleted: () => void
+  1437→}) {
+  1438→  const [loading, setLoading] = useState(false)
+  1439→  const [result, setResult] = useState<ProvisionResult | null>(null)
+  1440→  const [elapsed, setElapsed] = useState(0)
+  1441→
+  1442→  // Reset state whenever a new server is selected
+  1443→  useEffect(() => {
+  1444→    if (server) {
+  1445→      setResult(null)
+  1446→      setLoading(false)
+  1447→      setElapsed(0)
+  1448→    }
+  1449→  }, [server])
+  1450→
+  1451→  // Tick elapsed timer while provisioning
+  1452→  useEffect(() => {
+  1453→    if (!loading) return
+  1454→    setElapsed(0)
+  1455→    const start = Date.now()
+  1456→    const interval = setInterval(() => {
+  1457→      setElapsed(Math.floor((Date.now() - start) / 1000))
+  1458→    }, 1000)
+  1459→    return () => clearInterval(interval)
+  1460→  }, [loading])
+  1461→
+  1462→  const runProvision = useCallback(async () => {
+  1463→    if (!server) return
+  1464→    setLoading(true)
+  1465→    setResult(null)
+  1466→    try {
+  1467→      const res = await fetch(`/api/admin/servers/${server.id}/provision`, {
+  1468→        method: 'POST',
+  1469→        headers: authHeaders(),
+  1470→      })
+  1471→      const data = await res.json()
+  1472→      setResult(data as ProvisionResult)
+  1473→      if (data.ok) {
+  1474→        toast.success('Provisioning complete')
+  1475→      } else {
+  1476→        toast.error('Provisioning failed — see dialog for details')
+  1477→      }
+  1478→      onCompleted()
+  1479→    } catch {
+  1480→      setResult({
+  1481→        ok: false,
+  1482→        error: 'Network error during provisioning',
+  1483→        steps: [],
+  1484→        finalStatus: 'failed',
+  1485→      })
+  1486→      toast.error('Network error during provisioning')
+  1487→    } finally {
+  1488→      setLoading(false)
+  1489→    }
+  1490→  }, [server, onCompleted])
+  1491→
+  1492→  // Auto-start provisioning on open
+  1493→  useEffect(() => {
+  1494→    if (server && !loading && !result) {
+  1495→      runProvision()
+  1496→    }
+  1497→    // runProvision is intentionally omitted from deps — we only want to fire
+  1498→    // provisioning when the user opens the dialog (server changes), not on
+  1499→    // every render where runProvision's identity might shift.
+  1500→  }, [server])
+  1501→
+  1502→  // Build the step → status map from the result
+  1503→  const stepStatusMap = new Map<string, ProvisionStepResult>()
+  1504→  if (result?.steps) {
+  1505→    for (const s of result.steps) stepStatusMap.set(s.step, s)
+  1506→  }
+  1507→
+  1508→  return (
+  1509→    <Dialog open={!!server} onOpenChange={(v) => !v && onClose()}>
+  1510→      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/20">
+  1511→        <DialogHeader>
+  1512→          <DialogTitle className="flex items-center gap-2">
+  1513→            <Play className="size-5 text-emerald-600" />
+  1514→            Provisioning {server?.name}
+  1515→          </DialogTitle>
+  1516→          <DialogDescription>
+  1517→            Installing Docker, Caddy, and the hosting stack on{' '}
+  1518→            <span className="font-mono">{server?.ip}</span>
+  1519→          </DialogDescription>
+  1520→        </DialogHeader>
+  1521→
+  1522→        <div className="py-2 space-y-4">
+  1523→          {/* Indeterminate progress while running */}
+  1524→          {loading && (
+  1525→            <div className="space-y-3">
+  1526→              <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-muted">
+  1527→                <div className="absolute inset-y-0 left-0 w-1/3 bg-emerald-500 rounded-full animate-[indeterminate_1.5s_ease-in-out_infinite]" />
+  1528→              </div>
+  1529→              <style>{`
+  1530→                @keyframes indeterminate {
+  1531→                  0% { left: -33%; }
+  1532→                  100% { left: 100%; }
+  1533→                }
+  1534→              `}</style>
+  1535→              <div className="flex items-center justify-between text-xs text-muted-foreground">
+  1536→                <span className="flex items-center gap-1.5">
+  1537→                  <Loader2 className="size-3.5 animate-spin text-emerald-600" />
+  1538→                  Running pipeline...
+  1539→                </span>
+  1540→                <span className="font-mono tabular-nums">
+  1541→                  {Math.floor(elapsed / 60)}m {elapsed % 60}s
+  1542→                </span>
+  1543→              </div>
+  1544→              <div className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-900/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400 flex items-start gap-2">
+  1545→                <AlertTriangle className="size-3.5 shrink-0 mt-0.5" />
+  1546→                <span>
+  1547→                  Provisioning can take 5-10 minutes on a fresh VPS. The dialog
+  1548→                  will update when complete.
+  1549→                </span>
+  1550→              </div>
+  1551→            </div>
+  1552→          )}
+  1553→
+  1554→          {/* Step list */}
+  1555→          <div className="space-y-1">
+  1556→            {PROVISION_STEPS.map((step, idx) => {
+  1557→              const result = stepStatusMap.get(step.name)
+  1558→              const isLast = idx === PROVISION_STEPS.length - 1
+  1559→              const StepIcon = step.icon
+  1560→
+  1561→              let status: 'pending' | 'running' | 'success' | 'failed' | 'skipped' = 'pending'
+  1562→              if (result) status = result.status
+  1563→              else if (loading) status = 'pending' // not started yet
+  1564→
+  1565→              let iconWrapClass = 'bg-muted text-muted-foreground'
+  1566→              if (status === 'success')
+  1567→                iconWrapClass = 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+  1568→              else if (status === 'failed')
+  1569→                iconWrapClass = 'bg-red-500/10 text-red-600 dark:text-red-400'
+  1570→              else if (status === 'skipped')
+  1571→                iconWrapClass = 'bg-muted/60 text-muted-foreground/60'
+  1572→              else if (loading && idx === (result ? stepStatusMap.size : 0))
+  1573→                iconWrapClass = 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+  1574→
+  1575→              const connectorClass =
+  1576→                status === 'success'
+  1577→                  ? 'bg-emerald-500/50'
+  1578→                  : 'bg-border'
+  1579→
+  1580→              return (
+  1581→                <div key={step.name} className="relative">
+  1582→                  {!isLast && (
+  1583→                    <div
+  1584→                      className={`absolute left-[18px] top-9 w-0.5 h-[calc(100%-12px)] ${connectorClass}`}
+  1585→                    />
+  1586→                  )}
+  1587→                  <div className="relative flex items-start gap-3 p-2 rounded-lg">
+  1588→                    <div
+  1589→                      className={`size-9 rounded-full flex items-center justify-center shrink-0 ${iconWrapClass}`}
+  1590→                    >
+  1591→                      {status === 'success' ? (
+  1592→                        <CheckCircle2 className="size-4" />
+  1593→                      ) : status === 'failed' ? (
+  1594→                        <XCircle className="size-4" />
+  1595→                      ) : status === 'skipped' ? (
+  1596→                        <StepIcon className="size-4 opacity-60" />
+  1597→                      ) : loading &&
+  1598→                        idx ===
+  1599→                          (result ? stepStatusMap.size : 0) ? (
+  1600→                        <Loader2 className="size-4 animate-spin" />
+  1601→                      ) : (
+  1602→                        <StepIcon className="size-4 opacity-60" />
+  1603→                      )}
+  1604→                    </div>
+  1605→                    <div className="flex-1 min-w-0 pt-1">
+  1606→                      <div className="flex flex-wrap items-center gap-2">
+  1607→                        <span className="text-sm font-medium">{step.label}</span>
+  1608→                        {result && (
+  1609→                          <Badge
+  1610→                            variant="outline"
+  1611→                            className={
+  1612→                              status === 'success'
+  1613→                                ? 'text-[10px] bg-emerald-50 text-emerald-700 border-emerald-200'
+  1614→                                : status === 'failed'
+  1615→                                  ? 'text-[10px] bg-red-50 text-red-700 border-red-200'
+  1616→                                  : 'text-[10px] bg-gray-50 text-gray-600 border-gray-200'
+  1617→                            }
+  1618→                          >
+  1619→                            {status}
+  1620→                          </Badge>
+  1621→                        )}
+  1622→                        {result?.durationMs != null && (
+  1623→                          <span className="text-[10px] text-muted-foreground inline-flex items-center gap-0.5">
+  1624→                            <Clock className="size-2.5" />
+  1625→                            {(result.durationMs / 1000).toFixed(1)}s
+  1626→                          </span>
+  1627→                        )}
+  1628→                      </div>
+  1629→                      {result?.message && (
+  1630→                        <p className="text-xs text-muted-foreground mt-0.5 break-all">
+  1631→                          {result.message}
+  1632→                        </p>
+  1633→                      )}
+  1634→                      {!result && loading && (
+  1635→                        <p className="text-xs text-muted-foreground mt-0.5">
+  1636→                          Queued — waiting for previous step.
+  1637→                        </p>
+  1638→                      )}
+  1639→                    </div>
+  1640→                  </div>
+  1641→                </div>
+  1642→              )
+  1643→            })}
+  1644→          </div>
+  1645→
+  1646→          {/* Final result */}
+  1647→          {result && !loading && (
+  1648→            <div
+  1649→              className={`rounded-lg border p-4 ${
+  1650→                result.ok
+  1651→                  ? 'border-emerald-200 bg-emerald-50 dark:border-emerald-900/50 dark:bg-emerald-900/10'
+  1652→                  : 'border-red-200 bg-red-50 dark:border-red-900/50 dark:bg-red-900/10'
+  1653→              }`}
+  1654→            >
+  1655→              <div className="flex items-center gap-2 mb-3">
+  1656→                {result.ok ? (
+  1657→                  <CheckCircle2 className="size-5 text-emerald-600" />
+  1658→                ) : (
+  1659→                  <XCircle className="size-5 text-red-600" />
+  1660→                )}
+  1661→                <p
+  1662→                  className={`text-sm font-medium ${
+  1663→                    result.ok
+  1664→                      ? 'text-emerald-700 dark:text-emerald-400'
+  1665→                      : 'text-red-700 dark:text-red-400'
+  1666→                  }`}
+  1667→                >
+  1668→                  {result.ok
+  1669→                    ? `Provisioning completed — server status: ${result.finalStatus}`
+  1670→                    : `Provisioning failed — server status: ${result.finalStatus}`}
+  1671→                </p>
+  1672→              </div>
+  1673→              {result.ok && (
+  1674→                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+  1675→                  {result.osInfo && (
+  1676→                    <div>
+  1677→                      <span className="text-muted-foreground">OS: </span>
+  1678→                      <span className="font-mono">{result.osInfo}</span>
+  1679→                    </div>
+  1680→                  )}
+  1681→                  {result.dockerVersion && (
+  1682→                    <div>
+  1683→                      <span className="text-muted-foreground">Docker: </span>
+  1684→                      <span className="font-mono">{result.dockerVersion}</span>
+  1685→                    </div>
+  1686→                  )}
+  1687→                  {result.caddyVersion && (
+  1688→                    <div>
+  1689→                      <span className="text-muted-foreground">Caddy: </span>
+  1690→                      <span className="font-mono">{result.caddyVersion}</span>
+  1691→                    </div>
+  1692→                  )}
+  1693→                  {result.detectedCpuCores != null && (
+  1694→                    <div>
+  1695→                      <span className="text-muted-foreground">Detected CPU: </span>
+  1696→                      <span className="font-mono">{result.detectedCpuCores} cores</span>
+  1697→                    </div>
+  1698→                  )}
+  1699→                  {result.detectedRamGB != null && (
+  1700→                    <div>
+  1701→                      <span className="text-muted-foreground">Detected RAM: </span>
+  1702→                      <span className="font-mono">{result.detectedRamGB} GB</span>
+  1703→                    </div>
+  1704→                  )}
+  1705→                  {result.detectedStorageGB != null && (
+  1706→                    <div>
+  1707→                      <span className="text-muted-foreground">Detected Disk: </span>
+  1708→                      <span className="font-mono">{result.detectedStorageGB} GB</span>
+  1709→                    </div>
+  1710→                  )}
+  1711→                </div>
+  1712→              )}
+  1713→              {!result.ok && result.error && (
+  1714→                <p className="text-xs text-red-700 dark:text-red-400 mt-2 break-all">
+  1715→                  {result.error}
+  1716→                </p>
+  1717→              )}
+  1718→            </div>
+  1719→          )}
+  1720→        </div>
+  1721→
+  1722→        <DialogFooter>
+  1723→          <Button variant="outline" onClick={onClose} disabled={loading}>
+  1724→            {loading ? 'Cancel' : 'Close'}
+  1725→          </Button>
+  1726→          {!loading && result && !result.ok && (
+  1727→            <Button
+  1728→              onClick={runProvision}
+  1729→              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+  1730→            >
+  1731→              <RotateCcw className="size-4 mr-2" />
+  1732→              Retry Provisioning
+  1733→            </Button>
+  1734→          )}
+  1735→        </DialogFooter>
+  1736→      </DialogContent>
+  1737→    </Dialog>
+  1738→  )
+  1739→}
+  1740→
+  1741→// ─── Stats Dialog (auto-refresh 5s) ─────────────────────────────────────
+  1742→
+  1743→function StatsDialog({
+  1744→  server,
+  1745→  onClose,
+  1746→}: {
+  1747→  server: Server | null
+  1748→  onClose: () => void
+  1749→}) {
+  1750→  const [stats, setStats] = useState<ServerStats | null>(null)
+  1751→  const [loading, setLoading] = useState(false)
+  1752→  const [error, setError] = useState<string | null>(null)
+  1753→  const [autoRefresh, setAutoRefresh] = useState(true)
+  1754→  const mountedRef = useRef(true)
+  1755→
+  1756→  const fetchStats = useCallback(async () => {
+  1757→    if (!server) return
+  1758→    setLoading(true)
+  1759→    setError(null)
+  1760→    try {
+  1761→      const res = await fetch(`/api/admin/servers/${server.id}/stats`, {
+  1762→        headers: authHeaders(),
+  1763→      })
+  1764→      const data = await res.json()
+  1765→      if (!res.ok) {
+  1766→        setError(data.error || 'Failed to fetch stats')
+  1767→      } else {
+  1768→        setStats(data)
+  1769→      }
+  1770→    } catch {
+  1771→      setError('Network error')
+  1772→    } finally {
+  1773→      setLoading(false)
+  1774→    }
+  1775→  }, [server])
+  1776→
+  1777→  useEffect(() => {
+  1778→    mountedRef.current = true
+  1779→    return () => {
+  1780→      mountedRef.current = false
+  1781→    }
+  1782→  }, [])
+  1783→
+  1784→  // Initial fetch
+  1785→  useEffect(() => {
+  1786→    if (server) {
+  1787→      setStats(null)
+  1788→      fetchStats()
+  1789→    }
+  1790→  }, [server, fetchStats])
+  1791→
+  1792→  // Auto-refresh every 5s
+  1793→  useEffect(() => {
+  1794→    if (!server || !autoRefresh) return
+  1795→    const interval = setInterval(() => {
+  1796→      if (mountedRef.current) fetchStats()
+  1797→    }, 5000)
+  1798→    return () => clearInterval(interval)
+  1799→  }, [server, autoRefresh, fetchStats])
+  1800→
+  1801→  return (
+  1802→    <Dialog open={!!server} onOpenChange={(v) => !v && onClose()}>
+  1803→      <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/20">
+  1804→        <DialogHeader>
+  1805→          <DialogTitle className="flex items-center gap-2">
+  1806→            <Activity className="size-5 text-emerald-600" />
+  1807→            Live Stats — {server?.name}
+  1808→          </DialogTitle>
+  1809→          <DialogDescription className="flex items-center gap-2 flex-wrap">
+  1810→            <span className="font-mono">{server?.ip}</span>
+  1811→            {stats?.demo && (
+  1812→              <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-700 border-amber-200">
+  1813→                Simulated (demo mode)
+  1814→              </Badge>
+  1815→            )}
+  1816→            {stats?.timestamp && (
+  1817→              <span className="text-[10px] text-muted-foreground">
+  1818→                Updated {new Date(stats.timestamp).toLocaleTimeString()}
+  1819→              </span>
+  1820→            )}
+  1821→            <label className="ml-auto flex items-center gap-1.5 text-xs cursor-pointer">
+  1822→              <Switch
+  1823→                checked={autoRefresh}
+  1824→                onCheckedChange={setAutoRefresh}
+  1825→                className="scale-75"
+  1826→              />
+  1827→              Auto-refresh (5s)
+  1828→            </label>
+  1829→          </DialogDescription>
+  1830→        </DialogHeader>
+  1831→
+  1832→        <div className="py-2 space-y-4">
+  1833→          {error && (
+  1834→            <div className="rounded-md border border-red-200 bg-red-50 dark:border-red-900/50 dark:bg-red-900/10 p-3 text-xs text-red-700 dark:text-red-400 flex items-start gap-2">
+  1835→              <AlertTriangle className="size-3.5 shrink-0 mt-0.5" />
+  1836→              <span>{error}</span>
+  1837→            </div>
+  1838→          )}
+  1839→
+  1840→          {loading && !stats && (
+  1841→            <div className="flex items-center justify-center py-8">
+  1842→              <Loader2 className="size-6 text-emerald-600 animate-spin" />
+  1843→            </div>
+  1844→          )}
+  1845→
+  1846→          {stats && (
+  1847→            <>
+  1848→              {/* CPU / Memory / Disk */}
+  1849→              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+  1850→                <MetricCard
+  1851→                  icon={Cpu}
+  1852→                  label="CPU Usage"
+  1853→                  value={`${stats.cpu.busyPercent.toFixed(1)}%`}
+  1854→                  percent={stats.cpu.busyPercent}
+  1855→                  sublabel={`${stats.cpu.cpuCount} cores · ${stats.cpu.userPercent}% user / ${stats.cpu.systemPercent}% sys`}
+  1856→                />
+  1857→                <MetricCard
+  1858→                  icon={MemoryStick}
+  1859→                  label="Memory"
+  1860→                  value={`${(stats.memory.usedMB / 1024).toFixed(2)} / ${(stats.memory.totalMB / 1024).toFixed(2)} GB`}
+  1861→                  percent={stats.memory.usedPercent}
+  1862→                  sublabel={`${stats.memory.usedPercent}% used`}
+  1863→                />
+  1864→                <MetricCard
+  1865→                  icon={HardDrive}
+  1866→                  label="Disk (/)"
+  1867→                  value={`${stats.disk.used} / ${stats.disk.size}`}
+  1868→                  percent={stats.disk.usePercent}
+  1869→                  sublabel={`${stats.disk.usePercent}% used · ${stats.disk.available} avail`}
+  1870→                />
+  1871→              </div>
+  1872→
+  1873→              {/* Load Avg + Uptime */}
+  1874→              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+  1875→                <Card>
+  1876→                  <CardHeader className="pb-2">
+  1877→                    <CardDescription className="flex items-center gap-1.5">
+  1878→                      <Activity className="size-3.5" />
+  1879→                      Load Average
+  1880→                    </CardDescription>
+  1881→                  </CardHeader>
+  1882→                  <CardContent className="pt-0">
+  1883→                    <div className="grid grid-cols-3 gap-2 text-center">
+  1884→                      <div>
+  1885→                        <div className="text-lg font-bold tabular-nums">
+  1886→                          {stats.loadAvg.load1.toFixed(2)}
+  1887→                        </div>
+  1888→                        <div className="text-[10px] text-muted-foreground">1 min</div>
+  1889→                      </div>
+  1890→                      <div>
+  1891→                        <div className="text-lg font-bold tabular-nums">
+  1892→                          {stats.loadAvg.load5.toFixed(2)}
+  1893→                        </div>
+  1894→                        <div className="text-[10px] text-muted-foreground">5 min</div>
+  1895→                      </div>
+  1896→                      <div>
+  1897→                        <div className="text-lg font-bold tabular-nums">
+  1898→                          {stats.loadAvg.load15.toFixed(2)}
+  1899→                        </div>
+  1900→                        <div className="text-[10px] text-muted-foreground">15 min</div>
+  1901→                      </div>
+  1902→                    </div>
+  1903→                  </CardContent>
+  1904→                </Card>
+  1905→                <Card>
+  1906→                  <CardHeader className="pb-2">
+  1907→                    <CardDescription className="flex items-center gap-1.5">
+  1908→                      <Clock className="size-3.5" />
+  1909→                      Uptime
+  1910→                    </CardDescription>
+  1911→                  </CardHeader>
+  1912→                  <CardContent className="pt-0">
+  1913→                    <div className="text-lg font-bold">{stats.uptime.uptimeString}</div>
+  1914→                    <div className="text-[10px] text-muted-foreground mt-1">
+  1915→                      {stats.uptime.users} user{stats.uptime.users !== 1 ? 's' : ''} logged in
+  1916→                    </div>
+  1917→                  </CardContent>
+  1918→                </Card>
+  1919→              </div>
+  1920→
+  1921→              {/* Docker Containers */}
+  1922→              <Card>
+  1923→                <CardHeader className="pb-2">
+  1924→                  <CardTitle className="text-sm flex items-center gap-2">
+  1925→                    <Container className="size-4 text-emerald-600" />
+  1926→                    Docker Containers
+  1927→                    <Badge variant="secondary" className="text-[10px] h-5">
+  1928→                      {stats.containers.length}
+  1929→                    </Badge>
+  1930→                  </CardTitle>
+  1931→                </CardHeader>
+  1932→                <CardContent className="pt-0">
+  1933→                  {stats.containers.length === 0 ? (
+  1934→                    <div className="text-center py-6 text-sm text-muted-foreground">
+  1935→                      <Container className="size-8 mx-auto mb-2 opacity-30" />
+  1936→                      No running containers
+  1937→                    </div>
+  1938→                  ) : (
+  1939→                    <div className="max-h-64 overflow-y-auto rounded-md border [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/20">
+  1940→                      <table className="w-full text-xs">
+  1941→                        <thead className="bg-muted/50 sticky top-0">
+  1942→                          <tr>
+  1943→                            <th className="text-left p-2 font-medium">Name</th>
+  1944→                            <th className="text-left p-2 font-medium">Status</th>
+  1945→                            <th className="text-left p-2 font-medium">Ports</th>
+  1946→                          </tr>
+  1947→                        </thead>
+  1948→                        <tbody>
+  1949→                          {stats.containers.map((c) => {
+  1950→                            const cs = stats.containerStats?.find(
+  1951→                              (s) => s.name === c.name
+  1952→                            )
+  1953→                            return (
+  1954→                              <tr key={c.name} className="border-t">
+  1955→                                <td className="p-2 font-mono">{c.name}</td>
+  1956→                                <td className="p-2">
+  1957→                                  <span
+  1958→                                    className={`inline-flex items-center gap-1 ${
+  1959→                                      c.status.toLowerCase().startsWith('up')
+  1960→                                        ? 'text-emerald-600'
+  1961→                                        : 'text-gray-500'
+  1962→                                    }`}
+  1963→                                  >
+  1964→                                    <span
+  1965→                                      className={`size-1.5 rounded-full ${
+  1966→                                        c.status.toLowerCase().startsWith('up')
+  1967→                                          ? 'bg-emerald-500'
+  1968→                                          : 'bg-gray-400'
+  1969→                                      }`}
+  1970→                                    />
+  1971→                                    {c.status}
+  1972→                                  </span>
+  1973→                                  {cs && (
+  1974→                                    <span className="block text-[10px] text-muted-foreground mt-0.5">
+  1975→                                      {cs.cpuPercent.toFixed(2)}% CPU · {cs.memUsage}
+  1976→                                    </span>
+  1977→                                  )}
+  1978→                                </td>
+  1979→                                <td className="p-2 font-mono text-[10px] break-all max-w-[200px]">
+  1980→                                  {c.ports || '—'}
+  1981→                                </td>
+  1982→                              </tr>
+  1983→                            )
+  1984→                          })}
+  1985→                        </tbody>
+  1986→                      </table>
+  1987→                    </div>
+  1988→                  )}
+  1989→                </CardContent>
+  1990→              </Card>
+  1991→            </>
+  1992→          )}
+  1993→        </div>
+  1994→
+  1995→        <DialogFooter>
+  1996→          <Button variant="outline" size="sm" onClick={fetchStats} disabled={loading}>
+  1997→            <RefreshCw className={`size-4 mr-1.5 ${loading ? 'animate-spin' : ''}`} />
+  1998→            Refresh Now
+  1999→          </Button>
+  2000→          <Button variant="outline" onClick={onClose}>
+
+[showing lines 1-2000 of 2301; use offset=2001 with limit to continue reading]

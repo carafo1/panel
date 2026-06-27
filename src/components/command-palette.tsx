@@ -175,7 +175,7 @@ export function CommandPalette() {
       open={open}
       onOpenChange={setOpen}
       title="Command Palette"
-      description="Search commands and navigate DeployHub"
+      description="Search commands and navigate APSAMO"
       className="sm:max-w-2xl"
     >
       <CommandInput placeholder={`Search commands... (press ${modKey}K to toggle)`} />
@@ -185,7 +185,7 @@ export function CommandPalette() {
         {/* ── Actions ─────────────────────────────────────────────── */}
         <CommandGroup heading="Actions">
           <CommandItem onSelect={handleCreateProject} value="create new project hosting">
-            <Plus className="size-4 text-emerald-600" />
+            <Plus className="size-4 text-indigo-600" />
             <div className="flex flex-col">
               <span>Create New Project</span>
               <span className="text-xs text-muted-foreground">Provision a new hosting project</span>
@@ -193,21 +193,21 @@ export function CommandPalette() {
             <CommandShortcut>New</CommandShortcut>
           </CommandItem>
           <CommandItem onSelect={handleRegisterDomain} value="register domain dns">
-            <Globe className="size-4 text-emerald-600" />
+            <Globe className="size-4 text-indigo-600" />
             <div className="flex flex-col">
               <span>Register Domain</span>
               <span className="text-xs text-muted-foreground">Search & register a new domain</span>
             </div>
           </CommandItem>
           <CommandItem onSelect={handleDeployProject} value="deploy project deployment">
-            <Rocket className="size-4 text-emerald-600" />
+            <Rocket className="size-4 text-indigo-600" />
             <div className="flex flex-col">
               <span>Deploy Project</span>
               <span className="text-xs text-muted-foreground">View deployment history</span>
             </div>
           </CommandItem>
           <CommandItem onSelect={handleSearchTemplates} value="search templates starter">
-            <LayoutGrid className="size-4 text-emerald-600" />
+            <LayoutGrid className="size-4 text-indigo-600" />
             <div className="flex flex-col">
               <span>Search Templates</span>
               <span className="text-xs text-muted-foreground">Browse starter templates</span>

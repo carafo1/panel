@@ -238,7 +238,7 @@ export function TemplatesPanel() {
       {/* ── Header ──────────────────────────────────────────────────────── */}
       <div className="flex flex-col gap-2">
         <div className="flex items-center gap-2">
-          <LayoutGrid className="h-6 w-6 text-emerald-500" />
+          <LayoutGrid className="h-6 w-6 text-indigo-500" />
           <h1 className="text-2xl font-bold tracking-tight">
             Template Marketplace
           </h1>
@@ -271,7 +271,7 @@ export function TemplatesPanel() {
               <TabsTrigger
                 key={cat}
                 value={cat}
-                className="text-xs px-3 data-[state=active]:bg-emerald-500 data-[state=active]:text-white"
+                className="text-xs px-3 data-[state=active]:bg-indigo-500 data-[state=active]:text-white"
               >
                 {cat}
               </TabsTrigger>
@@ -326,7 +326,7 @@ export function TemplatesPanel() {
                       {selectedTemplate.isOfficial && (
                         <Badge
                           variant="secondary"
-                          className="ml-2 text-[10px] bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400"
+                          className="ml-2 text-[10px] bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-400"
                         >
                           Official
                         </Badge>
@@ -355,7 +355,7 @@ export function TemplatesPanel() {
                     <span className="text-muted-foreground">stars</span>
                   </div>
                   <div className="flex items-center gap-1 text-sm">
-                    <Download className="h-4 w-4 text-emerald-500" />
+                    <Download className="h-4 w-4 text-indigo-500" />
                     <span className="font-medium">
                       {formatNumber(selectedTemplate.deployments)}
                     </span>
@@ -368,7 +368,7 @@ export function TemplatesPanel() {
                 {/* Features */}
                 <div>
                   <h4 className="text-sm font-semibold mb-2 flex items-center gap-1.5">
-                    <Sparkles className="h-4 w-4 text-emerald-500" />
+                    <Sparkles className="h-4 w-4 text-indigo-500" />
                     Features
                   </h4>
                   <div className="flex flex-wrap gap-2">
@@ -392,7 +392,7 @@ export function TemplatesPanel() {
                       <Badge
                         key={tag}
                         variant="outline"
-                        className="text-xs border-emerald-500/30 text-emerald-600 dark:text-emerald-400"
+                        className="text-xs border-indigo-500/30 text-indigo-600 dark:text-indigo-400"
                       >
                         {tag}
                       </Badge>
@@ -408,7 +408,7 @@ export function TemplatesPanel() {
                       href={selectedTemplate.repoUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-emerald-600 dark:text-emerald-400 hover:underline truncate"
+                      className="text-indigo-600 dark:text-indigo-400 hover:underline truncate"
                     >
                       {selectedTemplate.repoUrl}
                     </a>
@@ -424,7 +424,7 @@ export function TemplatesPanel() {
                   Cancel
                 </Button>
                 <Button
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white"
                   onClick={() => handleOpenDeploy(selectedTemplate)}
                 >
                   <Zap className="h-4 w-4 mr-1.5" />
@@ -443,7 +443,7 @@ export function TemplatesPanel() {
             <>
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
-                  <Zap className="h-5 w-5 text-emerald-500" />
+                  <Zap className="h-5 w-5 text-indigo-500" />
                   Deploy {deployingTemplate.name}
                 </DialogTitle>
                 <DialogDescription>
@@ -453,8 +453,8 @@ export function TemplatesPanel() {
 
               {deploySuccess ? (
                 <div className="flex flex-col items-center justify-center py-8 gap-3">
-                  <div className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/40">
-                    <Check className="h-7 w-7 text-emerald-600 dark:text-emerald-400" />
+                  <div className="flex h-14 w-14 items-center justify-center rounded-full bg-indigo-100 dark:bg-indigo-900/40">
+                    <Check className="h-7 w-7 text-indigo-600 dark:text-indigo-400" />
                   </div>
                   <h3 className="text-lg font-semibold">
                     Deployment Started!
@@ -465,7 +465,7 @@ export function TemplatesPanel() {
                       {projectName}
                     </span>{' '}
                     is being created and will be live at{' '}
-                    <span className="font-medium text-emerald-600 dark:text-emerald-400">
+                    <span className="font-medium text-indigo-600 dark:text-indigo-400">
                       https://{subdomain}
                     </span>
                   </p>
@@ -473,7 +473,7 @@ export function TemplatesPanel() {
               ) : (
                 <div className="flex flex-col gap-4 mt-2">
                   {/* Template info banner */}
-                  <div className="flex items-center gap-3 rounded-lg border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 p-3">
+                  <div className="flex items-center gap-3 rounded-lg border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/30 p-3">
                     <div
                       className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-gradient-to-br ${deployingTemplate.previewGradient} text-lg`}
                     >
@@ -522,7 +522,7 @@ export function TemplatesPanel() {
                     <div className="flex h-9 items-center rounded-md border bg-muted/50 px-3 text-sm">
                       <Badge
                         variant="outline"
-                        className="border-emerald-500/30 text-emerald-600 dark:text-emerald-400 mr-2"
+                        className="border-indigo-500/30 text-indigo-600 dark:text-indigo-400 mr-2"
                       >
                         {deployingTemplate.framework}
                       </Badge>
@@ -544,7 +544,7 @@ export function TemplatesPanel() {
                     Cancel
                   </Button>
                   <Button
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white"
                     onClick={handleDeploy}
                     disabled={!projectName.trim() || isDeploying}
                   >
@@ -602,7 +602,7 @@ function TemplateCard({ template, onView, onDeploy }: TemplateCardProps) {
         {template.isOfficial && (
           <Badge
             variant="secondary"
-            className="absolute top-2 left-2 text-[10px] bg-emerald-500/30 text-white backdrop-blur-sm border-emerald-400/20"
+            className="absolute top-2 left-2 text-[10px] bg-indigo-500/30 text-white backdrop-blur-sm border-indigo-400/20"
           >
             Official
           </Badge>
@@ -611,7 +611,7 @@ function TemplateCard({ template, onView, onDeploy }: TemplateCardProps) {
 
       <CardHeader className="pb-2 pt-4 px-4">
         <CardTitle
-          className="text-base leading-snug cursor-pointer hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
+          className="text-base leading-snug cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
           onClick={() => onView(template)}
         >
           {template.name}
@@ -629,7 +629,7 @@ function TemplateCard({ template, onView, onDeploy }: TemplateCardProps) {
             {formatNumber(template.stars)}
           </span>
           <span className="flex items-center gap-1">
-            <Download className="h-3.5 w-3.5 text-emerald-500" />
+            <Download className="h-3.5 w-3.5 text-indigo-500" />
             {formatNumber(template.deployments)}
           </span>
         </div>
@@ -640,7 +640,7 @@ function TemplateCard({ template, onView, onDeploy }: TemplateCardProps) {
             <Badge
               key={tag}
               variant="outline"
-              className="text-[10px] px-1.5 py-0 border-emerald-500/30 text-emerald-600 dark:text-emerald-400"
+              className="text-[10px] px-1.5 py-0 border-indigo-500/30 text-indigo-600 dark:text-indigo-400"
             >
               {tag}
             </Badge>
@@ -659,7 +659,7 @@ function TemplateCard({ template, onView, onDeploy }: TemplateCardProps) {
       <CardFooter className="px-4 pb-4 pt-0">
         <Button
           size="sm"
-          className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs"
+          className="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-xs"
           onClick={() => onDeploy(template)}
         >
           <Zap className="h-3.5 w-3.5 mr-1.5" />

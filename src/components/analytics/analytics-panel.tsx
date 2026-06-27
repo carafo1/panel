@@ -71,7 +71,7 @@ function RequestsChart({ data }: { data: Array<{ date: string; count: number; er
     <Card>
       <CardHeader className="pb-2">
         <CardTitle className="text-base flex items-center gap-2">
-          <BarChart3 className="size-4 text-emerald-600" />
+          <BarChart3 className="size-4 text-indigo-600" />
           Requests Over Time
         </CardTitle>
         <CardDescription>Daily request volume</CardDescription>
@@ -96,7 +96,7 @@ function RequestsChart({ data }: { data: Array<{ date: string; count: number; er
                     <div className="flex items-end gap-px w-full h-44">
                       <div className="flex-1 flex flex-col justify-end">
                         <div
-                          className="bg-gradient-to-t from-emerald-600 to-emerald-400 rounded-t-sm transition-all duration-500 min-h-[2px] w-full"
+                          className="bg-gradient-to-t from-indigo-600 to-indigo-400 rounded-t-sm transition-all duration-500 min-h-[2px] w-full"
                           style={{ height: `${Math.max(barHeight, 1)}%` }}
                         />
                       </div>
@@ -123,7 +123,7 @@ function RequestsChart({ data }: { data: Array<{ date: string; count: number; er
           </div>
           <div className="flex items-center gap-4 text-[10px] pl-9">
             <div className="flex items-center gap-1">
-              <div className="size-2.5 rounded-sm bg-emerald-500" />
+              <div className="size-2.5 rounded-sm bg-indigo-500" />
               <span className="text-muted-foreground">Requests</span>
             </div>
             <div className="flex items-center gap-1">
@@ -147,7 +147,7 @@ function ResponseTimeChart({ data }: { data: Array<{ date: string; avg: number; 
     <Card>
       <CardHeader className="pb-2">
         <CardTitle className="text-base flex items-center gap-2">
-          <Clock className="size-4 text-emerald-600" />
+          <Clock className="size-4 text-indigo-600" />
           Response Time
         </CardTitle>
         <CardDescription>Average and P95 latency</CardDescription>
@@ -211,7 +211,7 @@ function ResponseTimeChart({ data }: { data: Array<{ date: string; avg: number; 
           <div className="flex items-center justify-between pl-9">
             <div className="flex items-center gap-4 text-[10px]">
               <div className="flex items-center gap-1">
-                <div className="size-2.5 rounded-full bg-emerald-500" />
+                <div className="size-2.5 rounded-full bg-indigo-500" />
                 <span className="text-muted-foreground">Avg</span>
               </div>
               <div className="flex items-center gap-1">
@@ -236,7 +236,7 @@ function TopPathsChart({ data }: { data: Array<{ path: string; count: number; av
     <Card>
       <CardHeader className="pb-2">
         <CardTitle className="text-base flex items-center gap-2">
-          <Zap className="size-4 text-emerald-600" />
+          <Zap className="size-4 text-indigo-600" />
           Top Paths
         </CardTitle>
         <CardDescription>Most requested routes</CardDescription>
@@ -256,7 +256,7 @@ function TopPathsChart({ data }: { data: Array<{ path: string; count: number; av
                 </div>
                 <div className="h-2 bg-muted/50 rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 rounded-full transition-all duration-500"
+                    className="h-full bg-gradient-to-r from-indigo-500 to-indigo-400 rounded-full transition-all duration-500"
                     style={{ width: `${widthPct}%` }}
                   />
                 </div>
@@ -276,7 +276,7 @@ function GeoDistribution({ data }: { data: Array<{ country: string; count: numbe
     <Card>
       <CardHeader className="pb-2">
         <CardTitle className="text-base flex items-center gap-2">
-          <Globe className="size-4 text-emerald-600" />
+          <Globe className="size-4 text-indigo-600" />
           Geographic Distribution
         </CardTitle>
         <CardDescription>Requests by country</CardDescription>
@@ -291,7 +291,7 @@ function GeoDistribution({ data }: { data: Array<{ country: string; count: numbe
                   <span className="text-sm w-36 truncate shrink-0">{item.country}</span>
                   <div className="flex-1 h-2 bg-muted/50 rounded-full overflow-hidden">
                     <div
-                      className="h-full bg-emerald-500/60 rounded-full transition-all duration-500"
+                      className="h-full bg-indigo-500/60 rounded-full transition-all duration-500"
                       style={{ width: `${widthPct}%` }}
                     />
                   </div>
@@ -414,7 +414,7 @@ export default function AnalyticsPanel() {
                 onClick={() => setPeriod(p)}
                 className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
                   period === p
-                    ? 'bg-emerald-600 text-white shadow-sm'
+                    ? 'bg-indigo-600 text-white shadow-sm'
                     : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
@@ -426,8 +426,8 @@ export default function AnalyticsPanel() {
           {/* Live indicator */}
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <span className="relative flex size-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-              <span className="relative inline-flex rounded-full size-2 bg-emerald-500" />
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
+              <span className="relative inline-flex rounded-full size-2 bg-indigo-500" />
             </span>
             Live
           </div>
@@ -474,14 +474,14 @@ export default function AnalyticsPanel() {
               <CardContent className="p-5">
                 <div className="flex items-center justify-between">
                   <p className="text-sm text-muted-foreground">Total Requests</p>
-                  <div className="size-8 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
-                    <Activity className="size-4 text-emerald-600" />
+                  <div className="size-8 rounded-lg bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center">
+                    <Activity className="size-4 text-indigo-600" />
                   </div>
                 </div>
                 <p className="text-2xl font-bold font-mono mt-2">{formatNumber(analytics.totalRequests)}</p>
                 <div className="flex items-center gap-1 mt-1">
-                  <TrendingUp className="size-3 text-emerald-500" />
-                  <span className="text-xs text-emerald-600 font-medium">+12.5%</span>
+                  <TrendingUp className="size-3 text-indigo-500" />
+                  <span className="text-xs text-indigo-600 font-medium">+12.5%</span>
                   <span className="text-xs text-muted-foreground">vs last period</span>
                 </div>
               </CardContent>
@@ -492,14 +492,14 @@ export default function AnalyticsPanel() {
               <CardContent className="p-5">
                 <div className="flex items-center justify-between">
                   <p className="text-sm text-muted-foreground">Avg Response Time</p>
-                  <div className="size-8 rounded-lg bg-cyan-100 dark:bg-cyan-900/30 flex items-center justify-center">
-                    <Clock className="size-4 text-cyan-600" />
+                  <div className="size-8 rounded-lg bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center">
+                    <Clock className="size-4 text-indigo-600" />
                   </div>
                 </div>
                 <p className="text-2xl font-bold font-mono mt-2">{analytics.avgResponseTime}<span className="text-sm font-normal text-muted-foreground ml-1">ms</span></p>
                 <div className="flex items-center gap-1 mt-1">
-                  <TrendingDown className="size-3 text-emerald-500" />
-                  <span className="text-xs text-emerald-600 font-medium">-8.3%</span>
+                  <TrendingDown className="size-3 text-indigo-500" />
+                  <span className="text-xs text-indigo-600 font-medium">-8.3%</span>
                   <span className="text-xs text-muted-foreground">faster</span>
                 </div>
               </CardContent>
@@ -518,8 +518,8 @@ export default function AnalyticsPanel() {
                 <div className="flex items-center gap-1 mt-1">
                   {analytics.errorRate < 2 ? (
                     <>
-                      <TrendingDown className="size-3 text-emerald-500" />
-                      <span className="text-xs text-emerald-600 font-medium">Healthy</span>
+                      <TrendingDown className="size-3 text-indigo-500" />
+                      <span className="text-xs text-indigo-600 font-medium">Healthy</span>
                     </>
                   ) : (
                     <>
@@ -536,14 +536,14 @@ export default function AnalyticsPanel() {
               <CardContent className="p-5">
                 <div className="flex items-center justify-between">
                   <p className="text-sm text-muted-foreground">Unique Visitors</p>
-                  <div className="size-8 rounded-lg bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
-                    <Users className="size-4 text-violet-600" />
+                  <div className="size-8 rounded-lg bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center">
+                    <Users className="size-4 text-indigo-600" />
                   </div>
                 </div>
                 <p className="text-2xl font-bold font-mono mt-2">{formatNumber(analytics.uniqueVisitors)}</p>
                 <div className="flex items-center gap-1 mt-1">
-                  <TrendingUp className="size-3 text-emerald-500" />
-                  <span className="text-xs text-emerald-600 font-medium">+5.2%</span>
+                  <TrendingUp className="size-3 text-indigo-500" />
+                  <span className="text-xs text-indigo-600 font-medium">+5.2%</span>
                   <span className="text-xs text-muted-foreground">vs last period</span>
                 </div>
               </CardContent>

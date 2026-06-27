@@ -128,15 +128,15 @@ const ROLE_STYLES: Record<
   { className: string; icon?: React.ElementType }
 > = {
   super_admin: {
-    className: 'bg-purple-100 text-purple-700 border-purple-200',
+    className: 'bg-indigo-100 text-indigo-700 border-indigo-200',
     icon: Crown,
   },
   admin: {
-    className: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+    className: 'bg-indigo-100 text-indigo-700 border-indigo-200',
     icon: ShieldCheck,
   },
   client: {
-    className: 'bg-blue-100 text-blue-700 border-blue-200',
+    className: 'bg-indigo-100 text-indigo-700 border-indigo-200',
     icon: Building2,
   },
   user: {
@@ -174,8 +174,8 @@ function RoleBadge({ role }: { role: string }) {
 function JobStatusBadge({ status }: { status: string }) {
   const map: Record<string, { className: string; icon: React.ElementType }> = {
     queued: { className: 'bg-yellow-100 text-yellow-700 border-yellow-200', icon: Clock },
-    processing: { className: 'bg-blue-100 text-blue-700 border-blue-200', icon: Loader2 },
-    completed: { className: 'bg-emerald-100 text-emerald-700 border-emerald-200', icon: CheckCircle2 },
+    processing: { className: 'bg-indigo-100 text-indigo-700 border-indigo-200', icon: Loader2 },
+    completed: { className: 'bg-indigo-100 text-indigo-700 border-indigo-200', icon: CheckCircle2 },
     failed: { className: 'bg-red-100 text-red-700 border-red-200', icon: XCircle },
   }
   const cfg = map[status] || map.queued
@@ -304,32 +304,32 @@ export function AdminPanel() {
       value: stats?.totalUsers ?? 0,
       subtitle: `${stats?.recentSignups ?? 0} new (30d)`,
       icon: Users,
-      color: 'text-emerald-600',
-      bg: 'bg-emerald-50',
+      color: 'text-indigo-600',
+      bg: 'bg-indigo-50',
     },
     {
       title: 'Monthly Revenue',
       value: `$${(stats?.monthlyRevenue ?? 0).toLocaleString()}`,
       subtitle: `Total: $${(stats?.totalRevenue ?? 0).toLocaleString()}`,
       icon: DollarSign,
-      color: 'text-emerald-600',
-      bg: 'bg-emerald-50',
+      color: 'text-indigo-600',
+      bg: 'bg-indigo-50',
     },
     {
       title: 'Active Projects',
       value: stats?.activeProjects ?? 0,
       subtitle: `${stats?.totalProjects ?? 0} total`,
       icon: Server,
-      color: 'text-emerald-600',
-      bg: 'bg-emerald-50',
+      color: 'text-indigo-600',
+      bg: 'bg-indigo-50',
     },
     {
       title: 'Domains Managed',
       value: stats?.totalDomains ?? 0,
       subtitle: `${stats?.activeSubscriptions ?? 0} active subs`,
       icon: Globe,
-      color: 'text-emerald-600',
-      bg: 'bg-emerald-50',
+      color: 'text-indigo-600',
+      bg: 'bg-indigo-50',
     },
   ]
 
@@ -461,7 +461,7 @@ export function AdminPanel() {
                                       >
                                         <RoleBadge role={r} />
                                         {u.role === r && (
-                                          <CheckCircle2 className="size-3.5 ml-auto text-emerald-600" />
+                                          <CheckCircle2 className="size-3.5 ml-auto text-indigo-600" />
                                         )}
                                       </DropdownMenuItem>
                                     )
@@ -474,7 +474,7 @@ export function AdminPanel() {
                           </TableCell>
                           <TableCell>
                             {u.activeSubscription ? (
-                              <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
+                              <Badge variant="outline" className="bg-indigo-50 text-indigo-700 border-indigo-200">
                                 {u.activeSubscription.planName}
                               </Badge>
                             ) : (
@@ -528,7 +528,7 @@ export function AdminPanel() {
                         key={filter}
                         variant={jobFilter === filter ? 'default' : 'outline'}
                         size="sm"
-                        className={jobFilter === filter ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : ''}
+                        className={jobFilter === filter ? 'bg-indigo-600 hover:bg-indigo-700 text-white' : ''}
                         onClick={() => setJobFilter(filter)}
                       >
                         {filter.charAt(0).toUpperCase() + filter.slice(1)}

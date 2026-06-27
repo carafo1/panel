@@ -121,9 +121,9 @@ const STATUS_META: Record<
 > = {
   up: {
     label: 'Operational',
-    dot: 'bg-emerald-500',
+    dot: 'bg-indigo-500',
     badge:
-      'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30',
+      'bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 border-indigo-500/30',
     icon: CheckCircle2,
   },
   down: {
@@ -168,13 +168,13 @@ function formatResponseTime(ms: number | null | undefined): string {
 }
 
 function uptimeColor(pct: number): string {
-  if (pct >= 99) return 'text-emerald-600 dark:text-emerald-400'
+  if (pct >= 99) return 'text-indigo-600 dark:text-indigo-400'
   if (pct >= 95) return 'text-amber-600 dark:text-amber-400'
   return 'text-red-600 dark:text-red-400'
 }
 
 function uptimeBarClass(pct: number): string {
-  if (pct >= 99) return '[&_[data-slot=progress-indicator]]:bg-emerald-500'
+  if (pct >= 99) return '[&_[data-slot=progress-indicator]]:bg-indigo-500'
   if (pct >= 95) return '[&_[data-slot=progress-indicator]]:bg-amber-500'
   return '[&_[data-slot=progress-indicator]]:bg-red-500'
 }
@@ -249,7 +249,7 @@ function AddMonitorDialog({
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Activity className="size-5 text-emerald-600" />
+            <Activity className="size-5 text-indigo-600" />
             New Uptime Monitor
           </DialogTitle>
           <DialogDescription>
@@ -312,7 +312,7 @@ function AddMonitorDialog({
                     onClick={() => setIntervalSec(sec)}
                     className={
                       active
-                        ? 'bg-emerald-600 hover:bg-emerald-700'
+                        ? 'bg-indigo-600 hover:bg-indigo-700'
                         : ''
                     }
                   >
@@ -335,7 +335,7 @@ function AddMonitorDialog({
           <Button
             onClick={handleSubmit}
             disabled={submitting || projects.length === 0}
-            className="bg-emerald-600 hover:bg-emerald-700"
+            className="bg-indigo-600 hover:bg-indigo-700"
           >
             {submitting ? (
               <>
@@ -373,7 +373,7 @@ function UptimeSparkline({ checks }: { checks: CheckRecord[] }) {
           key={c.id}
           title={`${new Date(c.checkedAt).toLocaleString()} · ${c.status} · ${formatResponseTime(c.responseTime)}`}
           className={`flex-1 rounded-sm min-w-[3px] ${
-            c.status === 'up' ? 'bg-emerald-500' : 'bg-red-500'
+            c.status === 'up' ? 'bg-indigo-500' : 'bg-red-500'
           }`}
           style={{ height: c.status === 'up' ? '100%' : '60%' }}
         />
@@ -515,7 +515,7 @@ function MonitorDetailDialog({
               href={monitor.url}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-1 text-emerald-600 hover:underline"
+              className="inline-flex items-center gap-1 text-indigo-600 hover:underline"
             >
               Visit <ExternalLink className="size-3" />
             </a>
@@ -596,7 +596,7 @@ function MonitorDetailDialog({
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm flex items-center gap-2">
-                  <Activity className="size-4 text-emerald-600" />
+                  <Activity className="size-4 text-indigo-600" />
                   Recent Checks
                 </CardTitle>
                 <CardDescription>
@@ -616,7 +616,7 @@ function MonitorDetailDialog({
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm flex items-center gap-2">
-                  <Zap className="size-4 text-emerald-600" />
+                  <Zap className="size-4 text-indigo-600" />
                   Response Time
                 </CardTitle>
                 <CardDescription>Latency over the selected range</CardDescription>
@@ -634,7 +634,7 @@ function MonitorDetailDialog({
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm flex items-center gap-2">
-                  <Clock className="size-4 text-emerald-600" />
+                  <Clock className="size-4 text-indigo-600" />
                   Check Log
                 </CardTitle>
               </CardHeader>
@@ -652,7 +652,7 @@ function MonitorDetailDialog({
                           className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-muted/40"
                         >
                           {c.status === 'up' ? (
-                            <CheckCircle2 className="size-4 text-emerald-500 shrink-0" />
+                            <CheckCircle2 className="size-4 text-indigo-500 shrink-0" />
                           ) : (
                             <XCircle className="size-4 text-red-500 shrink-0" />
                           )}
@@ -698,7 +698,7 @@ function MonitorDetailDialog({
               onRefresh()
               loadStats()
             }}
-            className="bg-emerald-600 hover:bg-emerald-700"
+            className="bg-indigo-600 hover:bg-indigo-700"
           >
             <RefreshCw className="size-4 mr-2" />
             Refresh
@@ -729,7 +729,7 @@ function MonitorCard({
 
   return (
     <Card
-      className="group cursor-pointer hover:border-emerald-500/40 hover:shadow-sm transition-all"
+      className="group cursor-pointer hover:border-indigo-500/40 hover:shadow-sm transition-all"
       onClick={onClick}
     >
       <CardHeader className="pb-3">
@@ -737,7 +737,7 @@ function MonitorCard({
           <div className="relative mt-0.5 shrink-0">
             <span className={`block size-3 rounded-full ${meta.dot}`} />
             {key === 'up' && (
-              <span className="absolute inset-0 rounded-full animate-ping bg-emerald-500 opacity-40" />
+              <span className="absolute inset-0 rounded-full animate-ping bg-indigo-500 opacity-40" />
             )}
           </div>
           <div className="flex-1 min-w-0">
@@ -947,7 +947,7 @@ export default function UptimePanel() {
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h2 className="text-xl font-bold tracking-tight flex items-center gap-2">
-            <Activity className="size-5 text-emerald-600" />
+            <Activity className="size-5 text-indigo-600" />
             Uptime Monitoring
           </h2>
           <p className="text-sm text-muted-foreground mt-1">
@@ -971,7 +971,7 @@ export default function UptimePanel() {
           <Button
             onClick={() => setAddOpen(true)}
             size="sm"
-            className="bg-emerald-600 hover:bg-emerald-700"
+            className="bg-indigo-600 hover:bg-indigo-700"
           >
             <Plus className="size-4 mr-2" />
             Add Monitor
@@ -998,11 +998,11 @@ export default function UptimePanel() {
               <div className="text-[10px] text-muted-foreground uppercase tracking-wide">
                 Operational
               </div>
-              <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
+              <div className="text-2xl font-bold text-indigo-600 dark:text-indigo-400">
                 {mounted ? upCount : 0}
               </div>
             </div>
-            <CheckCircle2 className="size-5 text-emerald-500" />
+            <CheckCircle2 className="size-5 text-indigo-500" />
           </div>
         </Card>
         <Card className="p-4">
@@ -1050,8 +1050,8 @@ export default function UptimePanel() {
         </div>
       ) : total === 0 ? (
         <Card className="p-8 text-center">
-          <div className="mx-auto size-12 rounded-full bg-emerald-500/10 flex items-center justify-center mb-3">
-            <Activity className="size-6 text-emerald-600" />
+          <div className="mx-auto size-12 rounded-full bg-indigo-500/10 flex items-center justify-center mb-3">
+            <Activity className="size-6 text-indigo-600" />
           </div>
           <h3 className="font-semibold mb-1">No monitors yet</h3>
           <p className="text-sm text-muted-foreground mb-4 max-w-md mx-auto">
@@ -1066,7 +1066,7 @@ export default function UptimePanel() {
           ) : (
             <Button
               onClick={() => setAddOpen(true)}
-              className="bg-emerald-600 hover:bg-emerald-700"
+              className="bg-indigo-600 hover:bg-indigo-700"
             >
               <Plus className="size-4 mr-2" />
               Add your first monitor

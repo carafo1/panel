@@ -51,15 +51,15 @@ function formatRelativeTime(dateStr: string): string {
 function getTypeIcon(type: string) {
   switch (type) {
     case 'info':
-      return <Info className="size-4 text-blue-500 shrink-0" />
+      return <Info className="size-4 text-indigo-500 shrink-0" />
     case 'success':
-      return <CheckCircle2 className="size-4 text-emerald-500 shrink-0" />
+      return <CheckCircle2 className="size-4 text-indigo-500 shrink-0" />
     case 'warning':
       return <AlertTriangle className="size-4 text-amber-500 shrink-0" />
     case 'error':
       return <AlertCircle className="size-4 text-red-500 shrink-0" />
     default:
-      return <Info className="size-4 text-blue-500 shrink-0" />
+      return <Info className="size-4 text-indigo-500 shrink-0" />
   }
 }
 
@@ -233,7 +233,7 @@ export function NotificationCenter() {
         <div className="max-h-96 overflow-y-auto">
           {loading && notifications.length === 0 ? (
             <div className="flex items-center justify-center py-8">
-              <div className="size-6 animate-spin rounded-full border-2 border-emerald-600 border-t-transparent" />
+              <div className="size-6 animate-spin rounded-full border-2 border-indigo-600 border-t-transparent" />
             </div>
           ) : notifications.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 gap-2">

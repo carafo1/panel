@@ -88,8 +88,8 @@ function getPasswordStrength(password: string): { label: string; color: string; 
   if (score <= 1) return { label: 'Weak', color: 'bg-red-500', percent: 20 }
   if (score <= 2) return { label: 'Fair', color: 'bg-orange-500', percent: 40 }
   if (score <= 3) return { label: 'Medium', color: 'bg-yellow-500', percent: 60 }
-  if (score <= 4) return { label: 'Strong', color: 'bg-emerald-400', percent: 80 }
-  return { label: 'Very Strong', color: 'bg-emerald-600', percent: 100 }
+  if (score <= 4) return { label: 'Strong', color: 'bg-indigo-400', percent: 80 }
+  return { label: 'Very Strong', color: 'bg-indigo-600', percent: 100 }
 }
 
 // ── Profile Tab ────────────────────────────────────────────────────────────
@@ -128,7 +128,7 @@ function ProfileTab() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <User className="size-5 text-emerald-600" />
+            <User className="size-5 text-indigo-600" />
             Profile Information
           </CardTitle>
           <CardDescription>
@@ -138,8 +138,8 @@ function ProfileTab() {
         <CardContent className="space-y-6">
           {/* Avatar */}
           <div className="flex items-center gap-4">
-            <div className="size-16 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
-              <span className="text-2xl font-bold text-emerald-700">
+            <div className="size-16 rounded-full bg-indigo-100 flex items-center justify-center shrink-0">
+              <span className="text-2xl font-bold text-indigo-700">
                 {name?.charAt(0)?.toUpperCase() || 'U'}
               </span>
             </div>
@@ -149,7 +149,7 @@ function ProfileTab() {
               <div className="flex items-center gap-2 mt-1">
                 <Badge variant="outline" className="text-[10px] capitalize">{user?.role}</Badge>
                 {user?.emailVerified ? (
-                  <Badge className="text-[10px] bg-emerald-100 text-emerald-700 hover:bg-emerald-100">
+                  <Badge className="text-[10px] bg-indigo-100 text-indigo-700 hover:bg-indigo-100">
                     <CheckCircle2 className="size-3 mr-1" /> Verified
                   </Badge>
                 ) : (
@@ -196,7 +196,7 @@ function ProfileTab() {
             <Button
               onClick={handleSave}
               disabled={saving}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+              className="bg-indigo-600 hover:bg-indigo-700 text-white"
             >
               {saving ? (
                 <Loader2 className="size-4 animate-spin mr-2" />
@@ -321,7 +321,7 @@ function TwoFactorCard({ enabled, onToggle }: TwoFactorCardProps) {
   const handleDownloadBackupCodes = () => {
     if (!backupCodes.length) return
     const text =
-      `DeployHub 2FA Backup Codes\n` +
+      `APSAMO 2FA Backup Codes\n` +
       `Generated: ${new Date().toLocaleString()}\n\n` +
       backupCodes.map((c, i) => `${i + 1}.  ${c}`).join('\n') +
       `\n\nEach code can be used only once. Store them somewhere safe.\n`
@@ -381,7 +381,7 @@ function TwoFactorCard({ enabled, onToggle }: TwoFactorCardProps) {
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <ShieldCheck className="size-5 text-emerald-600" />
+          <ShieldCheck className="size-5 text-indigo-600" />
           Two-Factor Authentication
         </CardTitle>
         <CardDescription>
@@ -396,7 +396,7 @@ function TwoFactorCard({ enabled, onToggle }: TwoFactorCardProps) {
             <div
               className={`size-9 rounded-lg flex items-center justify-center shrink-0 ${
                 enabled
-                  ? 'bg-emerald-50 text-emerald-600'
+                  ? 'bg-indigo-50 text-indigo-600'
                   : 'bg-amber-50 text-amber-600'
               }`}
             >
@@ -416,7 +416,7 @@ function TwoFactorCard({ enabled, onToggle }: TwoFactorCardProps) {
           <Badge
             className={`shrink-0 ${
               enabled
-                ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100'
+                ? 'bg-indigo-100 text-indigo-700 hover:bg-indigo-100'
                 : 'bg-amber-100 text-amber-700 hover:bg-amber-100'
             }`}
           >
@@ -429,7 +429,7 @@ function TwoFactorCard({ enabled, onToggle }: TwoFactorCardProps) {
           {!enabled ? (
             <Button
               onClick={handleBeginEnable}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+              className="bg-indigo-600 hover:bg-indigo-700 text-white"
               disabled={settingUp}
             >
               {settingUp ? (
@@ -458,7 +458,7 @@ function TwoFactorCard({ enabled, onToggle }: TwoFactorCardProps) {
           <DialogContent className="max-w-md">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
-                <Shield className="size-5 text-emerald-600" />
+                <Shield className="size-5 text-indigo-600" />
                 {enableStep === 'qr' ? 'Set Up Two-Factor Authentication' : 'Save Your Backup Codes'}
               </DialogTitle>
               <DialogDescription>
@@ -472,7 +472,7 @@ function TwoFactorCard({ enabled, onToggle }: TwoFactorCardProps) {
               <div className="space-y-4 py-2">
                 {settingUp && !setupData ? (
                   <div className="flex flex-col items-center py-8 gap-2">
-                    <Loader2 className="size-6 animate-spin text-emerald-600" />
+                    <Loader2 className="size-6 animate-spin text-indigo-600" />
                     <p className="text-sm text-muted-foreground">Generating secret…</p>
                   </div>
                 ) : setupData ? (
@@ -548,10 +548,10 @@ function TwoFactorCard({ enabled, onToggle }: TwoFactorCardProps) {
 
             {enableStep === 'backup' && (
               <div className="space-y-4 py-2">
-                <Alert className="border-emerald-300 bg-emerald-50">
-                  <CheckCircle2 className="size-4 text-emerald-600" />
+                <Alert className="border-indigo-300 bg-indigo-50">
+                  <CheckCircle2 className="size-4 text-indigo-600" />
                   <AlertDescription>
-                    <p className="font-medium text-emerald-800 mb-2">
+                    <p className="font-medium text-indigo-800 mb-2">
                       2FA is now enabled! Save these backup codes.
                     </p>
                     <div className="grid grid-cols-2 gap-1.5 bg-white border rounded p-3">
@@ -584,7 +584,7 @@ function TwoFactorCard({ enabled, onToggle }: TwoFactorCardProps) {
                     onClick={handleCopyAllBackupCodes}
                   >
                     {copiedAll ? (
-                      <CheckCircle2 className="size-4 mr-2 text-emerald-600" />
+                      <CheckCircle2 className="size-4 mr-2 text-indigo-600" />
                     ) : (
                       <Copy className="size-4 mr-2" />
                     )}
@@ -603,7 +603,7 @@ function TwoFactorCard({ enabled, onToggle }: TwoFactorCardProps) {
                   <Button
                     onClick={handleVerifyEnable}
                     disabled={enabling || verifyToken.length !== 6 || !setupData}
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white"
                   >
                     {enabling ? (
                       <Loader2 className="size-4 animate-spin mr-2" />
@@ -616,7 +616,7 @@ function TwoFactorCard({ enabled, onToggle }: TwoFactorCardProps) {
               ) : (
                 <Button
                   onClick={handleCloseEnable}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white"
                 >
                   <CheckCircle2 className="size-4 mr-2" />
                   I&apos;ve saved my codes
@@ -738,7 +738,7 @@ function SecurityTab() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Shield className="size-5 text-emerald-600" />
+            <Shield className="size-5 text-indigo-600" />
             Change Password
           </CardTitle>
           <CardDescription>
@@ -805,7 +805,7 @@ function SecurityTab() {
                   strength.label === 'Weak' ? 'text-red-500' :
                   strength.label === 'Fair' ? 'text-orange-500' :
                   strength.label === 'Medium' ? 'text-yellow-600' :
-                  'text-emerald-600'
+                  'text-indigo-600'
                 }`}>
                   Password strength: {strength.label}
                 </p>
@@ -827,7 +827,7 @@ function SecurityTab() {
               <p className="text-xs text-red-500">Passwords do not match</p>
             )}
             {confirmPassword && passwordsMatch && (
-              <p className="text-xs text-emerald-600 flex items-center gap-1">
+              <p className="text-xs text-indigo-600 flex items-center gap-1">
                 <CheckCircle2 className="size-3" /> Passwords match
               </p>
             )}
@@ -837,7 +837,7 @@ function SecurityTab() {
             <Button
               onClick={handleUpdatePassword}
               disabled={!canSubmit || saving}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+              className="bg-indigo-600 hover:bg-indigo-700 text-white"
             >
               {saving ? (
                 <Loader2 className="size-4 animate-spin mr-2" />
@@ -948,11 +948,11 @@ function ApiKeysTab() {
           <div className="flex items-center justify-between">
             <div>
               <CardTitle className="flex items-center gap-2">
-                <Key className="size-5 text-emerald-600" />
+                <Key className="size-5 text-indigo-600" />
                 API Keys
               </CardTitle>
               <CardDescription className="mt-1.5">
-                Manage your API keys for programmatic access to DeployHub.
+                Manage your API keys for programmatic access to APSAMO.
               </CardDescription>
             </div>
             <Dialog open={createOpen} onOpenChange={(open) => {
@@ -960,7 +960,7 @@ function ApiKeysTab() {
               if (!open) setNewKeyName('')
             }}>
               <DialogTrigger asChild>
-                <Button className="bg-emerald-600 hover:bg-emerald-700 text-white">
+                <Button className="bg-indigo-600 hover:bg-indigo-700 text-white">
                   <Plus className="size-4 mr-2" />
                   Create API Key
                 </Button>
@@ -993,7 +993,7 @@ function ApiKeysTab() {
                   <Button
                     onClick={handleCreate}
                     disabled={creating || !newKeyName.trim()}
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white"
                   >
                     {creating ? <Loader2 className="size-4 animate-spin mr-2" /> : <KeyRound className="size-4 mr-2" />}
                     Create Key
@@ -1006,10 +1006,10 @@ function ApiKeysTab() {
         <CardContent>
           {/* New key alert */}
           {createdKey && (
-            <Alert className="mb-4 border-emerald-300 bg-emerald-50">
-              <KeyRound className="size-4 text-emerald-600" />
+            <Alert className="mb-4 border-indigo-300 bg-indigo-50">
+              <KeyRound className="size-4 text-indigo-600" />
               <AlertDescription className="space-y-2">
-                <p className="font-medium text-emerald-800">
+                <p className="font-medium text-indigo-800">
                   API key created! Copy it now — it won&apos;t be shown again.
                 </p>
                 <div className="flex items-center gap-2">
@@ -1022,16 +1022,16 @@ function ApiKeysTab() {
                     onClick={() => handleCopy(createdKey.key)}
                     className="shrink-0"
                   >
-                    {copied ? <CheckCircle2 className="size-4 text-emerald-600" /> : <Copy className="size-4" />}
+                    {copied ? <CheckCircle2 className="size-4 text-indigo-600" /> : <Copy className="size-4" />}
                   </Button>
                 </div>
-                <p className="text-xs text-emerald-700">
+                <p className="text-xs text-indigo-700">
                   Key name: {createdKey.name}
                 </p>
                 <Button
                   size="sm"
                   variant="ghost"
-                  className="text-emerald-700 hover:text-emerald-800"
+                  className="text-indigo-700 hover:text-indigo-800"
                   onClick={() => setCreatedKey(null)}
                 >
                   Dismiss
@@ -1049,11 +1049,11 @@ function ApiKeysTab() {
               <Key className="size-10 text-muted-foreground mx-auto mb-3" />
               <p className="font-medium text-muted-foreground">No API keys yet</p>
               <p className="text-sm text-muted-foreground mt-1">
-                Create an API key to access the DeployHub API programmatically.
+                Create an API key to access the APSAMO API programmatically.
               </p>
               <Button
                 onClick={() => setCreateOpen(true)}
-                className="mt-4 bg-emerald-600 hover:bg-emerald-700 text-white"
+                className="mt-4 bg-indigo-600 hover:bg-indigo-700 text-white"
               >
                 <Plus className="size-4 mr-2" />
                 Create Your First API Key
@@ -1224,7 +1224,7 @@ function NotificationsTab() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Bell className="size-5 text-emerald-600" />
+            <Bell className="size-5 text-indigo-600" />
             Notification Preferences
           </CardTitle>
           <CardDescription>
@@ -1238,8 +1238,8 @@ function NotificationsTab() {
               <div key={item.key}>
                 <div className="flex items-center justify-between py-4">
                   <div className="flex items-start gap-3">
-                    <div className="size-9 rounded-lg bg-emerald-50 flex items-center justify-center shrink-0 mt-0.5">
-                      <Icon className="size-4 text-emerald-600" />
+                    <div className="size-9 rounded-lg bg-indigo-50 flex items-center justify-center shrink-0 mt-0.5">
+                      <Icon className="size-4 text-indigo-600" />
                     </div>
                     <div>
                       <p className="text-sm font-medium">{item.title}</p>
@@ -1260,7 +1260,7 @@ function NotificationsTab() {
             <Button
               onClick={handleSave}
               disabled={saving}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+              className="bg-indigo-600 hover:bg-indigo-700 text-white"
             >
               {saving ? (
                 <Loader2 className="size-4 animate-spin mr-2" />

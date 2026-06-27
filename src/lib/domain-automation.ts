@@ -454,7 +454,7 @@ export async function runRegistrationPipeline(
               <li>Invoice: ${invoiceNumber}</li>
               <li>Expires: ${expiry.toDateString()}</li>
             </ul>
-            <p>You can manage your domain from the DeployHub dashboard.</p>
+            <p>You can manage your domain from the APSAMO dashboard.</p>
           `,
         })
         ok('send_email', `Confirmation sent to ${user.email}`)

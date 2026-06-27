@@ -257,7 +257,7 @@ function statusColor(status: string) {
   switch (status) {
     case 'running':
     case 'live':
-      return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+      return 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400'
     case 'creating':
     case 'building':
     case 'deploying':
@@ -292,13 +292,13 @@ function frameworkLabel(fw: string) {
 function frameworkColor(fw: string) {
   switch (fw) {
     case 'nextjs':
-      return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+      return 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400'
     case 'react':
-      return 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400'
+      return 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400'
     case 'node':
-      return 'bg-lime-100 text-lime-700 dark:bg-lime-900/30 dark:text-lime-400'
+      return 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400'
     case 'static':
-      return 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
+      return 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400'
     default:
       return 'bg-gray-100 text-gray-700 dark:bg-gray-800/30 dark:text-gray-400'
   }
@@ -307,13 +307,13 @@ function frameworkColor(fw: string) {
 function frameworkIcon(fw: string) {
   switch (fw) {
     case 'nextjs':
-      return <Triangle className="size-4 text-emerald-600 dark:text-emerald-400" />
+      return <Triangle className="size-4 text-indigo-600 dark:text-indigo-400" />
     case 'react':
-      return <Hexagon className="size-4 text-sky-500 dark:text-sky-400" />
+      return <Hexagon className="size-4 text-indigo-500 dark:text-indigo-400" />
     case 'node':
-      return <FileCode className="size-4 text-lime-600 dark:text-lime-400" />
+      return <FileCode className="size-4 text-indigo-600 dark:text-indigo-400" />
     case 'static':
-      return <Layout className="size-4 text-orange-500 dark:text-orange-400" />
+      return <Layout className="size-4 text-indigo-500 dark:text-indigo-400" />
     default:
       return <FileCode className="size-4 text-gray-500" />
   }
@@ -322,7 +322,7 @@ function frameworkIcon(fw: string) {
 function deployStatusIcon(status: string) {
   switch (status) {
     case 'live':
-      return <CheckCircle2 className="size-4 text-emerald-500" />
+      return <CheckCircle2 className="size-4 text-indigo-500" />
     case 'building':
     case 'deploying':
       return <Loader2 className="size-4 text-yellow-500 animate-spin" />
@@ -399,7 +399,7 @@ ${ts} > Live at https://${project.subdomain}`
 
 function colorizeLogLine(line: string): React.ReactNode {
   if (line.includes('✓') || line.includes('successful') || line.includes('Live at')) {
-    return <span className="text-emerald-400">{line}</span>
+    return <span className="text-indigo-400">{line}</span>
   }
   if (line.includes('✗') || line.includes('Error') || line.includes('failed')) {
     return <span className="text-red-400">{line}</span>
@@ -450,13 +450,13 @@ function ProjectCard({
     <Card
       className={`group cursor-pointer transition-all hover:shadow-lg relative overflow-hidden ${
         selected
-          ? 'border-emerald-500 ring-2 ring-emerald-500/30 bg-emerald-50/30 dark:bg-emerald-950/10'
-          : 'hover:border-emerald-200 dark:hover:border-emerald-800 hover:bg-gradient-to-br hover:from-card hover:to-emerald-50/30 dark:hover:to-emerald-950/10'
+          ? 'border-indigo-500 ring-2 ring-indigo-500/30 bg-indigo-50/30 dark:bg-indigo-950/10'
+          : 'hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gradient-to-br hover:from-card hover:to-indigo-50/30 dark:hover:to-indigo-950/10'
       }`}
       onClick={onClick}
     >
       {/* Subtle gradient overlay on hover */}
-      <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/0 to-emerald-500/0 group-hover:from-emerald-500/5 group-hover:to-transparent transition-all pointer-events-none" />
+      <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/0 to-indigo-500/0 group-hover:from-indigo-500/5 group-hover:to-transparent transition-all pointer-events-none" />
 
       {/* Selection checkbox (top-right) */}
       <div
@@ -475,8 +475,8 @@ function ProjectCard({
           aria-label={selected ? 'Deselect project' : 'Select project'}
           className={`flex size-6 items-center justify-center rounded-md border transition-all ${
             selected
-              ? 'border-emerald-500 bg-emerald-500 text-white'
-              : 'border-input bg-background/80 opacity-0 group-hover:opacity-100 hover:border-emerald-400'
+              ? 'border-indigo-500 bg-indigo-500 text-white'
+              : 'border-input bg-background/80 opacity-0 group-hover:opacity-100 hover:border-indigo-400'
           }`}
         >
           {selected ? (
@@ -507,7 +507,7 @@ function ProjectCard({
             {project.status}
           </Badge>
           {project.sslEnabled && (
-            <Badge variant="outline" className="bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400 text-xs">
+            <Badge variant="outline" className="bg-indigo-50 text-indigo-600 dark:bg-indigo-900/20 dark:text-indigo-400 text-xs">
               <Shield className="size-3 mr-1" />
               SSL
             </Badge>
@@ -639,14 +639,14 @@ function CreateProjectDialog({
                     key={plan.id}
                     type="button"
                     onClick={() => setPlanId(plan.id)}
-                    className={`relative flex items-center gap-3 rounded-lg border p-3 text-left transition-all hover:border-emerald-300 dark:hover:border-emerald-700 ${
+                    className={`relative flex items-center gap-3 rounded-lg border p-3 text-left transition-all hover:border-indigo-300 dark:hover:border-indigo-700 ${
                       planId === plan.id
-                        ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 ring-1 ring-emerald-500'
+                        ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20 ring-1 ring-indigo-500'
                         : 'border-border'
                     }`}
                   >
                     {plan.popular && (
-                      <Badge className="absolute -top-2 right-3 bg-emerald-600 text-white text-[10px] px-1.5 py-0">
+                      <Badge className="absolute -top-2 right-3 bg-indigo-600 text-white text-[10px] px-1.5 py-0">
                         Popular
                       </Badge>
                     )}
@@ -657,7 +657,7 @@ function CreateProjectDialog({
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="font-semibold text-emerald-600 dark:text-emerald-400">
+                      <div className="font-semibold text-indigo-600 dark:text-indigo-400">
                         ${plan.price}
                       </div>
                       <div className="text-[10px] text-muted-foreground">/mo</div>
@@ -676,7 +676,7 @@ function CreateProjectDialog({
           <Button
             onClick={handleCreate}
             disabled={loading || !name.trim()}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white"
+            className="bg-indigo-600 hover:bg-indigo-700 text-white"
           >
             {loading ? (
               <>
@@ -732,13 +732,13 @@ function BuildLogsDialog({
       <DialogContent className="sm:max-w-3xl max-h-[80vh]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Terminal className="size-5 text-emerald-600" />
+            <Terminal className="size-5 text-indigo-600" />
             Build Logs
             {isAnimating && (
-              <span className="flex items-center gap-1 text-sm text-emerald-600 ml-2">
+              <span className="flex items-center gap-1 text-sm text-indigo-600 ml-2">
                 <span className="relative flex size-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                  <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
+                  <span className="relative inline-flex size-2 rounded-full bg-indigo-500" />
                 </span>
                 Live
               </span>
@@ -836,7 +836,7 @@ function ContainerLogsDialog({
       <DialogContent className="sm:max-w-3xl max-h-[90vh] flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Terminal className="size-5 text-emerald-600" />
+            <Terminal className="size-5 text-indigo-600" />
             Container Logs
           </DialogTitle>
           <DialogDescription className="flex items-center gap-2 flex-wrap">
@@ -876,7 +876,7 @@ function ContainerLogsDialog({
             >
               {copied ? (
                 <>
-                  <CheckCircle2 className="size-3.5 mr-1 text-emerald-500" />
+                  <CheckCircle2 className="size-3.5 mr-1 text-indigo-500" />
                   Copied
                 </>
               ) : (
@@ -904,14 +904,14 @@ function ContainerLogsDialog({
           <div className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-900 border-b border-zinc-800">
             <span className="size-2 rounded-full bg-red-500/80" />
             <span className="size-2 rounded-full bg-amber-500/80" />
-            <span className="size-2 rounded-full bg-emerald-500/80" />
+            <span className="size-2 rounded-full bg-indigo-500/80" />
             <span className="ml-2 text-[10px] text-zinc-500 font-mono">
               docker logs --tail {tail} {containerName}
             </span>
           </div>
           <div
             ref={scrollRef}
-            className="p-3 text-xs font-mono text-emerald-400 overflow-auto max-h-[60vh] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-zinc-700"
+            className="p-3 text-xs font-mono text-indigo-400 overflow-auto max-h-[60vh] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-zinc-700"
           >
             {loading ? (
               <div className="flex items-center gap-2 text-zinc-400">
@@ -934,7 +934,7 @@ function ContainerLogsDialog({
                             ? 'text-yellow-400'
                             : line.toLowerCase().includes('debug')
                               ? 'text-zinc-500'
-                              : 'text-emerald-400'
+                              : 'text-indigo-400'
                       }
                     >
                       {line || ' '}
@@ -1511,7 +1511,7 @@ function ProjectDetailView({
               href={`https://${project.subdomain}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="hover:text-emerald-600 transition-colors font-mono"
+              className="hover:text-indigo-600 transition-colors font-mono"
             >
               {project.subdomain}
               <ExternalLink className="size-3 inline ml-1" />
@@ -1529,7 +1529,7 @@ function ProjectDetailView({
           <Button
             onClick={handleDeploy}
             disabled={deploying || project.status !== 'running'}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white"
+            className="bg-indigo-600 hover:bg-indigo-700 text-white"
           >
             {deploying ? (
               <RefreshCw className="size-4 mr-2 animate-spin" />
@@ -1592,11 +1592,11 @@ function ProjectDetailView({
           <CardContent>
             <div className="text-sm">
               <div className="flex items-center gap-2">
-                <div className={`size-2 rounded-full ${project.sslEnabled ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+                <div className={`size-2 rounded-full ${project.sslEnabled ? 'bg-indigo-500' : 'bg-gray-400'}`} />
                 SSL {project.sslEnabled ? 'Enabled' : 'Disabled'}
               </div>
               <div className="flex items-center gap-2 mt-1">
-                <div className={`size-2 rounded-full ${project.autoDeploy ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+                <div className={`size-2 rounded-full ${project.autoDeploy ? 'bg-indigo-500' : 'bg-gray-400'}`} />
                 Auto Deploy {project.autoDeploy ? 'On' : 'Off'}
               </div>
             </div>
@@ -1615,7 +1615,7 @@ function ProjectDetailView({
               <div className="space-y-1">
                 {project.domains.map((d) => (
                   <div key={d.id} className="text-sm font-mono flex items-center gap-1.5">
-                    <div className={`size-1.5 rounded-full ${d.status === 'active' ? 'bg-emerald-500' : 'bg-yellow-500'}`} />
+                    <div className={`size-1.5 rounded-full ${d.status === 'active' ? 'bg-indigo-500' : 'bg-yellow-500'}`} />
                     {d.name}
                   </div>
                 ))}
@@ -1649,7 +1649,7 @@ function ProjectDetailView({
       <Card>
         <CardHeader>
           <CardTitle className="text-lg flex items-center gap-2">
-            <Rocket className="size-5 text-emerald-600" />
+            <Rocket className="size-5 text-indigo-600" />
             Deployment History
           </CardTitle>
           <CardDescription>Recent deployments for this project</CardDescription>
@@ -1676,7 +1676,7 @@ function ProjectDetailView({
                 </TableHeader>
                 <TableBody>
                   {project.deployments.map((dep) => (
-                    <TableRow key={dep.id} className="hover:bg-emerald-50/50 dark:hover:bg-emerald-950/20 transition-colors">
+                    <TableRow key={dep.id} className="hover:bg-indigo-50/50 dark:hover:bg-indigo-950/20 transition-colors">
                       <TableCell>
                         <div className="flex items-center gap-2">
                           {deployStatusIcon(dep.status)}
@@ -1704,7 +1704,7 @@ function ProjectDetailView({
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="h-7 text-xs hover:text-emerald-600"
+                          className="h-7 text-xs hover:text-indigo-600"
                           onClick={() => handleViewLogs(dep)}
                         >
                           <Terminal className="size-3 mr-1" />
@@ -1724,7 +1724,7 @@ function ProjectDetailView({
       <Card>
         <CardHeader>
           <CardTitle className="text-lg flex items-center gap-2">
-            <Settings className="size-5 text-emerald-600" />
+            <Settings className="size-5 text-indigo-600" />
             Settings
           </CardTitle>
           <CardDescription>Configure your project settings</CardDescription>
@@ -1790,7 +1790,7 @@ function ProjectDetailView({
             <Button
               onClick={handleSaveSettings}
               disabled={savingSettings}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+              className="bg-indigo-600 hover:bg-indigo-700 text-white"
             >
               {savingSettings ? (
                 <>
@@ -1814,7 +1814,7 @@ function ProjectDetailView({
           <div className="flex items-center justify-between">
             <div>
               <CardTitle className="text-lg flex items-center gap-2">
-                <Container className="size-5 text-emerald-600" />
+                <Container className="size-5 text-indigo-600" />
                 Container Status
               </CardTitle>
               <CardDescription className="mt-1">
@@ -1851,7 +1851,7 @@ function ProjectDetailView({
                 size="sm"
                 onClick={handleDeploy}
                 disabled={deploying || project.status !== 'running'}
-                className="mt-4 bg-emerald-600 hover:bg-emerald-700 text-white h-8 text-xs"
+                className="mt-4 bg-indigo-600 hover:bg-indigo-700 text-white h-8 text-xs"
               >
                 {deploying ? (
                   <Loader2 className="size-3.5 mr-1 animate-spin" />
@@ -1867,7 +1867,7 @@ function ProjectDetailView({
               const isRunning = c.state === 'running'
               const stateColor =
                 c.state === 'running'
-                  ? 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400'
+                  ? 'bg-indigo-100 text-indigo-700 border-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-400'
                   : c.state === 'paused'
                     ? 'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:text-amber-400'
                     : 'bg-gray-100 text-gray-600 border-gray-200 dark:bg-gray-800/30 dark:text-gray-400'
@@ -1901,7 +1901,7 @@ function ProjectDetailView({
                         <span className="text-xs text-muted-foreground w-20">State</span>
                         <Badge variant="outline" className={stateColor}>
                           {isRunning && (
-                            <span className="size-1.5 rounded-full bg-emerald-500 mr-1.5 animate-pulse" />
+                            <span className="size-1.5 rounded-full bg-indigo-500 mr-1.5 animate-pulse" />
                           )}
                           {c.state}
                         </Badge>
@@ -1977,7 +1977,7 @@ function ProjectDetailView({
           <div className="flex items-center justify-between">
             <div>
               <CardTitle className="text-lg flex items-center gap-2">
-                <Shield className="size-5 text-emerald-600" />
+                <Shield className="size-5 text-indigo-600" />
                 SSL Certificate
               </CardTitle>
               <CardDescription className="mt-1">
@@ -2013,7 +2013,7 @@ function ProjectDetailView({
               const status = cert?.status ?? (sslInfo.sslEnabled ? 'issued' : 'none')
               const statusMap: Record<string, { className: string; pulse?: boolean }> = {
                 issued: {
-                  className: 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400',
+                  className: 'bg-indigo-100 text-indigo-700 border-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-400',
                 },
                 pending: {
                   className: 'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:text-amber-400',
@@ -2041,7 +2041,7 @@ function ProjectDetailView({
                       ? 'text-red-600 font-medium'
                       : days < 30
                         ? 'text-amber-600 font-medium'
-                        : 'text-emerald-600'
+                        : 'text-indigo-600'
 
               return (
                 <div className="space-y-4">
@@ -2070,7 +2070,7 @@ function ProjectDetailView({
                         size="sm"
                         onClick={() => handleSslToggle(true)}
                         disabled={sslActionLoading}
-                        className="mt-3 bg-emerald-600 hover:bg-emerald-700 text-white h-8 text-xs"
+                        className="mt-3 bg-indigo-600 hover:bg-indigo-700 text-white h-8 text-xs"
                       >
                         {sslActionLoading ? (
                           <Loader2 className="size-3.5 mr-1 animate-spin" />
@@ -2149,7 +2149,7 @@ function ProjectDetailView({
                             SSL {sslInfo.sslEnabled ? 'Enabled' : 'Disabled'}
                           </span>
                           {cert.autoRenew && (
-                            <Badge variant="outline" className="text-[10px] h-5 bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400">
+                            <Badge variant="outline" className="text-[10px] h-5 bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-900/20 dark:text-indigo-400">
                               Auto-renew
                             </Badge>
                           )}
@@ -2188,9 +2188,9 @@ function ProjectDetailView({
           <div className="flex items-center justify-between">
             <div>
               <CardTitle className="text-lg flex items-center gap-2">
-                <Key className="size-5 text-emerald-600" />
+                <Key className="size-5 text-indigo-600" />
                 Environment Variables
-                <Badge variant="outline" className="ml-1 bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-900/50 text-[10px] h-5">
+                <Badge variant="outline" className="ml-1 bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-900/20 dark:text-indigo-400 dark:border-indigo-900/50 text-[10px] h-5">
                   <Lock className="size-3 mr-1" />
                   AES-256
                 </Badge>
@@ -2221,7 +2221,7 @@ function ProjectDetailView({
               <Button
                 size="sm"
                 onClick={() => handleOpenEnvDialog('create')}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white h-8 text-xs"
+                className="bg-indigo-600 hover:bg-indigo-700 text-white h-8 text-xs"
               >
                 <Plus className="size-3.5 mr-1" />
                 Add Variable
@@ -2244,7 +2244,7 @@ function ProjectDetailView({
               <Button
                 size="sm"
                 onClick={() => handleOpenEnvDialog('create')}
-                className="mt-4 bg-emerald-600 hover:bg-emerald-700 text-white h-8 text-xs"
+                className="mt-4 bg-indigo-600 hover:bg-indigo-700 text-white h-8 text-xs"
               >
                 <Plus className="size-3.5 mr-1" />
                 Add Your First Variable
@@ -2263,7 +2263,7 @@ function ProjectDetailView({
                 </TableHeader>
                 <TableBody>
                   {envVars.map((ev) => (
-                    <TableRow key={ev.id} className="hover:bg-emerald-50/50 dark:hover:bg-emerald-950/20 transition-colors">
+                    <TableRow key={ev.id} className="hover:bg-indigo-50/50 dark:hover:bg-indigo-950/20 transition-colors">
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <Key className="size-3.5 text-muted-foreground" />
@@ -2292,7 +2292,7 @@ function ProjectDetailView({
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="h-7 text-xs hover:text-emerald-600"
+                            className="h-7 text-xs hover:text-indigo-600"
                             onClick={() => handleOpenEnvDialog('edit', ev)}
                           >
                             <Edit className="size-3 mr-1" />
@@ -2324,7 +2324,7 @@ function ProjectDetailView({
           <div className="flex items-center justify-between">
             <div>
               <CardTitle className="text-lg flex items-center gap-2">
-                <Github className="size-5 text-emerald-600" />
+                <Github className="size-5 text-indigo-600" />
                 GitHub Integration
               </CardTitle>
               <CardDescription className="mt-1">
@@ -2347,7 +2347,7 @@ function ProjectDetailView({
               <Button
                 size="sm"
                 onClick={() => setConnectDialogOpen(true)}
-                className="mt-4 bg-emerald-600 hover:bg-emerald-700 text-white h-8 text-xs"
+                className="mt-4 bg-indigo-600 hover:bg-indigo-700 text-white h-8 text-xs"
               >
                 <Github className="size-3.5 mr-1" />
                 Connect GitHub
@@ -2367,7 +2367,7 @@ function ProjectDetailView({
                       {githubIntegration.branch}
                     </Badge>
                     {githubIntegration.autoDeploy && (
-                      <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px] h-5">
+                      <Badge className="bg-indigo-50 text-indigo-700 border-indigo-200 text-[10px] h-5">
                         Auto-deploy
                       </Badge>
                     )}
@@ -2460,7 +2460,7 @@ function ProjectDetailView({
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Github className="size-5 text-emerald-600" />
+              <Github className="size-5 text-indigo-600" />
               Connect GitHub Repository
             </DialogTitle>
             <DialogDescription>
@@ -2492,7 +2492,7 @@ function ProjectDetailView({
             <div className="flex items-center justify-between rounded-lg border p-4">
               <div className="space-y-0.5">
                 <Label className="text-base flex items-center gap-2">
-                  <RefreshCw className="size-4 text-emerald-600" />
+                  <RefreshCw className="size-4 text-indigo-600" />
                   Auto-deploy
                 </Label>
                 <p className="text-xs text-muted-foreground">
@@ -2544,7 +2544,7 @@ function ProjectDetailView({
                 }
               }}
               disabled={connecting || !connectRepoUrl.trim()}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+              className="bg-indigo-600 hover:bg-indigo-700 text-white"
             >
               {connecting ? (
                 <>
@@ -2567,7 +2567,7 @@ function ProjectDetailView({
         <DialogContent className="sm:max-w-2xl max-h-[80vh]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <GitCommit className="size-5 text-emerald-600" />
+              <GitCommit className="size-5 text-indigo-600" />
               Commit History
             </DialogTitle>
             <DialogDescription>
@@ -2606,7 +2606,7 @@ function ProjectDetailView({
                         <span className="text-xs text-muted-foreground">{timeAgo(commit.date)}</span>
                       </div>
                     </div>
-                    <code className="text-[10px] font-mono text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20 px-1.5 py-0.5 rounded shrink-0">
+                    <code className="text-[10px] font-mono text-indigo-600 bg-indigo-50 dark:bg-indigo-900/20 px-1.5 py-0.5 rounded shrink-0">
                       {commit.shortSha}
                     </code>
                   </div>
@@ -2773,7 +2773,7 @@ function ProjectDetailView({
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Key className="size-5 text-emerald-600" />
+              <Key className="size-5 text-indigo-600" />
               {envDialogMode === 'create' ? 'Add Environment Variable' : 'Edit Environment Variable'}
             </DialogTitle>
             <DialogDescription>
@@ -2811,10 +2811,10 @@ function ProjectDetailView({
               />
             </div>
 
-            <div className="flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 dark:border-emerald-900/50 dark:bg-emerald-950/20 p-3">
-              <Lock className="size-4 text-emerald-600 mt-0.5 shrink-0" />
+            <div className="flex items-start gap-3 rounded-lg border border-indigo-200 bg-indigo-50 dark:border-indigo-900/50 dark:bg-indigo-950/20 p-3">
+              <Lock className="size-4 text-indigo-600 mt-0.5 shrink-0" />
               <div className="space-y-0.5">
-                <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
+                <p className="text-sm font-medium text-indigo-700 dark:text-indigo-400">
                   Encrypted at rest with AES-256-GCM
                 </p>
                 <p className="text-xs text-muted-foreground">
@@ -2831,7 +2831,7 @@ function ProjectDetailView({
             <Button
               onClick={handleSaveEnvVar}
               disabled={envSaving || !envKey.trim()}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+              className="bg-indigo-600 hover:bg-indigo-700 text-white"
             >
               {envSaving ? (
                 <>
@@ -3102,7 +3102,7 @@ export default function HostingPanel() {
         </div>
         <Button
           onClick={() => setShowCreate(true)}
-          className="bg-emerald-600 hover:bg-emerald-700 text-white shrink-0"
+          className="bg-indigo-600 hover:bg-indigo-700 text-white shrink-0"
         >
           <Plus className="size-4 mr-2" />
           New Project
@@ -3152,7 +3152,7 @@ export default function HostingPanel() {
                   className={statusFilter === s ? 'bg-accent' : ''}
                 >
                   <span className="capitalize">{s}</span>
-                  {statusFilter === s && <CheckCircle2 className="size-3.5 ml-auto text-emerald-600" />}
+                  {statusFilter === s && <CheckCircle2 className="size-3.5 ml-auto text-indigo-600" />}
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>
@@ -3177,7 +3177,7 @@ export default function HostingPanel() {
                   className={frameworkFilter === f ? 'bg-accent' : ''}
                 >
                   {f === 'all' ? 'All' : frameworkLabel(f)}
-                  {frameworkFilter === f && <CheckCircle2 className="size-3.5 ml-auto text-emerald-600" />}
+                  {frameworkFilter === f && <CheckCircle2 className="size-3.5 ml-auto text-indigo-600" />}
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>
@@ -3202,21 +3202,21 @@ export default function HostingPanel() {
                 className={sortBy === 'created' ? 'bg-accent' : ''}
               >
                 Created date (newest)
-                {sortBy === 'created' && <CheckCircle2 className="size-3.5 ml-auto text-emerald-600" />}
+                {sortBy === 'created' && <CheckCircle2 className="size-3.5 ml-auto text-indigo-600" />}
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => setSortBy('name')}
                 className={sortBy === 'name' ? 'bg-accent' : ''}
               >
                 Name (A → Z)
-                {sortBy === 'name' && <CheckCircle2 className="size-3.5 ml-auto text-emerald-600" />}
+                {sortBy === 'name' && <CheckCircle2 className="size-3.5 ml-auto text-indigo-600" />}
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => setSortBy('deployed')}
                 className={sortBy === 'deployed' ? 'bg-accent' : ''}
               >
                 Last deployed
-                {sortBy === 'deployed' && <CheckCircle2 className="size-3.5 ml-auto text-emerald-600" />}
+                {sortBy === 'deployed' && <CheckCircle2 className="size-3.5 ml-auto text-indigo-600" />}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -3232,10 +3232,10 @@ export default function HostingPanel() {
 
       {/* Bulk Action Toolbar */}
       {selectedCount > 0 && (
-        <div className="sticky top-0 z-20 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between p-3 rounded-lg border border-emerald-200 dark:border-emerald-900/50 bg-emerald-50/80 dark:bg-emerald-950/30 backdrop-blur-sm shadow-sm animate-in fade-in slide-in-from-top-2 duration-200">
+        <div className="sticky top-0 z-20 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between p-3 rounded-lg border border-indigo-200 dark:border-indigo-900/50 bg-indigo-50/80 dark:bg-indigo-950/30 backdrop-blur-sm shadow-sm animate-in fade-in slide-in-from-top-2 duration-200">
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2 text-sm font-medium">
-              <div className="flex size-7 items-center justify-center rounded-md bg-emerald-600 text-white text-xs font-semibold">
+              <div className="flex size-7 items-center justify-center rounded-md bg-indigo-600 text-white text-xs font-semibold">
                 {selectedCount}
               </div>
               <span>project{selectedCount !== 1 ? 's' : ''} selected</span>
@@ -3243,7 +3243,7 @@ export default function HostingPanel() {
             <button
               type="button"
               onClick={selectAll}
-              className="text-xs text-emerald-700 dark:text-emerald-400 hover:underline"
+              className="text-xs text-indigo-700 dark:text-indigo-400 hover:underline"
             >
               Select all ({projects.length})
             </button>
@@ -3260,7 +3260,7 @@ export default function HostingPanel() {
               {bulkLoading && bulkAction === 'deploy' ? (
                 <Loader2 className="size-3.5 animate-spin" />
               ) : (
-                <Rocket className="size-3.5 text-emerald-600" />
+                <Rocket className="size-3.5 text-indigo-600" />
               )}
               Deploy All
             </Button>
@@ -3288,7 +3288,7 @@ export default function HostingPanel() {
               {bulkLoading && bulkAction === 'restart' ? (
                 <Loader2 className="size-3.5 animate-spin" />
               ) : (
-                <RotateCcw className="size-3.5 text-blue-600" />
+                <RotateCcw className="size-3.5 text-indigo-600" />
               )}
               Restart All
             </Button>
@@ -3352,7 +3352,7 @@ export default function HostingPanel() {
                 </p>
                 <Button
                   onClick={() => setShowCreate(true)}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white"
                 >
                   <Plus className="size-4 mr-2" />
                   Create Project
@@ -3368,7 +3368,7 @@ export default function HostingPanel() {
               Showing {projects.length} project{projects.length !== 1 ? 's' : ''}
             </span>
             {selectedCount > 0 && (
-              <span className="text-emerald-600 dark:text-emerald-400 font-medium">
+              <span className="text-indigo-600 dark:text-indigo-400 font-medium">
                 {selectedCount} selected
               </span>
             )}

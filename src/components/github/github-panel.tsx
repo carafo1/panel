@@ -189,13 +189,13 @@ function frameworkLabel(fw: string) {
 function frameworkColor(fw: string) {
   switch (fw) {
     case 'nextjs':
-      return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+      return 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400'
     case 'react':
-      return 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400'
+      return 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400'
     case 'node':
-      return 'bg-lime-100 text-lime-700 dark:bg-lime-900/30 dark:text-lime-400'
+      return 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400'
     case 'static':
-      return 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
+      return 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400'
     default:
       return 'bg-gray-100 text-gray-700 dark:bg-gray-800/30 dark:text-gray-400'
   }
@@ -204,17 +204,17 @@ function frameworkColor(fw: string) {
 function languageColor(lang: string) {
   switch (lang) {
     case 'TypeScript':
-      return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+      return 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400'
     case 'JavaScript':
-      return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
+      return 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400'
     case 'Python':
-      return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+      return 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400'
     case 'Rust':
-      return 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
+      return 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400'
     case 'Go':
-      return 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400'
+      return 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400'
     case 'Ruby':
-      return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+      return 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400'
     default:
       return 'bg-gray-100 text-gray-700 dark:bg-gray-800/30 dark:text-gray-400'
   }
@@ -406,7 +406,7 @@ function ConnectRepositoryDialog({
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Github className="size-5 text-emerald-600" />
+            <Github className="size-5 text-indigo-600" />
             Connect Repository
           </DialogTitle>
           <DialogDescription>
@@ -418,15 +418,15 @@ function ConnectRepositoryDialog({
           {/* ── OAuth option (only shown when GitHub OAuth is enabled) ── */}
           {oauthEnabled && (
             <>
-              <div className="rounded-lg border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/50 dark:bg-emerald-950/20 p-4 space-y-3">
+              <div className="rounded-lg border border-indigo-200 dark:border-indigo-900/60 bg-indigo-50/50 dark:bg-indigo-950/20 p-4 space-y-3">
                 <div className="flex items-start gap-3">
-                  <div className="flex size-9 items-center justify-center rounded-lg bg-emerald-100 dark:bg-emerald-900/40 shrink-0">
-                    <ShieldCheck className="size-5 text-emerald-600 dark:text-emerald-400" />
+                  <div className="flex size-9 items-center justify-center rounded-lg bg-indigo-100 dark:bg-indigo-900/40 shrink-0">
+                    <ShieldCheck className="size-5 text-indigo-600 dark:text-indigo-400" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium flex items-center gap-2">
                       Connect with GitHub
-                      <Badge className="bg-emerald-600 text-white text-[10px] px-1.5 py-0">
+                      <Badge className="bg-indigo-600 text-white text-[10px] px-1.5 py-0">
                         Recommended
                       </Badge>
                     </p>
@@ -439,9 +439,9 @@ function ConnectRepositoryDialog({
                 </div>
                 {oauthIntegration && (
                   <div className="text-xs text-muted-foreground flex items-center gap-1.5 pl-12">
-                    <CheckCircle2 className="size-3 text-emerald-600" />
+                    <CheckCircle2 className="size-3 text-indigo-600" />
                     Signed in as
-                    <span className="font-mono font-medium text-emerald-700 dark:text-emerald-400">
+                    <span className="font-mono font-medium text-indigo-700 dark:text-indigo-400">
                       @{oauthIntegration.username}
                     </span>
                   </div>
@@ -450,7 +450,7 @@ function ConnectRepositoryDialog({
                   <Button
                     onClick={handleStartOauth}
                     disabled={oauthStarting || connecting}
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white"
                     size="sm"
                   >
                     {oauthStarting ? (
@@ -546,7 +546,7 @@ function ConnectRepositoryDialog({
           <Button
             onClick={handleConnect}
             disabled={connecting || oauthStarting || !projectId || !repoUrl.trim()}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white"
+            className="bg-indigo-600 hover:bg-indigo-700 text-white"
           >
             {connecting ? (
               <>
@@ -691,8 +691,8 @@ function IntegrationDetailView({
         <CardHeader className="pb-3">
           <div className="flex items-start justify-between">
             <div className="flex items-center gap-3">
-              <div className="flex size-10 items-center justify-center rounded-lg bg-emerald-100 dark:bg-emerald-900/30">
-                <Github className="size-5 text-emerald-600 dark:text-emerald-400" />
+              <div className="flex size-10 items-center justify-center rounded-lg bg-indigo-100 dark:bg-indigo-900/30">
+                <Github className="size-5 text-indigo-600 dark:text-indigo-400" />
               </div>
               <div>
                 <CardTitle className="text-base">{integration.repoFullName}</CardTitle>
@@ -701,12 +701,12 @@ function IntegrationDetailView({
                 </CardDescription>
               </div>
             </div>
-            <Badge variant="outline" className="bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400 shrink-0">
+            <Badge variant="outline" className="bg-indigo-50 text-indigo-600 dark:bg-indigo-900/20 dark:text-indigo-400 shrink-0">
               <CheckCircle2 className="size-3 mr-1" />
               Connected
             </Badge>
             {integration.oauthConnected && (
-              <Badge variant="outline" className="bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 shrink-0 gap-1">
+              <Badge variant="outline" className="bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300 shrink-0 gap-1">
                 <ShieldCheck className="size-3" />
                 Connected via OAuth
               </Badge>
@@ -718,7 +718,7 @@ function IntegrationDetailView({
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground">Branch</p>
               <div className="flex items-center gap-1.5 text-sm font-medium">
-                <GitBranch className="size-3.5 text-emerald-600" />
+                <GitBranch className="size-3.5 text-indigo-600" />
                 {integration.branch}
               </div>
             </div>
@@ -731,7 +731,7 @@ function IntegrationDetailView({
               <div className="flex items-center gap-1.5 text-sm font-medium">
                 {integration.autoDeploy ? (
                   <>
-                    <Zap className="size-3.5 text-emerald-600" />
+                    <Zap className="size-3.5 text-indigo-600" />
                     Enabled
                   </>
                 ) : (
@@ -757,7 +757,7 @@ function IntegrationDetailView({
             <div className="flex items-center justify-between rounded-lg border p-3">
               <div className="space-y-0.5">
                 <Label className="text-sm flex items-center gap-2">
-                  <Zap className="size-4 text-emerald-600" />
+                  <Zap className="size-4 text-indigo-600" />
                   Auto-deploy
                 </Label>
                 <p className="text-xs text-muted-foreground">
@@ -774,7 +774,7 @@ function IntegrationDetailView({
             <div className="flex items-center justify-between rounded-lg border p-3">
               <div className="space-y-0.5">
                 <Label className="text-sm flex items-center gap-2">
-                  <GitBranch className="size-4 text-emerald-600" />
+                  <GitBranch className="size-4 text-indigo-600" />
                   Deploy Branch
                 </Label>
                 <p className="text-xs text-muted-foreground">
@@ -860,7 +860,7 @@ function IntegrationDetailView({
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-base flex items-center gap-2">
-                  <GitCommit className="size-4 text-emerald-600" />
+                  <GitCommit className="size-4 text-indigo-600" />
                   Recent Commits
                 </CardTitle>
                 <Badge variant="outline" className="text-xs">
@@ -898,8 +898,8 @@ function IntegrationDetailView({
                             loading="lazy"
                           />
                         ) : (
-                          <div className="flex size-8 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/30 shrink-0 mt-0.5">
-                            <GitCommit className="size-3.5 text-emerald-600 dark:text-emerald-400" />
+                          <div className="flex size-8 items-center justify-center rounded-full bg-indigo-100 dark:bg-indigo-900/30 shrink-0 mt-0.5">
+                            <GitCommit className="size-3.5 text-indigo-600 dark:text-indigo-400" />
                           </div>
                         )}
                         <div className="flex-1 min-w-0">
@@ -918,7 +918,7 @@ function IntegrationDetailView({
                                 href={commit.url}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="text-xs text-emerald-600 hover:underline inline-flex items-center gap-0.5"
+                                className="text-xs text-indigo-600 hover:underline inline-flex items-center gap-0.5"
                               >
                                 <ExternalLink className="size-3" />
                                 View
@@ -944,7 +944,7 @@ function IntegrationDetailView({
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-base flex items-center gap-2">
-                  <Github className="size-4 text-emerald-600" />
+                  <Github className="size-4 text-indigo-600" />
                   Repositories
                 </CardTitle>
                 <Badge variant="outline" className="text-xs">
@@ -982,7 +982,7 @@ function IntegrationDetailView({
                             <div className="flex items-center gap-2">
                               <Github className="size-4 text-muted-foreground shrink-0" />
                               <div className="min-w-0">
-                                <p className="text-sm font-medium truncate group-hover:text-emerald-600 transition-colors flex items-center gap-1.5">
+                                <p className="text-sm font-medium truncate group-hover:text-indigo-600 transition-colors flex items-center gap-1.5">
                                   {repo.fullName}
                                   {repo.private && (
                                     <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
@@ -991,7 +991,7 @@ function IntegrationDetailView({
                                     </Badge>
                                   )}
                                   {repo.connected && (
-                                    <Badge variant="outline" className="text-[10px] bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
+                                    <Badge variant="outline" className="text-[10px] bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400">
                                       <CheckCircle2 className="size-2.5 mr-0.5" />
                                       Linked
                                     </Badge>
@@ -1128,11 +1128,11 @@ function ActivityFeed({ projects }: { projects: ProjectWithIntegration[] }) {
   function eventIcon(type: ActivityEvent['type']) {
     switch (type) {
       case 'commit_pushed':
-        return <GitCommit className="size-3.5 text-emerald-600 dark:text-emerald-400" />
+        return <GitCommit className="size-3.5 text-indigo-600 dark:text-indigo-400" />
       case 'auto_deploy_triggered':
         return <Zap className="size-3.5 text-amber-600 dark:text-amber-400" />
       case 'integration_connected':
-        return <CheckCircle2 className="size-3.5 text-emerald-600 dark:text-emerald-400" />
+        return <CheckCircle2 className="size-3.5 text-indigo-600 dark:text-indigo-400" />
       case 'integration_disconnected':
         return <XCircle className="size-3.5 text-red-500" />
     }
@@ -1141,11 +1141,11 @@ function ActivityFeed({ projects }: { projects: ProjectWithIntegration[] }) {
   function eventBgColor(type: ActivityEvent['type']) {
     switch (type) {
       case 'commit_pushed':
-        return 'bg-emerald-100 dark:bg-emerald-900/30'
+        return 'bg-indigo-100 dark:bg-indigo-900/30'
       case 'auto_deploy_triggered':
         return 'bg-amber-100 dark:bg-amber-900/30'
       case 'integration_connected':
-        return 'bg-emerald-100 dark:bg-emerald-900/30'
+        return 'bg-indigo-100 dark:bg-indigo-900/30'
       case 'integration_disconnected':
         return 'bg-red-100 dark:bg-red-900/30'
     }
@@ -1169,7 +1169,7 @@ function ActivityFeed({ projects }: { projects: ProjectWithIntegration[] }) {
     <Card className="rounded-xl">
       <CardHeader className="pb-3">
         <CardTitle className="text-base flex items-center gap-2">
-          <Clock className="size-4 text-emerald-600" />
+          <Clock className="size-4 text-indigo-600" />
           Activity Feed
         </CardTitle>
         <CardDescription>Recent GitHub events across all integrations</CardDescription>
@@ -1236,7 +1236,7 @@ function GithubAccountCard({
     <Card
       className={`rounded-xl border ${
         connected
-          ? 'border-emerald-200 dark:border-emerald-900/60 bg-gradient-to-br from-emerald-50/50 to-card dark:from-emerald-950/20'
+          ? 'border-indigo-200 dark:border-indigo-900/60 bg-gradient-to-br from-indigo-50/50 to-card dark:from-indigo-950/20'
           : 'border-dashed'
       }`}
     >
@@ -1246,7 +1246,7 @@ function GithubAccountCard({
             <div
               className={`flex size-10 items-center justify-center rounded-xl shrink-0 ${
                 connected
-                  ? 'bg-emerald-100 dark:bg-emerald-900/40'
+                  ? 'bg-indigo-100 dark:bg-indigo-900/40'
                   : 'bg-muted'
               }`}
             >
@@ -1259,7 +1259,7 @@ function GithubAccountCard({
                     className="size-10 rounded-xl object-cover"
                   />
                 ) : (
-                  <Github className="size-5 text-emerald-600 dark:text-emerald-400" />
+                  <Github className="size-5 text-indigo-600 dark:text-indigo-400" />
                 )
               ) : (
                 <KeyRound className="size-5 text-muted-foreground" />
@@ -1272,7 +1272,7 @@ function GithubAccountCard({
                 </p>
                 {connected ? (
                   <>
-                    <Badge variant="outline" className="bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 text-[10px] gap-1">
+                    <Badge variant="outline" className="bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300 text-[10px] gap-1">
                       <ShieldCheck className="size-2.5" />
                       Connected via OAuth
                     </Badge>
@@ -1300,7 +1300,7 @@ function GithubAccountCard({
             className={
               connected
                 ? 'shrink-0'
-                : 'bg-emerald-600 hover:bg-emerald-700 text-white shrink-0'
+                : 'bg-indigo-600 hover:bg-indigo-700 text-white shrink-0'
             }
             size="sm"
           >
@@ -1470,14 +1470,14 @@ export default function GithubPanel() {
       {/* Overview Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-start gap-3">
-          <div className="flex size-10 items-center justify-center rounded-xl bg-emerald-100 dark:bg-emerald-900/30 shrink-0">
-            <Github className="size-5 text-emerald-600 dark:text-emerald-400" />
+          <div className="flex size-10 items-center justify-center rounded-xl bg-indigo-100 dark:bg-indigo-900/30 shrink-0">
+            <Github className="size-5 text-indigo-600 dark:text-indigo-400" />
           </div>
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-2xl font-bold">GitHub Integration</h2>
               {projects.length > 0 && (
-                <Badge className="bg-emerald-600 text-white text-[10px] px-1.5 py-0">
+                <Badge className="bg-indigo-600 text-white text-[10px] px-1.5 py-0">
                   {connectedCount} connected
                 </Badge>
               )}
@@ -1489,7 +1489,7 @@ export default function GithubPanel() {
         </div>
         <Button
           onClick={() => setShowConnect(true)}
-          className="bg-emerald-600 hover:bg-emerald-700 text-white shrink-0"
+          className="bg-indigo-600 hover:bg-indigo-700 text-white shrink-0"
         >
           <Plus className="size-4 mr-2" />
           Connect Repo
@@ -1510,8 +1510,8 @@ export default function GithubPanel() {
           <Card className="rounded-xl">
             <CardContent className="p-4">
               <div className="flex items-center gap-2">
-                <div className="flex size-8 items-center justify-center rounded-lg bg-emerald-100 dark:bg-emerald-900/30">
-                  <Github className="size-4 text-emerald-600 dark:text-emerald-400" />
+                <div className="flex size-8 items-center justify-center rounded-lg bg-indigo-100 dark:bg-indigo-900/30">
+                  <Github className="size-4 text-indigo-600 dark:text-indigo-400" />
                 </div>
                 <div>
                   <p className="text-2xl font-bold">{connectedCount}</p>
@@ -1551,8 +1551,8 @@ export default function GithubPanel() {
           <Card className="rounded-xl">
             <CardContent className="p-4">
               <div className="flex items-center gap-2">
-                <div className="flex size-8 items-center justify-center rounded-lg bg-emerald-100 dark:bg-emerald-900/30">
-                  <GitBranch className="size-4 text-emerald-600 dark:text-emerald-400" />
+                <div className="flex size-8 items-center justify-center rounded-lg bg-indigo-100 dark:bg-indigo-900/30">
+                  <GitBranch className="size-4 text-indigo-600 dark:text-indigo-400" />
                 </div>
                 <div>
                   <p className="text-2xl font-bold">
@@ -1593,7 +1593,7 @@ export default function GithubPanel() {
                 key={project.id}
                 className={`group transition-all rounded-xl ${
                   isConnected
-                    ? 'cursor-pointer hover:shadow-lg hover:border-emerald-200 dark:hover:border-emerald-800 hover:bg-gradient-to-br hover:from-card hover:to-emerald-50/30 dark:hover:to-emerald-950/10'
+                    ? 'cursor-pointer hover:shadow-lg hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gradient-to-br hover:from-card hover:to-indigo-50/30 dark:hover:to-indigo-950/10'
                     : ''
                 } relative overflow-hidden`}
                 onClick={() => {
@@ -1604,13 +1604,13 @@ export default function GithubPanel() {
               >
                 {/* Subtle gradient overlay on hover for connected projects */}
                 {isConnected && (
-                  <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/0 to-emerald-500/0 group-hover:from-emerald-500/5 group-hover:to-transparent transition-all pointer-events-none" />
+                  <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/0 to-indigo-500/0 group-hover:from-indigo-500/5 group-hover:to-transparent transition-all pointer-events-none" />
                 )}
 
                 <CardHeader className="pb-2 relative">
                   <div className="flex items-start justify-between">
                     <div className="flex items-center gap-2">
-                      <Github className={`size-4 ${isConnected ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'}`} />
+                      <Github className={`size-4 ${isConnected ? 'text-indigo-600 dark:text-indigo-400' : 'text-muted-foreground'}`} />
                       <CardTitle className="text-base">{project.name}</CardTitle>
                     </div>
                     <div className="flex items-center gap-2">
@@ -1618,7 +1618,7 @@ export default function GithubPanel() {
                         {frameworkLabel(project.framework)}
                       </Badge>
                       {isConnected ? (
-                        <Badge variant="outline" className="bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400 text-[10px]">
+                        <Badge variant="outline" className="bg-indigo-50 text-indigo-600 dark:bg-indigo-900/20 dark:text-indigo-400 text-[10px]">
                           <CheckCircle2 className="size-2.5 mr-0.5" />
                           Connected
                         </Badge>
@@ -1661,7 +1661,7 @@ export default function GithubPanel() {
                           {timeAgo(project.githubIntegration.createdAt)}
                         </div>
                         {project.githubIntegration.oauthConnected && (
-                          <div className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
+                          <div className="flex items-center gap-1 text-xs text-indigo-600 dark:text-indigo-400">
                             <ShieldCheck className="size-3" />
                             <span>OAuth</span>
                           </div>

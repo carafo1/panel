@@ -73,17 +73,17 @@ interface AuditLogsResponse {
 const PAGE_SIZE = 25
 
 const ACTION_GROUPS: Array<{ label: string; value: string; color: string }> = [
-  { label: 'user.login', value: 'user.login', color: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100' },
+  { label: 'user.login', value: 'user.login', color: 'bg-indigo-100 text-indigo-700 hover:bg-indigo-100' },
   { label: 'user.login_failed', value: 'user.login_failed', color: 'bg-red-100 text-red-700 hover:bg-red-100' },
   { label: 'user.logout', value: 'user.logout', color: 'bg-slate-100 text-slate-700 hover:bg-slate-100' },
-  { label: 'user.register', value: 'user.register', color: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100' },
-  { label: 'project.create', value: 'project.create', color: 'bg-blue-100 text-blue-700 hover:bg-blue-100' },
+  { label: 'user.register', value: 'user.register', color: 'bg-indigo-100 text-indigo-700 hover:bg-indigo-100' },
+  { label: 'project.create', value: 'project.create', color: 'bg-indigo-100 text-indigo-700 hover:bg-indigo-100' },
   { label: 'project.update', value: 'project.update', color: 'bg-amber-100 text-amber-700 hover:bg-amber-100' },
   { label: 'project.delete', value: 'project.delete', color: 'bg-red-100 text-red-700 hover:bg-red-100' },
-  { label: 'project.deploy', value: 'project.deploy', color: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100' },
-  { label: 'domain.register', value: 'domain.register', color: 'bg-purple-100 text-purple-700 hover:bg-purple-100' },
+  { label: 'project.deploy', value: 'project.deploy', color: 'bg-indigo-100 text-indigo-700 hover:bg-indigo-100' },
+  { label: 'domain.register', value: 'domain.register', color: 'bg-indigo-100 text-indigo-700 hover:bg-indigo-100' },
   { label: 'domain.delete', value: 'domain.delete', color: 'bg-red-100 text-red-700 hover:bg-red-100' },
-  { label: 'api_key.create', value: 'api_key.create', color: 'bg-cyan-100 text-cyan-700 hover:bg-cyan-100' },
+  { label: 'api_key.create', value: 'api_key.create', color: 'bg-indigo-100 text-indigo-700 hover:bg-indigo-100' },
   { label: 'api_key.delete', value: 'api_key.delete', color: 'bg-red-100 text-red-700 hover:bg-red-100' },
   { label: 'subscription.create', value: 'subscription.create', color: 'bg-indigo-100 text-indigo-700 hover:bg-indigo-100' },
 ]
@@ -128,7 +128,7 @@ function getStatusBadge(status: string) {
     )
   }
   return (
-    <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100 gap-1">
+    <Badge className="bg-indigo-100 text-indigo-700 hover:bg-indigo-100 gap-1">
       <ShieldCheck className="size-3" />
       Success
     </Badge>
@@ -175,11 +175,11 @@ function getResourceIcon(resource: string) {
     case 'user':
       return <UserIcon className="size-3.5 text-slate-500" />
     case 'project':
-      return <Activity className="size-3.5 text-blue-500" />
+      return <Activity className="size-3.5 text-indigo-500" />
     case 'domain':
-      return <Globe className="size-3.5 text-purple-500" />
+      return <Globe className="size-3.5 text-indigo-500" />
     case 'api_key':
-      return <Key className="size-3.5 text-cyan-500" />
+      return <Key className="size-3.5 text-indigo-500" />
     case 'subscription':
       return <CreditCard className="size-3.5 text-indigo-500" />
     default:
@@ -264,7 +264,7 @@ export default function AuditLogPanel() {
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
             <CardTitle className="flex items-center gap-2">
-              <History className="size-5 text-emerald-600" />
+              <History className="size-5 text-indigo-600" />
               Audit Logs
             </CardTitle>
             <CardDescription className="mt-1">

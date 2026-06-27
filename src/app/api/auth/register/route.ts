@@ -66,7 +66,7 @@ export async function POST(request: Request) {
     await db.notification.create({
       data: {
         userId: user.id,
-        title: 'Welcome to DeployHub!',
+        title: 'Welcome to APSAMO!',
         message: 'Your account has been created. Please verify your email address to get started.',
         type: 'info',
       },

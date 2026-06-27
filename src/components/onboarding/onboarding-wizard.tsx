@@ -54,9 +54,9 @@ interface PlanOption {
 /* ── Data ── */
 const FRAMEWORKS: FrameworkOption[] = [
   { id: 'nextjs', name: 'Next.js', icon: Triangle, description: 'Full-stack React framework with SSR', color: 'text-black dark:text-white' },
-  { id: 'react', name: 'React', icon: Hexagon, description: 'Client-side SPA with React', color: 'text-sky-500' },
-  { id: 'nodejs', name: 'Node.js', icon: FileCode, description: 'Backend API server', color: 'text-green-600' },
-  { id: 'static', name: 'Static', icon: Layout, description: 'HTML/CSS/JS static site', color: 'text-orange-500' },
+  { id: 'react', name: 'React', icon: Hexagon, description: 'Client-side SPA with React', color: 'text-indigo-500' },
+  { id: 'nodejs', name: 'Node.js', icon: FileCode, description: 'Backend API server', color: 'text-indigo-600' },
+  { id: 'static', name: 'Static', icon: Layout, description: 'HTML/CSS/JS static site', color: 'text-indigo-500' },
 ]
 
 const STEP_LABELS = ['Welcome', 'Project', 'Domain', 'Plan', 'Deploy']
@@ -228,15 +228,15 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                   <div
                     className={`flex size-9 items-center justify-center rounded-full text-sm font-semibold transition-all duration-300 ${
                       isCompleted
-                        ? 'bg-emerald-500 text-white'
+                        ? 'bg-indigo-500 text-white'
                         : isCurrent
-                          ? 'bg-emerald-500/10 text-emerald-600 border-2 border-emerald-500'
+                          ? 'bg-indigo-500/10 text-indigo-600 border-2 border-indigo-500'
                           : 'bg-muted text-muted-foreground'
                     }`}
                   >
                     {isCompleted ? <Check className="size-4" /> : stepNum}
                   </div>
-                  <span className={`text-[10px] font-medium hidden sm:block ${isCurrent ? 'text-emerald-600' : 'text-muted-foreground'}`}>
+                  <span className={`text-[10px] font-medium hidden sm:block ${isCurrent ? 'text-indigo-600' : 'text-muted-foreground'}`}>
                     {label}
                   </span>
                 </div>
@@ -245,7 +245,7 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
           </div>
           <div className="h-2 bg-muted rounded-full overflow-hidden">
             <div
-              className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 rounded-full transition-all duration-500 ease-out"
+              className="h-full bg-gradient-to-r from-indigo-500 to-indigo-400 rounded-full transition-all duration-500 ease-out"
               style={{ width: `${progress}%` }}
             />
           </div>
@@ -258,22 +258,22 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
             {step === 1 && (
               <div className="flex-1 flex flex-col items-center justify-center text-center animate-fade-in-up">
                 <div className="relative mb-6">
-                  <div className="size-20 rounded-2xl bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-500/30">
+                  <div className="size-20 rounded-2xl bg-gradient-to-br from-indigo-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-500/30">
                     <Rocket className="size-10 text-white" />
                   </div>
-                  <div className="absolute -top-2 -right-2 size-6 rounded-full bg-emerald-400 flex items-center justify-center animate-float">
+                  <div className="absolute -top-2 -right-2 size-6 rounded-full bg-indigo-400 flex items-center justify-center animate-float">
                     <Sparkles className="size-3 text-white" />
                   </div>
                 </div>
                 <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight mb-3">
-                  Welcome to DeployHub!
+                  Welcome to APSAMO!
                 </h1>
                 <p className="text-muted-foreground text-lg max-w-md mb-8">
                   Let&apos;s get your first project deployed in under 2 minutes
                 </p>
                 <Button
                   size="lg"
-                  className="bg-emerald-500 hover:bg-emerald-600 text-white px-10 h-12 text-base animate-pulse-glow"
+                  className="bg-indigo-500 hover:bg-indigo-600 text-white px-10 h-12 text-base animate-pulse-glow"
                   onClick={() => setStep(2)}
                 >
                   Get Started
@@ -317,15 +317,15 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                           onClick={() => setFramework(fw.id)}
                           className={`flex items-start gap-3 p-4 rounded-xl border-2 text-left transition-all duration-200 hover:shadow-md ${
                             isSelected
-                              ? 'border-emerald-500 bg-emerald-500/5 shadow-md shadow-emerald-500/10'
-                              : 'border-border hover:border-emerald-500/30'
+                              ? 'border-indigo-500 bg-indigo-500/5 shadow-md shadow-indigo-500/10'
+                              : 'border-border hover:border-indigo-500/30'
                           }`}
                         >
-                          <div className={`flex size-10 shrink-0 items-center justify-center rounded-lg ${isSelected ? 'bg-emerald-500/10' : 'bg-muted'}`}>
-                            <fw.icon className={`size-5 ${isSelected ? 'text-emerald-600' : fw.color}`} />
+                          <div className={`flex size-10 shrink-0 items-center justify-center rounded-lg ${isSelected ? 'bg-indigo-500/10' : 'bg-muted'}`}>
+                            <fw.icon className={`size-5 ${isSelected ? 'text-indigo-600' : fw.color}`} />
                           </div>
                           <div>
-                            <p className={`font-semibold text-sm ${isSelected ? 'text-emerald-600' : ''}`}>{fw.name}</p>
+                            <p className={`font-semibold text-sm ${isSelected ? 'text-indigo-600' : ''}`}>{fw.name}</p>
                             <p className="text-xs text-muted-foreground mt-0.5">{fw.description}</p>
                           </div>
                         </button>
@@ -346,7 +346,7 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                       <ArrowLeft className="size-4 mr-1" /> Back
                     </Button>
                     <Button
-                      className="bg-emerald-500 hover:bg-emerald-600 text-white"
+                      className="bg-indigo-500 hover:bg-indigo-600 text-white"
                       onClick={() => setStep(3)}
                       disabled={!projectName.trim()}
                     >
@@ -378,7 +378,7 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                       />
                     </div>
                     <Button
-                      className="bg-emerald-500 hover:bg-emerald-600 text-white"
+                      className="bg-indigo-500 hover:bg-indigo-600 text-white"
                       onClick={handleDomainSearch}
                       disabled={searchingDomain}
                     >
@@ -395,16 +395,16 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                         onClick={() => { setSelectedDomain(domainResults.domain); setUseFreeSubdomain(false) }}
                         className={`w-full flex items-center justify-between p-3 rounded-lg border-2 transition-all ${
                           selectedDomain === domainResults.domain && !useFreeSubdomain
-                            ? 'border-emerald-500 bg-emerald-500/5'
-                            : 'border-border hover:border-emerald-500/30'
+                            ? 'border-indigo-500 bg-indigo-500/5'
+                            : 'border-border hover:border-indigo-500/30'
                         }`}
                       >
                         <div className="flex items-center gap-2">
-                          <Check className="size-4 text-emerald-500" />
+                          <Check className="size-4 text-indigo-500" />
                           <span className="font-medium text-sm">{domainResults.domain}</span>
-                          <Badge variant="secondary" className="text-[10px] bg-emerald-500/10 text-emerald-600">Available</Badge>
+                          <Badge variant="secondary" className="text-[10px] bg-indigo-500/10 text-indigo-600">Available</Badge>
                         </div>
-                        <span className="font-semibold text-emerald-600">${domainResults.price}/yr</span>
+                        <span className="font-semibold text-indigo-600">${domainResults.price}/yr</span>
                       </button>
                     )}
                     {domainResults.suggestions?.map((s) => (
@@ -413,15 +413,15 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                         onClick={() => { setSelectedDomain(s.domain); setUseFreeSubdomain(false) }}
                         className={`w-full flex items-center justify-between p-3 rounded-lg border-2 transition-all ${
                           selectedDomain === s.domain && !useFreeSubdomain
-                            ? 'border-emerald-500 bg-emerald-500/5'
-                            : 'border-border hover:border-emerald-500/30'
+                            ? 'border-indigo-500 bg-indigo-500/5'
+                            : 'border-border hover:border-indigo-500/30'
                         }`}
                       >
                         <div className="flex items-center gap-2">
                           <Globe className="size-4 text-muted-foreground" />
                           <span className="font-medium text-sm">{s.domain}</span>
                         </div>
-                        <span className="font-semibold text-emerald-600">${s.price}/yr</span>
+                        <span className="font-semibold text-indigo-600">${s.price}/yr</span>
                       </button>
                     ))}
                   </div>
@@ -432,20 +432,20 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                   onClick={() => { setUseFreeSubdomain(true); setSelectedDomain(null) }}
                   className={`w-full flex items-center gap-3 p-4 rounded-xl border-2 transition-all mb-4 ${
                     useFreeSubdomain
-                      ? 'border-emerald-500 bg-emerald-500/5'
-                      : 'border-border hover:border-emerald-500/30'
+                      ? 'border-indigo-500 bg-indigo-500/5'
+                      : 'border-border hover:border-indigo-500/30'
                   }`}
                 >
-                  <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10">
-                    <Globe className="size-5 text-emerald-500" />
+                  <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-indigo-500/10">
+                    <Globe className="size-5 text-indigo-500" />
                   </div>
                   <div className="text-left">
                     <p className="font-semibold text-sm">Use a free subdomain</p>
                     <p className="text-xs text-muted-foreground">
-                      <span className="text-emerald-600 font-mono">{slug}.deployhub.io</span> — Free with any plan
+                      <span className="text-indigo-600 font-mono">{slug}.deployhub.io</span> — Free with any plan
                     </p>
                   </div>
-                  <Badge variant="secondary" className="ml-auto bg-emerald-500/10 text-emerald-600 text-[10px]">FREE</Badge>
+                  <Badge variant="secondary" className="ml-auto bg-indigo-500/10 text-indigo-600 text-[10px]">FREE</Badge>
                 </button>
 
                 <div className="mt-auto flex items-center justify-between">
@@ -460,7 +460,7 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                       <ArrowLeft className="size-4 mr-1" /> Back
                     </Button>
                     <Button
-                      className="bg-emerald-500 hover:bg-emerald-600 text-white"
+                      className="bg-indigo-500 hover:bg-indigo-600 text-white"
                       onClick={() => setStep(4)}
                       disabled={!selectedDomain && !useFreeSubdomain}
                     >
@@ -481,7 +481,7 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
 
                 {loadingPlans ? (
                   <div className="flex-1 flex items-center justify-center">
-                    <Loader2 className="size-8 animate-spin text-emerald-500" />
+                    <Loader2 className="size-8 animate-spin text-indigo-500" />
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
@@ -493,12 +493,12 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                           onClick={() => setSelectedPlan(plan.id)}
                           className={`relative flex flex-col p-4 rounded-xl border-2 text-left transition-all duration-200 hover:shadow-md ${
                             isSelected
-                              ? 'border-emerald-500 bg-emerald-500/5 shadow-md shadow-emerald-500/10'
-                              : 'border-border hover:border-emerald-500/30'
+                              ? 'border-indigo-500 bg-indigo-500/5 shadow-md shadow-indigo-500/10'
+                              : 'border-border hover:border-indigo-500/30'
                           }`}
                         >
                           {plan.popular && (
-                            <Badge className="absolute -top-2.5 left-1/2 -translate-x-1/2 bg-emerald-500 text-white border-0 text-[10px] px-2 py-0">
+                            <Badge className="absolute -top-2.5 left-1/2 -translate-x-1/2 bg-indigo-500 text-white border-0 text-[10px] px-2 py-0">
                               POPULAR
                             </Badge>
                           )}
@@ -512,7 +512,7 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                             <ul className="mt-3 space-y-1">
                               {plan.features.slice(0, 3).map((f) => (
                                 <li key={f} className="flex items-center gap-1.5 text-[11px]">
-                                  <Check className="size-3 text-emerald-500 shrink-0" />
+                                  <Check className="size-3 text-indigo-500 shrink-0" />
                                   {f}
                                 </li>
                               ))}
@@ -536,7 +536,7 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                       <ArrowLeft className="size-4 mr-1" /> Back
                     </Button>
                     <Button
-                      className="bg-emerald-500 hover:bg-emerald-600 text-white"
+                      className="bg-indigo-500 hover:bg-indigo-600 text-white"
                       onClick={() => setStep(5)}
                       disabled={!selectedPlan}
                     >
@@ -576,7 +576,7 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                   </div>
                   <div className="flex items-center justify-between py-2">
                     <span className="text-sm text-muted-foreground">Monthly Cost</span>
-                    <span className="font-bold text-lg text-emerald-600">${monthlyCost}/mo</span>
+                    <span className="font-bold text-lg text-indigo-600">${monthlyCost}/mo</span>
                   </div>
                 </div>
 
@@ -592,7 +592,7 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                       <ArrowLeft className="size-4 mr-1" /> Back
                     </Button>
                     <Button
-                      className="bg-emerald-500 hover:bg-emerald-600 text-white px-8"
+                      className="bg-indigo-500 hover:bg-indigo-600 text-white px-8"
                       onClick={handleDeploy}
                       disabled={deploying}
                     >
@@ -618,7 +618,7 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
               <div className="flex-1 flex flex-col items-center justify-center text-center relative animate-fade-in-up">
                 <ConfettiEffect />
                 <div className="animate-success-bounce mb-6">
-                  <div className="size-20 rounded-full bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-500/30">
+                  <div className="size-20 rounded-full bg-gradient-to-br from-indigo-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-500/30">
                     <Check className="size-10 text-white" />
                   </div>
                 </div>
@@ -628,16 +628,16 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                 <p className="text-muted-foreground mb-6">
                   Congratulations! Your project has been deployed successfully.
                 </p>
-                <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-4 py-3 mb-8">
-                  <Globe className="size-4 text-emerald-500" />
-                  <span className="font-mono font-semibold text-emerald-600 text-sm">
+                <div className="flex items-center gap-2 bg-indigo-500/10 border border-indigo-500/20 rounded-lg px-4 py-3 mb-8">
+                  <Globe className="size-4 text-indigo-500" />
+                  <span className="font-mono font-semibold text-indigo-600 text-sm">
                     https://{deployUrl}
                   </span>
-                  <ExternalLink className="size-3 text-emerald-500" />
+                  <ExternalLink className="size-3 text-indigo-500" />
                 </div>
                 <Button
                   size="lg"
-                  className="bg-emerald-500 hover:bg-emerald-600 text-white px-10 h-12 text-base"
+                  className="bg-indigo-500 hover:bg-indigo-600 text-white px-10 h-12 text-base"
                   onClick={onComplete}
                 >
                   Go to Dashboard
