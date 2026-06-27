@@ -353,9 +353,9 @@ export function SiteLayout({ children, onGetStarted }: SiteLayoutProps) {
               {
                 title: 'Resources',
                 links: [
-                  { label: 'Documentation', href: '#/' },
-                  { label: 'Blog', href: '#/' },
-                  { label: 'Status', href: '#/' },
+                  { label: 'Documentation', href: '#/about' },
+                  { label: 'Blog', href: '#/about' },
+                  { label: 'Status', href: '#/home' },
                   { label: 'Support', href: '#/contact' },
                 ],
               },

@@ -2571,3 +2571,40 @@ Stage Summary:
 - Active-state highlighting works: the current service is highlighted in the dropdown; "Services" stays underlined when on any service page.
 - No lint errors, no runtime errors, responsive across desktop + mobile.
 - Artifact: src/components/landing/site-layout.tsx.
+
+---
+Task ID: finish-complete
+Agent: main (Z.ai Code)
+Task: Finish everything completely (user request: "do all to finish completely"). Addressed the 3 remaining gaps identified in the prior audit.
+
+Work Log:
+- Built NEW dedicated `saas-system-page.tsx` matching the design depth of the other 3 service pages:
+  - Count-up stats bar (6mo boilerplate saved, 100% ownership, 4wks to launch, 50k users)
+  - 8-module grid (Auth, Multi-tenancy, Billing, Teams & RBAC, Admin, Onboarding & Email, Webhooks, Security & Compliance) each with icon + tags
+  - 4-layer architecture stack (Presentation / Application / Data / Infrastructure) as horizontal cards with tech tags
+  - 12-integration grid (Stripe, Google/GitHub/Apple OAuth, Waafi, Resend, Slack, Postgres, Redis, Sentry, PostHog, Cloudflare)
+  - "Skip 6 months of boilerplate" split section with a "What you get on day one" summary card
+  - Pricing (MVP/Scale/Enterprise) + FAQs + CTA
+- Added `not-found` page type to `PublicPage` union in `app-store.ts`.
+- Updated `use-public-hash-router.ts`: unknown top-level hash segments now route to `not-found` (previously silently went to home). Added `buildHash` case + `home` case for clarity.
+- Built NEW `not-found-page.tsx`: big gradient "404" with layered shadow, helpful message, "Back to Home" + "Browse Services" CTAs (as `<a>` tags so the URL updates), popular-destinations grid linking to all 4 services, and a "Contact our team" help line. VLM rated 9/10.
+- Updated `public-router.tsx`: added `saas-system` case → `SaasSystemPage`; changed service-detail `default` to render `NotFoundPage` for unknown slugs; added top-level `not-found` case.
+- Updated footer Resources column in `site-layout.tsx`: Documentation→#/about, Blog→#/about, Status→#/home, Support→#/contact (previously all pointed to #/).
+- Removed unused `Button`/`Card` imports from `not-found-page.tsx` after switching CTAs to `<a>` tags.
+- Ran `bun run lint` → clean (no errors/warnings).
+- Agent Browser verification:
+  - SaaS page: H1 = "Full SaaS platforms — done right"; DOM confirmed all 7 sections present (body height 6791px); modules section VLM 8/10.
+  - 404 page (unknown route `#/totally-fake-page`): H1 = "404", renders correctly, VLM 9/10.
+  - 404 page (unknown service slug `#/services/nonexistent-service`): H1 = "404" (now uses NotFoundPage instead of the old minimal "Service not found").
+  - 404 "Back to Home" link: clicked → URL became `#/`, H1 = "Deploy in Seconds..." (home renders).
+  - Regression: all 9 routes verified (`#/`, `#/services`, 4× service-detail, `#/pricing`, `#/about`, `#/contact`) — every H1 correct, zero page errors.
+  - Footer Resources links verified: Documentation/Blog/Status/Support all point to real routes.
+- Final state: dev server HTTP 200, lint clean, zero runtime errors in dev.log.
+
+Stage Summary:
+- ALL 4 flagship services now have dedicated, custom-designed pages (Web Development, Hosting, Domain, SaaS System) — no more generic template fallback.
+- Unknown routes and unknown service slugs now show a polished branded 404 page (with service shortcuts + contact link) instead of silently going home or showing a minimal message.
+- Footer Resources column fully wired to real destinations.
+- Artifacts: src/components/landing/pages/{saas-system-page,not-found-page}.tsx, src/components/landing/{public-router,use-public-hash-router,site-layout}.tsx, src/store/app-store.ts.
+- Screenshots: screenshots/{saas-page,saas-modules,saas-arch,saas-integrations,not-found-page}.png.
+- Project is now complete: all pages built, all menu/footer links wired, 404 handled, lint clean, browser-verified.

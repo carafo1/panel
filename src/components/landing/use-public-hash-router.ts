@@ -36,8 +36,11 @@ export function parseHash(hash: string): PublicPageState {
       return { page: 'about' }
     case 'contact':
       return { page: 'contact' }
-    default:
+    case 'home':
       return { page: 'home' }
+    default:
+      // Unknown top-level segment → 404 (only when the user typed something).
+      return { page: 'not-found' }
   }
 }
 
@@ -56,6 +59,8 @@ export function buildHash(page: PublicPageState): string {
       return '#/about'
     case 'contact':
       return '#/contact'
+    case 'not-found':
+      return '#/not-found'
   }
 }
 

@@ -8,9 +8,11 @@ import { ServiceDetailPage } from './pages/service-detail-page'
 import { WebDevelopmentPage } from './pages/web-development-page'
 import { HostingPage } from './pages/hosting-page'
 import { DomainPage } from './pages/domain-page'
+import { SaasSystemPage } from './pages/saas-system-page'
 import { PricingPage } from './pages/pricing-page'
 import { AboutPage } from './pages/about-page'
 import { ContactPage } from './pages/contact-page'
+import { NotFoundPage } from './pages/not-found-page'
 
 interface PublicRouterProps {
   onGetStarted: () => void
@@ -25,7 +27,7 @@ export function PublicRouter({ onGetStarted }: PublicRouterProps) {
       content = <ServicesPage />
       break
     case 'service-detail':
-      // Dedicated, custom-designed pages for the flagship services.
+      // Dedicated, custom-designed pages for every service.
       switch (publicPage.slug) {
         case 'web-development':
           content = <WebDevelopmentPage onGetStarted={onGetStarted} />
@@ -36,8 +38,11 @@ export function PublicRouter({ onGetStarted }: PublicRouterProps) {
         case 'domain-registration':
           content = <DomainPage onGetStarted={onGetStarted} />
           break
+        case 'saas-system':
+          content = <SaasSystemPage onGetStarted={onGetStarted} />
+          break
         default:
-          content = <ServiceDetailPage slug={publicPage.slug} onGetStarted={onGetStarted} />
+          content = <NotFoundPage />
       }
       break
     case 'pricing':
@@ -48,6 +53,9 @@ export function PublicRouter({ onGetStarted }: PublicRouterProps) {
       break
     case 'contact':
       content = <ContactPage />
+      break
+    case 'not-found':
+      content = <NotFoundPage />
       break
     case 'home':
     default:
