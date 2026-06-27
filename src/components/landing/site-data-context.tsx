@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react'
 import { SERVICES } from './services-data'
 import { resolveIcon } from './icon-registry'
+import { DEFAULT_CONTENT } from '@/lib/content-schema'
 import type { LucideIcon } from 'lucide-react'
 
 /**
@@ -138,8 +139,13 @@ export function SiteDataProvider({ children }: SiteDataProviderProps) {
     refresh()
   }, [refresh])
 
-  const getContent = useCallback((key: string, fallback = '') => {
-    return content[key] ?? fallback
+  const getContent = useCallback((key: string, fallback?: string) => {
+    // Prefer the admin-overridden DB value, then the schema default, then
+    // the caller-provided fallback. This guarantees every known key resolves
+    // even before the API responds (during the initial loading state).
+    if (content[key] != null && content[key] !== '') return content[key]
+    if (DEFAULT_CONTENT[key] != null) return DEFAULT_CONTENT[key]
+    return fallback ?? ''
   }, [content])
 
   return (

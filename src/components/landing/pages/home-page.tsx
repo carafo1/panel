@@ -7,15 +7,12 @@ import {
   Sparkles, ArrowRight, Play, Check, Zap, Shield, Globe2,
   GitBranch, Activity, Users, Server, Code2, Rocket,
 } from 'lucide-react'
-import { SERVICES } from '../services-data'
 import {
   useCountUp, useSpotlight, ScrollReveal, StaggerCard,
 } from '../ui-helpers'
 import { DomainSearchWidget } from '../domain-search-widget'
 import { useAppStore } from '@/store/app-store'
 import { useSiteContent, resolveIcon } from '../site-data-context'
-
-const TECH_STACK = ['React', 'Next.js', 'TypeScript', 'Node.js', 'Tailwind', 'Prisma', 'Docker', 'Vercel', 'AWS', 'Cloudflare', 'GitHub', 'FastAPI']
 
 const STATS = [
   { value: 10000, suffix: '+', label: 'Developers' },
@@ -57,7 +54,11 @@ interface HomePageProps {
 
 export function HomePage({ onGetStarted }: HomePageProps) {
   const { setPublicPage } = useAppStore()
-  const { services } = useSiteContent()
+  const { services, getContent } = useSiteContent()
+  const techStack = getContent('home.techStack.items')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
   const stat0 = useCountUp(STATS[0].value, 2000)
   const stat1 = useCountUp(STATS[1].value, 2000)
   const stat2 = useCountUp(STATS[2].value, 2000)
@@ -83,38 +84,33 @@ export function HomePage({ onGetStarted }: HomePageProps) {
           <div className="animate-fade-in-up">
             <span className="inline-flex items-center gap-2 mb-6 rounded-full glass px-4 py-1.5 text-sm text-indigo-200">
               <Sparkles className="size-3.5 text-indigo-300" />
-              Web Development · Hosting · Domains · SaaS
+              {getContent('home.hero.badge')}
             </span>
           </div>
 
           <h1 className="text-5xl sm:text-6xl lg:text-8xl font-extrabold tracking-tight leading-[1.02] mb-6 animate-fade-in-up" style={{ animationDelay: '0.15s' }}>
-            Deploy in Seconds,{' '}
-            <span className="text-gradient-brand">Scale Without Limits</span>
+            {getContent('home.hero.title')}
           </h1>
 
           <p className="mx-auto max-w-2xl text-lg sm:text-xl text-zinc-300 mb-10 leading-relaxed animate-fade-in-up" style={{ animationDelay: '0.3s' }}>
-            From <span className="text-indigo-300 font-medium">web development</span> and{' '}
-            <span className="text-indigo-300 font-medium">hosting</span> to{' '}
-            <span className="text-indigo-300 font-medium">domain registration</span> and{' '}
-            <span className="text-indigo-300 font-medium">SaaS platforms</span> — APSAMO
-            builds, hosts, and scales your entire online presence.
+            {getContent('home.hero.subtitle')}
           </p>
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 animate-fade-in-up" style={{ animationDelay: '0.45s' }}>
             <Button size="lg" className="btn-shimmer relative bg-indigo-500 hover:bg-indigo-600 text-white px-8 h-12 text-base shadow-glow-indigo hover:shadow-glow-indigo-lg transition-all duration-300 hover:scale-105 border-0" onClick={onGetStarted}>
-              Start Deploying
+              {getContent('home.hero.ctaPrimary')}
               <ArrowRight className="size-4 ml-1" />
             </Button>
             <button onClick={() => setPublicPage({ page: 'services' })} className="group inline-flex items-center justify-center gap-2 h-12 px-8 text-base rounded-md glass text-white hover:bg-white/10 transition-all duration-300">
               <Play className="size-4 text-indigo-300" />
-              Explore Services
+              {getContent('home.hero.ctaSecondary')}
             </button>
           </div>
 
           <div className="mt-14 flex flex-wrap items-center justify-center gap-x-8 gap-y-3 text-sm text-zinc-400 animate-fade-in-up" style={{ animationDelay: '0.6s' }}>
-            <span className="inline-flex items-center gap-2"><Check className="size-4 text-indigo-400" /> No credit card required</span>
-            <span className="inline-flex items-center gap-2"><Check className="size-4 text-indigo-400" /> Free SSL on every plan</span>
-            <span className="inline-flex items-center gap-2"><Check className="size-4 text-indigo-400" /> 99.9% uptime SLA</span>
+            <span className="inline-flex items-center gap-2"><Check className="size-4 text-indigo-400" /> {getContent('home.hero.check1')}</span>
+            <span className="inline-flex items-center gap-2"><Check className="size-4 text-indigo-400" /> {getContent('home.hero.check2')}</span>
+            <span className="inline-flex items-center gap-2"><Check className="size-4 text-indigo-400" /> {getContent('home.hero.check3')}</span>
           </div>
 
           {/* Domain search widget */}
@@ -122,8 +118,8 @@ export function HomePage({ onGetStarted }: HomePageProps) {
             <DomainSearchWidget
               onGetStarted={onGetStarted}
               variant="hero"
-              title="Find Your Perfect Domain"
-              subtitle="Search 100+ TLDs with live availability & instant pricing"
+              title={getContent('widget.domain.title')}
+              subtitle={getContent('widget.domain.subtitle')}
             />
           </div>
         </div>
@@ -132,11 +128,11 @@ export function HomePage({ onGetStarted }: HomePageProps) {
       {/* TECH STACK MARQUEE */}
       <section className="border-b bg-background py-10">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 mb-6 text-center">
-          <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground font-medium">Powered by a modern, battle-tested stack</p>
+          <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground font-medium">{getContent('home.techStack.label')}</p>
         </div>
         <div className="marquee">
           <div className="marquee-track gap-8 px-4">
-            {[...TECH_STACK, ...TECH_STACK].map((tech, i) => (
+            {[...techStack, ...techStack].map((tech, i) => (
               <span key={i} className="text-lg font-semibold text-muted-foreground/70 whitespace-nowrap">{tech}</span>
             ))}
           </div>
@@ -162,9 +158,9 @@ export function HomePage({ onGetStarted }: HomePageProps) {
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <ScrollReveal>
             <div className="text-center mb-16">
-              <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">Our Services</Badge>
-              <h2 className="text-3xl sm:text-5xl font-extrabold tracking-tight">Everything you need to <span className="text-gradient-brand">build &amp; grow</span></h2>
-              <p className="mt-4 text-lg text-muted-foreground max-w-2xl mx-auto">Four integrated services, one platform. From your first line of code to global scale.</p>
+              <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">{getContent('home.services.badge')}</Badge>
+              <h2 className="text-3xl sm:text-5xl font-extrabold tracking-tight"><span className="text-gradient-brand">{getContent('home.services.title')}</span></h2>
+              <p className="mt-4 text-lg text-muted-foreground max-w-2xl mx-auto">{getContent('home.services.subtitle')}</p>
             </div>
           </ScrollReveal>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -201,8 +197,9 @@ export function HomePage({ onGetStarted }: HomePageProps) {
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <ScrollReveal>
             <div className="text-center mb-16">
-              <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">Platform Features</Badge>
-              <h2 className="text-3xl sm:text-5xl font-extrabold tracking-tight">Built for <span className="text-gradient-brand">production</span>, not just demos</h2>
+              <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">{getContent('home.features.badge')}</Badge>
+              <h2 className="text-3xl sm:text-5xl font-extrabold tracking-tight"><span className="text-gradient-brand">{getContent('home.features.title')}</span></h2>
+              <p className="mt-4 text-lg text-muted-foreground max-w-2xl mx-auto">{getContent('home.features.subtitle')}</p>
             </div>
           </ScrollReveal>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
@@ -232,8 +229,9 @@ export function HomePage({ onGetStarted }: HomePageProps) {
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <ScrollReveal>
             <div className="text-center mb-16">
-              <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">How It Works</Badge>
-              <h2 className="text-3xl sm:text-5xl font-extrabold tracking-tight">From code to cloud in <span className="text-gradient-brand">three steps</span></h2>
+              <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">{getContent('home.howItWorks.badge')}</Badge>
+              <h2 className="text-3xl sm:text-5xl font-extrabold tracking-tight"><span className="text-gradient-brand">{getContent('home.howItWorks.title')}</span></h2>
+              <p className="mt-4 text-lg text-muted-foreground max-w-2xl mx-auto">{getContent('home.howItWorks.subtitle')}</p>
             </div>
           </ScrollReveal>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
@@ -260,8 +258,8 @@ export function HomePage({ onGetStarted }: HomePageProps) {
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <ScrollReveal>
             <div className="text-center mb-16">
-              <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">Testimonials</Badge>
-              <h2 className="text-3xl sm:text-5xl font-extrabold tracking-tight">Loved by <span className="text-gradient-brand">developers</span> worldwide</h2>
+              <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">{getContent('home.testimonials.badge')}</Badge>
+              <h2 className="text-3xl sm:text-5xl font-extrabold tracking-tight"><span className="text-gradient-brand">{getContent('home.testimonials.title')}</span></h2>
             </div>
           </ScrollReveal>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -295,9 +293,9 @@ export function HomePage({ onGetStarted }: HomePageProps) {
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <ScrollReveal>
             <div className="text-center mb-16">
-              <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">Pricing</Badge>
-              <h2 className="text-3xl sm:text-5xl font-extrabold tracking-tight">Simple, <span className="text-gradient-brand">transparent</span> pricing</h2>
-              <p className="mt-4 text-lg text-muted-foreground">Start free. Upgrade when you grow. No hidden fees.</p>
+              <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">{getContent('home.pricing.badge')}</Badge>
+              <h2 className="text-3xl sm:text-5xl font-extrabold tracking-tight"><span className="text-gradient-brand">{getContent('home.pricing.title')}</span></h2>
+              <p className="mt-4 text-lg text-muted-foreground">{getContent('home.pricing.subtitle')}</p>
             </div>
           </ScrollReveal>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
@@ -348,11 +346,11 @@ export function HomePage({ onGetStarted }: HomePageProps) {
         <div className="relative z-10 mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 text-center py-24">
           <ScrollReveal>
             <div className="relative rounded-3xl glass p-8 sm:p-16 shadow-glow-indigo-lg">
-              <h2 className="text-3xl sm:text-5xl font-extrabold tracking-tight mb-4">Ready to Deploy?</h2>
-              <p className="text-zinc-300 text-lg mb-8 max-w-lg mx-auto">Start building and deploying today. No credit card required.</p>
+              <h2 className="text-3xl sm:text-5xl font-extrabold tracking-tight mb-4"><span className="text-gradient-brand">{getContent('home.cta.title')}</span></h2>
+              <p className="text-zinc-300 text-lg mb-8 max-w-lg mx-auto">{getContent('home.cta.subtitle')}</p>
               <Button size="lg" className="btn-shimmer relative bg-indigo-500 hover:bg-indigo-600 text-white px-10 h-12 text-base shadow-glow-indigo hover:shadow-glow-indigo-lg hover:scale-105 transition-all duration-300 border-0" onClick={onGetStarted}>
                 <Rocket className="size-4 mr-2" />
-                Get Started Free
+                {getContent('home.cta.button')}
               </Button>
             </div>
           </ScrollReveal>

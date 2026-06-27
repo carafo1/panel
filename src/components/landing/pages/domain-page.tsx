@@ -14,6 +14,7 @@ import {
 import { PageHero, ScrollReveal, StaggerCard } from '../ui-helpers'
 import { DomainSearchWidget } from '../domain-search-widget'
 import { useAppStore } from '@/store/app-store'
+import { useSiteContent, useServiceBySlug } from '../site-data-context'
 
 const TLD_TABLE = [
   { tld: '.com', price: 12.99, popular: true, category: 'Business', desc: 'The classic. Recognised worldwide.' },
@@ -46,7 +47,7 @@ const LIFECYCLE = [
   { icon: RefreshCw, title: 'Renew', desc: 'Auto-renewal keeps your domain yours. Get alerts before every renewal.' },
 ]
 
-const PLANS = [
+const FALLBACK_PLANS = [
   {
     name: '.com',
     price: 12.99,
@@ -90,7 +91,7 @@ const PLANS = [
   },
 ]
 
-const FAQS = [
+const FALLBACK_FAQS = [
   {
     q: 'How much does a domain cost?',
     a: 'Pricing varies by TLD. .com starts at $12.99/year, .io at $39.99/year, .ai at $92.10/year. Use the search above to get live pricing for any domain.',
@@ -115,13 +116,17 @@ interface DomainPageProps {
 
 export function DomainPage({ onGetStarted }: DomainPageProps) {
   const { setPublicPage } = useAppStore()
+  const { getContent } = useSiteContent()
+  const service = useServiceBySlug('domain-registration')
+  const plans = service?.plans?.length ? service.plans : FALLBACK_PLANS
+  const faqs = service?.faqs?.length ? service.faqs : FALLBACK_FAQS
 
   return (
     <>
       <PageHero
-        badge="Domain Registration"
-        title={<>Find &amp; register the perfect <span className="text-gradient-brand">domain</span></>}
-        subtitle="Search 100+ TLDs with real-time availability and transparent Dynadot-powered pricing. Free WHOIS privacy, automatic DNS, and one-click transfers — APSAMO is your one-stop domain shop."
+        badge={getContent('svc.domain-registration.hero.badge')}
+        title={getContent('svc.domain-registration.hero.title')}
+        subtitle={getContent('svc.domain-registration.hero.subtitle')}
       />
 
       {/* Domain search widget */}
@@ -130,8 +135,8 @@ export function DomainPage({ onGetStarted }: DomainPageProps) {
           <DomainSearchWidget
             onGetStarted={onGetStarted}
             variant="section"
-            title="Check Domain Availability"
-            subtitle="Real-time search across 100+ TLDs with live Dynadot pricing"
+            title={getContent('widget.domain.sectionTitle')}
+            subtitle={getContent('widget.domain.sectionSubtitle')}
           />
         </div>
       </section>
@@ -142,7 +147,7 @@ export function DomainPage({ onGetStarted }: DomainPageProps) {
           <ScrollReveal>
             <div className="text-center mb-14">
               <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">TLD Pricing</Badge>
-              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight">Transparent pricing for <span className="text-gradient-brand">every TLD</span></h2>
+              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight"><span className="text-gradient-brand">{getContent('svc.domain-registration.pricing.title')}</span></h2>
               <p className="mt-3 text-muted-foreground max-w-2xl mx-auto">Live Dynadot wholesale + a small markup. What you see is what you pay — no hidden fees at checkout.</p>
             </div>
           </ScrollReveal>
@@ -201,7 +206,7 @@ export function DomainPage({ onGetStarted }: DomainPageProps) {
           <ScrollReveal>
             <div className="text-center mb-14">
               <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">Included Free</Badge>
-              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight">Every domain comes <span className="text-gradient-brand">fully loaded</span></h2>
+              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight"><span className="text-gradient-brand">{getContent('svc.domain-registration.features.title')}</span></h2>
               <p className="mt-3 text-muted-foreground max-w-2xl mx-auto">No upsells, no surprise add-ons. These ship with every single domain registration.</p>
             </div>
           </ScrollReveal>
@@ -233,7 +238,7 @@ export function DomainPage({ onGetStarted }: DomainPageProps) {
           <ScrollReveal>
             <div className="text-center mb-14">
               <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">How It Works</Badge>
-              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight">From search to live in <span className="text-gradient-brand">four steps</span></h2>
+              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight"><span className="text-gradient-brand">{getContent('svc.domain-registration.lifecycle.title')}</span></h2>
             </div>
           </ScrollReveal>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
@@ -269,12 +274,12 @@ export function DomainPage({ onGetStarted }: DomainPageProps) {
           <ScrollReveal>
             <div className="text-center mb-14">
               <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">Popular TLDs</Badge>
-              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight">Pick the right <span className="text-gradient-brand">extension</span></h2>
+              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight"><span className="text-gradient-brand">{getContent('svc.domain-registration.tld.title')}</span></h2>
               <p className="mt-3 text-muted-foreground">All prices include WHOIS privacy, DNS, and forwarding.</p>
             </div>
           </ScrollReveal>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
-            {PLANS.map((plan, i) => (
+            {plans.map((plan, i) => (
               <StaggerCard key={plan.name} index={i}>
                 <Card className={`relative flex flex-col h-full transition-all duration-500 bg-card/80 backdrop-blur-sm ${plan.popular ? 'border-indigo-500 shadow-glow-indigo scale-[1.03] shimmer-border' : 'hover:border-indigo-500/30 hover:shadow-modern-lg'}`}>
                   {plan.popular && (
@@ -314,11 +319,11 @@ export function DomainPage({ onGetStarted }: DomainPageProps) {
           <ScrollReveal>
             <div className="text-center mb-10">
               <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">FAQ</Badge>
-              <h2 className="text-3xl font-extrabold tracking-tight">Frequently asked questions</h2>
+              <h2 className="text-3xl font-extrabold tracking-tight">{getContent('svc.domain-registration.faq.title')}</h2>
             </div>
           </ScrollReveal>
           <Accordion type="single" collapsible className="w-full">
-            {FAQS.map((faq, i) => (
+            {faqs.map((faq, i) => (
               <AccordionItem key={i} value={`item-${i}`}>
                 <AccordionTrigger className="text-left">{faq.q}</AccordionTrigger>
                 <AccordionContent className="text-muted-foreground">{faq.a}</AccordionContent>
@@ -334,12 +339,12 @@ export function DomainPage({ onGetStarted }: DomainPageProps) {
         <div className="aurora-blob aurora-blob-2" style={{ bottom: '-15%', left: '5%', width: '420px', height: '420px', background: 'radial-gradient(circle, #8888FF 0%, transparent 70%)' }} />
         <div className="relative z-10 mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 text-center py-24">
           <ScrollReveal>
-            <h2 className="text-3xl sm:text-5xl font-extrabold tracking-tight mb-4">Claim your <span className="text-gradient-brand">domain</span> today</h2>
+            <h2 className="text-3xl sm:text-5xl font-extrabold tracking-tight mb-4"><span className="text-gradient-brand">{getContent('svc.domain-registration.cta.title')}</span></h2>
             <p className="text-zinc-300 text-lg mb-8 max-w-xl mx-auto">Search, register, and connect in minutes. Free WHOIS privacy on every domain, forever.</p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
               <Button size="lg" className="btn-shimmer bg-indigo-500 hover:bg-indigo-600 text-white px-10 h-12 border-0 shadow-glow-indigo hover:scale-105 transition-all" onClick={onGetStarted}>
                 <Globe className="size-4 mr-2" />
-                Search Domains
+                {getContent('svc.domain-registration.cta.button')}
                 <ArrowRight className="size-4 ml-2" />
               </Button>
               <button onClick={() => setPublicPage({ page: 'services' })} className="inline-flex items-center justify-center gap-2 h-12 px-8 rounded-md glass text-white hover:bg-white/10 transition-all">

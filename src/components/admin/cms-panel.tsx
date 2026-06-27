@@ -25,9 +25,12 @@ import { toast } from 'sonner'
 import {
   Plus, Pencil, Trash2, Eye, EyeOff, GripVertical, Save, Loader2,
   FileText, LayoutGrid, RefreshCw, X, ChevronUp, ChevronDown, Save as SaveIcon,
+  ChevronRight,
 } from 'lucide-react'
 import { useAuthStore } from '@/store/auth-store'
 import { ICON_NAMES, resolveIcon } from '@/components/landing/icon-registry'
+import { CONTENT_GROUPS, KNOWN_CONTENT_KEYS } from '@/lib/content-schema'
+import { cn } from '@/lib/utils'
 
 // ── Types ──────────────────────────────────────────────────────────────
 interface CmsPlan {
@@ -127,6 +130,7 @@ export function CmsPanel() {
   const [editing, setEditing] = useState<Partial<CmsService> | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<CmsService | null>(null)
+  const [view, setView] = useState<'services' | 'pages'>('services')
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
@@ -270,144 +274,122 @@ export function CmsPanel() {
             Content Management
           </h2>
           <p className="text-sm text-muted-foreground mt-1">
-            Manage services, pricing, and site text. Changes go live instantly.
+            Manage services, pricing, and all text on the website. Changes go live instantly.
           </p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={fetchAll} disabled={loading}>
             <RefreshCw className="size-4 mr-1" /> Refresh
           </Button>
-          <Button size="sm" onClick={openCreate} className="bg-indigo-500 hover:bg-indigo-600 text-white border-0">
-            <Plus className="size-4 mr-1" /> New Service
-          </Button>
+          {view === 'services' && (
+            <Button size="sm" onClick={openCreate} className="bg-indigo-500 hover:bg-indigo-600 text-white border-0">
+              <Plus className="size-4 mr-1" /> New Service
+            </Button>
+          )}
         </div>
       </div>
 
-      {/* Services table */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">Services ({services.length})</CardTitle>
-          <CardDescription>Add, edit, delete, reorder, and toggle visibility of services shown on the public site.</CardDescription>
-        </CardHeader>
-        <CardContent className="p-0">
-          <ScrollArea className="max-h-[28rem]">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-10"></TableHead>
-                  <TableHead>Service</TableHead>
-                  <TableHead className="hidden md:table-cell">Slug</TableHead>
-                  <TableHead className="hidden lg:table-cell">Plans</TableHead>
-                  <TableHead className="text-center">Visible</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {services.map((svc, i) => {
-                  const Icon = resolveIcon(svc.iconName)
-                  return (
-                    <TableRow key={svc.id}>
-                      <TableCell className="align-middle">
-                        <div className="flex flex-col">
-                          <button onClick={() => moveOrder(svc, 'up')} disabled={i === 0} className="text-muted-foreground hover:text-foreground disabled:opacity-30" aria-label="Move up">
-                            <ChevronUp className="size-3.5" />
-                          </button>
-                          <button onClick={() => moveOrder(svc, 'down')} disabled={i === services.length - 1} className="text-muted-foreground hover:text-foreground disabled:opacity-30" aria-label="Move down">
-                            <ChevronDown className="size-3.5" />
-                          </button>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-3">
-                          <div className={`flex size-9 items-center justify-center rounded-lg bg-gradient-to-br ${svc.accent} text-white shadow-sm shrink-0`}>
-                            <Icon className="size-4" />
+      {/* Tab bar */}
+      <div className="flex items-center gap-1 border-b">
+        <TabButton active={view === 'services'} onClick={() => setView('services')} icon={LayoutGrid} label="Services" count={services.length} />
+        <TabButton active={view === 'pages'} onClick={() => setView('pages')} icon={FileText} label="Pages & Text" count={CONTENT_GROUPS.length} />
+      </div>
+
+      {/* Services view */}
+      {view === 'services' && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Services ({services.length})</CardTitle>
+            <CardDescription>Add, edit, delete, reorder, and toggle visibility of services shown on the public site. Each service drives its dedicated page, the pricing page, and the navbar dropdown.</CardDescription>
+          </CardHeader>
+          <CardContent className="p-0">
+            <ScrollArea className="max-h-[32rem]">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-10"></TableHead>
+                    <TableHead>Service</TableHead>
+                    <TableHead className="hidden md:table-cell">Slug</TableHead>
+                    <TableHead className="hidden lg:table-cell">Plans</TableHead>
+                    <TableHead className="text-center">Visible</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {services.map((svc, i) => {
+                    const Icon = resolveIcon(svc.iconName)
+                    return (
+                      <TableRow key={svc.id}>
+                        <TableCell className="align-middle">
+                          <div className="flex flex-col">
+                            <button onClick={() => moveOrder(svc, 'up')} disabled={i === 0} className="text-muted-foreground hover:text-foreground disabled:opacity-30" aria-label="Move up">
+                              <ChevronUp className="size-3.5" />
+                            </button>
+                            <button onClick={() => moveOrder(svc, 'down')} disabled={i === services.length - 1} className="text-muted-foreground hover:text-foreground disabled:opacity-30" aria-label="Move down">
+                              <ChevronDown className="size-3.5" />
+                            </button>
                           </div>
-                          <div className="min-w-0">
-                            <p className="font-medium truncate">{svc.name}</p>
-                            <p className="text-xs text-muted-foreground truncate max-w-[20rem]">{svc.tagline}</p>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-3">
+                            <div className={`flex size-9 items-center justify-center rounded-lg bg-gradient-to-br ${svc.accent} text-white shadow-sm shrink-0`}>
+                              <Icon className="size-4" />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="font-medium truncate">{svc.name}</p>
+                              <p className="text-xs text-muted-foreground truncate max-w-[20rem]">{svc.tagline}</p>
+                            </div>
                           </div>
-                        </div>
-                      </TableCell>
-                      <TableCell className="hidden md:table-cell">
-                        <code className="text-xs rounded bg-muted px-1.5 py-0.5">{svc.slug}</code>
-                      </TableCell>
-                      <TableCell className="hidden lg:table-cell text-sm text-muted-foreground">{svc.plans.length}</TableCell>
-                      <TableCell className="text-center">
-                        <button onClick={() => toggleVisible(svc)} className="inline-flex" aria-label="Toggle visibility">
-                          {svc.visible ? (
-                            <Eye className="size-4 text-emerald-500" />
-                          ) : (
-                            <EyeOff className="size-4 text-muted-foreground" />
-                          )}
-                        </button>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-1">
-                          <Button variant="ghost" size="sm" onClick={() => openEdit(svc)}>
-                            <Pencil className="size-3.5" />
-                          </Button>
-                          <Button variant="ghost" size="sm" onClick={() => setDeleteTarget(svc)} className="text-red-500 hover:text-red-600">
-                            <Trash2 className="size-3.5" />
-                          </Button>
-                        </div>
+                        </TableCell>
+                        <TableCell className="hidden md:table-cell">
+                          <code className="text-xs rounded bg-muted px-1.5 py-0.5">{svc.slug}</code>
+                        </TableCell>
+                        <TableCell className="hidden lg:table-cell text-sm text-muted-foreground">{svc.plans.length}</TableCell>
+                        <TableCell className="text-center">
+                          <button onClick={() => toggleVisible(svc)} className="inline-flex" aria-label="Toggle visibility">
+                            {svc.visible ? (
+                              <Eye className="size-4 text-emerald-500" />
+                            ) : (
+                              <EyeOff className="size-4 text-muted-foreground" />
+                            )}
+                          </button>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-1">
+                            <Button variant="ghost" size="sm" onClick={() => openEdit(svc)}>
+                              <Pencil className="size-3.5" />
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={() => setDeleteTarget(svc)} className="text-red-500 hover:text-red-600">
+                              <Trash2 className="size-3.5" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
+                  {services.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center text-muted-foreground py-12">
+                        No services yet. Click &ldquo;New Service&rdquo; to create one.
                       </TableCell>
                     </TableRow>
-                  )
-                })}
-                {services.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={6} className="text-center text-muted-foreground py-12">
-                      No services yet. Click &ldquo;New Service&rdquo; to create one.
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </ScrollArea>
-        </CardContent>
-      </Card>
+                  )}
+                </TableBody>
+              </Table>
+            </ScrollArea>
+          </CardContent>
+        </Card>
+      )}
 
-      {/* Site text editor */}
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between space-y-0">
-          <div>
-            <CardTitle className="text-lg flex items-center gap-2">
-              <FileText className="size-5 text-indigo-500" />
-              Site Text
-            </CardTitle>
-            <CardDescription>Edit global text used across the marketing site (hero, stats, badges, etc.).</CardDescription>
-          </div>
-          <Button size="sm" onClick={saveContent} disabled={saving} className="bg-indigo-500 hover:bg-indigo-600 text-white border-0">
-            {saving ? <Loader2 className="size-4 mr-1 animate-spin" /> : <SaveIcon className="size-4 mr-1" />}
-            Save Text
-          </Button>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {Object.keys(content).length === 0 ? (
-            <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-              No custom text yet. This section will populate as you add content keys (e.g. <code>hero.title</code>, <code>hero.subtitle</code>). Use the &ldquo;Add Field&rdquo; button below.
-            </div>
-          ) : (
-            Object.entries(content).map(([key, value]) => (
-              <div key={key} className="grid grid-cols-1 md:grid-cols-[12rem_1fr_auto] gap-2 items-start">
-                <div className="flex items-center gap-1 pt-2">
-                  <code className="text-xs rounded bg-muted px-1.5 py-0.5 truncate">{key}</code>
-                  <button onClick={() => { const next = { ...content }; delete next[key]; setContent(next) }} className="text-red-400 hover:text-red-600" aria-label="Remove field">
-                    <X className="size-3.5" />
-                  </button>
-                </div>
-                <Textarea
-                  value={value}
-                  onChange={(e) => setContent((c) => ({ ...c, [key]: e.target.value }))}
-                  rows={2}
-                  className="text-sm"
-                />
-              </div>
-            ))
-          )}
-          <AddContentField onAdd={(key) => setContent((c) => ({ ...c, [key]: '' }))} existing={Object.keys(content)} />
-        </CardContent>
-      </Card>
+      {/* Pages & Text view */}
+      {view === 'pages' && (
+        <PagesEditor
+          content={content}
+          setContent={setContent}
+          onSave={saveContent}
+          saving={saving}
+        />
+      )}
 
       {/* Service editor dialog */}
       <ServiceEditorDialog
@@ -442,37 +424,215 @@ export function CmsPanel() {
   )
 }
 
-// ── Add-content-field helper ───────────────────────────────────────────
-function AddContentField({ onAdd, existing }: { onAdd: (key: string) => void; existing: string[] }) {
-  const [key, setKey] = useState('')
-  const [value, setValue] = useState('')
+// ── Tab button ────────────────────────────────────────────────────────
+function TabButton({ active, onClick, icon: Icon, label, count }: {
+  active: boolean
+  onClick: () => void
+  icon: React.ComponentType<{ className?: string }>
+  label: string
+  count?: number
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        'relative inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors -mb-px border-b-2',
+        active
+          ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400'
+          : 'border-transparent text-muted-foreground hover:text-foreground'
+      )}
+    >
+      <Icon className="size-4" />
+      {label}
+      {count != null && (
+        <Badge variant="secondary" className="text-xs h-5 px-1.5">{count}</Badge>
+      )}
+    </button>
+  )
+}
 
-  const handleAdd = () => {
-    const k = key.trim()
+// ── Pages & Text editor ──────────────────────────────────────────────
+interface PagesEditorProps {
+  content: SiteContentMap
+  setContent: React.Dispatch<React.SetStateAction<SiteContentMap>>
+  onSave: () => void
+  saving: boolean
+}
+
+function PagesEditor({ content, setContent, onSave, saving }: PagesEditorProps) {
+  const [openGroup, setOpenGroup] = useState<string>(CONTENT_GROUPS[0]?.group ?? '')
+  const [customOpen, setCustomOpen] = useState(false)
+  const [newKey, setNewKey] = useState('')
+
+  // Keys that exist in the content map but aren't part of the schema (power-user additions).
+  const customKeys = Object.keys(content).filter((k) => !KNOWN_CONTENT_KEYS.includes(k))
+
+  const setField = (key: string, value: string) => {
+    setContent((c) => ({ ...c, [key]: value }))
+  }
+
+  const addCustomKey = () => {
+    const k = newKey.trim()
     if (!k) {
       toast.error('Enter a key first')
       return
     }
-    if (existing.includes(k)) {
+    if (content[k] != null) {
       toast.error('That key already exists')
       return
     }
-    onAdd(k)
-    if (value.trim()) {
-      // value is set on the parent via the onAdd callback for the key, but
-      // since the parent initialises to '', we separately set it here.
-    }
-    setKey('')
-    setValue('')
+    setField(k, '')
+    setNewKey('')
+    setCustomOpen(true)
+  }
+
+  const removeKey = (key: string) => {
+    setContent((c) => {
+      const next = { ...c }
+      delete next[key]
+      return next
+    })
   }
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-[12rem_1fr_auto] gap-2 items-start pt-2 border-t">
-      <Input placeholder="key (e.g. hero.title)" value={key} onChange={(e) => setKey(e.target.value)} className="text-sm" />
-      <Input placeholder="value (optional)" value={value} onChange={(e) => setValue(e.target.value)} className="text-sm" />
-      <Button variant="outline" size="sm" onClick={handleAdd}>
-        <Plus className="size-4 mr-1" /> Add Field
-      </Button>
+    <div className="space-y-4">
+      {/* Sticky save bar */}
+      <div className="sticky top-0 z-10 flex items-center justify-between rounded-lg border bg-background/95 backdrop-blur px-4 py-3 shadow-sm">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <FileText className="size-4 text-indigo-500" />
+          <span>Edit the text shown across every public page. Fields are pre-filled with defaults.</span>
+        </div>
+        <Button size="sm" onClick={onSave} disabled={saving} className="bg-indigo-500 hover:bg-indigo-600 text-white border-0">
+          {saving ? <Loader2 className="size-4 mr-1 animate-spin" /> : <SaveIcon className="size-4 mr-1" />}
+          Save Changes
+        </Button>
+      </div>
+
+      {/* Grouped content */}
+      {CONTENT_GROUPS.map((group) => {
+        const isOpen = openGroup === group.group
+        const GroupIcon = resolveIcon(group.icon ?? 'FileText')
+        // Count how many fields in this group differ from the default (unsaved edits indicator).
+        const changedCount = group.fields.filter((f) => content[f.key] != null && content[f.key] !== '').length
+
+        return (
+          <Card key={group.group} className="overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setOpenGroup(isOpen ? '' : group.group)}
+              className="w-full text-left flex items-center justify-between gap-3 px-4 py-3.5 hover:bg-accent/50 transition-colors"
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-indigo-500/10">
+                  <GroupIcon className="size-4 text-indigo-500" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="font-semibold text-sm truncate">{group.group}</h3>
+                  {group.description && (
+                    <p className="text-xs text-muted-foreground truncate">{group.description}</p>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <Badge variant="outline" className="text-xs">{group.fields.length} fields</Badge>
+                <ChevronDown className={cn('size-4 text-muted-foreground transition-transform', isOpen && 'rotate-180')} />
+              </div>
+            </button>
+            {isOpen && (
+              <CardContent className="pt-0 border-t">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-3 pt-4">
+                  {group.fields.map((field) => (
+                    <div key={field.key} className="space-y-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <Label className="text-xs font-medium">{field.label}</Label>
+                        <code className="text-[10px] text-muted-foreground/70 truncate max-w-[12rem]">{field.key}</code>
+                      </div>
+                      {field.type === 'textarea' ? (
+                        <Textarea
+                          value={content[field.key] ?? ''}
+                          onChange={(e) => setField(field.key, e.target.value)}
+                          rows={2}
+                          className="text-sm resize-y"
+                        />
+                      ) : (
+                        <Input
+                          value={content[field.key] ?? ''}
+                          onChange={(e) => setField(field.key, e.target.value)}
+                          className="text-sm"
+                        />
+                      )}
+                      {field.hint && (
+                        <p className="text-[11px] text-muted-foreground">{field.hint}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            )}
+          </Card>
+        )
+      })}
+
+      {/* Custom keys (power-user) */}
+      <Card className="overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setCustomOpen((v) => !v)}
+          className="w-full text-left flex items-center justify-between gap-3 px-4 py-3.5 hover:bg-accent/50 transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-amber-500/10">
+              <ChevronRight className="size-4 text-amber-600" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-sm">Custom Keys</h3>
+              <p className="text-xs text-muted-foreground">Advanced: add arbitrary key/value pairs not covered by the schema above.</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {customKeys.length > 0 && <Badge variant="outline" className="text-xs">{customKeys.length}</Badge>}
+            <ChevronDown className={cn('size-4 text-muted-foreground transition-transform', customOpen && 'rotate-180')} />
+          </div>
+        </button>
+        {customOpen && (
+          <CardContent className="pt-0 border-t space-y-3">
+            <div className="pt-4 space-y-2">
+              {customKeys.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-2">No custom keys. Add one below if you need a value not covered by the groups above.</p>
+              ) : (
+                customKeys.map((key) => (
+                  <div key={key} className="grid grid-cols-1 md:grid-cols-[12rem_1fr_auto] gap-2 items-start">
+                    <div className="flex items-center gap-1 pt-2">
+                      <code className="text-xs rounded bg-muted px-1.5 py-0.5 truncate">{key}</code>
+                      <button onClick={() => removeKey(key)} className="text-red-400 hover:text-red-600" aria-label="Remove key">
+                        <X className="size-3.5" />
+                      </button>
+                    </div>
+                    <Textarea
+                      value={content[key] ?? ''}
+                      onChange={(e) => setField(key, e.target.value)}
+                      rows={2}
+                      className="text-sm"
+                    />
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="flex gap-2 pt-2 border-t">
+              <Input
+                placeholder="new.key (e.g. hero.promoBanner)"
+                value={newKey}
+                onChange={(e) => setNewKey(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCustomKey() } }}
+                className="text-sm max-w-xs"
+              />
+              <Button variant="outline" size="sm" onClick={addCustomKey}>
+                <Plus className="size-4 mr-1" /> Add Key
+              </Button>
+            </div>
+          </CardContent>
+        )}
+      </Card>
     </div>
   )
 }

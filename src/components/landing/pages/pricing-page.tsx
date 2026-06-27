@@ -4,24 +4,25 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Check } from 'lucide-react'
-import { SERVICES } from '../services-data'
 import { PageHero, ScrollReveal, StaggerCard } from '../ui-helpers'
+import { useSiteContent, resolveIcon } from '../site-data-context'
 
 interface PricingPageProps {
   onGetStarted: () => void
 }
 
 export function PricingPage({ onGetStarted }: PricingPageProps) {
+  const { services, getContent } = useSiteContent()
   return (
     <>
       <PageHero
-        badge="Pricing"
-        title={<>Transparent pricing for <span className="text-gradient-brand">every service</span></>}
-        subtitle="Pay only for what you use. No hidden fees, no surprises. Upgrade, downgrade, or cancel anytime."
+        badge={getContent('pricing.hero.badge')}
+        title={<span className="text-gradient-brand">{getContent('pricing.hero.title')}</span>}
+        subtitle={getContent('pricing.hero.subtitle')}
       />
 
-      {SERVICES.map((service) => {
-        const Icon = service.icon
+      {services.map((service) => {
+        const Icon = resolveIcon(service.iconName)
         return (
           <section key={service.slug} className="py-16 bg-background even:bg-muted/30">
             <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
@@ -76,10 +77,10 @@ export function PricingPage({ onGetStarted }: PricingPageProps) {
       <section className="py-16 bg-background">
         <div className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 text-center">
           <ScrollReveal>
-            <h2 className="text-2xl font-extrabold mb-4">Need a custom plan?</h2>
-            <p className="text-muted-foreground mb-6">For high-volume or enterprise needs, talk to our team about a tailored solution.</p>
+            <h2 className="text-2xl font-extrabold mb-4">{getContent('pricing.custom.title')}</h2>
+            <p className="text-muted-foreground mb-6">{getContent('pricing.custom.subtitle')}</p>
             <Button variant="outline" className="border-indigo-500/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/10">
-              Contact Sales
+              {getContent('pricing.custom.button')}
             </Button>
           </ScrollReveal>
         </div>

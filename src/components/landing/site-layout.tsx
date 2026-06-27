@@ -10,12 +10,12 @@ import { useAppStore, type PublicPageState } from '@/store/app-store'
 import { useSiteContent, resolveIcon } from './site-data-context'
 
 /** Top-level nav entries (Services gets a dropdown). */
-const NAV_LINKS: { label: string; href: string; page: PublicPageState['page'] }[] = [
-  { label: 'Home', href: '#/', page: 'home' },
-  { label: 'Services', href: '#/services', page: 'services' },
-  { label: 'Pricing', href: '#/pricing', page: 'pricing' },
-  { label: 'About', href: '#/about', page: 'about' },
-  { label: 'Contact', href: '#/contact', page: 'contact' },
+const NAV_LINKS: { labelKey: string; href: string; page: PublicPageState['page'] }[] = [
+  { labelKey: 'nav.home', href: '#/', page: 'home' },
+  { labelKey: 'nav.services', href: '#/services', page: 'services' },
+  { labelKey: 'nav.pricing', href: '#/pricing', page: 'pricing' },
+  { labelKey: 'nav.about', href: '#/about', page: 'about' },
+  { labelKey: 'nav.contact', href: '#/contact', page: 'contact' },
 ]
 
 interface SiteLayoutProps {
@@ -29,7 +29,7 @@ export function SiteLayout({ children, onGetStarted }: SiteLayoutProps) {
   const [scrolled, setScrolled] = useState(false)
   const publicPage = useAppStore((s) => s.publicPage)
   const setPublicPage = useAppStore((s) => s.setPublicPage)
-  const { services } = useSiteContent()
+  const { services, getContent } = useSiteContent()
 
   // Derive the dropdown service links from CMS data (with sensible fallbacks
   // derived from each service's tagline).
@@ -89,7 +89,7 @@ export function SiteLayout({ children, onGetStarted }: SiteLayoutProps) {
                         aria-haspopup="true"
                         aria-expanded={servicesOpen}
                       >
-                        {link.label}
+                        {getContent(link.labelKey)}
                         <ChevronDown className={cn('size-3.5 transition-transform duration-200', servicesOpen && 'rotate-180')} />
                         {isActive && (
                           <span className="absolute bottom-1 left-1/2 -translate-x-1/2 h-0.5 w-6 rounded-full bg-indigo-500" />
@@ -111,7 +111,7 @@ export function SiteLayout({ children, onGetStarted }: SiteLayoutProps) {
                             onClick={() => { setPublicPage({ page: 'services' }); setServicesOpen(false) }}
                             className="flex items-center justify-between rounded-lg px-3 py-2 text-sm font-semibold text-foreground hover:bg-indigo-500/10 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
                           >
-                            All Services
+                            {getContent('nav.allServices')}
                             <ArrowRight className="size-3.5" />
                           </a>
                           <div className="my-1 h-px bg-border/60" />
@@ -166,7 +166,7 @@ export function SiteLayout({ children, onGetStarted }: SiteLayoutProps) {
                         : 'text-muted-foreground hover:text-foreground'
                     )}
                   >
-                    {link.label}
+                    {getContent(link.labelKey)}
                     {isActive && (
                       <span className="absolute bottom-1 left-1/2 -translate-x-1/2 h-0.5 w-6 rounded-full bg-indigo-500" />
                     )}
@@ -177,14 +177,14 @@ export function SiteLayout({ children, onGetStarted }: SiteLayoutProps) {
 
             <div className="hidden md:flex items-center gap-2">
               <Button variant="ghost" size="sm" onClick={onGetStarted} className="text-muted-foreground hover:text-foreground">
-                Sign In
+                {getContent('nav.signin')}
               </Button>
               <Button
                 size="sm"
                 onClick={onGetStarted}
                 className="btn-shimmer bg-indigo-500 hover:bg-indigo-600 text-white border-0 shadow-glow-indigo"
               >
-                Get Started
+                {getContent('nav.getStarted')}
               </Button>
             </div>
 
@@ -219,7 +219,7 @@ export function SiteLayout({ children, onGetStarted }: SiteLayoutProps) {
                         )}
                         aria-expanded={servicesOpen}
                       >
-                        <span>{link.label}</span>
+                        <span>{getContent(link.labelKey)}</span>
                         <ChevronDown className={cn('size-4 transition-transform duration-200', servicesOpen && 'rotate-180')} />
                       </button>
                       {servicesOpen && (
@@ -229,7 +229,7 @@ export function SiteLayout({ children, onGetStarted }: SiteLayoutProps) {
                             onClick={() => { setPublicPage({ page: 'services' }); setMobileOpen(false) }}
                             className="px-3 py-2 text-sm font-semibold rounded-md text-foreground hover:bg-indigo-500/10 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
                           >
-                            All Services
+                            {getContent('nav.allServices')}
                           </a>
                           {SERVICE_LINKS.map((svc) => {
                             const Icon = svc.icon
@@ -268,16 +268,16 @@ export function SiteLayout({ children, onGetStarted }: SiteLayoutProps) {
                         : 'text-muted-foreground hover:text-foreground hover:bg-accent'
                     )}
                   >
-                    {link.label}
+                    {getContent(link.labelKey)}
                   </a>
                 )
               })}
               <div className="flex gap-2 mt-2">
                 <Button variant="outline" size="sm" className="flex-1" onClick={() => { onGetStarted(); setMobileOpen(false) }}>
-                  Sign In
+                  {getContent('nav.signin')}
                 </Button>
                 <Button size="sm" className="flex-1 bg-indigo-500 hover:bg-indigo-600 text-white border-0" onClick={() => { onGetStarted(); setMobileOpen(false) }}>
-                  Get Started
+                  {getContent('nav.getStarted')}
                 </Button>
               </div>
             </nav>
@@ -306,13 +306,13 @@ export function SiteLayout({ children, onGetStarted }: SiteLayoutProps) {
                 </div>
               </div>
               <p className="mt-4 text-sm text-zinc-400 max-w-xs leading-relaxed">
-                Build, host, and scale your entire online presence — web development, hosting, domains, and SaaS in one platform.
+                {getContent('footer.tagline')}
               </p>
             </div>
 
             {[
               {
-                title: 'Product',
+                titleKey: 'footer.col.product',
                 links: [
                   { label: 'Web Development', href: '#/services/web-development' },
                   { label: 'Web Hosting', href: '#/services/web-hosting' },
@@ -322,7 +322,7 @@ export function SiteLayout({ children, onGetStarted }: SiteLayoutProps) {
                 ],
               },
               {
-                title: 'Company',
+                titleKey: 'footer.col.company',
                 links: [
                   { label: 'About', href: '#/about' },
                   { label: 'Contact', href: '#/contact' },
@@ -331,7 +331,7 @@ export function SiteLayout({ children, onGetStarted }: SiteLayoutProps) {
                 ],
               },
               {
-                title: 'Resources',
+                titleKey: 'footer.col.resources',
                 links: [
                   { label: 'Documentation', href: '#/about' },
                   { label: 'Blog', href: '#/about' },
@@ -340,8 +340,8 @@ export function SiteLayout({ children, onGetStarted }: SiteLayoutProps) {
                 ],
               },
             ].map((col) => (
-              <div key={col.title}>
-                <h4 className="text-sm font-semibold text-white mb-3">{col.title}</h4>
+              <div key={col.titleKey}>
+                <h4 className="text-sm font-semibold text-white mb-3">{getContent(col.titleKey)}</h4>
                 <ul className="space-y-2">
                   {col.links.map((link) => (
                     <li key={link.label}>
@@ -359,7 +359,7 @@ export function SiteLayout({ children, onGetStarted }: SiteLayoutProps) {
           </div>
 
           <div className="mt-12 pt-8 border-t border-white/10 flex flex-col sm:flex-row items-center justify-between gap-4">
-            <p className="text-xs text-zinc-500">© 2025 APSAMO. Built by APSAMO Technology.</p>
+            <p className="text-xs text-zinc-500">{getContent('footer.copyright')}</p>
             <div className="flex items-center gap-4 text-xs text-zinc-500">
               <a href="#/" className="hover:text-indigo-300 transition-colors">Privacy</a>
               <a href="#/" className="hover:text-indigo-300 transition-colors">Terms</a>

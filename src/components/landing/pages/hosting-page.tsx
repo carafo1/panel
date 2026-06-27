@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { PageHero, ScrollReveal, StaggerCard, useCountUp } from '../ui-helpers'
 import { useAppStore } from '@/store/app-store'
+import { useSiteContent, useServiceBySlug } from '../site-data-context'
 
 const STATS = [
   { value: 99.97, suffix: '%', label: '12-month uptime' },
@@ -61,7 +62,7 @@ const BENCHMARKS = [
   { label: 'Rollback', us: '1 click', them: 'manual', win: true },
 ]
 
-const PLANS = [
+const FALLBACK_PLANS = [
   {
     name: 'Hobby',
     price: 9,
@@ -110,7 +111,7 @@ const PLANS = [
   },
 ]
 
-const FAQS = [
+const FALLBACK_FAQS = [
   {
     q: 'Can I host any Dockerized app?',
     a: 'Yes. If it has a Dockerfile (or we auto-detect Node, Python, Go, Ruby, PHP), we can host it. Bring your compose file or use our templates.',
@@ -135,6 +136,10 @@ interface HostingPageProps {
 
 export function HostingPage({ onGetStarted }: HostingPageProps) {
   const { setPublicPage } = useAppStore()
+  const { getContent } = useSiteContent()
+  const service = useServiceBySlug('web-hosting')
+  const plans = service?.plans?.length ? service.plans : FALLBACK_PLANS
+  const faqs = service?.faqs?.length ? service.faqs : FALLBACK_FAQS
   const stat0 = useCountUp(STATS[0].value, 1800)
   const stat1 = useCountUp(STATS[1].value, 1800)
   const stat2 = useCountUp(STATS[2].value, 1800)
@@ -144,9 +149,9 @@ export function HostingPage({ onGetStarted }: HostingPageProps) {
   return (
     <>
       <PageHero
-        badge="Web Hosting"
-        title={<>Managed hosting that <span className="text-gradient-brand">just works</span></>}
-        subtitle="Containerized hosting on a global edge network. Push to GitHub → we build → we deploy → we scale. Automatic HTTPS, instant rollbacks, and 99.9% uptime SLA. Stop wrestling with servers and start shipping."
+        badge={getContent('svc.web-hosting.hero.badge')}
+        title={getContent('svc.web-hosting.hero.title')}
+        subtitle={getContent('svc.web-hosting.hero.subtitle')}
       />
 
       {/* Infra stats */}
@@ -173,7 +178,7 @@ export function HostingPage({ onGetStarted }: HostingPageProps) {
           <ScrollReveal>
             <div className="text-center mb-16">
               <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">Deploy Flow</Badge>
-              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight">From <span className="text-gradient-brand">push to production</span> in 30 seconds</h2>
+              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight"><span className="text-gradient-brand">{getContent('svc.web-hosting.deploy.title')}</span></h2>
               <p className="mt-3 text-muted-foreground max-w-2xl mx-auto">No SSH, no YAML, no DevOps hire required. Connect your repo and watch it ship.</p>
             </div>
           </ScrollReveal>
@@ -212,7 +217,7 @@ export function HostingPage({ onGetStarted }: HostingPageProps) {
           <ScrollReveal>
             <div className="text-center mb-14">
               <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">Features</Badge>
-              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight">Everything included, <span className="text-gradient-brand">nothing extra</span></h2>
+              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight"><span className="text-gradient-brand">{getContent('svc.web-hosting.features.title')}</span></h2>
               <p className="mt-3 text-muted-foreground max-w-2xl mx-auto">Every plan ships with the full feature set. You only pay for compute and bandwidth.</p>
             </div>
           </ScrollReveal>
@@ -244,7 +249,7 @@ export function HostingPage({ onGetStarted }: HostingPageProps) {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
             <ScrollReveal>
               <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">Global Network</Badge>
-              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight mb-4">Served from <span className="text-gradient-brand">280+ edge locations</span></h2>
+              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight mb-4"><span className="text-gradient-brand">{getContent('svc.web-hosting.edge.title')}</span></h2>
               <p className="text-muted-foreground leading-relaxed mb-6">
                 Your content is replicated across a global anycast network. Whichever region your users hit, the nearest edge node responds — typically in under 50ms.
               </p>
@@ -305,12 +310,12 @@ export function HostingPage({ onGetStarted }: HostingPageProps) {
           <ScrollReveal>
             <div className="text-center mb-14">
               <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">Pricing</Badge>
-              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight">Scale as you <span className="text-gradient-brand">grow</span></h2>
+              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight"><span className="text-gradient-brand">{getContent('svc.web-hosting.pricing.title')}</span></h2>
               <p className="mt-3 text-muted-foreground">Start on Hobby, upgrade in one click. No downtime, no migration.</p>
             </div>
           </ScrollReveal>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
-            {PLANS.map((plan, i) => (
+            {plans.map((plan, i) => (
               <StaggerCard key={plan.name} index={i}>
                 <Card className={`relative flex flex-col h-full transition-all duration-500 bg-card/80 backdrop-blur-sm ${plan.popular ? 'border-indigo-500 shadow-glow-indigo scale-[1.03] shimmer-border' : 'hover:border-indigo-500/30 hover:shadow-modern-lg'}`}>
                   {plan.popular && (
@@ -350,11 +355,11 @@ export function HostingPage({ onGetStarted }: HostingPageProps) {
           <ScrollReveal>
             <div className="text-center mb-10">
               <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">FAQ</Badge>
-              <h2 className="text-3xl font-extrabold tracking-tight">Frequently asked questions</h2>
+              <h2 className="text-3xl font-extrabold tracking-tight">{getContent('svc.web-hosting.faq.title')}</h2>
             </div>
           </ScrollReveal>
           <Accordion type="single" collapsible className="w-full">
-            {FAQS.map((faq, i) => (
+            {faqs.map((faq, i) => (
               <AccordionItem key={i} value={`item-${i}`}>
                 <AccordionTrigger className="text-left">{faq.q}</AccordionTrigger>
                 <AccordionContent className="text-muted-foreground">{faq.a}</AccordionContent>
@@ -370,12 +375,12 @@ export function HostingPage({ onGetStarted }: HostingPageProps) {
         <div className="aurora-blob aurora-blob-2" style={{ bottom: '-15%', left: '5%', width: '420px', height: '420px', background: 'radial-gradient(circle, #8888FF 0%, transparent 70%)' }} />
         <div className="relative z-10 mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 text-center py-24">
           <ScrollReveal>
-            <h2 className="text-3xl sm:text-5xl font-extrabold tracking-tight mb-4">Ship your first deploy <span className="text-gradient-brand">today</span></h2>
+            <h2 className="text-3xl sm:text-5xl font-extrabold tracking-tight mb-4"><span className="text-gradient-brand">{getContent('svc.web-hosting.cta.title')}</span></h2>
             <p className="text-zinc-300 text-lg mb-8 max-w-xl mx-auto">Connect a repo, pick a plan, and go live in under five minutes. No credit card to start.</p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
               <Button size="lg" className="btn-shimmer bg-indigo-500 hover:bg-indigo-600 text-white px-10 h-12 border-0 shadow-glow-indigo hover:scale-105 transition-all" onClick={onGetStarted}>
                 <Server className="size-4 mr-2" />
-                Deploy Now
+                {getContent('svc.web-hosting.cta.button')}
                 <ArrowRight className="size-4 ml-2" />
               </Button>
               <button onClick={() => setPublicPage({ page: 'services' })} className="inline-flex items-center justify-center gap-2 h-12 px-8 rounded-md glass text-white hover:bg-white/10 transition-all">

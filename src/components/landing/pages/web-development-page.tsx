@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { PageHero, ScrollReveal, StaggerCard } from '../ui-helpers'
 import { useAppStore } from '@/store/app-store'
+import { useSiteContent, useServiceBySlug } from '../site-data-context'
 
 const STATS = [
   { value: '500+', label: 'Projects shipped' },
@@ -90,7 +91,7 @@ const CAPABILITIES = [
   { icon: Cpu, title: 'AI Integration', desc: 'LLM features, vector search, and RAG pipelines wired into your product.' },
 ]
 
-const PLANS = [
+const FALLBACK_PLANS = [
   {
     name: 'Starter',
     price: 49,
@@ -138,7 +139,7 @@ const PLANS = [
   },
 ]
 
-const FAQS = [
+const FALLBACK_FAQS = [
   {
     q: 'What technologies do you use?',
     a: 'We primarily build with Next.js 16, TypeScript, Tailwind CSS, Prisma, and Postgres. For real-time features we use Socket.io. We can also work with your existing stack if needed.',
@@ -178,13 +179,17 @@ interface WebDevelopmentPageProps {
 
 export function WebDevelopmentPage({ onGetStarted }: WebDevelopmentPageProps) {
   const { setPublicPage } = useAppStore()
+  const { getContent } = useSiteContent()
+  const service = useServiceBySlug('web-development')
+  const plans = service?.plans?.length ? service.plans : FALLBACK_PLANS
+  const faqs = service?.faqs?.length ? service.faqs : FALLBACK_FAQS
 
   return (
     <>
       <PageHero
-        badge="Web Development"
-        title={<>Custom web apps engineered for <span className="text-gradient-brand">performance &amp; scale</span></>}
-        subtitle="From MVP to enterprise — APSAMO builds production-grade web applications with Next.js, TypeScript, and modern infrastructure. Pixel-perfect UI, robust APIs, and observability baked in from day one."
+        badge={getContent('svc.web-development.hero.badge')}
+        title={getContent('svc.web-development.hero.title')}
+        subtitle={getContent('svc.web-development.hero.subtitle')}
       />
 
       {/* Stats bar */}
@@ -209,7 +214,7 @@ export function WebDevelopmentPage({ onGetStarted }: WebDevelopmentPageProps) {
           <ScrollReveal>
             <div className="text-center mb-14">
               <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">Tech Stack</Badge>
-              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight">A modern, <span className="text-gradient-brand">battle-tested</span> stack</h2>
+              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight"><span className="text-gradient-brand">{getContent('svc.web-development.stack.title')}</span></h2>
               <p className="mt-3 text-muted-foreground max-w-2xl mx-auto">No legacy baggage. Every tool is chosen for developer velocity, type-safety, and long-term maintainability.</p>
             </div>
           </ScrollReveal>
@@ -253,7 +258,7 @@ export function WebDevelopmentPage({ onGetStarted }: WebDevelopmentPageProps) {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
             <ScrollReveal>
               <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">Code Quality</Badge>
-              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight mb-4">Type-safe, <span className="text-gradient-brand">end to end</span></h2>
+              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight mb-4"><span className="text-gradient-brand">{getContent('svc.web-development.code.title')}</span></h2>
               <p className="text-muted-foreground leading-relaxed mb-6">
                 Shared TypeScript schemas flow from your database, through your API, and into your UI. Entire classes of runtime bugs simply disappear. Refactoring becomes safe. Onboarding new engineers takes days, not weeks.
               </p>
@@ -309,7 +314,7 @@ export function WebDevelopmentPage({ onGetStarted }: WebDevelopmentPageProps) {
           <ScrollReveal>
             <div className="text-center mb-14">
               <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">Our Process</Badge>
-              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight">From idea to launch in <span className="text-gradient-brand">five steps</span></h2>
+              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight"><span className="text-gradient-brand">{getContent('svc.web-development.process.title')}</span></h2>
             </div>
           </ScrollReveal>
           <div className="relative">
@@ -347,7 +352,7 @@ export function WebDevelopmentPage({ onGetStarted }: WebDevelopmentPageProps) {
           <ScrollReveal>
             <div className="text-center mb-14">
               <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">Capabilities</Badge>
-              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight">Built for <span className="text-gradient-brand">real products</span></h2>
+              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight"><span className="text-gradient-brand">{getContent('svc.web-development.capabilities.title')}</span></h2>
               <p className="mt-3 text-muted-foreground max-w-2xl mx-auto">Not just pretty pages — the full range of capabilities your product needs to succeed.</p>
             </div>
           </ScrollReveal>
@@ -379,12 +384,12 @@ export function WebDevelopmentPage({ onGetStarted }: WebDevelopmentPageProps) {
           <ScrollReveal>
             <div className="text-center mb-14">
               <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">Pricing</Badge>
-              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight">Plans for every <span className="text-gradient-brand">stage</span></h2>
+              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight"><span className="text-gradient-brand">{getContent('svc.web-development.pricing.title')}</span></h2>
               <p className="mt-3 text-muted-foreground">Fixed scope, fixed price, fixed timeline. No surprises.</p>
             </div>
           </ScrollReveal>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
-            {PLANS.map((plan, i) => (
+            {plans.map((plan, i) => (
               <StaggerCard key={plan.name} index={i}>
                 <Card className={`relative flex flex-col h-full transition-all duration-500 bg-card/80 backdrop-blur-sm ${plan.popular ? 'border-indigo-500 shadow-glow-indigo scale-[1.03] shimmer-border' : 'hover:border-indigo-500/30 hover:shadow-modern-lg'}`}>
                   {plan.popular && (
@@ -424,11 +429,11 @@ export function WebDevelopmentPage({ onGetStarted }: WebDevelopmentPageProps) {
           <ScrollReveal>
             <div className="text-center mb-10">
               <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">FAQ</Badge>
-              <h2 className="text-3xl font-extrabold tracking-tight">Frequently asked questions</h2>
+              <h2 className="text-3xl font-extrabold tracking-tight">{getContent('svc.web-development.faq.title')}</h2>
             </div>
           </ScrollReveal>
           <Accordion type="single" collapsible className="w-full">
-            {FAQS.map((faq, i) => (
+            {faqs.map((faq, i) => (
               <AccordionItem key={i} value={`item-${i}`}>
                 <AccordionTrigger className="text-left">{faq.q}</AccordionTrigger>
                 <AccordionContent className="text-muted-foreground">{faq.a}</AccordionContent>
@@ -444,12 +449,12 @@ export function WebDevelopmentPage({ onGetStarted }: WebDevelopmentPageProps) {
         <div className="aurora-blob aurora-blob-2" style={{ bottom: '-15%', left: '5%', width: '420px', height: '420px', background: 'radial-gradient(circle, #8888FF 0%, transparent 70%)' }} />
         <div className="relative z-10 mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 text-center py-24">
           <ScrollReveal>
-            <h2 className="text-3xl sm:text-5xl font-extrabold tracking-tight mb-4">Let&apos;s build something <span className="text-gradient-brand">remarkable</span></h2>
+            <h2 className="text-3xl sm:text-5xl font-extrabold tracking-tight mb-4"><span className="text-gradient-brand">{getContent('svc.web-development.cta.title')}</span></h2>
             <p className="text-zinc-300 text-lg mb-8 max-w-xl mx-auto">Tell us about your idea. We&apos;ll reply within 24 hours with a plan, a timeline, and a fixed quote.</p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
               <Button size="lg" className="btn-shimmer bg-indigo-500 hover:bg-indigo-600 text-white px-10 h-12 border-0 shadow-glow-indigo hover:scale-105 transition-all" onClick={onGetStarted}>
                 <Sparkles className="size-4 mr-2" />
-                Start Your Project
+                {getContent('svc.web-development.cta.button')}
                 <ArrowRight className="size-4 ml-2" />
               </Button>
               <button onClick={() => setPublicPage({ page: 'services' })} className="inline-flex items-center justify-center gap-2 h-12 px-8 rounded-md glass text-white hover:bg-white/10 transition-all">

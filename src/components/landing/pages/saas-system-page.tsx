@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { PageHero, ScrollReveal, StaggerCard, useCountUp } from '../ui-helpers'
 import { useAppStore } from '@/store/app-store'
+import { useSiteContent, useServiceBySlug } from '../site-data-context'
 
 const STATS = [
   { value: 6, suffix: 'mo', label: 'Boilerplate saved' },
@@ -114,7 +115,7 @@ const INTEGRATIONS = [
   { name: 'Cloudflare', desc: 'CDN & WAF' },
 ]
 
-const PLANS = [
+const FALLBACK_PLANS = [
   {
     name: 'MVP',
     price: 99,
@@ -162,7 +163,7 @@ const PLANS = [
   },
 ]
 
-const FAQS = [
+const FALLBACK_FAQS = [
   {
     q: 'Do I own the SaaS codebase?',
     a: 'Yes. You own 100% of the code, infrastructure, and IP. We deliver everything in your private GitHub repo and hand over all credentials.',
@@ -187,6 +188,10 @@ interface SaasSystemPageProps {
 
 export function SaasSystemPage({ onGetStarted }: SaasSystemPageProps) {
   const { setPublicPage } = useAppStore()
+  const { getContent } = useSiteContent()
+  const service = useServiceBySlug('saas-system')
+  const plans = service?.plans?.length ? service.plans : FALLBACK_PLANS
+  const faqs = service?.faqs?.length ? service.faqs : FALLBACK_FAQS
   const stat0 = useCountUp(STATS[0].value, 1800)
   const stat1 = useCountUp(STATS[1].value, 1800)
   const stat2 = useCountUp(STATS[2].value, 1800)
@@ -196,9 +201,9 @@ export function SaasSystemPage({ onGetStarted }: SaasSystemPageProps) {
   return (
     <>
       <PageHero
-        badge="SaaS System"
-        title={<>Full SaaS platforms — <span className="text-gradient-brand">done right</span></>}
-        subtitle="We architect and build complete SaaS platforms: authentication, multi-tenancy, subscription billing, admin dashboards, team management, and audit logs. Skip 6 months of plumbing — launch in weeks."
+        badge={getContent('svc.saas-system.hero.badge')}
+        title={getContent('svc.saas-system.hero.title')}
+        subtitle={getContent('svc.saas-system.hero.subtitle')}
       />
 
       {/* Stats bar */}
@@ -225,7 +230,7 @@ export function SaasSystemPage({ onGetStarted }: SaasSystemPageProps) {
           <ScrollReveal>
             <div className="text-center mb-14">
               <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">What&apos;s Included</Badge>
-              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight">Every module a SaaS <span className="text-gradient-brand">actually needs</span></h2>
+              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight"><span className="text-gradient-brand">{getContent('svc.saas-system.modules.title')}</span></h2>
               <p className="mt-3 text-muted-foreground max-w-2xl mx-auto">Eight production-ready modules that would take a solo founder six months to build. We ship them on day one.</p>
             </div>
           </ScrollReveal>
@@ -269,7 +274,7 @@ export function SaasSystemPage({ onGetStarted }: SaasSystemPageProps) {
           <ScrollReveal>
             <div className="text-center mb-14">
               <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">Architecture</Badge>
-              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight">A <span className="text-gradient-brand">layered</span>, type-safe architecture</h2>
+              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight"><span className="text-gradient-brand">{getContent('svc.saas-system.arch.title')}</span></h2>
               <p className="mt-3 text-muted-foreground max-w-2xl mx-auto">Four clean layers, each with a single responsibility. Types flow end-to-end — from database to UI — eliminating entire classes of bugs.</p>
             </div>
           </ScrollReveal>
@@ -313,7 +318,7 @@ export function SaasSystemPage({ onGetStarted }: SaasSystemPageProps) {
           <ScrollReveal>
             <div className="text-center mb-14">
               <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">Integrations</Badge>
-              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight">Pre-wired to the <span className="text-gradient-brand">tools you need</span></h2>
+              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight"><span className="text-gradient-brand">{getContent('svc.saas-system.integrations.title')}</span></h2>
               <p className="mt-3 text-muted-foreground max-w-2xl mx-auto">Battle-tested integrations shipped ready-to-use. No weeks of API wrangling — just plug in your keys and go.</p>
             </div>
           </ScrollReveal>
@@ -343,7 +348,7 @@ export function SaasSystemPage({ onGetStarted }: SaasSystemPageProps) {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
             <ScrollReveal>
               <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">Why APSAMO</Badge>
-              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight mb-4">Skip <span className="text-gradient-brand">6 months</span> of boilerplate</h2>
+              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight mb-4"><span className="text-gradient-brand">{getContent('svc.saas-system.boilerplate.title')}</span></h2>
               <p className="text-muted-foreground leading-relaxed mb-6">
                 Auth, billing, teams, audit logs, onboarding flows — all the unsexy infrastructure that takes a solo founder half a year to build. We ship it day one, tested and production-hardened. You focus on your product; we handle the plumbing.
               </p>
@@ -409,12 +414,12 @@ export function SaasSystemPage({ onGetStarted }: SaasSystemPageProps) {
           <ScrollReveal>
             <div className="text-center mb-14">
               <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">Pricing</Badge>
-              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight">From MVP to <span className="text-gradient-brand">enterprise</span></h2>
+              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight"><span className="text-gradient-brand">{getContent('svc.saas-system.pricing.title')}</span></h2>
               <p className="mt-3 text-muted-foreground">Start with the MVP, upgrade when you scale. One click, no migration.</p>
             </div>
           </ScrollReveal>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
-            {PLANS.map((plan, i) => (
+            {plans.map((plan, i) => (
               <StaggerCard key={plan.name} index={i}>
                 <Card className={`relative flex flex-col h-full transition-all duration-500 bg-card/80 backdrop-blur-sm ${plan.popular ? 'border-indigo-500 shadow-glow-indigo scale-[1.03] shimmer-border' : 'hover:border-indigo-500/30 hover:shadow-modern-lg'}`}>
                   {plan.popular && (
@@ -454,11 +459,11 @@ export function SaasSystemPage({ onGetStarted }: SaasSystemPageProps) {
           <ScrollReveal>
             <div className="text-center mb-10">
               <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">FAQ</Badge>
-              <h2 className="text-3xl font-extrabold tracking-tight">Frequently asked questions</h2>
+              <h2 className="text-3xl font-extrabold tracking-tight">{getContent('svc.saas-system.faq.title')}</h2>
             </div>
           </ScrollReveal>
           <Accordion type="single" collapsible className="w-full">
-            {FAQS.map((faq, i) => (
+            {faqs.map((faq, i) => (
               <AccordionItem key={i} value={`item-${i}`}>
                 <AccordionTrigger className="text-left">{faq.q}</AccordionTrigger>
                 <AccordionContent className="text-muted-foreground">{faq.a}</AccordionContent>
@@ -474,12 +479,12 @@ export function SaasSystemPage({ onGetStarted }: SaasSystemPageProps) {
         <div className="aurora-blob aurora-blob-2" style={{ bottom: '-15%', left: '5%', width: '420px', height: '420px', background: 'radial-gradient(circle, #8888FF 0%, transparent 70%)' }} />
         <div className="relative z-10 mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 text-center py-24">
           <ScrollReveal>
-            <h2 className="text-3xl sm:text-5xl font-extrabold tracking-tight mb-4">Launch your SaaS in <span className="text-gradient-brand">weeks</span>, not months</h2>
+            <h2 className="text-3xl sm:text-5xl font-extrabold tracking-tight mb-4"><span className="text-gradient-brand">{getContent('svc.saas-system.cta.title')}</span></h2>
             <p className="text-zinc-300 text-lg mb-8 max-w-xl mx-auto">Skip the boilerplate. Ship the product. We&apos;ll handle auth, billing, teams, and everything in between.</p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
               <Button size="lg" className="btn-shimmer bg-indigo-500 hover:bg-indigo-600 text-white px-10 h-12 border-0 shadow-glow-indigo hover:scale-105 transition-all" onClick={onGetStarted}>
                 <Rocket className="size-4 mr-2" />
-                Build My SaaS
+                {getContent('svc.saas-system.cta.button')}
                 <ArrowRight className="size-4 ml-2" />
               </Button>
               <button onClick={() => setPublicPage({ page: 'services' })} className="inline-flex items-center justify-center gap-2 h-12 px-8 rounded-md glass text-white hover:bg-white/10 transition-all">

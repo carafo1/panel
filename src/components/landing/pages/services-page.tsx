@@ -24,14 +24,14 @@ const WHY = [
 
 export function ServicesPage() {
   const { setPublicPage } = useAppStore()
-  const { services } = useSiteContent()
+  const { services, getContent } = useSiteContent()
 
   return (
     <>
       <PageHero
-        badge="Our Services"
-        title={<>Everything you need to <span className="text-gradient-brand">build &amp; grow</span> online</>}
-        subtitle="Four integrated services that take you from idea to global scale — all on one platform."
+        badge={getContent('services.hero.badge')}
+        title={<span className="text-gradient-brand">{getContent('services.hero.title')}</span>}
+        subtitle={getContent('services.hero.subtitle')}
       />
 
       <section className="py-24 bg-background">
@@ -85,9 +85,9 @@ export function ServicesPage() {
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <ScrollReveal>
             <div className="text-center mb-14">
-              <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">Integrated Workflow</Badge>
-              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight">Four services, <span className="text-gradient-brand">one workflow</span></h2>
-              <p className="mt-3 text-muted-foreground max-w-2xl mx-auto">APSAMO services are designed to chain together. Each handoff is automatic — no glue code, no manual config.</p>
+              <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">{getContent('services.workflow.badge')}</Badge>
+              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight"><span className="text-gradient-brand">{getContent('services.workflow.title')}</span></h2>
+              <p className="mt-3 text-muted-foreground max-w-2xl mx-auto">{getContent('services.workflow.subtitle')}</p>
             </div>
           </ScrollReveal>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
@@ -121,11 +121,11 @@ export function ServicesPage() {
           <ScrollReveal>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
               <div>
-                <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">Why APSAMO</Badge>
-                <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight mb-4">One platform, <span className="text-gradient-brand">zero integration headaches</span></h2>
-                <p className="text-lg text-muted-foreground mb-6">Every APSAMO service is designed to work together. Buy a domain, get hosting, deploy your app, and scale — all from a single dashboard.</p>
+                <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">{getContent('services.why.badge')}</Badge>
+                <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight mb-4"><span className="text-gradient-brand">{getContent('services.why.title')}</span></h2>
+                <p className="text-lg text-muted-foreground mb-6">{getContent('services.why.desc')}</p>
                 <Button onClick={() => setPublicPage({ page: 'pricing' })} className="bg-indigo-500 hover:bg-indigo-600 text-white border-0 shadow-glow-indigo">
-                  View Pricing <ArrowRight className="size-4 ml-1" />
+                  {getContent('services.why.button')} <ArrowRight className="size-4 ml-1" />
                 </Button>
               </div>
               <div className="space-y-3">
@@ -150,11 +150,11 @@ export function ServicesPage() {
         <div className="aurora-blob aurora-blob-1" style={{ top: '-10%', right: '10%', width: '450px', height: '450px', background: 'radial-gradient(circle, #706FD3 0%, transparent 70%)' }} />
         <div className="relative z-10 mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 text-center py-20">
           <ScrollReveal>
-            <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight mb-4">Not sure where to start?</h2>
-            <p className="text-zinc-300 mb-8 max-w-xl mx-auto">Book a free consultation. We&apos;ll map the right services to your goals and give you a fixed quote.</p>
+            <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight mb-4"><span className="text-gradient-brand">{getContent('services.cta.title')}</span></h2>
+            <p className="text-zinc-300 mb-8 max-w-xl mx-auto">{getContent('services.cta.subtitle')}</p>
             <a href="#/contact" onClick={() => setPublicPage({ page: 'contact' })} className="inline-flex items-center gap-2 h-12 px-8 rounded-md glass text-white hover:bg-white/10 transition-all">
               <Sparkles className="size-4 text-indigo-300" />
-              Talk to an Expert
+              {getContent('services.cta.button')}
               <ArrowRight className="size-4 ml-1" />
             </a>
           </ScrollReveal>

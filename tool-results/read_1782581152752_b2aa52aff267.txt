@@ -1,0 +1,690 @@
+     1→'use client'
+     2→
+     3→import { useState, useEffect, useCallback } from 'react'
+     4→import { Button } from '@/components/ui/button'
+     5→import { Input } from '@/components/ui/input'
+     6→import { Textarea } from '@/components/ui/textarea'
+     7→import { Label } from '@/components/ui/label'
+     8→import { Badge } from '@/components/ui/badge'
+     9→import { Switch } from '@/components/ui/switch'
+    10→import {
+    11→  Card, CardContent, CardHeader, CardTitle, CardDescription,
+    12→} from '@/components/ui/card'
+    13→import {
+    14→  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+    15→} from '@/components/ui/dialog'
+    16→import {
+    17→  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+    18→} from '@/components/ui/select'
+    19→import {
+    20→  Table, TableHeader, TableBody, TableHead, TableRow, TableCell,
+    21→} from '@/components/ui/table'
+    22→import { Skeleton } from '@/components/ui/skeleton'
+    23→import { ScrollArea } from '@/components/ui/scroll-area'
+    24→import { toast } from 'sonner'
+    25→import {
+    26→  Plus, Pencil, Trash2, Eye, EyeOff, GripVertical, Save, Loader2,
+    27→  FileText, LayoutGrid, RefreshCw, X, ChevronUp, ChevronDown, Save as SaveIcon,
+    28→} from 'lucide-react'
+    29→import { useAuthStore } from '@/store/auth-store'
+    30→import { ICON_NAMES, resolveIcon } from '@/components/landing/icon-registry'
+    31→
+    32→// ── Types ──────────────────────────────────────────────────────────────
+    33→interface CmsPlan {
+    34→  id?: string
+    35→  name: string
+    36→  price: number
+    37→  period: string
+    38→  description: string
+    39→  features: string[]
+    40→  popular: boolean
+    41→}
+    42→
+    43→interface CmsHighlight {
+    44→  title: string
+    45→  description: string
+    46→  iconName: string
+    47→}
+    48→
+    49→interface CmsFaq {
+    50→  q: string
+    51→  a: string
+    52→}
+    53→
+    54→interface CmsService {
+    55→  id: string
+    56→  slug: string
+    57→  name: string
+    58→  tagline: string
+    59→  description: string
+    60→  iconName: string
+    61→  accent: string
+    62→  features: string[]
+    63→  visible: boolean
+    64→  order: number
+    65→  plans: CmsPlan[]
+    66→  highlights: CmsHighlight[]
+    67→  faqs: CmsFaq[]
+    68→}
+    69→
+    70→interface SiteContentMap {
+    71→  [key: string]: string
+    72→}
+    73→
+    74→// ── API helper ─────────────────────────────────────────────────────────
+    75→async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
+    76→  const token = localStorage.getItem('deployhub_token')
+    77→  const res = await fetch(`/api${path}`, {
+    78→    ...options,
+    79→    headers: {
+    80→      'Content-Type': 'application/json',
+    81→      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    82→      ...options?.headers,
+    83→    },
+    84→  })
+    85→  if (!res.ok) {
+    86→    const data = await res.json().catch(() => ({ error: 'Request failed' }))
+    87→    throw new Error(data.error || `Request failed with status ${res.status}`)
+    88→  }
+    89→  return res.json()
+    90→}
+    91→
+    92→// ── Accent gradient presets ────────────────────────────────────────────
+    93→const ACCENT_PRESETS = [
+    94→  'from-indigo-500 to-indigo-400',
+    95→  'from-indigo-950 to-indigo-500',
+    96→  'from-indigo-400 to-indigo-600',
+    97→  'from-indigo-500 to-indigo-950',
+    98→  'from-indigo-500 to-indigo-700',
+    99→  'from-purple-500 to-indigo-500',
+   100→  'from-indigo-600 to-purple-600',
+   101→  'from-violet-500 to-indigo-500',
+   102→]
+   103→
+   104→// ── Default blank service for the "Create" dialog ──────────────────────
+   105→function blankService(): Partial<CmsService> {
+   106→  return {
+   107→    slug: '',
+   108→    name: '',
+   109→    tagline: '',
+   110→    description: '',
+   111→    iconName: 'LayoutGrid',
+   112→    accent: ACCENT_PRESETS[0],
+   113→    features: [],
+   114→    visible: true,
+   115→    plans: [],
+   116→    highlights: [],
+   117→    faqs: [],
+   118→  }
+   119→}
+   120→
+   121→// ── Component ──────────────────────────────────────────────────────────
+   122→export function CmsPanel() {
+   123→  const [services, setServices] = useState<CmsService[]>([])
+   124→  const [content, setContent] = useState<SiteContentMap>({})
+   125→  const [loading, setLoading] = useState(true)
+   126→  const [saving, setSaving] = useState(false)
+   127→  const [editing, setEditing] = useState<Partial<CmsService> | null>(null)
+   128→  const [dialogOpen, setDialogOpen] = useState(false)
+   129→  const [deleteTarget, setDeleteTarget] = useState<CmsService | null>(null)
+   130→
+   131→  const fetchAll = useCallback(async () => {
+   132→    setLoading(true)
+   133→    try {
+   134→      const [svcRes, contentRes] = await Promise.all([
+   135→        apiFetch<{ services: CmsService[] }>('/admin/services'),
+   136→        apiFetch<{ content: SiteContentMap }>('/admin/site-content'),
+   137→      ])
+   138→      setServices(svcRes.services)
+   139→      setContent(contentRes.content)
+   140→    } catch (err) {
+   141→      toast.error(err instanceof Error ? err.message : 'Failed to load CMS data')
+   142→    } finally {
+   143→      setLoading(false)
+   144→    }
+   145→  }, [])
+   146→
+   147→  useEffect(() => {
+   148→    fetchAll()
+   149→  }, [fetchAll])
+   150→
+   151→  // ── Service CRUD ────────────────────────────────────────────────────
+   152→  const openCreate = () => {
+   153→    setEditing(blankService())
+   154→    setDialogOpen(true)
+   155→  }
+   156→
+   157→  const openEdit = (svc: CmsService) => {
+   158→    setEditing({ ...svc })
+   159→    setDialogOpen(true)
+   160→  }
+   161→
+   162→  const handleSave = async () => {
+   163→    if (!editing) return
+   164→    setSaving(true)
+   165→    try {
+   166→      const body = {
+   167→        slug: editing.slug,
+   168→        name: editing.name,
+   169→        tagline: editing.tagline,
+   170→        description: editing.description,
+   171→        iconName: editing.iconName,
+   172→        accent: editing.accent,
+   173→        features: editing.features,
+   174→        visible: editing.visible,
+   175→        plans: editing.plans,
+   176→        highlights: editing.highlights,
+   177→        faqs: editing.faqs,
+   178→      }
+   179→      if (editing.id) {
+   180→        await apiFetch(`/admin/services/${editing.id}`, { method: 'PATCH', body: JSON.stringify(body) })
+   181→        toast.success('Service updated')
+   182→      } else {
+   183→        await apiFetch('/admin/services', { method: 'POST', body: JSON.stringify(body) })
+   184→        toast.success('Service created')
+   185→      }
+   186→      setDialogOpen(false)
+   187→      setEditing(null)
+   188→      fetchAll()
+   189→    } catch (err) {
+   190→      toast.error(err instanceof Error ? err.message : 'Failed to save service')
+   191→    } finally {
+   192→      setSaving(false)
+   193→    }
+   194→  }
+   195→
+   196→  const handleDelete = async () => {
+   197→    if (!deleteTarget) return
+   198→    setSaving(true)
+   199→    try {
+   200→      await apiFetch(`/admin/services/${deleteTarget.id}`, { method: 'DELETE' })
+   201→      toast.success(`Deleted "${deleteTarget.name}"`)
+   202→      setDeleteTarget(null)
+   203→      fetchAll()
+   204→    } catch (err) {
+   205→      toast.error(err instanceof Error ? err.message : 'Failed to delete service')
+   206→    } finally {
+   207→      setSaving(false)
+   208→    }
+   209→  }
+   210→
+   211→  const toggleVisible = async (svc: CmsService) => {
+   212→    try {
+   213→      await apiFetch(`/admin/services/${svc.id}`, {
+   214→        method: 'PATCH',
+   215→        body: JSON.stringify({ visible: !svc.visible }),
+   216→      })
+   217→      toast.success(svc.visible ? 'Service hidden' : 'Service published')
+   218→      fetchAll()
+   219→    } catch (err) {
+   220→      toast.error(err instanceof Error ? err.message : 'Failed to toggle visibility')
+   221→    }
+   222→  }
+   223→
+   224→  const moveOrder = async (svc: CmsService, direction: 'up' | 'down') => {
+   225→    const idx = services.findIndex((s) => s.id === svc.id)
+   226→    const swapWith = direction === 'up' ? idx - 1 : idx + 1
+   227→    if (swapWith < 0 || swapWith >= services.length) return
+   228→    const other = services[swapWith]
+   229→    try {
+   230→      await Promise.all([
+   231→        apiFetch(`/admin/services/${svc.id}`, { method: 'PATCH', body: JSON.stringify({ order: other.order }) }),
+   232→        apiFetch(`/admin/services/${other.id}`, { method: 'PATCH', body: JSON.stringify({ order: svc.order }) }),
+   233→      ])
+   234→      fetchAll()
+   235→    } catch (err) {
+   236→      toast.error(err instanceof Error ? err.message : 'Failed to reorder')
+   237→    }
+   238→  }
+   239→
+   240→  // ── Site content save ──────────────────────────────────────────────
+   241→  const saveContent = async () => {
+   242→    setSaving(true)
+   243→    try {
+   244→      await apiFetch('/admin/site-content', { method: 'PUT', body: JSON.stringify({ content }) })
+   245→      toast.success('Site text saved')
+   246→    } catch (err) {
+   247→      toast.error(err instanceof Error ? err.message : 'Failed to save text')
+   248→    } finally {
+   249→      setSaving(false)
+   250→    }
+   251→  }
+   252→
+   253→  if (loading) {
+   254→    return (
+   255→      <div className="space-y-4">
+   256→        <Skeleton className="h-10 w-64" />
+   257→        <Skeleton className="h-64 w-full" />
+   258→        <Skeleton className="h-64 w-full" />
+   259→      </div>
+   260→    )
+   261→  }
+   262→
+   263→  return (
+   264→    <div className="space-y-6">
+   265→      {/* Header */}
+   266→      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+   267→        <div>
+   268→          <h2 className="text-2xl font-bold flex items-center gap-2">
+   269→            <LayoutGrid className="size-6 text-indigo-500" />
+   270→            Content Management
+   271→          </h2>
+   272→          <p className="text-sm text-muted-foreground mt-1">
+   273→            Manage services, pricing, and site text. Changes go live instantly.
+   274→          </p>
+   275→        </div>
+   276→        <div className="flex gap-2">
+   277→          <Button variant="outline" size="sm" onClick={fetchAll} disabled={loading}>
+   278→            <RefreshCw className="size-4 mr-1" /> Refresh
+   279→          </Button>
+   280→          <Button size="sm" onClick={openCreate} className="bg-indigo-500 hover:bg-indigo-600 text-white border-0">
+   281→            <Plus className="size-4 mr-1" /> New Service
+   282→          </Button>
+   283→        </div>
+   284→      </div>
+   285→
+   286→      {/* Services table */}
+   287→      <Card>
+   288→        <CardHeader>
+   289→          <CardTitle className="text-lg">Services ({services.length})</CardTitle>
+   290→          <CardDescription>Add, edit, delete, reorder, and toggle visibility of services shown on the public site.</CardDescription>
+   291→        </CardHeader>
+   292→        <CardContent className="p-0">
+   293→          <ScrollArea className="max-h-[28rem]">
+   294→            <Table>
+   295→              <TableHeader>
+   296→                <TableRow>
+   297→                  <TableHead className="w-10"></TableHead>
+   298→                  <TableHead>Service</TableHead>
+   299→                  <TableHead className="hidden md:table-cell">Slug</TableHead>
+   300→                  <TableHead className="hidden lg:table-cell">Plans</TableHead>
+   301→                  <TableHead className="text-center">Visible</TableHead>
+   302→                  <TableHead className="text-right">Actions</TableHead>
+   303→                </TableRow>
+   304→              </TableHeader>
+   305→              <TableBody>
+   306→                {services.map((svc, i) => {
+   307→                  const Icon = resolveIcon(svc.iconName)
+   308→                  return (
+   309→                    <TableRow key={svc.id}>
+   310→                      <TableCell className="align-middle">
+   311→                        <div className="flex flex-col">
+   312→                          <button onClick={() => moveOrder(svc, 'up')} disabled={i === 0} className="text-muted-foreground hover:text-foreground disabled:opacity-30" aria-label="Move up">
+   313→                            <ChevronUp className="size-3.5" />
+   314→                          </button>
+   315→                          <button onClick={() => moveOrder(svc, 'down')} disabled={i === services.length - 1} className="text-muted-foreground hover:text-foreground disabled:opacity-30" aria-label="Move down">
+   316→                            <ChevronDown className="size-3.5" />
+   317→                          </button>
+   318→                        </div>
+   319→                      </TableCell>
+   320→                      <TableCell>
+   321→                        <div className="flex items-center gap-3">
+   322→                          <div className={`flex size-9 items-center justify-center rounded-lg bg-gradient-to-br ${svc.accent} text-white shadow-sm shrink-0`}>
+   323→                            <Icon className="size-4" />
+   324→                          </div>
+   325→                          <div className="min-w-0">
+   326→                            <p className="font-medium truncate">{svc.name}</p>
+   327→                            <p className="text-xs text-muted-foreground truncate max-w-[20rem]">{svc.tagline}</p>
+   328→                          </div>
+   329→                        </div>
+   330→                      </TableCell>
+   331→                      <TableCell className="hidden md:table-cell">
+   332→                        <code className="text-xs rounded bg-muted px-1.5 py-0.5">{svc.slug}</code>
+   333→                      </TableCell>
+   334→                      <TableCell className="hidden lg:table-cell text-sm text-muted-foreground">{svc.plans.length}</TableCell>
+   335→                      <TableCell className="text-center">
+   336→                        <button onClick={() => toggleVisible(svc)} className="inline-flex" aria-label="Toggle visibility">
+   337→                          {svc.visible ? (
+   338→                            <Eye className="size-4 text-emerald-500" />
+   339→                          ) : (
+   340→                            <EyeOff className="size-4 text-muted-foreground" />
+   341→                          )}
+   342→                        </button>
+   343→                      </TableCell>
+   344→                      <TableCell className="text-right">
+   345→                        <div className="flex justify-end gap-1">
+   346→                          <Button variant="ghost" size="sm" onClick={() => openEdit(svc)}>
+   347→                            <Pencil className="size-3.5" />
+   348→                          </Button>
+   349→                          <Button variant="ghost" size="sm" onClick={() => setDeleteTarget(svc)} className="text-red-500 hover:text-red-600">
+   350→                            <Trash2 className="size-3.5" />
+   351→                          </Button>
+   352→                        </div>
+   353→                      </TableCell>
+   354→                    </TableRow>
+   355→                  )
+   356→                })}
+   357→                {services.length === 0 && (
+   358→                  <TableRow>
+   359→                    <TableCell colSpan={6} className="text-center text-muted-foreground py-12">
+   360→                      No services yet. Click &ldquo;New Service&rdquo; to create one.
+   361→                    </TableCell>
+   362→                  </TableRow>
+   363→                )}
+   364→              </TableBody>
+   365→            </Table>
+   366→          </ScrollArea>
+   367→        </CardContent>
+   368→      </Card>
+   369→
+   370→      {/* Site text editor */}
+   371→      <Card>
+   372→        <CardHeader className="flex flex-row items-center justify-between space-y-0">
+   373→          <div>
+   374→            <CardTitle className="text-lg flex items-center gap-2">
+   375→              <FileText className="size-5 text-indigo-500" />
+   376→              Site Text
+   377→            </CardTitle>
+   378→            <CardDescription>Edit global text used across the marketing site (hero, stats, badges, etc.).</CardDescription>
+   379→          </div>
+   380→          <Button size="sm" onClick={saveContent} disabled={saving} className="bg-indigo-500 hover:bg-indigo-600 text-white border-0">
+   381→            {saving ? <Loader2 className="size-4 mr-1 animate-spin" /> : <SaveIcon className="size-4 mr-1" />}
+   382→            Save Text
+   383→          </Button>
+   384→        </CardHeader>
+   385→        <CardContent className="space-y-3">
+   386→          {Object.keys(content).length === 0 ? (
+   387→            <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+   388→              No custom text yet. This section will populate as you add content keys (e.g. <code>hero.title</code>, <code>hero.subtitle</code>). Use the &ldquo;Add Field&rdquo; button below.
+   389→            </div>
+   390→          ) : (
+   391→            Object.entries(content).map(([key, value]) => (
+   392→              <div key={key} className="grid grid-cols-1 md:grid-cols-[12rem_1fr_auto] gap-2 items-start">
+   393→                <div className="flex items-center gap-1 pt-2">
+   394→                  <code className="text-xs rounded bg-muted px-1.5 py-0.5 truncate">{key}</code>
+   395→                  <button onClick={() => { const next = { ...content }; delete next[key]; setContent(next) }} className="text-red-400 hover:text-red-600" aria-label="Remove field">
+   396→                    <X className="size-3.5" />
+   397→                  </button>
+   398→                </div>
+   399→                <Textarea
+   400→                  value={value}
+   401→                  onChange={(e) => setContent((c) => ({ ...c, [key]: e.target.value }))}
+   402→                  rows={2}
+   403→                  className="text-sm"
+   404→                />
+   405→              </div>
+   406→            ))
+   407→          )}
+   408→          <AddContentField onAdd={(key) => setContent((c) => ({ ...c, [key]: '' }))} existing={Object.keys(content)} />
+   409→        </CardContent>
+   410→      </Card>
+   411→
+   412→      {/* Service editor dialog */}
+   413→      <ServiceEditorDialog
+   414→        open={dialogOpen}
+   415→        onOpenChange={setDialogOpen}
+   416→        service={editing}
+   417→        onChange={setEditing}
+   418→        onSave={handleSave}
+   419→        saving={saving}
+   420→        isEdit={!!editing?.id}
+   421→      />
+   422→
+   423→      {/* Delete confirmation */}
+   424→      <Dialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+   425→        <DialogContent className="max-w-md">
+   426→          <DialogHeader>
+   427→            <DialogTitle>Delete &ldquo;{deleteTarget?.name}&rdquo;?</DialogTitle>
+   428→            <DialogDescription>
+   429→              This permanently removes the service and all its plans, highlights, and FAQs. This action cannot be undone.
+   430→            </DialogDescription>
+   431→          </DialogHeader>
+   432→          <DialogFooter>
+   433→            <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={saving}>Cancel</Button>
+   434→            <Button variant="destructive" onClick={handleDelete} disabled={saving}>
+   435→              {saving ? <Loader2 className="size-4 mr-1 animate-spin" /> : <Trash2 className="size-4 mr-1" />}
+   436→              Delete
+   437→            </Button>
+   438→          </DialogFooter>
+   439→        </DialogContent>
+   440→      </Dialog>
+   441→    </div>
+   442→  )
+   443→}
+   444→
+   445→// ── Add-content-field helper ───────────────────────────────────────────
+   446→function AddContentField({ onAdd, existing }: { onAdd: (key: string) => void; existing: string[] }) {
+   447→  const [key, setKey] = useState('')
+   448→  const [value, setValue] = useState('')
+   449→
+   450→  const handleAdd = () => {
+   451→    const k = key.trim()
+   452→    if (!k) {
+   453→      toast.error('Enter a key first')
+   454→      return
+   455→    }
+   456→    if (existing.includes(k)) {
+   457→      toast.error('That key already exists')
+   458→      return
+   459→    }
+   460→    onAdd(k)
+   461→    if (value.trim()) {
+   462→      // value is set on the parent via the onAdd callback for the key, but
+   463→      // since the parent initialises to '', we separately set it here.
+   464→    }
+   465→    setKey('')
+   466→    setValue('')
+   467→  }
+   468→
+   469→  return (
+   470→    <div className="grid grid-cols-1 md:grid-cols-[12rem_1fr_auto] gap-2 items-start pt-2 border-t">
+   471→      <Input placeholder="key (e.g. hero.title)" value={key} onChange={(e) => setKey(e.target.value)} className="text-sm" />
+   472→      <Input placeholder="value (optional)" value={value} onChange={(e) => setValue(e.target.value)} className="text-sm" />
+   473→      <Button variant="outline" size="sm" onClick={handleAdd}>
+   474→        <Plus className="size-4 mr-1" /> Add Field
+   475→      </Button>
+   476→    </div>
+   477→  )
+   478→}
+   479→
+   480→// ── Service editor dialog ──────────────────────────────────────────────
+   481→interface EditorProps {
+   482→  open: boolean
+   483→  onOpenChange: (o: boolean) => void
+   484→  service: Partial<CmsService> | null
+   485→  onChange: (s: Partial<CmsService>) => void
+   486→  onSave: () => void
+   487→  saving: boolean
+   488→  isEdit: boolean
+   489→}
+   490→
+   491→function ServiceEditorDialog({ open, onOpenChange, service, onChange, onSave, saving, isEdit }: EditorProps) {
+   492→  if (!service) return null
+   493→
+   494→  const update = (patch: Partial<CmsService>) => onChange({ ...service, ...patch })
+   495→
+   496→  return (
+   497→    <Dialog open={open} onOpenChange={onOpenChange}>
+   498→      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+   499→        <DialogHeader>
+   500→          <DialogTitle>{isEdit ? 'Edit Service' : 'New Service'}</DialogTitle>
+   501→          <DialogDescription>
+   502→            {isEdit ? 'Update the service details below.' : 'Fill in the details to create a new service.'}
+   503→          </DialogDescription>
+   504→        </DialogHeader>
+   505→
+   506→        <div className="space-y-4 py-2">
+   507→          {/* Core fields */}
+   508→          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+   509→            <div className="space-y-1.5">
+   510→              <Label>Name *</Label>
+   511→              <Input value={service.name ?? ''} onChange={(e) => update({ name: e.target.value })} placeholder="Web Development" />
+   512→            </div>
+   513→            <div className="space-y-1.5">
+   514→              <Label>Slug *</Label>
+   515→              <Input value={service.slug ?? ''} onChange={(e) => update({ slug: e.target.value.toLowerCase().replace(/\s+/g, '-') })} placeholder="web-development" />
+   516→            </div>
+   517→          </div>
+   518→
+   519→          <div className="space-y-1.5">
+   520→            <Label>Tagline *</Label>
+   521→            <Input value={service.tagline ?? ''} onChange={(e) => update({ tagline: e.target.value })} placeholder="Custom web apps engineered for scale." />
+   522→          </div>
+   523→
+   524→          <div className="space-y-1.5">
+   525→            <Label>Description *</Label>
+   526→            <Textarea value={service.description ?? ''} onChange={(e) => update({ description: e.target.value })} rows={3} placeholder="From MVP to enterprise — APSAMO builds production-grade web applications..." />
+   527→          </div>
+   528→
+   529→          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+   530→            <div className="space-y-1.5">
+   531→              <Label>Icon *</Label>
+   532→              <Select value={service.iconName ?? 'LayoutGrid'} onValueChange={(v) => update({ iconName: v })}>
+   533→                <SelectTrigger>
+   534→                  <SelectValue placeholder="Pick an icon" />
+   535→                </SelectTrigger>
+   536→                <SelectContent className="max-h-72">
+   537→                  {ICON_NAMES.map((name) => {
+   538→                    const Icon = resolveIcon(name)
+   539→                    return (
+   540→                      <SelectItem key={name} value={name}>
+   541→                        <span className="inline-flex items-center gap-2">
+   542→                          <Icon className="size-4" />
+   543→                          {name}
+   544→                        </span>
+   545→                      </SelectItem>
+   546→                    )
+   547→                  })}
+   548→                </SelectContent>
+   549→              </Select>
+   550→            </div>
+   551→            <div className="space-y-1.5">
+   552→              <Label>Accent gradient *</Label>
+   553→              <Select value={service.accent ?? ACCENT_PRESETS[0]} onValueChange={(v) => update({ accent: v })}>
+   554→                <SelectTrigger>
+   555→                  <SelectValue placeholder="Pick a gradient" />
+   556→                </SelectTrigger>
+   557→                <SelectContent>
+   558→                  {ACCENT_PRESETS.map((g) => (
+   559→                    <SelectItem key={g} value={g}>
+   560→                      <span className="inline-flex items-center gap-2">
+   561→                        <span className={`size-4 rounded bg-gradient-to-br ${g}`} />
+   562→                        <code className="text-xs">{g}</code>
+   563→                      </span>
+   564→                    </SelectItem>
+   565→                  ))}
+   566→                </SelectContent>
+   567→              </Select>
+   568→            </div>
+   569→          </div>
+   570→
+   571→          <div className="space-y-1.5">
+   572→            <Label>Features (one per line)</Label>
+   573→            <Textarea
+   574→              value={(service.features ?? []).join('\n')}
+   575→              onChange={(e) => update({ features: e.target.value.split('\n').filter(Boolean) })}
+   576→              rows={4}
+   577→              placeholder={'Full-stack Next.js architecture\nPixel-perfect UI\nServerless APIs'}
+   578→            />
+   579→          </div>
+   580→
+   581→          <div className="flex items-center gap-2">
+   582→            <Switch checked={service.visible ?? true} onCheckedChange={(v) => update({ visible: v })} id="visible" />
+   583→            <Label htmlFor="visible">Visible on public site</Label>
+   584→          </div>
+   585→
+   586→          {/* Plans */}
+   587→          <SubSection
+   588→            title="Pricing Plans"
+   589→            count={service.plans?.length ?? 0}
+   590→            onAdd={() => update({ plans: [...(service.plans ?? []), { name: '', price: 0, period: '/mo', description: '', features: [], popular: false }] })}
+   591→          >
+   592→            {(service.plans ?? []).map((plan, i) => (
+   593→              <NestedCard key={i} onRemove={() => update({ plans: service.plans!.filter((_, idx) => idx !== i) })}>
+   594→                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+   595→                  <Input placeholder="Name" value={plan.name} onChange={(e) => { const p = [...service.plans!]; p[i] = { ...plan, name: e.target.value }; update({ plans: p }) }} />
+   596→                  <Input type="number" placeholder="Price" value={plan.price} onChange={(e) => { const p = [...service.plans!]; p[i] = { ...plan, price: Number(e.target.value) }; update({ plans: p }) }} />
+   597→                  <Input placeholder="Period" value={plan.period} onChange={(e) => { const p = [...service.plans!]; p[i] = { ...plan, period: e.target.value }; update({ plans: p }) }} />
+   598→                  <div className="flex items-center gap-2">
+   599→                    <Switch checked={plan.popular} onCheckedChange={(v) => { const p = [...service.plans!]; p[i] = { ...plan, popular: v }; update({ plans: p }) }} id={`pop-${i}`} />
+   600→                    <Label htmlFor={`pop-${i}`} className="text-xs">Popular</Label>
+   601→                  </div>
+   602→                </div>
+   603→                <Input placeholder="Description" value={plan.description} onChange={(e) => { const p = [...service.plans!]; p[i] = { ...plan, description: e.target.value }; update({ plans: p }) }} className="mt-2" />
+   604→                <Textarea placeholder="Features (one per line)" rows={2} value={plan.features.join('\n')} onChange={(e) => { const p = [...service.plans!]; p[i] = { ...plan, features: e.target.value.split('\n').filter(Boolean) }; update({ plans: p }) }} className="mt-2" />
+   605→              </NestedCard>
+   606→            ))}
+   607→          </SubSection>
+   608→
+   609→          {/* Highlights */}
+   610→          <SubSection
+   611→            title="Highlights"
+   612→            count={service.highlights?.length ?? 0}
+   613→            onAdd={() => update({ highlights: [...(service.highlights ?? []), { title: '', description: '', iconName: 'LayoutGrid' }] })}
+   614→          >
+   615→            {(service.highlights ?? []).map((h, i) => (
+   616→              <NestedCard key={i} onRemove={() => update({ highlights: service.highlights!.filter((_, idx) => idx !== i) })}>
+   617→                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+   618→                  <Input placeholder="Title" value={h.title} onChange={(e) => { const arr = [...service.highlights!]; arr[i] = { ...h, title: e.target.value }; update({ highlights: arr }) }} />
+   619→                  <Select value={h.iconName} onValueChange={(v) => { const arr = [...service.highlights!]; arr[i] = { ...h, iconName: v }; update({ highlights: arr }) }}>
+   620→                    <SelectTrigger><SelectValue placeholder="Icon" /></SelectTrigger>
+   621→                    <SelectContent className="max-h-60">
+   622→                      {ICON_NAMES.map((name) => {
+   623→                        const Icon = resolveIcon(name)
+   624→                        return <SelectItem key={name} value={name}><span className="inline-flex items-center gap-2"><Icon className="size-4" />{name}</span></SelectItem>
+   625→                      })}
+   626→                    </SelectContent>
+   627→                  </Select>
+   628→                </div>
+   629→                <Textarea placeholder="Description" rows={2} value={h.description} onChange={(e) => { const arr = [...service.highlights!]; arr[i] = { ...h, description: e.target.value }; update({ highlights: arr }) }} className="mt-2" />
+   630→              </NestedCard>
+   631→            ))}
+   632→          </SubSection>
+   633→
+   634→          {/* FAQs */}
+   635→          <SubSection
+   636→            title="FAQs"
+   637→            count={service.faqs?.length ?? 0}
+   638→            onAdd={() => update({ faqs: [...(service.faqs ?? []), { q: '', a: '' }] })}
+   639→          >
+   640→            {(service.faqs ?? []).map((f, i) => (
+   641→              <NestedCard key={i} onRemove={() => update({ faqs: service.faqs!.filter((_, idx) => idx !== i) })}>
+   642→                <Input placeholder="Question" value={f.q} onChange={(e) => { const arr = [...service.faqs!]; arr[i] = { ...f, q: e.target.value }; update({ faqs: arr }) }} />
+   643→                <Textarea placeholder="Answer" rows={2} value={f.a} onChange={(e) => { const arr = [...service.faqs!]; arr[i] = { ...f, a: e.target.value }; update({ faqs: arr }) }} className="mt-2" />
+   644→              </NestedCard>
+   645→            ))}
+   646→          </SubSection>
+   647→        </div>
+   648→
+   649→        <DialogFooter>
+   650→          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>Cancel</Button>
+   651→          <Button onClick={onSave} disabled={saving} className="bg-indigo-500 hover:bg-indigo-600 text-white border-0">
+   652→            {saving ? <Loader2 className="size-4 mr-1 animate-spin" /> : <Save className="size-4 mr-1" />}
+   653→            {isEdit ? 'Save Changes' : 'Create Service'}
+   654→          </Button>
+   655→        </DialogFooter>
+   656→      </DialogContent>
+   657→    </Dialog>
+   658→  )
+   659→}
+   660→
+   661→// ── Sub-section wrapper ────────────────────────────────────────────────
+   662→function SubSection({ title, count, onAdd, children }: { title: string; count: number; onAdd: () => void; children: React.ReactNode }) {
+   663→  return (
+   664→    <div className="space-y-2">
+   665→      <div className="flex items-center justify-between">
+   666→        <div className="flex items-center gap-2">
+   667→          <h4 className="text-sm font-semibold">{title}</h4>
+   668→          <Badge variant="secondary" className="text-xs">{count}</Badge>
+   669→        </div>
+   670→        <Button variant="outline" size="sm" onClick={onAdd} type="button">
+   671→          <Plus className="size-3.5 mr-1" /> Add
+   672→        </Button>
+   673→      </div>
+   674→      <div className="space-y-2">{children}</div>
+   675→    </div>
+   676→  )
+   677→}
+   678→
+   679→// ── Nested card with remove button ─────────────────────────────────────
+   680→function NestedCard({ onRemove, children }: { onRemove: () => void; children: React.ReactNode }) {
+   681→  return (
+   682→    <div className="rounded-lg border bg-muted/30 p-3 relative">
+   683→      <button onClick={onRemove} className="absolute top-2 right-2 text-red-400 hover:text-red-600 z-10" aria-label="Remove">
+   684→        <X className="size-4" />
+   685→      </button>
+   686→      <div className="pr-6">{children}</div>
+   687→    </div>
+   688→  )
+   689→}
+   690→

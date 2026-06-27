@@ -4,6 +4,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Target, Heart, Zap, Users, Rocket, Shield } from 'lucide-react'
 import { PageHero, ScrollReveal, StaggerCard } from '../ui-helpers'
+import { useSiteContent } from '../site-data-context'
 
 const VALUES = [
   { icon: Target, title: 'Craftsmanship', desc: 'We sweat every detail — from pixel-perfect UI to sub-100ms API responses. Quality is non-negotiable.' },
@@ -22,12 +23,13 @@ const STATS = [
 ]
 
 export function AboutPage() {
+  const { getContent } = useSiteContent()
   return (
     <>
       <PageHero
-        badge="About Us"
-        title={<>We build the web so <span className="text-gradient-brand">you can build</span> your business</>}
-        subtitle="APSAMO Technology was founded by developers, for developers. We believe deploying a website should be as simple as pushing to git."
+        badge={getContent('about.hero.badge')}
+        title={<span className="text-gradient-brand">{getContent('about.hero.title')}</span>}
+        subtitle={getContent('about.hero.subtitle')}
       />
 
       {/* Story */}
@@ -35,15 +37,15 @@ export function AboutPage() {
         <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8">
           <ScrollReveal>
             <div className="prose prose-lg max-w-none">
-              <h2 className="text-2xl font-extrabold mb-4">Our story</h2>
+              <h2 className="text-2xl font-extrabold mb-4">{getContent('about.story.title')}</h2>
               <p className="text-muted-foreground leading-relaxed mb-4">
-                APSAMO started with a simple frustration: deploying a web app involved too many tools, too many accounts, and too many points of failure. Domain registrars, DNS providers, hosting platforms, CI/CD pipelines, SSL certificates — each a separate bill, a separate dashboard, a separate headache.
+                {getContent('about.story.p1')}
               </p>
               <p className="text-muted-foreground leading-relaxed mb-4">
-                We set out to build the platform we wished existed: one place to develop, host, register domains, and scale SaaS applications — with automation that handles the boring parts so you can focus on building.
+                {getContent('about.story.p2')}
               </p>
               <p className="text-muted-foreground leading-relaxed">
-                Today, APSAMO powers tens of thousands of sites across 12 countries, with a 99.9% uptime SLA and a relentless focus on developer experience. But we\'re just getting started.
+                {getContent('about.story.p3')}
               </p>
             </div>
           </ScrollReveal>
@@ -71,8 +73,8 @@ export function AboutPage() {
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <ScrollReveal>
             <div className="text-center mb-12">
-              <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">Our Values</Badge>
-              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight">What we <span className="text-gradient-brand">believe</span></h2>
+              <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">{getContent('about.values.badge')}</Badge>
+              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight"><span className="text-gradient-brand">{getContent('about.values.title')}</span></h2>
             </div>
           </ScrollReveal>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -101,9 +103,9 @@ export function AboutPage() {
         <div className="aurora-blob aurora-blob-1" style={{ top: '-10%', right: '5%', width: '500px', height: '500px', background: 'radial-gradient(circle, #706FD3 0%, transparent 70%)' }} />
         <div className="relative z-10 mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 text-center py-20">
           <ScrollReveal>
-            <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight mb-4">Our mission</h2>
+            <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight mb-4"><span className="text-gradient-brand">{getContent('about.mission.title')}</span></h2>
             <p className="text-xl text-zinc-300 leading-relaxed">
-              To make the web faster, safer, and more accessible — by giving every developer the infrastructure they need to build something great, without the operational burden.
+              {getContent('about.mission.text')}
             </p>
           </ScrollReveal>
         </div>

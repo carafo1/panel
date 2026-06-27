@@ -11,17 +11,19 @@ import { Badge } from '@/components/ui/badge'
 import { Mail, Phone, MapPin, Clock, Send, Loader2 } from 'lucide-react'
 import { apiFetch } from '@/store/auth-store'
 import { PageHero, ScrollReveal } from '../ui-helpers'
-
-const CONTACT_INFO = [
-  { icon: Mail, title: 'Email', value: 'hello@apsamo.tech', desc: 'We reply within 24 hours' },
-  { icon: Phone, title: 'Phone', value: '+1 (555) 010-2025', desc: 'Mon–Fri, 9am–6pm EST' },
-  { icon: MapPin, title: 'Office', value: 'Remote-first, Global', desc: 'Team across 12 countries' },
-  { icon: Clock, title: 'Support', value: '24/7', desc: 'Always-on for production issues' },
-]
+import { useSiteContent } from '../site-data-context'
 
 export function ContactPage() {
+  const { getContent } = useSiteContent()
   const [form, setForm] = useState({ name: '', email: '', subject: '', message: '' })
   const [loading, setLoading] = useState(false)
+
+  const contactInfo = [
+    { icon: Mail, title: 'Email', value: getContent('contact.info.email'), desc: getContent('contact.info.emailDesc') },
+    { icon: Phone, title: 'Phone', value: getContent('contact.info.phone'), desc: getContent('contact.info.phoneDesc') },
+    { icon: MapPin, title: 'Office', value: getContent('contact.info.office'), desc: getContent('contact.info.officeDesc') },
+    { icon: Clock, title: 'Support', value: getContent('contact.info.support'), desc: getContent('contact.info.supportDesc') },
+  ]
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -49,9 +51,9 @@ export function ContactPage() {
   return (
     <>
       <PageHero
-        badge="Contact"
-        title={<>Let&apos;s build something <span className="text-gradient-brand">great together</span></>}
-        subtitle="Have a question, a project, or just want to say hi? We'd love to hear from you."
+        badge={getContent('contact.hero.badge')}
+        title={<span className="text-gradient-brand">{getContent('contact.hero.title')}</span>}
+        subtitle={getContent('contact.hero.subtitle')}
       />
 
       <section className="py-20 bg-background">
@@ -60,13 +62,13 @@ export function ContactPage() {
             {/* Contact info */}
             <ScrollReveal>
               <div>
-                <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">Get in touch</Badge>
-                <h2 className="text-2xl font-extrabold mb-4">We&apos;re here to help</h2>
+                <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">{getContent('contact.info.badge')}</Badge>
+                <h2 className="text-2xl font-extrabold mb-4">{getContent('contact.info.title')}</h2>
                 <p className="text-muted-foreground mb-8 leading-relaxed">
-                  Whether you&apos;re evaluating APSAMO for your team, need technical support, or want to explore a partnership — reach out through any channel below.
+                  {getContent('contact.info.desc')}
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {CONTACT_INFO.map((info) => {
+                  {contactInfo.map((info) => {
                     const Icon = info.icon
                     return (
                       <Card key={info.title} className="border hover:border-indigo-500/30 hover:shadow-modern-lg transition-all duration-300 bg-card/80 backdrop-blur-sm">
@@ -141,7 +143,7 @@ export function ContactPage() {
                       {loading ? (
                         <><Loader2 className="size-4 mr-2 animate-spin" /> Sending...</>
                       ) : (
-                        <><Send className="size-4 mr-2" /> Send Message</>
+                        <><Send className="size-4 mr-2" /> {getContent('contact.form.button')}</>
                       )}
                     </Button>
                   </form>

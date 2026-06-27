@@ -1,6 +1,7 @@
 import { db } from '@/lib/db'
 import { SERVICES } from '@/components/landing/services-data'
 import { ICON_REGISTRY, resolveIcon } from '@/components/landing/icon-registry'
+import { DEFAULT_CONTENT } from '@/lib/content-schema'
 import type { LucideIcon } from 'lucide-react'
 
 /**
@@ -249,12 +250,17 @@ export async function getServiceBySlug(slug: string): Promise<CmsService | null>
 
 /**
  * Get all site content key/value pairs as a plain object.
+ *
+ * Merges the admin-overridden DB values OVER the default schema values, so
+ * every known key always resolves (pages never receive an empty string) and
+ * the admin editor always shows pre-filled fields. Custom keys the admin may
+ * have added that aren't in the schema are preserved.
  */
 export async function getSiteContent(): Promise<CmsSiteContent> {
   const rows = await db.siteContent.findMany()
-  const out: CmsSiteContent = {}
-  for (const r of rows) out[r.key] = r.value
-  return out
+  const dbValues: CmsSiteContent = {}
+  for (const r of rows) dbValues[r.key] = r.value
+  return { ...DEFAULT_CONTENT, ...dbValues }
 }
 
 /**
