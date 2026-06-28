@@ -1,0 +1,300 @@
+**Step 4 — Run + verify**: First run actually modified 7 DB records (3 Domain.provider + 4 Notification.title). Re-ran the script to confirm idempotency — second run showed `TOTAL: matched=8 updated=0` (8 case-insensitive matches in Notification.message but 0 actual changes; all other steps 0). Verification query confirmed:
+- 4 Notification records now have `title='Welcome to APSAMO!'`
+- 3 Domain records now have `provider='apsamo'` (registrar unchanged: openprovider/dynadot)
+- 8 Notification.message records still contain `https://...deployhub.io` URLs (PRESERVED)
+- 6 Project.subdomain records still contain `*.deployhub.io` (PRESERVED)
+- 2 User.email records still contain `*@deployhub.io` (PRESERVED)
+- 50 AuditLog.metadata records still contain functional mailboxes + DNS hostnames (PRESERVED)
+- 7 AutomationLog.output records still contain `https://app.deployhub.io` URLs (PRESERVED)
+- 5 Deployment.deployUrl records still contain `https://...deployhub.io` (PRESERVED)
+- 0 Template.author records have 'DeployHub' (12 already have 'APSAMO' from prior task)
+
+### Stage Summary
+- **Script file**: `/home/z/my-project/scripts/migrate-deployhub-to-apsamo.ts` (390 lines, including ~80 lines of JSDoc explaining what it touches and what it preserves)
+- **DB records actually modified**: 7 total
+  - `Domain.provider`: 3 records updated (`deployhub` → `apsamo`)
+  - `Notification.title`: 4 records updated (`Welcome to DeployHub!` → `Welcome to APSAMO!`)
+- **DB records preserved per task spec** (NOT touched):
+  - `User.email` × 2 (`admin@deployhub.io`, `testuser@deployhub.io`) — functional mailboxes
+  - `Project.subdomain` × 6 (`*.deployhub.io`) — DNS hostnames
+  - `Project.customDomain` × 0 — no matches
+  - `Deployment.deployUrl` × 5 (`https://*.deployhub.io`) — DNS hostnames in URLs
+  - `AuditLog.metadata` × 50 (mix of `admin@deployhub.io` functional mailboxes + `*.deployhub.io` DNS hostnames) — preserved
+  - `AutomationLog.output` × 7 (deployment URLs like `https://app.deployhub.io`) — preserved
+  - `Domain.name` × 0 — no DeployHub refs (domains are user-registered names like `e2etest.com`)
+  - `Webhook.url` × 0 — no matches
+  - `Project.repoUrl` × 0 — no matches
+- **Task-spec fields skipped (don't exist in current Prisma schema)**:
+  - `AutomationLog.title` / `.message` — schema only has `action`, `eventType`, `input`, `output`, `error`
+  - `Payment.description` — schema only has `type`, `method`, `metadata`
+  - `PaymentMethod` model — does not exist (only `PaymentMethodSetting` exists with different shape)
+- **Task-spec fields attempted but 0 matches**:
+  - `Domain.registrar='DeployHub'` — 0 records (registrar field stores `dynadot`/`openprovider`, never `DeployHub`)
+  - `AuditLog.action contains 'DeployHub'` — 0 records
+  - `Template.author='DeployHub'` — 0 records (already migrated by prior task)
+- **Lint**: `cd /home/z/my-project && bun run lint` → exit code 0, 0 errors, 0 warnings (clean).
+- **Idempotency**: Re-running the script produces `TOTAL: matched=8 updated=0` — safe to re-run.
+
+---
+
+## Task ID: 4-c
+**Agent**: general-purpose
+**Task**: Backward-compatible migrations — localStorage keys, webhook dual-headers, env-var configurable hostnames/emails
+
+### Work Log
+Read worklog tail first to confirm state (last task was 4-b: DB migration of `Domain.provider` lowercase values + `Notification.title` strings; preserved functional mailboxes, DNS hostnames, and historical audit/automation-log records).
+
+This task implements 3 backward-compatible migration patterns so existing user sessions, 2FA enrollments, customer webhook integrations, and existing DNS/email deployments keep working after the DeployHub → APSAMO rebrand.
+
+**Pattern 1 — localStorage/sessionStorage key migration (preserves user sessions)**:
+
+1. Created `/home/z/my-project/src/lib/migrate-storage.ts` — idempotent migration helper exporting `migrateStorageKeys()`. Maps 5 keys:
+   - `deployhub_token` → `apsamo_token` (local)
+   - `deployhub_onboarding_complete` → `apsamo_onboarding_complete` (local)
+   - `deployhub_notification_prefs` → `apsamo_notification_prefs` (local)
+   - `deployhub_pending_checkout` → `apsamo_pending_checkout` (session)
+   - `deployhub_2fa_pending` → `apsamo_2fa_pending` (local)
+   - Strategy: if old exists & new doesn't → copy old→new then delete old (counts as `migrated`); if both exist → keep new, delete old (counts as `skipped`); SSR/private-browsing: silently no-op. Returns `{ migrated, skipped }` for logging.
+
+2. Updated `/home/z/my-project/src/store/auth-store.ts` — all 5 references to `deployhub_token` (getItem in apiFetch + loadUser, setItem in setAuth, removeItem in logout + loadUser-catch) → `apsamo_token`. No fallback to old key (the migration helper handles it on app mount).
+
+3. Updated `/home/z/my-project/src/app/page.tsx`:
+   - Added import `import { migrateStorageKeys } from '@/lib/migrate-storage'`.
+   - Called `migrateStorageKeys()` inside the existing `useEffect(() => { loadUser() }, [loadUser])` block (runs synchronously before loadUser so token is renamed before auth fetch).
+   - Replaced 3 occurrences of `localStorage.getItem/setItem('deployhub_onboarding_complete', ...)` → `'apsamo_onboarding_complete'` (L368 init-state, L421/L426 completion handlers).
+   - Note: the unrelated `window.dispatchEvent(new CustomEvent('deployhub:open-command-palette'))` event-bus names (L275, L289) are intentionally NOT touched — they are internal app event names, not storage keys, and have no user-visible impact.
+
+4. Updated `/home/z/my-project/src/components/settings/settings-panel.tsx` — replaced `localStorage.getItem('deployhub_token')` (L115, used to refresh auth store after profile update), `localStorage.getItem('deployhub_notification_prefs')` (L1161), and `localStorage.setItem('deployhub_notification_prefs', ...)` (L1178) → `apsamo_*`.
+
+5. Bulk-updated 8 additional component files that read `localStorage.getItem('deployhub_token')` or write `sessionStorage.setItem('deployhub_pending_checkout', ...)`:
+   - `src/components/dashboard/overview-panel.tsx` (L52)
+   - `src/components/hosting/hosting-panel.tsx` (L249)
+   - `src/components/billing/billing-panel.tsx` (L143 token, L362 pending_checkout)
+   - `src/components/admin/admin-panel.tsx` (L106)
+   - `src/components/admin/cms-panel.tsx` (L79)
+   - `src/components/admin/payment-methods-panel.tsx` (L86)
+   - `src/components/admin/servers-panel.tsx` (L225)
+   - `src/components/deployments/deployments-panel.tsx` (L82, L323)
+   - Used a targeted `sed` that only matches `localStorage.{getItem,setItem,removeItem}('deployhub_token'` and `sessionStorage.{getItem,setItem}('deployhub_pending_checkout'` (no other tokens touched). Verified post-sed: no `deployhub_` storage references remain in `src/` except in `migrate-storage.ts` itself (the source mapping).
+
+**Pattern 2 — Webhook dual-header (preserves customer integrations)**:
+
+6. Updated `/home/z/my-project/src/lib/webhook-delivery.ts` (L111-125): the `fetch(webhook.url, ...)` headers block now sends BOTH the legacy `X-DeployHub-{Event,Delivery,Signature}` headers AND the new `X-APSAMO-{Event,Delivery,Signature}` headers. Both header sets carry identical values (same HMAC-SHA256 signature), so customer webhook receivers can migrate at their own pace without any delivery breaking. Added an inline comment explaining the backward-compat rationale.
+
+7. Updated `/home/z/my-project/src/components/webhooks/webhooks-panel.tsx`:
+   - L629-635: the user-facing signature-header documentation paragraph now shows `X-APSAMO-Signature` (recommended) and `X-DeployHub-Signature` (legacy) side-by-side so customers know both are sent.
+   - L936: webhook URL placeholder updated from `https://example.com/webhooks/deployhub` → `https://example.com/webhooks/apsamo` for new-customer docs (this is just a placeholder — actual user-entered URLs are not constrained).
+
+**Pattern 3 — Env-var configurable hostnames & emails**:
+
+8. Created `/home/z/my-project/src/lib/brand-config.ts` — single source of truth for brand identity. Exports:
+   - `BRAND_DOMAIN` (default `apsamo.io`)
+   - `MAIL_SERVER_HOSTNAME`, `NS1_HOSTNAME`, `NS2_HOSTNAME`, `APP_SUBDOMAIN_PATTERN` (derived from `BRAND_DOMAIN`)
+   - `NO_REPLY_EMAIL`, `SUPPORT_EMAIL`, `BILLING_EMAIL`, `ADMIN_EMAIL` (derived from `BRAND_DOMAIN`)
+   - `FROM_EMAIL`, `FROM_NAME` (defaults to `NO_REPLY_EMAIL` and `'APSAMO'`)
+   - Each var respects its env-var override; existing DeployHub deployments set `BRAND_DOMAIN=deployhub.io` (+ specific overrides if needed) to keep all derived hostnames/emails at their current values.
+
+9. Created `/home/z/my-project/.env.example` — documents `BRAND_DOMAIN` and all 8 derived brand-config vars with APSAMO defaults, plus commented-out sections for SMTP, Stripe, Dynadot, Mailcow, Let's Encrypt, GitHub integration. Existing DeployHub operators uncomment + override to keep their setup working.
+
+10. Updated `/home/z/my-project/src/lib/email.ts`:
+    - Added `import { FROM_NAME, FROM_EMAIL } from '@/lib/brand-config'`.
+    - Removed module-local `const FROM_NAME = process.env.SMTP_FROM_NAME || 'APSAMO'` and `const FROM_EMAIL = process.env.SMTP_FROM_EMAIL || 'no-reply@deployhub.local'` (now sourced from brand-config).
+    - Demo-mode `messageId` now uses `${FROM_EMAIL.split('@')[1] || 'apsamo.io'}` instead of hardcoded `@deployhub.local` — keeps the demo-mode message ID domain in sync with the configured brand.
+
+11. Updated `/home/z/my-project/src/lib/payment-methods.ts`:
+    - Added `import { BILLING_EMAIL } from '@/lib/brand-config'`.
+    - Manual-payment `instructions` string now interpolates `${BILLING_EMAIL}` instead of hardcoding `billing@deployhub.io`.
+    - Verified `'APSAMO Inc.'` accountName (L92) is already correct from task 3-e — no change needed.
+
+12. Updated `/home/z/my-project/src/lib/orchestration.ts`:
+    - Added import of `MAIL_SERVER_HOSTNAME, NS1_HOSTNAME, NS2_HOSTNAME, APP_SUBDOMAIN_PATTERN` from brand-config.
+    - L197 `resolveMailServerHostname()` — replaced `process.env.MAIL_SERVER_HOSTNAME || 'mail.deployhub.io'` with `MAIL_SERVER_HOSTNAME` (brand-config already handles the env-var fallback).
+    - L847 (credentials.dns.nameservers fallback) — `['ns1.deployhub.io', 'ns2.deployhub.io']` → `[NS1_HOSTNAME, NS2_HOSTNAME]`.
+    - L940 (getDomainInfo error fallback) — same replacement.
+    - L1096 — `${slug.split('.')[0]}.deployhub.io` → `APP_SUBDOMAIN_PATTERN.replace('{slug}', slug.split('.')[0])` (supports custom app subdomain patterns per deployment).
+    - Verified `'APSAMO'` registrar display label (L838) is already correct from task 4-a — no change needed.
+
+13. Updated `/home/z/my-project/src/lib/domain-automation.ts`:
+    - Added `import { MAIL_SERVER_HOSTNAME, NS1_HOSTNAME, NS2_HOSTNAME } from './brand-config'`.
+    - L49 (JSDoc comment) — `mail.deployhub.io` → `mail.<brand-domain>` (with note pointing to brand-config).
+    - L124 (mxTarget default) — `'mail.deployhub.io'` → `MAIL_SERVER_HOSTNAME`.
+    - L276 (nameservers default fallback) — `['ns1.deployhub.io', 'ns2.deployhub.io']` → `[NS1_HOSTNAME, NS2_HOSTNAME]`.
+
+14. Updated `/home/z/my-project/src/app/api/docs/route.ts`:
+    - Added `import { SUPPORT_EMAIL } from '@/lib/brand-config'`.
+    - L18 OpenAPI `contact.email` — `'support@deployhub.io'` → `SUPPORT_EMAIL`.
+
+15. Updated `/home/z/my-project/src/lib/vps/proxy.ts`:
+    - Added `import { ADMIN_EMAIL } from '@/lib/brand-config'`.
+    - L289 (per-site Caddyfile ACME email) — `process.env.LE_EMAIL || process.env.ADMIN_EMAIL || 'admin@deployhub.io'` → `process.env.LE_EMAIL || ADMIN_EMAIL` (brand-config already includes the `process.env.ADMIN_EMAIL` fallback and falls back to `admin@apsamo.io` by default).
+    - L307 (global Caddyfile ACME email) — same replacement.
+    - Note: L12/L37/L55 `deployhub` Docker network name + L285/L318 `/opt/deployhub/logs/...` filesystem paths are intentionally PRESERVED — these are infrastructure identifiers (Docker external network + on-VPS deploy path) explicitly out-of-scope per task 4-a worklog.
+
+### Stage Summary
+- **New files created (3)**:
+  - `src/lib/migrate-storage.ts` (58 lines incl. JSDoc)
+  - `src/lib/brand-config.ts` (35 lines incl. JSDoc)
+  - `.env.example` (50 lines)
+- **Files modified (12)**:
+  - `src/store/auth-store.ts` (5 deployhub_token → apsamo_token)
+  - `src/app/page.tsx` (import + migration call + 3 onboarding_complete renames)
+  - `src/components/settings/settings-panel.tsx` (3 storage-key renames)
+  - `src/components/dashboard/overview-panel.tsx` (1 token rename)
+  - `src/components/hosting/hosting-panel.tsx` (1 token rename)
+  - `src/components/billing/billing-panel.tsx` (1 token + 1 pending_checkout rename)
+  - `src/components/admin/admin-panel.tsx` (1 token rename)
+  - `src/components/admin/cms-panel.tsx` (1 token rename)
+  - `src/components/admin/payment-methods-panel.tsx` (1 token rename)
+  - `src/components/admin/servers-panel.tsx` (1 token rename)
+  - `src/components/deployments/deployments-panel.tsx` (2 token renames)
+  - `src/lib/webhook-delivery.ts` (dual headers — 3 new APSAMO headers added alongside 3 preserved legacy DeployHub headers)
+  - `src/components/webhooks/webhooks-panel.tsx` (signature doc shows both headers; example URL placeholder → apsamo)
+  - `src/lib/email.ts` (FROM_NAME/FROM_EMAIL sourced from brand-config; demo messageId domain derived)
+  - `src/lib/payment-methods.ts` (BILLING_EMAIL from brand-config in instructions)
+  - `src/lib/orchestration.ts` (4 hostnames → brand-config: mail + ns1/ns2 × 2 + APP_SUBDOMAIN_PATTERN)
+  - `src/lib/domain-automation.ts` (3 hostnames → brand-config: mail + ns1/ns2)
+  - `src/app/api/docs/route.ts` (SUPPORT_EMAIL from brand-config in OpenAPI contact)
+  - `src/lib/vps/proxy.ts` (ADMIN_EMAIL from brand-config × 2 ACME-email fallbacks)
+- **Total DeployHub → APSAMO replacements in this task**: ~30 across 12 modified files.
+- **Backward-compat strategy — what stays working for existing users**:
+  1. **User sessions preserved**: `migrateStorageKeys()` runs on app mount (page.tsx), copies `deployhub_token` → `apsamo_token` on first load after upgrade, then deletes the old key. No user is logged out. Idempotent — safe across reloads. SSR-safe and private-browsing-safe (silent no-op on storage errors).
+  2. **Onboarding state preserved**: `deployhub_onboarding_complete` → `apsamo_onboarding_complete` migrated the same way; users who completed onboarding pre-upgrade don't see the wizard again.
+  3. **Notification preferences preserved**: `deployhub_notification_prefs` → `apsamo_notification_prefs` migrated; per-user bell/email/digest settings carry over.
+  4. **2FA enrollments preserved**: `deployhub_2fa_pending` migration path included in `KEY_MIGRATIONS`; in-flight 2FA flows survive the upgrade. (Backup-code key prefix `deployhub_backup_codes_*` not currently used in codebase per grep, so not in the migration table — future-proofed by the same pattern if added later.)
+  5. **Billing checkout state preserved**: `deployhub_pending_checkout` (sessionStorage) → `apsamo_pending_checkout` migrated; users mid-Stripe-checkout redirect don't lose their session.
+  6. **Customer webhook integrations preserved**: every webhook HTTP delivery now sends BOTH `X-DeployHub-*` (legacy) AND `X-APSAMO-*` (new) headers with identical values. Existing customer receivers verifying `X-DeployHub-Signature` keep working indefinitely; new customers can adopt `X-APSAMO-Signature`. No breakage on either side.
+  7. **Existing DNS hostnames preserved**: existing DeployHub installations set `BRAND_DOMAIN=deployhub.io` (or override `MAIL_SERVER_HOSTNAME`/`NS1_HOSTNAME`/`NS2_HOSTNAME`/`APP_SUBDOMAIN_PATTERN` individually) so generated DNS records, nameserver defaults, MX targets, and app subdomains continue to use `*.deployhub.io`. New installations get `*.apsamo.io` defaults.
+  8. **Existing email mailboxes preserved**: same env-var override pattern for `NO_REPLY_EMAIL`/`SUPPORT_EMAIL`/`BILLING_EMAIL`/`ADMIN_EMAIL`/`FROM_NAME`/`FROM_EMAIL` — existing deployments keep their `*@deployhub.io` (or `*@deployhub.local` for demo) sender identities; new deployments get `*@apsamo.io`.
+- **Out-of-scope items intentionally preserved** (per task 4-a worklog + this task's scope):
+  - `deployhub` Docker external network name (`src/lib/vps/proxy.ts`, `src/lib/vps/deployer.ts`) — infrastructure identifier.
+  - `/opt/deployhub` deployment filesystem paths (`src/lib/vps/proxy.ts`, `src/lib/vps/deployer.ts`) — infrastructure identifier.
+  - `deployhub:open-command-palette` window CustomEvent names (`src/app/page.tsx`) — internal event bus, not user-facing, no migration value.
+  - Many `*.deployhub.io` subdomain references in other components (e.g. `onboarding-wizard.tsx`, `analytics-panel.tsx`, `deployments-panel.tsx` display strings, `billing/checkout/route.ts`, `templates/[id]/deploy/route.ts`, `hosting/create/route.ts`, `domains/register/route.ts`, `domains/[id]/propagation/route.ts`, `deployments/[id]/events/route.ts`) — these were left for prior tasks' decisions; this task scope was limited to the 6 lib/api files explicitly listed in the task spec. They can be addressed in a follow-up if desired.
+  - `demo@deployhub.local` placeholder emails in `src/lib/stripe.ts` and `src/lib/github.ts` — out of this task's scope; left as-is.
+  - `admin@deployhub.io` and `testuser@deployhub.io` in `src/lib/seed.ts` — seed data for existing demo deployments; left as-is.
+- **Lint**: `cd /home/z/my-project && bun run lint` → exit code 0, no errors, no warnings (clean).
+- **Idempotency / re-runnability**: `migrateStorageKeys()` is idempotent (safe on every mount). brand-config env-var reads are stateless. Webhook dual-headers are static. No DB writes performed by this task.
+
+---
+
+## Task ID: 5-a
+- **Agent**: general-purpose
+- **Task**: Apply final brand naming — "Apsamo Technology" (public website) + "Apsamo Panel" (system/dashboard)
+
+### Work Log
+1. Read last 50 lines of worklog to confirm post-4-a state (codebase already migrated from DeployHub → APSAMO).
+2. Applied Category A — public-website branding → "Apsamo Technology" — across 18 files via targeted Edit/MultiEdit operations:
+   - `src/app/layout.tsx` — 4 edits (metadata title, description, keywords array [dropped bare "APSAMO" entry], authors, openGraph.title).
+   - `src/components/landing/site-layout.tsx` — 1 edit (footer logo wordmark L304).
+   - `src/components/ui/logo.tsx` — 2 edits (logo wordmark L51 + JSDoc at L14 — the JSDoc was the File 39 item from Category B, applied in the same pass since the file was already opened).
+   - `src/lib/content-schema.ts` — 14 edits across DEFAULT_CONTENT marketing copy (footer.copyright, hero.subtitle, howItWorks.subtitle, home.cta.subtitle, services.workflow.subtitle, services.why.badge, services.why.desc, about.hero.subtitle, about.story.p1, about.story.p3, contact.info.desc, svc.web-development.hero.subtitle, svc.domain-registration.hero.subtitle) + 4 CONTENT_GROUPS label edits (services.why.badge/title/desc/button). JSDoc at L2 left unchanged per spec.
+   - `src/app/api/auth/register/route.ts` — 1 edit (welcome notification title).
+   - `src/app/api/auth/verify-email/route.ts` — 1 edit (verification success message).
+   - `src/lib/email.ts` — 9 edits (welcome subject + h1 + text body; password-reset subject + body text + plain text; team-invitation subject + body + plain text).
+   - `src/components/auth/auth-modal.tsx` — 2 edits (modal h2 wordmark + register-mode subtitle).
+   - `src/components/landing/pages/hosting-page.tsx` — 2 edits ("APSAMO vs. The Rest" benchmark heading + "APSAMO" column label).
+   - `src/components/landing/pages/saas-system-page.tsx` — 1 edit ("Why APSAMO" badge). JSX comment at L345 (`{/* Why APSAMO SaaS */}`) intentionally left per Category C.
+   - `src/components/landing/pages/home-page.tsx` — 1 edit (Sarah Chen testimonial quote).
+   - `src/components/landing/pages/domain-page.tsx` — 1 edit (WHOIS FAQ answer).
+   - `src/components/landing/pages/service-detail-page.tsx` — 1 edit (CTA "Join thousands of developers…").
+   - `src/components/landing/services-data.ts` — 3 edits (web-development description, domain-registration description, domain WHOIS FAQ).
+   - `src/app/api/docs/route.ts` — 3 edits (OpenAPI title, contact.name, Swagger HTML `<title>`).
+   - `src/app/api/templates/seed/route.ts` — 12 edits via `replace_all: true` (every `author: 'APSAMO'` → `author: 'Apsamo Technology'`).
+   - `src/lib/payment-methods.ts` — 3 edits (bank accountName, Stripe fallback planName, Waafi description fallback).
+   - `src/components/admin/cms-panel.tsx` — 1 edit (Textarea placeholder for service.description).
+3. Applied Category B — system/dashboard branding → "Apsamo Panel" — across 21 files:
+   - `src/app/page.tsx` — 3 edits (sidebar logo wordmark L196, dashboard footer copyright L325 [also dropped the "· Automated Hosting & Domain Platform" tagline per spec], loading screen L437).
+   - `src/components/dashboard/dashboard-layout.tsx` — 1 edit (sidebar logo L149).
+   - `src/components/onboarding/onboarding-wizard.tsx` — 1 edit (welcome heading L269).
+   - `src/components/command-palette.tsx` — 1 edit (palette description L178).
+   - `src/components/assistant/assistant-panel.tsx` — 2 edits (CI/CD quick-prompt + empty-state intro paragraph).
+   - `src/app/api/assistant/chat/route.ts` — 1 edit (SYSTEM_PROMPT identity L17).
+   - `src/components/webhooks/webhooks-panel.tsx` — 1 edit (webhook URL helper text L944).
+   - `src/components/settings/settings-panel.tsx` — 3 edits (2FA backup-code download filename L324, API-keys CardDescription L955, API-keys empty-state paragraph L1052).
+   - `src/lib/domain-automation.ts` — 1 edit (email confirmation body "manage your domain from the … dashboard" L458).
+   - `src/lib/totp.ts` — 1 edit (`generateQRCode` issuer default L39 → 'Apsamo Panel').
+   - `src/lib/monitor.ts` — 1 edit (User-Agent header L46 → 'ApsamoPanel-Uptime-Monitor/1.0', no spaces per HTTP convention).
+   - `src/lib/mailcow.ts` — 2 edits (DKIM key_description strings at L173 + L331).
+   - `src/lib/vps/proxy.ts` — 3 edits (Caddyfile "Managed by" comment L310, "No sites configured yet" comment L329, Caddy `:80 respond` banner L330).
+   - `src/lib/vps/deployer.ts` — 8 edits (3 `# Auto-generated by APSAMO` docker-compose headers at L569/L609/L628; 3 `deployed_by` JSON fields at L667 [nodejs], L685 [php], L705 [python]; L720 README.md `Deployed via …`; L730 demo build-log header).
+   - `src/lib/vps/provisioner.ts` — 2 edits (JSDoc L5 `APSAMO hosting stack` → `Apsamo Panel hosting stack`; L139 step-label `Setup APSAMO directories`).
+   - `src/lib/stacks.ts` — 2 edits (docker stack description L138; wordpress stack description L145). JSDoc at L4/L15 left unchanged per spec.
+   - `src/lib/orchestration.ts` — 2 edits (Domain.registrar credential fallback L844; Mailcow addDomain description L1213). JSDoc/code comments at L5/L65/L201 left unchanged per spec.
+   - `src/lib/automation.ts` — 1 edit (auto-deployment build-log header L725).
+   - `src/lib/email-dns.ts` — 4 edits (JSDoc L6/L8 + L174 platform name + L206 generation comment + L326 validation comment). These were JSDoc that describe user-facing infrastructure ("APSAMO platform", "APSAMO domain") so they fall under Category B per the spec.
+   - `src/app/api/domains/[id]/verify-code/route.ts` — 1 edit (inline comment L58 "default APSAMO flow" → "default Apsamo Panel flow").
+4. Applied Category C — `src/lib/brand-config.ts` L39: `FROM_NAME` default `'APSAMO'` → `'Apsamo Technology'` (emails come FROM the company, not the panel). Brand-config code comments left unchanged.
+5. Ran the DB migration script via `bun -e`. Results:
+   - `Domain.registrar` updated: **0** (no rows had 'APSAMO' or 'DeployHub' — all domains already had provider-specific registrar names like 'dynadot' or 'openprovider').
+   - `Domain.provider` updated: **0** (no rows had 'deployhub' — all 'apsamo' or 'dynadot').
+   - `Notification` updated: rows with literal 'APSAMO' or 'DeployHub' in title/message replaced with 'Apsamo Technology'. Post-migration verification: 0 notifications still contain literal "APSAMO", 0 contain "DeployHub". (Note: SQLite `contains` is case-insensitive, so the verification query `title: { contains: 'APSAMO' }` still matches the new "Apsamo Technology" titles; a JS-level case-sensitive check confirmed all 4 matching notifications were correctly updated to "Welcome to Apsamo Technology!".)
+   - `AutomationLog.title` update **skipped**: the model has no `title` field (fields are: id, userId, projectId, domainId, eventType, action, status, input, output, error, retryCount, createdAt, updatedAt). The try/catch handled this gracefully — no migration needed.
+   - `Template.author` updated: **12** rows ('APSAMO' → 'Apsamo Technology'; verified 0 'APSAMO' + 0 'DeployHub' + 12 'Apsamo Technology' remain).
+
+### Stage Summary
+- **Files modified**: 33 (Files 1–18 = Category A; Files 19–38 = Category B; File 39's L14 JSDoc was applied together with File 3's edits since both touch `logo.tsx`; File 40 = Category C brand-config).
+- **Per-file replacement counts**:
+
+| # | File | "Apsamo Technology" | "Apsamo Panel" |
+|---|---|---:|---:|
+| 1 | src/app/layout.tsx | 4 | 0 |
+| 2 | src/components/landing/site-layout.tsx | 1 | 0 |
+| 3 | src/components/ui/logo.tsx | 2 (incl. JSDoc — File 39) | 0 |
+| 4 | src/lib/content-schema.ts | 14 (DEFAULT_CONTENT) + 4 (CONTENT_GROUPS labels) = 18 | 0 |
+| 5 | src/app/api/auth/register/route.ts | 1 | 0 |
+| 6 | src/app/api/auth/verify-email/route.ts | 1 | 0 |
+| 7 | src/lib/email.ts | 9 | 0 |
+| 8 | src/components/auth/auth-modal.tsx | 2 | 0 |
+| 9 | src/components/landing/pages/hosting-page.tsx | 2 | 0 |
+| 10 | src/components/landing/pages/saas-system-page.tsx | 1 | 0 |
+| 11 | src/components/landing/pages/home-page.tsx | 1 | 0 |
+| 12 | src/components/landing/pages/domain-page.tsx | 1 | 0 |
+| 13 | src/components/landing/pages/service-detail-page.tsx | 1 | 0 |
+| 14 | src/components/landing/services-data.ts | 3 | 0 |
+| 15 | src/app/api/docs/route.ts | 3 | 0 |
+| 16 | src/app/api/templates/seed/route.ts | 12 (replace_all) | 0 |
+| 17 | src/lib/payment-methods.ts | 3 | 0 |
+| 18 | src/components/admin/cms-panel.tsx | 1 | 0 |
+| 19 | src/app/page.tsx | 0 | 3 |
+| 20 | src/components/dashboard/dashboard-layout.tsx | 0 | 1 |
+| 21 | src/components/onboarding/onboarding-wizard.tsx | 0 | 1 |
+| 22 | src/components/command-palette.tsx | 0 | 1 |
+| 23 | src/components/assistant/assistant-panel.tsx | 0 | 2 |
+| 24 | src/app/api/assistant/chat/route.ts | 0 | 1 |
+| 25 | src/components/webhooks/webhooks-panel.tsx | 0 | 1 |
+| 26 | src/components/settings/settings-panel.tsx | 0 | 3 |
+| 27 | src/lib/domain-automation.ts | 0 | 1 |
+| 28 | src/lib/totp.ts | 0 | 1 |
+| 29 | src/lib/monitor.ts | 0 | 1 |
+| 30 | src/lib/mailcow.ts | 0 | 2 |
+| 31 | src/lib/vps/proxy.ts | 0 | 3 |
+| 32 | src/lib/vps/deployer.ts | 0 | 8 |
+| 33 | src/lib/vps/provisioner.ts | 0 | 2 |
+| 34 | src/lib/stacks.ts | 0 | 2 |
+| 35 | src/lib/orchestration.ts | 0 | 2 |
+| 36 | src/lib/automation.ts | 0 | 1 |
+| 37 | src/lib/email-dns.ts | 0 | 4 |
+| 38 | src/app/api/domains/[id]/verify-code/route.ts | 0 | 1 |
+| 40 | src/lib/brand-config.ts | 1 (FROM_NAME default) | 0 |
+| **TOTAL** | | **67** | **46** |
+
+- **DB migration results**:
+  - `Domain.registrar`: 0 rows updated (none matched 'APSAMO'/'DeployHub').
+  - `Domain.provider`: 0 rows updated (none matched 'deployhub').
+  - `Notification`: ~4 rows updated (title + message fields; 'APSAMO'/'DeployHub' → 'Apsamo Technology').
+  - `AutomationLog`: skipped (model has no `title` field — try/catch handled gracefully).
+  - `Template.author`: **12 rows** updated ('APSAMO'/'DeployHub' → 'Apsamo Technology').
+- **Lint**: `cd /home/z/my-project && bun run lint` → exit 0, no errors, no warnings (clean).
+- **Items intentionally NOT touched (Category C)**:
+  - `src/app/globals.css` — CSS comments (`/* APSAMO brand palette */` etc.).
+  - `src/lib/migrate-storage.ts` — code comment about the rebrand.
+  - `src/lib/webhook-delivery.ts` — code comments + the dual `X-DeployHub-*` / `X-APSAMO-*` HTTP header names (HTTP header identifiers, not display text).
+  - `src/lib/content-schema.ts` L2 JSDoc (`Content schema for the APSAMO CMS.`).
+  - `src/components/landing/pages/saas-system-page.tsx` L345 JSX comment (`{/* Why APSAMO SaaS */}`).
+  - `src/components/landing/pages/services-page.tsx` L118 JSX comment (`{/* Why APSAMO */}`).
+  - `src/lib/stacks.ts` L4 + L15 JSDoc comments.
+  - `src/lib/orchestration.ts` L5 + L65 + L201 JSDoc/code comments.
+  - All lowercase `deployhub` / `apsamo` technical identifiers (localStorage keys, env vars, Docker network name, on-VPS filesystem paths, HTTP header names).
+- **Naming-context logic applied**: Public website (landing pages, marketing, auth modal, SEO metadata, transactional emails, public API docs title, payment descriptor fallbacks, email From-name default) → "Apsamo Technology". Dashboard / system / infra (sidebar, loading screen, onboarding, command palette, in-app assistant system prompt, webhook URL helper, 2FA issuer + backup-code filename, API-keys copy, Caddyfile headers, docker-compose auto-generated banners, deploy_by JSON fields, build-log headers, TOTP issuer, uptime-monitor User-Agent, Mailcow DKIM key descriptions, VPS provisioner step labels, stack descriptions, domain registrar fallback, automation log header, DNS JSDoc, domain verify-code comment) → "Apsamo Panel".
+- **Note on `logo.tsx` wordmark**: The task spec said to change L51 `APSAMO` → `Apsamo Technology` while leaving the conditional `{showSubtitle && <span>Technology</span>}` (L52–L56) intact. As instructed, only L51 was changed. The "Technology" subtitle still renders when callers pass `showSubtitle={true}` — this matches the spec verbatim and is consistent with the same pattern at `site-layout.tsx` L304–L305 (footer wordmark). A follow-up design pass could decide whether to remove the redundant subtitle now that the main wordmark contains "Technology".
+- **Note on `page.tsx` dashboard footer L325**: Per spec, dropped the entire "· Automated Hosting & Domain Platform" suffix and changed "APSAMO" → "Apsamo Panel". The new string is just `© 2025 Apsamo Panel. All rights reserved.`
