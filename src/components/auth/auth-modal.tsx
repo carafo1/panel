@@ -240,12 +240,12 @@ export function AuthModal({ mode, onModeChange, onClose }: AuthModalProps) {
               <Globe className="size-5" />
             </div>
           </div>
-          <h2 className="text-xl font-bold tracking-tight">APSAMO</h2>
+          <h2 className="text-xl font-bold tracking-tight">Apsamo Technology</h2>
           <p className="text-sm text-muted-foreground mt-1">
             {mode === 'login'
               ? 'Sign in to manage your hosting and domains'
               : mode === 'register'
-                ? 'Get started with APSAMO in seconds'
+                ? 'Get started with Apsamo Technology in seconds'
                 : mode === 'forgot-password'
                   ? 'Enter your email to receive a reset link'
                   : mode === 'two-factor'

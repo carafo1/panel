@@ -193,7 +193,7 @@ function Dashboard() {
           <div className="size-8 rounded-lg bg-indigo-600 flex items-center justify-center">
             <Rocket className="size-4 text-white" />
           </div>
-          <span className="font-bold text-lg tracking-tight">APSAMO</span>
+          <span className="font-bold text-lg tracking-tight">Apsamo Panel</span>
           <Button
             variant="ghost"
             size="icon"
@@ -322,7 +322,7 @@ function Dashboard() {
 
           {/* Footer */}
           <footer className="border-t px-4 py-4 text-center text-xs text-muted-foreground mt-auto">
-            © 2025 APSAMO. All rights reserved. · Automated Hosting & Domain Platform
+            © 2025 Apsamo Panel. All rights reserved.
           </footer>
         </div>
 
@@ -413,8 +413,10 @@ export default function Home() {
     if (!isLoading) {
       if (isAuthenticated) {
         setView('dashboard')
+        document.title = 'Apsamo Panel'
+      } else {
+        document.title = 'Apsamo Technology - Hosting & Domain Automation Platform'
       }
-      // If not authenticated, stay on landing page
     }
   }, [isLoading, isAuthenticated, setView])
 
@@ -434,7 +436,7 @@ export default function Home() {
       <div className="flex items-center justify-center min-h-screen">
         <div className="flex flex-col items-center gap-3">
           <div className="size-10 animate-spin rounded-full border-4 border-indigo-600 border-t-transparent" />
-          <p className="text-sm text-muted-foreground">Loading APSAMO...</p>
+          <p className="text-sm text-muted-foreground">Loading Apsamo Panel...</p>
         </div>
       </div>
     )

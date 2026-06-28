@@ -321,7 +321,7 @@ function TwoFactorCard({ enabled, onToggle }: TwoFactorCardProps) {
   const handleDownloadBackupCodes = () => {
     if (!backupCodes.length) return
     const text =
-      `APSAMO 2FA Backup Codes\n` +
+      `Apsamo Panel 2FA Backup Codes\n` +
       `Generated: ${new Date().toLocaleString()}\n\n` +
       backupCodes.map((c, i) => `${i + 1}.  ${c}`).join('\n') +
       `\n\nEach code can be used only once. Store them somewhere safe.\n`
@@ -952,7 +952,7 @@ function ApiKeysTab() {
                 API Keys
               </CardTitle>
               <CardDescription className="mt-1.5">
-                Manage your API keys for programmatic access to APSAMO.
+                Manage your API keys for programmatic access to Apsamo Panel.
               </CardDescription>
             </div>
             <Dialog open={createOpen} onOpenChange={(open) => {
@@ -1049,7 +1049,7 @@ function ApiKeysTab() {
               <Key className="size-10 text-muted-foreground mx-auto mb-3" />
               <p className="font-medium text-muted-foreground">No API keys yet</p>
               <p className="text-sm text-muted-foreground mt-1">
-                Create an API key to access the APSAMO API programmatically.
+                Create an API key to access the Apsamo Panel API programmatically.
               </p>
               <Button
                 onClick={() => setCreateOpen(true)}

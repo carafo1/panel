@@ -941,7 +941,7 @@ export default function WebhooksPanel() {
                 onChange={(e) => setCreateForm((p) => ({ ...p, url: e.target.value }))}
               />
               <p className="text-xs text-muted-foreground">
-                The URL where APSAMO will send HTTP POST requests.
+                The URL where Apsamo Panel will send HTTP POST requests.
               </p>
             </div>
 

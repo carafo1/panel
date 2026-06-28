@@ -3,9 +3,9 @@
  *
  * Used by:
  *  - #20 Email DNS helper — generate the standard MX/SPF/DKIM/DMARC records
- *    that a domain needs in order to send and receive mail through APSAMO's
+ *    that a domain needs in order to send and receive mail through Apsamo Panel's
  *    Mailcow instance, plus the A/CNAME records a domain needs in order to
- *    host a website through APSAMO's hosting layer.
+ *    host a website through Apsamo Panel's hosting layer.
  *
  * The records produced here are designed to match what Mailcow itself
  * documents (https://mailcow.github.io/mailcow-dockerized-docs/prerequisite-dns/)
@@ -171,7 +171,7 @@ export function generateEmailDnsRecords(
 
 /**
  * Generate the DNS records a domain needs in order to host a website on the
- * APSAMO platform:
+ * Apsamo Panel platform:
  *
  *   - A     @    → serverIp           (apex domain)
  *   - A     www  → serverIp           (www subdomain)
@@ -203,7 +203,7 @@ export function generateHostingDnsRecords(
 // ---------------------------------------------------------------------------
 
 /**
- * Generate every DNS record a fully-provisioned APSAMO domain needs:
+ * Generate every DNS record a fully-provisioned Apsamo Panel domain needs:
  * hosting (A records) + email (MX, SPF, DMARC, DKIM).
  *
  * The returned array is in a sensible display order (A records first, then
@@ -323,7 +323,7 @@ interface ValidationResult {
 }
 
 /**
- * Validate that all the DNS records APSAMO expects for a domain are
+ * Validate that all the DNS records Apsamo Panel expects for a domain are
  * present in a list of resolved records.
  *
  * The expected set is derived from `generateAllDnsRecords` (apex A, www A,

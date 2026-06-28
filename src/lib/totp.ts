@@ -36,7 +36,7 @@ export function generateSecret(): string {
 export async function generateQRCode(
   secret: string,
   email: string,
-  issuer = 'APSAMO'
+  issuer = 'Apsamo Panel'
 ): Promise<string> {
   const otpauthUri = authenticator.keyuri(email, issuer, secret)
   return QRCode.toDataURL(otpauthUri, {

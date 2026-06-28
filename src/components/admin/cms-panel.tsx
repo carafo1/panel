@@ -683,7 +683,7 @@ function ServiceEditorDialog({ open, onOpenChange, service, onChange, onSave, sa
 
           <div className="space-y-1.5">
             <Label>Description *</Label>
-            <Textarea value={service.description ?? ''} onChange={(e) => update({ description: e.target.value })} rows={3} placeholder="From MVP to enterprise — APSAMO builds production-grade web applications..." />
+            <Textarea value={service.description ?? ''} onChange={(e) => update({ description: e.target.value })} rows={3} placeholder="From MVP to enterprise — Apsamo Technology builds production-grade web applications..." />
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

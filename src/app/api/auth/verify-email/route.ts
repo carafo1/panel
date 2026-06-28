@@ -39,7 +39,7 @@ export async function GET(request: Request) {
       data: {
         userId: user.id,
         title: 'Email Verified',
-        message: 'Your email address has been verified successfully. Welcome to APSAMO!',
+        message: 'Your email address has been verified successfully. Welcome to Apsamo Technology!',
         type: 'success',
       },
     })

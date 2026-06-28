@@ -15,15 +15,15 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "APSAMO Technology - Hosting & Domain Automation Platform",
-  description: "APSAMO Technology — web development, hosting, domain registration, and SaaS platforms. Build, host, and scale your entire online presence.",
-  keywords: ["APSAMO", "APSAMO Technology", "Web Development", "Hosting", "Domains", "Deployment", "SaaS", "Next.js"],
-  authors: [{ name: "APSAMO Technology" }],
+  title: "Apsamo Technology - Hosting & Domain Automation Platform",
+  description: "Apsamo Technology — web development, hosting, domain registration, and SaaS platforms. Build, host, and scale your entire online presence.",
+  keywords: ["Apsamo Technology", "Web Development", "Hosting", "Domains", "Deployment", "SaaS", "Next.js"],
+  authors: [{ name: "Apsamo Technology" }],
   icons: {
     icon: "/apsamo-favicon.svg",
   },
   openGraph: {
-    title: "APSAMO Technology",
+    title: "Apsamo Technology",
     description: "Hosting & Domain Automation Platform — build, host, and scale your online presence.",
     type: "website",
   },

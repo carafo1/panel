@@ -301,7 +301,7 @@ export function SiteLayout({ children, onGetStarted }: SiteLayoutProps) {
                   </svg>
                 </div>
                 <div className="leading-none">
-                  <span className="text-lg font-extrabold text-white">APSAMO</span>
+                  <span className="text-lg font-extrabold text-white">Apsamo Technology</span>
                   <span className="block text-[10px] font-medium uppercase tracking-[0.18em] text-indigo-300/80 mt-0.5">Technology</span>
                 </div>
               </div>

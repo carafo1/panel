@@ -274,7 +274,7 @@ export function HostingPage({ onGetStarted }: HostingPageProps) {
                       <Gauge className="size-5" />
                     </div>
                     <div>
-                      <h3 className="text-lg font-bold">APSAMO vs. The Rest</h3>
+                      <h3 className="text-lg font-bold">Apsamo Technology vs. The Rest</h3>
                       <p className="text-xs text-muted-foreground">Real benchmarks, same workload</p>
                     </div>
                   </div>
@@ -286,7 +286,7 @@ export function HostingPage({ onGetStarted }: HostingPageProps) {
                           <div className="inline-flex items-center gap-1 rounded-md bg-indigo-500/15 px-2 py-0.5 text-sm font-bold text-indigo-600 dark:text-indigo-300">
                             <Check className="size-3" /> {b.us}
                           </div>
-                          <p className="text-[10px] text-muted-foreground mt-0.5">APSAMO</p>
+                          <p className="text-[10px] text-muted-foreground mt-0.5">Apsamo Technology</p>
                         </div>
                         <div className="text-center">
                           <div className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-sm font-medium text-muted-foreground">

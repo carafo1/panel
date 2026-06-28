@@ -43,7 +43,7 @@ export async function checkUptime(
       method: 'GET',
       signal: controller.signal,
       redirect: 'follow',
-      headers: { 'User-Agent': 'APSAMO-Uptime-Monitor/1.0' },
+      headers: { 'User-Agent': 'ApsamoPanel-Uptime-Monitor/1.0' },
     })
     const responseTime = Date.now() - start
     const isUp = res.status >= 200 && res.status < 400

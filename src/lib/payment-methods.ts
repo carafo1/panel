@@ -90,7 +90,7 @@ const DEFAULT_METHODS: Array<{
       instructions:
         `Transfer the amount to the bank account below and email proof of payment to ${BILLING_EMAIL}. Your subscription will be activated once the payment is verified.`,
       bankName: 'Bank of Example',
-      accountName: 'APSAMO Inc.',
+      accountName: 'Apsamo Technology Inc.',
       accountNumber: '0000-0000-0000',
       iban: '',
       swift: '',
@@ -309,7 +309,7 @@ export async function processPayment(
     try {
       const session = await createCheckoutSession({
         planId: opts.planId,
-        planName: opts.planName || 'APSAMO Purchase',
+        planName: opts.planName || 'Apsamo Technology Purchase',
         amount: Math.round(opts.amount * 100), // Stripe wants cents
         currency: opts.currency,
         successUrl: opts.successUrl,
@@ -371,7 +371,7 @@ export async function processPayment(
       const waafiResult = await createWaafiPayment({
         amount: opts.amount,
         currency: opts.currency.toUpperCase() === 'USD' ? 'USD' : opts.currency,
-        description: `${opts.planName || 'APSAMO'} - ${opts.purchaseType || 'subscription'}`,
+        description: `${opts.planName || 'Apsamo Technology'} - ${opts.purchaseType || 'subscription'}`,
         callbackUrl,
         returnUrl,
         reference,

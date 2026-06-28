@@ -3648,3 +3648,127 @@ This task implements 3 backward-compatible migration patterns so existing user s
   - `admin@deployhub.io` and `testuser@deployhub.io` in `src/lib/seed.ts` — seed data for existing demo deployments; left as-is.
 - **Lint**: `cd /home/z/my-project && bun run lint` → exit code 0, no errors, no warnings (clean).
 - **Idempotency / re-runnability**: `migrateStorageKeys()` is idempotent (safe on every mount). brand-config env-var reads are stateless. Webhook dual-headers are static. No DB writes performed by this task.
+
+---
+
+## Task ID: 5-a
+- **Agent**: general-purpose
+- **Task**: Apply final brand naming — "Apsamo Technology" (public website) + "Apsamo Panel" (system/dashboard)
+
+### Work Log
+1. Read last 50 lines of worklog to confirm post-4-a state (codebase already migrated from DeployHub → APSAMO).
+2. Applied Category A — public-website branding → "Apsamo Technology" — across 18 files via targeted Edit/MultiEdit operations:
+   - `src/app/layout.tsx` — 4 edits (metadata title, description, keywords array [dropped bare "APSAMO" entry], authors, openGraph.title).
+   - `src/components/landing/site-layout.tsx` — 1 edit (footer logo wordmark L304).
+   - `src/components/ui/logo.tsx` — 2 edits (logo wordmark L51 + JSDoc at L14 — the JSDoc was the File 39 item from Category B, applied in the same pass since the file was already opened).
+   - `src/lib/content-schema.ts` — 14 edits across DEFAULT_CONTENT marketing copy (footer.copyright, hero.subtitle, howItWorks.subtitle, home.cta.subtitle, services.workflow.subtitle, services.why.badge, services.why.desc, about.hero.subtitle, about.story.p1, about.story.p3, contact.info.desc, svc.web-development.hero.subtitle, svc.domain-registration.hero.subtitle) + 4 CONTENT_GROUPS label edits (services.why.badge/title/desc/button). JSDoc at L2 left unchanged per spec.
+   - `src/app/api/auth/register/route.ts` — 1 edit (welcome notification title).
+   - `src/app/api/auth/verify-email/route.ts` — 1 edit (verification success message).
+   - `src/lib/email.ts` — 9 edits (welcome subject + h1 + text body; password-reset subject + body text + plain text; team-invitation subject + body + plain text).
+   - `src/components/auth/auth-modal.tsx` — 2 edits (modal h2 wordmark + register-mode subtitle).
+   - `src/components/landing/pages/hosting-page.tsx` — 2 edits ("APSAMO vs. The Rest" benchmark heading + "APSAMO" column label).
+   - `src/components/landing/pages/saas-system-page.tsx` — 1 edit ("Why APSAMO" badge). JSX comment at L345 (`{/* Why APSAMO SaaS */}`) intentionally left per Category C.
+   - `src/components/landing/pages/home-page.tsx` — 1 edit (Sarah Chen testimonial quote).
+   - `src/components/landing/pages/domain-page.tsx` — 1 edit (WHOIS FAQ answer).
+   - `src/components/landing/pages/service-detail-page.tsx` — 1 edit (CTA "Join thousands of developers…").
+   - `src/components/landing/services-data.ts` — 3 edits (web-development description, domain-registration description, domain WHOIS FAQ).
+   - `src/app/api/docs/route.ts` — 3 edits (OpenAPI title, contact.name, Swagger HTML `<title>`).
+   - `src/app/api/templates/seed/route.ts` — 12 edits via `replace_all: true` (every `author: 'APSAMO'` → `author: 'Apsamo Technology'`).
+   - `src/lib/payment-methods.ts` — 3 edits (bank accountName, Stripe fallback planName, Waafi description fallback).
+   - `src/components/admin/cms-panel.tsx` — 1 edit (Textarea placeholder for service.description).
+3. Applied Category B — system/dashboard branding → "Apsamo Panel" — across 21 files:
+   - `src/app/page.tsx` — 3 edits (sidebar logo wordmark L196, dashboard footer copyright L325 [also dropped the "· Automated Hosting & Domain Platform" tagline per spec], loading screen L437).
+   - `src/components/dashboard/dashboard-layout.tsx` — 1 edit (sidebar logo L149).
+   - `src/components/onboarding/onboarding-wizard.tsx` — 1 edit (welcome heading L269).
+   - `src/components/command-palette.tsx` — 1 edit (palette description L178).
+   - `src/components/assistant/assistant-panel.tsx` — 2 edits (CI/CD quick-prompt + empty-state intro paragraph).
+   - `src/app/api/assistant/chat/route.ts` — 1 edit (SYSTEM_PROMPT identity L17).
+   - `src/components/webhooks/webhooks-panel.tsx` — 1 edit (webhook URL helper text L944).
+   - `src/components/settings/settings-panel.tsx` — 3 edits (2FA backup-code download filename L324, API-keys CardDescription L955, API-keys empty-state paragraph L1052).
+   - `src/lib/domain-automation.ts` — 1 edit (email confirmation body "manage your domain from the … dashboard" L458).
+   - `src/lib/totp.ts` — 1 edit (`generateQRCode` issuer default L39 → 'Apsamo Panel').
+   - `src/lib/monitor.ts` — 1 edit (User-Agent header L46 → 'ApsamoPanel-Uptime-Monitor/1.0', no spaces per HTTP convention).
+   - `src/lib/mailcow.ts` — 2 edits (DKIM key_description strings at L173 + L331).
+   - `src/lib/vps/proxy.ts` — 3 edits (Caddyfile "Managed by" comment L310, "No sites configured yet" comment L329, Caddy `:80 respond` banner L330).
+   - `src/lib/vps/deployer.ts` — 8 edits (3 `# Auto-generated by APSAMO` docker-compose headers at L569/L609/L628; 3 `deployed_by` JSON fields at L667 [nodejs], L685 [php], L705 [python]; L720 README.md `Deployed via …`; L730 demo build-log header).
+   - `src/lib/vps/provisioner.ts` — 2 edits (JSDoc L5 `APSAMO hosting stack` → `Apsamo Panel hosting stack`; L139 step-label `Setup APSAMO directories`).
+   - `src/lib/stacks.ts` — 2 edits (docker stack description L138; wordpress stack description L145). JSDoc at L4/L15 left unchanged per spec.
+   - `src/lib/orchestration.ts` — 2 edits (Domain.registrar credential fallback L844; Mailcow addDomain description L1213). JSDoc/code comments at L5/L65/L201 left unchanged per spec.
+   - `src/lib/automation.ts` — 1 edit (auto-deployment build-log header L725).
+   - `src/lib/email-dns.ts` — 4 edits (JSDoc L6/L8 + L174 platform name + L206 generation comment + L326 validation comment). These were JSDoc that describe user-facing infrastructure ("APSAMO platform", "APSAMO domain") so they fall under Category B per the spec.
+   - `src/app/api/domains/[id]/verify-code/route.ts` — 1 edit (inline comment L58 "default APSAMO flow" → "default Apsamo Panel flow").
+4. Applied Category C — `src/lib/brand-config.ts` L39: `FROM_NAME` default `'APSAMO'` → `'Apsamo Technology'` (emails come FROM the company, not the panel). Brand-config code comments left unchanged.
+5. Ran the DB migration script via `bun -e`. Results:
+   - `Domain.registrar` updated: **0** (no rows had 'APSAMO' or 'DeployHub' — all domains already had provider-specific registrar names like 'dynadot' or 'openprovider').
+   - `Domain.provider` updated: **0** (no rows had 'deployhub' — all 'apsamo' or 'dynadot').
+   - `Notification` updated: rows with literal 'APSAMO' or 'DeployHub' in title/message replaced with 'Apsamo Technology'. Post-migration verification: 0 notifications still contain literal "APSAMO", 0 contain "DeployHub". (Note: SQLite `contains` is case-insensitive, so the verification query `title: { contains: 'APSAMO' }` still matches the new "Apsamo Technology" titles; a JS-level case-sensitive check confirmed all 4 matching notifications were correctly updated to "Welcome to Apsamo Technology!".)
+   - `AutomationLog.title` update **skipped**: the model has no `title` field (fields are: id, userId, projectId, domainId, eventType, action, status, input, output, error, retryCount, createdAt, updatedAt). The try/catch handled this gracefully — no migration needed.
+   - `Template.author` updated: **12** rows ('APSAMO' → 'Apsamo Technology'; verified 0 'APSAMO' + 0 'DeployHub' + 12 'Apsamo Technology' remain).
+
+### Stage Summary
+- **Files modified**: 33 (Files 1–18 = Category A; Files 19–38 = Category B; File 39's L14 JSDoc was applied together with File 3's edits since both touch `logo.tsx`; File 40 = Category C brand-config).
+- **Per-file replacement counts**:
+
+| # | File | "Apsamo Technology" | "Apsamo Panel" |
+|---|---|---:|---:|
+| 1 | src/app/layout.tsx | 4 | 0 |
+| 2 | src/components/landing/site-layout.tsx | 1 | 0 |
+| 3 | src/components/ui/logo.tsx | 2 (incl. JSDoc — File 39) | 0 |
+| 4 | src/lib/content-schema.ts | 14 (DEFAULT_CONTENT) + 4 (CONTENT_GROUPS labels) = 18 | 0 |
+| 5 | src/app/api/auth/register/route.ts | 1 | 0 |
+| 6 | src/app/api/auth/verify-email/route.ts | 1 | 0 |
+| 7 | src/lib/email.ts | 9 | 0 |
+| 8 | src/components/auth/auth-modal.tsx | 2 | 0 |
+| 9 | src/components/landing/pages/hosting-page.tsx | 2 | 0 |
+| 10 | src/components/landing/pages/saas-system-page.tsx | 1 | 0 |
+| 11 | src/components/landing/pages/home-page.tsx | 1 | 0 |
+| 12 | src/components/landing/pages/domain-page.tsx | 1 | 0 |
+| 13 | src/components/landing/pages/service-detail-page.tsx | 1 | 0 |
+| 14 | src/components/landing/services-data.ts | 3 | 0 |
+| 15 | src/app/api/docs/route.ts | 3 | 0 |
+| 16 | src/app/api/templates/seed/route.ts | 12 (replace_all) | 0 |
+| 17 | src/lib/payment-methods.ts | 3 | 0 |
+| 18 | src/components/admin/cms-panel.tsx | 1 | 0 |
+| 19 | src/app/page.tsx | 0 | 3 |
+| 20 | src/components/dashboard/dashboard-layout.tsx | 0 | 1 |
+| 21 | src/components/onboarding/onboarding-wizard.tsx | 0 | 1 |
+| 22 | src/components/command-palette.tsx | 0 | 1 |
+| 23 | src/components/assistant/assistant-panel.tsx | 0 | 2 |
+| 24 | src/app/api/assistant/chat/route.ts | 0 | 1 |
+| 25 | src/components/webhooks/webhooks-panel.tsx | 0 | 1 |
+| 26 | src/components/settings/settings-panel.tsx | 0 | 3 |
+| 27 | src/lib/domain-automation.ts | 0 | 1 |
+| 28 | src/lib/totp.ts | 0 | 1 |
+| 29 | src/lib/monitor.ts | 0 | 1 |
+| 30 | src/lib/mailcow.ts | 0 | 2 |
+| 31 | src/lib/vps/proxy.ts | 0 | 3 |
+| 32 | src/lib/vps/deployer.ts | 0 | 8 |
+| 33 | src/lib/vps/provisioner.ts | 0 | 2 |
+| 34 | src/lib/stacks.ts | 0 | 2 |
+| 35 | src/lib/orchestration.ts | 0 | 2 |
+| 36 | src/lib/automation.ts | 0 | 1 |
+| 37 | src/lib/email-dns.ts | 0 | 4 |
+| 38 | src/app/api/domains/[id]/verify-code/route.ts | 0 | 1 |
+| 40 | src/lib/brand-config.ts | 1 (FROM_NAME default) | 0 |
+| **TOTAL** | | **67** | **46** |
+
+- **DB migration results**:
+  - `Domain.registrar`: 0 rows updated (none matched 'APSAMO'/'DeployHub').
+  - `Domain.provider`: 0 rows updated (none matched 'deployhub').
+  - `Notification`: ~4 rows updated (title + message fields; 'APSAMO'/'DeployHub' → 'Apsamo Technology').
+  - `AutomationLog`: skipped (model has no `title` field — try/catch handled gracefully).
+  - `Template.author`: **12 rows** updated ('APSAMO'/'DeployHub' → 'Apsamo Technology').
+- **Lint**: `cd /home/z/my-project && bun run lint` → exit 0, no errors, no warnings (clean).
+- **Items intentionally NOT touched (Category C)**:
+  - `src/app/globals.css` — CSS comments (`/* APSAMO brand palette */` etc.).
+  - `src/lib/migrate-storage.ts` — code comment about the rebrand.
+  - `src/lib/webhook-delivery.ts` — code comments + the dual `X-DeployHub-*` / `X-APSAMO-*` HTTP header names (HTTP header identifiers, not display text).
+  - `src/lib/content-schema.ts` L2 JSDoc (`Content schema for the APSAMO CMS.`).
+  - `src/components/landing/pages/saas-system-page.tsx` L345 JSX comment (`{/* Why APSAMO SaaS */}`).
+  - `src/components/landing/pages/services-page.tsx` L118 JSX comment (`{/* Why APSAMO */}`).
+  - `src/lib/stacks.ts` L4 + L15 JSDoc comments.
+  - `src/lib/orchestration.ts` L5 + L65 + L201 JSDoc/code comments.
+  - All lowercase `deployhub` / `apsamo` technical identifiers (localStorage keys, env vars, Docker network name, on-VPS filesystem paths, HTTP header names).
+- **Naming-context logic applied**: Public website (landing pages, marketing, auth modal, SEO metadata, transactional emails, public API docs title, payment descriptor fallbacks, email From-name default) → "Apsamo Technology". Dashboard / system / infra (sidebar, loading screen, onboarding, command palette, in-app assistant system prompt, webhook URL helper, 2FA issuer + backup-code filename, API-keys copy, Caddyfile headers, docker-compose auto-generated banners, deploy_by JSON fields, build-log headers, TOTP issuer, uptime-monitor User-Agent, Mailcow DKIM key descriptions, VPS provisioner step labels, stack descriptions, domain registrar fallback, automation log header, DNS JSDoc, domain verify-code comment) → "Apsamo Panel".
+- **Note on `logo.tsx` wordmark**: The task spec said to change L51 `APSAMO` → `Apsamo Technology` while leaving the conditional `{showSubtitle && <span>Technology</span>}` (L52–L56) intact. As instructed, only L51 was changed. The "Technology" subtitle still renders when callers pass `showSubtitle={true}` — this matches the spec verbatim and is consistent with the same pattern at `site-layout.tsx` L304–L305 (footer wordmark). A follow-up design pass could decide whether to remove the redundant subtitle now that the main wordmark contains "Technology".
+- **Note on `page.tsx` dashboard footer L325**: Per spec, dropped the entire "· Automated Hosting & Domain Platform" suffix and changed "APSAMO" → "Apsamo Panel". The new string is just `© 2025 Apsamo Panel. All rights reserved.`

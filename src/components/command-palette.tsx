@@ -175,7 +175,7 @@ export function CommandPalette() {
       open={open}
       onOpenChange={setOpen}
       title="Command Palette"
-      description="Search commands and navigate APSAMO"
+      description="Search commands and navigate Apsamo Panel"
       className="sm:max-w-2xl"
     >
       <CommandInput placeholder={`Search commands... (press ${modKey}K to toggle)`} />

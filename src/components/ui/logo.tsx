@@ -11,7 +11,7 @@ interface LogoMarkProps {
   className?: string
 }
 
-/** The APSAMO "A" mark — navy triangle peak + indigo swoosh. */
+/** The Apsamo Technology "A" mark — navy triangle peak + indigo swoosh. */
 export function LogoMark({ className }: LogoMarkProps) {
   return (
     <svg
@@ -48,7 +48,7 @@ export function Logo({ className, showSubtitle = false, subtitleClassName }: Log
         <LogoMark className="size-6" />
       </div>
       <div className="flex flex-col leading-none">
-        <span className="text-lg font-extrabold tracking-tight text-foreground">APSAMO</span>
+        <span className="text-lg font-extrabold tracking-tight text-foreground">Apsamo Technology</span>
         {showSubtitle && (
           <span className={cn('text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground', subtitleClassName)}>
             Technology

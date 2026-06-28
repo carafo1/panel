@@ -180,7 +180,7 @@ export function ServiceDetailPage({ slug, onGetStarted }: ServiceDetailPageProps
         <div className="aurora-blob aurora-blob-1" style={{ top: '-10%', right: '10%', width: '450px', height: '450px', background: 'radial-gradient(circle, #706FD3 0%, transparent 70%)' }} />
         <div className="relative z-10 mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 text-center py-20">
           <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight mb-4">Ready to get started with {service.name}?</h2>
-          <p className="text-zinc-300 mb-8">Join thousands of developers building on APSAMO.</p>
+          <p className="text-zinc-300 mb-8">Join thousands of developers building on Apsamo Technology.</p>
           <Button size="lg" className="btn-shimmer bg-indigo-500 hover:bg-indigo-600 text-white px-10 h-12 border-0 shadow-glow-indigo hover:scale-105 transition-all" onClick={onGetStarted}>
             <Sparkles className="size-4 mr-2" />
             Get Started Free

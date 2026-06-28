@@ -347,7 +347,7 @@ export function SaasSystemPage({ onGetStarted }: SaasSystemPageProps) {
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
             <ScrollReveal>
-              <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">Why APSAMO</Badge>
+              <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">Why Apsamo Technology</Badge>
               <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight mb-4"><span className="text-gradient-brand">{getContent('svc.saas-system.boilerplate.title')}</span></h2>
               <p className="text-muted-foreground leading-relaxed mb-6">
                 Auth, billing, teams, audit logs, onboarding flows — all the unsexy infrastructure that takes a solo founder half a year to build. We ship it day one, tested and production-hardened. You focus on your product; we handle the plumbing.

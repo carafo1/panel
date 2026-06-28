@@ -146,7 +146,7 @@ export function DashboardLayout({ children, activeTab, onTabChange }: DashboardL
         <div className="flex size-9 items-center justify-center rounded-lg bg-indigo-500 text-white">
           <Globe className="size-5" />
         </div>
-        <span className="text-lg font-bold tracking-tight">APSAMO</span>
+        <span className="text-lg font-bold tracking-tight">Apsamo Panel</span>
       </div>
 
       <Separator />

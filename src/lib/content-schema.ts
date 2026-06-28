@@ -58,7 +58,7 @@ export const DEFAULT_CONTENT: Record<string, string> = {
   // ── Footer ────────────────────────────────────────────────────────────
   'footer.tagline':
     'Build, host, and scale your entire online presence — web development, hosting, domains, and SaaS in one platform.',
-  'footer.copyright': '© 2025 APSAMO. Built by APSAMO Technology.',
+  'footer.copyright': '© 2025 Apsamo Technology. All rights reserved.',
   'footer.col.product': 'Product',
   'footer.col.company': 'Company',
   'footer.col.resources': 'Resources',
@@ -67,7 +67,7 @@ export const DEFAULT_CONTENT: Record<string, string> = {
   'home.hero.badge': 'Web Development · Hosting · Domains · SaaS',
   'home.hero.title': 'Deploy in Seconds, Scale Without Limits',
   'home.hero.subtitle':
-    'From web development and hosting to domain registration and SaaS platforms — APSAMO builds, hosts, and scales your entire online presence.',
+    'From web development and hosting to domain registration and SaaS platforms — Apsamo Technology builds, hosts, and scales your entire online presence.',
   'home.hero.ctaPrimary': 'Start Deploying',
   'home.hero.ctaSecondary': 'Explore Services',
   'home.hero.check1': 'No credit card required',
@@ -95,7 +95,7 @@ export const DEFAULT_CONTENT: Record<string, string> = {
   'home.howItWorks.badge': 'How It Works',
   'home.howItWorks.title': 'From code to live in three steps',
   'home.howItWorks.subtitle':
-    'Connect, deploy, and scale — APSAMO handles the infrastructure so you can focus on your product.',
+    'Connect, deploy, and scale — Apsamo Technology handles the infrastructure so you can focus on your product.',
 
   // ── Home: Testimonials ────────────────────────────────────────────────
   'home.testimonials.badge': 'Loved by Developers',
@@ -109,7 +109,7 @@ export const DEFAULT_CONTENT: Record<string, string> = {
   // ── Home: Final CTA ───────────────────────────────────────────────────
   'home.cta.title': 'Ready to deploy your next big idea?',
   'home.cta.subtitle':
-    'Join thousands of developers building on APSAMO. Your first deploy is seconds away.',
+    'Join thousands of developers building on Apsamo Technology. Your first deploy is seconds away.',
   'home.cta.button': 'Start Deploying',
 
   // ── Services index page ───────────────────────────────────────────────
@@ -120,11 +120,11 @@ export const DEFAULT_CONTENT: Record<string, string> = {
   'services.workflow.badge': 'Integrated Workflow',
   'services.workflow.title': 'Four services, one workflow',
   'services.workflow.subtitle':
-    'APSAMO services are designed to chain together. Each handoff is automatic — no glue code, no manual config.',
-  'services.why.badge': 'Why APSAMO',
+    'Apsamo Technology services are designed to chain together. Each handoff is automatic — no glue code, no manual config.',
+  'services.why.badge': 'Why Apsamo Technology',
   'services.why.title': 'One platform, zero integration headaches',
   'services.why.desc':
-    'Every APSAMO service is designed to work together. Buy a domain, get hosting, deploy your app, and scale — all from a single dashboard.',
+    'Every Apsamo Technology service is designed to work together. Buy a domain, get hosting, deploy your app, and scale — all from a single dashboard.',
   'services.why.button': 'View Pricing',
   'services.cta.title': 'Not sure where to start?',
   'services.cta.subtitle':
@@ -145,14 +145,14 @@ export const DEFAULT_CONTENT: Record<string, string> = {
   'about.hero.badge': 'About Us',
   'about.hero.title': 'We build the web so you can build your business',
   'about.hero.subtitle':
-    'APSAMO Technology was founded by developers, for developers. We believe deploying a website should be as simple as pushing to git.',
+    'Apsamo Technology was founded by developers, for developers. We believe deploying a website should be as simple as pushing to git.',
   'about.story.title': 'Our story',
   'about.story.p1':
-    'APSAMO started with a simple frustration: deploying a web app involved too many tools, too many accounts, and too many points of failure. Domain registrars, DNS providers, hosting platforms, CI/CD pipelines, SSL certificates — each a separate bill, a separate dashboard, a separate headache.',
+    'Apsamo Technology started with a simple frustration: deploying a web app involved too many tools, too many accounts, and too many points of failure. Domain registrars, DNS providers, hosting platforms, CI/CD pipelines, SSL certificates — each a separate bill, a separate dashboard, a separate headache.',
   'about.story.p2':
     'We set out to build the platform we wished existed: one place to develop, host, register domains, and scale SaaS applications — with automation that handles the boring parts so you can focus on building.',
   'about.story.p3':
-    'Today, APSAMO powers tens of thousands of sites across 12 countries, with a 99.9% uptime SLA and a relentless focus on developer experience. But we\u2019re just getting started.',
+    'Today, Apsamo Technology powers tens of thousands of sites across 12 countries, with a 99.9% uptime SLA and a relentless focus on developer experience. But we\u2019re just getting started.',
   'about.values.badge': 'Our Values',
   'about.values.title': 'What we believe',
   'about.mission.title': 'Our mission',
@@ -167,7 +167,7 @@ export const DEFAULT_CONTENT: Record<string, string> = {
   'contact.info.badge': 'Get in touch',
   'contact.info.title': 'We\u2019re here to help',
   'contact.info.desc':
-    'Whether you\u2019re evaluating APSAMO for your team, need technical support, or want to explore a partnership — reach out through any channel below.',
+    'Whether you\u2019re evaluating Apsamo Technology for your team, need technical support, or want to explore a partnership — reach out through any channel below.',
   'contact.info.email': 'hello@apsamo.tech',
   'contact.info.emailDesc': 'We reply within 24 hours',
   'contact.info.phone': '+1 (555) 010-2025',
@@ -182,7 +182,7 @@ export const DEFAULT_CONTENT: Record<string, string> = {
   'svc.web-development.hero.badge': 'Web Development',
   'svc.web-development.hero.title': 'Custom web apps engineered for performance & scale',
   'svc.web-development.hero.subtitle':
-    'From MVP to enterprise — APSAMO builds production-grade web applications with Next.js, TypeScript, and modern infrastructure. Pixel-perfect UI, robust APIs, and observability baked in from day one.',
+    'From MVP to enterprise — Apsamo Technology builds production-grade web applications with Next.js, TypeScript, and modern infrastructure. Pixel-perfect UI, robust APIs, and observability baked in from day one.',
   'svc.web-development.stack.title': 'A modern, battle-tested stack',
   'svc.web-development.code.title': 'Type-safe, end to end',
   'svc.web-development.process.title': 'From idea to launch in five steps',
@@ -209,7 +209,7 @@ export const DEFAULT_CONTENT: Record<string, string> = {
   'svc.domain-registration.hero.badge': 'Domain Registration',
   'svc.domain-registration.hero.title': 'Find & register the perfect domain',
   'svc.domain-registration.hero.subtitle':
-    'Search 100+ TLDs with real-time availability and transparent Dynadot-powered pricing. Free WHOIS privacy, automatic DNS, and one-click transfers — APSAMO is your one-stop domain shop.',
+    'Search 100+ TLDs with real-time availability and transparent Dynadot-powered pricing. Free WHOIS privacy, automatic DNS, and one-click transfers — Apsamo Technology is your one-stop domain shop.',
   'svc.domain-registration.pricing.title': 'Transparent pricing for every TLD',
   'svc.domain-registration.features.title': 'Every domain comes fully loaded',
   'svc.domain-registration.lifecycle.title': 'From search to live in four steps',
@@ -312,10 +312,10 @@ export const CONTENT_GROUPS: ContentGroup[] = [
       { key: 'services.workflow.badge', label: 'Workflow badge' },
       { key: 'services.workflow.title', label: 'Workflow title' },
       { key: 'services.workflow.subtitle', label: 'Workflow subtitle', type: 'textarea' },
-      { key: 'services.why.badge', label: 'Why APSAMO badge' },
-      { key: 'services.why.title', label: 'Why APSAMO title' },
-      { key: 'services.why.desc', label: 'Why APSAMO description', type: 'textarea' },
-      { key: 'services.why.button', label: 'Why APSAMO button' },
+      { key: 'services.why.badge', label: 'Why Apsamo Technology badge' },
+      { key: 'services.why.title', label: 'Why Apsamo Technology title' },
+      { key: 'services.why.desc', label: 'Why Apsamo Technology description', type: 'textarea' },
+      { key: 'services.why.button', label: 'Why Apsamo Technology button' },
       { key: 'services.cta.title', label: 'CTA title' },
       { key: 'services.cta.subtitle', label: 'CTA subtitle', type: 'textarea' },
       { key: 'services.cta.button', label: 'CTA button' },

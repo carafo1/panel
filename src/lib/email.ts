@@ -105,10 +105,10 @@ export async function sendWelcomeEmail(
 ): Promise<SendEmailResult> {
   return sendEmail({
     to: email,
-    subject: 'Welcome to APSAMO - please verify your email',
+    subject: 'Welcome to Apsamo Technology - please verify your email',
     html: `
       <div style="font-family: -apple-system, sans-serif; max-width: 560px; margin: auto; padding: 32px;">
-        <h1 style="color: #706fd3;">Welcome to APSAMO, ${name}!</h1>
+        <h1 style="color: #706fd3;">Welcome to Apsamo Technology, ${name}!</h1>
         <p>We're excited to have you on board. Before you can start deploying, please verify your email address:</p>
         <p style="text-align: center; margin: 32px 0;">
           <a href="${verificationUrl}" style="background: #706fd3; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
@@ -125,7 +125,7 @@ export async function sendWelcomeEmail(
         </p>
       </div>
     `,
-    text: `Welcome to APSAMO, ${name}!\n\nPlease verify your email by visiting: ${verificationUrl}`,
+    text: `Welcome to Apsamo Technology, ${name}!\n\nPlease verify your email by visiting: ${verificationUrl}`,
   })
 }
 
@@ -138,11 +138,11 @@ export async function sendPasswordResetEmail(
 ): Promise<SendEmailResult> {
   return sendEmail({
     to: email,
-    subject: 'Reset your APSAMO password',
+    subject: 'Reset your Apsamo Technology password',
     html: `
       <div style="font-family: -apple-system, sans-serif; max-width: 560px; margin: auto; padding: 32px;">
         <h1 style="color: #706fd3;">Password reset request</h1>
-        <p>We received a request to reset your APSAMO password. Click the button below to choose a new password:</p>
+        <p>We received a request to reset your Apsamo Technology password. Click the button below to choose a new password:</p>
         <p style="text-align: center; margin: 32px 0;">
           <a href="${resetUrl}" style="background: #706fd3; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
             Reset Password
@@ -157,7 +157,7 @@ export async function sendPasswordResetEmail(
         </p>
       </div>
     `,
-    text: `Reset your APSAMO password by visiting: ${resetUrl}\n\nThis link expires in 1 hour.`,
+    text: `Reset your Apsamo Technology password by visiting: ${resetUrl}\n\nThis link expires in 1 hour.`,
   })
 }
 
@@ -171,11 +171,11 @@ export async function sendTeamInvitationEmail(
 ): Promise<SendEmailResult> {
   return sendEmail({
     to: email,
-    subject: `You've been invited to join "${teamName}" on APSAMO`,
+    subject: `You've been invited to join "${teamName}" on Apsamo Technology`,
     html: `
       <div style="font-family: -apple-system, sans-serif; max-width: 560px; margin: auto; padding: 32px;">
         <h1 style="color: #706fd3;">Team invitation</h1>
-        <p>You've been invited to collaborate on the team <strong>${teamName}</strong> on APSAMO.</p>
+        <p>You've been invited to collaborate on the team <strong>${teamName}</strong> on Apsamo Technology.</p>
         <p style="text-align: center; margin: 32px 0;">
           <a href="${inviteUrl}" style="background: #706fd3; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
             Accept Invitation
@@ -187,7 +187,7 @@ export async function sendTeamInvitationEmail(
         </p>
       </div>
     `,
-    text: `You've been invited to join "${teamName}" on APSAMO.\n\nAccept: ${inviteUrl}`,
+    text: `You've been invited to join "${teamName}" on Apsamo Technology.\n\nAccept: ${inviteUrl}`,
   })
 }
 

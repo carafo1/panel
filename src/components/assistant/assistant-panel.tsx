@@ -33,7 +33,7 @@ interface ChatMessage {
 const QUICK_PROMPTS = [
   { label: 'Help me deploy my first project', icon: Rocket, prompt: 'Help me deploy my first project. What steps do I need to follow?' },
   { label: 'Configure DNS for my domain', icon: Globe, prompt: 'How do I configure DNS for my domain? What records do I need?' },
-  { label: 'Explain CI/CD pipelines', icon: GitMerge, prompt: 'Explain CI/CD pipelines and how they work in APSAMO.' },
+  { label: 'Explain CI/CD pipelines', icon: GitMerge, prompt: 'Explain CI/CD pipelines and how they work in Apsamo Panel.' },
   { label: 'Troubleshoot deployment failure', icon: AlertTriangle, prompt: 'My deployment failed. How can I troubleshoot deployment failures?' },
   { label: 'Best practices for production', icon: Shield, prompt: 'What are the best practices for deploying applications to production?' },
 ]
@@ -241,7 +241,7 @@ export default function AssistantPanel() {
                   How can I help you?
                 </h3>
                 <p className="text-sm text-muted-foreground text-center max-w-md mb-6">
-                  I&apos;m your APSAMO AI assistant. Ask me anything about hosting, domains, deployments, CI/CD, or cloud infrastructure.
+                  I&apos;m your Apsamo Panel AI assistant. Ask me anything about hosting, domains, deployments, CI/CD, or cloud infrastructure.
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-lg">
                   {QUICK_PROMPTS.map((prompt) => {

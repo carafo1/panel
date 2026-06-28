@@ -33,7 +33,7 @@ const TLD_TABLE = [
 
 const FEATURES = [
   { icon: Shield, title: 'Free WHOIS Privacy', desc: 'Your personal info never appears in public WHOIS records — free for the life of the domain.' },
-  { icon: Network, title: 'Automatic DNS', desc: 'Full DNS management with a friendly UI. Or let us auto-configure everything for APSAMO-hosted sites.' },
+  { icon: Network, title: 'Automatic DNS', desc: 'Full DNS management with a friendly UI. Or let us auto-configure everything for Apsamo Technology-hosted sites.' },
   { icon: ArrowLeftRight, title: 'One-Click Transfers', desc: 'Bring domains from any registrar. We handle the auth code, the unlock, and the whole transfer flow.' },
   { icon: Bell, title: 'Expiry Alerts & Auto-Renew', desc: 'Multiple alerts before expiry plus optional auto-renewal. Never lose a domain to a missed email.' },
   { icon: Mail, title: 'Email & URL Forwarding', desc: 'Forward me@yourdomain.com to any inbox, or redirect your domain to any URL — included free.' },
@@ -43,7 +43,7 @@ const FEATURES = [
 const LIFECYCLE = [
   { icon: Search, title: 'Search', desc: 'Check real-time availability across 100+ TLDs with live Dynadot pricing.' },
   { icon: ShoppingBag, title: 'Register', desc: 'Checkout in seconds. WHOIS privacy, DNS, and forwarding included free.' },
-  { icon: Server, title: 'Connect', desc: 'Link your domain to an APSAMO-hosted site — DNS & SSL configure automatically.' },
+  { icon: Server, title: 'Connect', desc: 'Link your domain to an Apsamo Technology-hosted site — DNS & SSL configure automatically.' },
   { icon: RefreshCw, title: 'Renew', desc: 'Auto-renewal keeps your domain yours. Get alerts before every renewal.' },
 ]
 
@@ -98,7 +98,7 @@ const FALLBACK_FAQS = [
   },
   {
     q: 'Is WHOIS privacy really free?',
-    a: 'Yes — every domain registered through APSAMO includes free WHOIS privacy for life. Your personal info never appears in public WHOIS records.',
+    a: 'Yes — every domain registered through Apsamo Technology includes free WHOIS privacy for life. Your personal info never appears in public WHOIS records.',
   },
   {
     q: 'Can I transfer domains from another registrar?',

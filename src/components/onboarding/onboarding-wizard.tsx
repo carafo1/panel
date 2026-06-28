@@ -266,7 +266,7 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                   </div>
                 </div>
                 <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight mb-3">
-                  Welcome to APSAMO!
+                  Welcome to Apsamo Panel!
                 </h1>
                 <p className="text-muted-foreground text-lg max-w-md mb-8">
                   Let&apos;s get your first project deployed in under 2 minutes

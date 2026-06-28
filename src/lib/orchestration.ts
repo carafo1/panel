@@ -841,7 +841,7 @@ function buildResult(
   // ─── Credentials ──────────────────────────────────────────────────
   const credentials: ProvisioningResult['credentials'] = {
     domain: {
-      registrar: domainResult?.provider === 'dynadot' ? 'Dynadot' : 'APSAMO',
+      registrar: domainResult?.provider === 'dynadot' ? 'Dynadot' : 'Apsamo Panel',
       managementUrl:
         domainResult?.provider === 'dynadot'
           ? 'https://dynadot.com/account/manage/domain.html'
@@ -1210,7 +1210,7 @@ async function provisionEmail(
   // 1. Add the domain to Mailcow.
   const addDomainResult = await addDomain({
     domain: domainName,
-    description: `APSAMO provisioned domain for ${job.userId}`,
+    description: `Apsamo Panel provisioned domain for ${job.userId}`,
     mailboxes: 10,
     aliases: 20,
     quota: 1024,

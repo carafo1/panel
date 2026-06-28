@@ -135,14 +135,14 @@ export function listStacks(): Array<{
       id: 'docker',
       name: STACK_DEFINITIONS.docker.name,
       description:
-        'Bring your own Dockerfile. APSAMO builds & runs it as-is on port 8080.',
+        'Bring your own Dockerfile. Apsamo Panel builds & runs it as-is on port 8080.',
       icon: 'container',
     },
     {
       id: 'wordpress',
       name: STACK_DEFINITIONS.wordpress.name,
       description:
-        'Managed WordPress 6.4 on PHP 8.2/Apache. APSAMO provisions a MySQL database alongside the container.',
+        'Managed WordPress 6.4 on PHP 8.2/Apache. Apsamo Panel provisions a MySQL database alongside the container.',
       icon: 'layout-template',
     },
   ]

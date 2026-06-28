@@ -37,7 +37,7 @@ const HOW_IT_WORKS = [
 ]
 
 const TESTIMONIALS = [
-  { name: 'Sarah Chen', role: 'CTO, Lumen Labs', initials: 'SC', quote: 'APSAMO cut our deployment time from hours to seconds. The domain integration alone saved us a full-time role.' },
+  { name: 'Sarah Chen', role: 'CTO, Lumen Labs', initials: 'SC', quote: 'Apsamo Technology cut our deployment time from hours to seconds. The domain integration alone saved us a full-time role.' },
   { name: 'Marcus Webb', role: 'Founder, Pulse', initials: 'MW', quote: 'From MVP to 100k users without touching infrastructure. The SaaS toolkit is genuinely enterprise-grade.' },
   { name: 'Aisha Patel', role: 'Lead Dev, Nimbus', initials: 'AP', quote: 'The best developer experience I have used in a decade. Real-time logs and instant rollbacks are a game changer.' },
 ]

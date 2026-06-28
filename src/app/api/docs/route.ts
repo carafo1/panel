@@ -9,14 +9,14 @@ import { SUPPORT_EMAIL } from '@/lib/brand-config'
 const openapiSpec = {
   openapi: '3.0.3',
   info: {
-    title: 'APSAMO Domain Reseller API',
+    title: 'Apsamo Technology Domain Reseller API',
     version: '1.0.0',
     description:
       'Production-ready domain management system powered by the Dynadot Reseller API. ' +
       'Supports complete domain lifecycle: search, register, renew, transfer, DNS, nameservers, ' +
       'WHOIS privacy, registrar lock, EPP auth codes, auto-renew, pricing with $6.50 markup, ' +
       'invoices, and full audit logging.',
-    contact: { name: 'APSAMO', email: SUPPORT_EMAIL },
+    contact: { name: 'Apsamo Technology', email: SUPPORT_EMAIL },
   },
   servers: [{ url: '/', description: 'Current host' }],
   components: {
@@ -318,7 +318,7 @@ const swaggerHtml = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>APSAMO Domain Reseller API — Swagger UI</title>
+  <title>Apsamo Technology Domain Reseller API — Swagger UI</title>
   <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.11.0/swagger-ui.css" />
   <style>body { margin: 0; }</style>
 </head>

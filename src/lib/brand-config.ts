@@ -36,4 +36,4 @@ export const ADMIN_EMAIL = process.env.ADMIN_EMAIL || `admin@${BRAND_DOMAIN}`
 
 // From name/email for outgoing email
 export const FROM_EMAIL = process.env.SMTP_FROM_EMAIL || NO_REPLY_EMAIL
-export const FROM_NAME = process.env.SMTP_FROM_NAME || 'APSAMO'
+export const FROM_NAME = process.env.SMTP_FROM_NAME || 'Apsamo Technology'

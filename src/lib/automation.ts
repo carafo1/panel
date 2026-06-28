@@ -722,7 +722,7 @@ export async function processEvent(event: AutomationEvent) {
             branch: 'main',
             status: 'live',
             buildLog: [
-              `🚀 APSAMO Auto-Deployment`,
+              `🚀 Apsamo Panel Auto-Deployment`,
               `========================`,
               `Project: ${project.name}`,
               `Framework: ${project.framework}`,

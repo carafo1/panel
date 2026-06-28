@@ -49,7 +49,7 @@ export const SERVICES: Service[] = [
     name: 'Web Development',
     tagline: 'Custom web apps engineered for performance, scale, and longevity.',
     description:
-      'From MVP to enterprise — APSAMO builds production-grade web applications with Next.js, TypeScript, and modern infrastructure. Pixel-perfect UI, robust APIs, automated CI/CD, and observability baked in from day one.',
+      'From MVP to enterprise — Apsamo Technology builds production-grade web applications with Next.js, TypeScript, and modern infrastructure. Pixel-perfect UI, robust APIs, automated CI/CD, and observability baked in from day one.',
     icon: Code2,
     accent: 'from-indigo-500 to-indigo-400',
     features: [
@@ -267,7 +267,7 @@ export const SERVICES: Service[] = [
     name: 'Domain Registration',
     tagline: 'Search 100+ TLDs with real-time availability and instant Dynadot pricing.',
     description:
-      'Find, register, renew, and transfer domains in seconds. Real-time availability across 100+ TLDs, transparent Dynadot-powered pricing, automatic DNS, free WHOIS privacy, and one-click transfer. APSAMO is your one-stop domain shop.',
+      'Find, register, renew, and transfer domains in seconds. Real-time availability across 100+ TLDs, transparent Dynadot-powered pricing, automatic DNS, free WHOIS privacy, and one-click transfer. Apsamo Technology is your one-stop domain shop.',
     icon: Globe,
     accent: 'from-indigo-400 to-indigo-600',
     features: [
@@ -335,7 +335,7 @@ export const SERVICES: Service[] = [
       },
       {
         title: 'Auto DNS & SSL',
-        description: 'Connect a domain to your APSAMO-hosted site and we configure DNS + SSL automatically.',
+        description: 'Connect a domain to your Apsamo Technology-hosted site and we configure DNS + SSL automatically.',
         icon: LayoutGrid,
       },
       {
@@ -351,7 +351,7 @@ export const SERVICES: Service[] = [
       },
       {
         q: 'Is WHOIS privacy really free?',
-        a: 'Yes — every domain registered through APSAMO includes free WHOIS privacy for life. Your personal info never appears in public WHOIS records.',
+        a: 'Yes — every domain registered through Apsamo Technology includes free WHOIS privacy for life. Your personal info never appears in public WHOIS records.',
       },
       {
         q: 'Can I transfer domains from another registrar?',

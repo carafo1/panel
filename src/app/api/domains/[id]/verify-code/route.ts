@@ -55,7 +55,7 @@ export async function GET(
       )
     }
 
-    // Domains registered through Dynadot (or default APSAMO flow) are
+    // Domains registered through Dynadot (or default Apsamo Panel flow) are
     // already trusted and do not require DNS verification.
     const requiresVerification =
       domain.provider === 'custom' ||

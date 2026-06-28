@@ -307,7 +307,7 @@ export function generateCaddyBlock(cfg: ProxyConfig): string {
 export function generateFullCaddyfile(configs: ProxyConfig[]): string {
   const email = process.env.LE_EMAIL || ADMIN_EMAIL
   const out: string[] = [
-    `# Managed by APSAMO — DO NOT EDIT MANUALLY`,
+    `# Managed by Apsamo Panel — DO NOT EDIT MANUALLY`,
     `# Generated: ${new Date().toISOString()}`,
     `# Sites: ${configs.length}`,
     ``,
@@ -326,8 +326,8 @@ export function generateFullCaddyfile(configs: ProxyConfig[]): string {
     out.push('')
   }
   if (configs.length === 0) {
-    out.push(`# No sites configured yet — APSAMO will add them here.`)
-    out.push(`:80 { respond "APSAMO — no sites configured" 200 }`)
+    out.push(`# No sites configured yet — Apsamo Panel will add them here.`)
+    out.push(`:80 { respond "Apsamo Panel — no sites configured" 200 }`)
   }
   return out.join('\n')
 }
