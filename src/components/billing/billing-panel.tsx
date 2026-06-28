@@ -140,7 +140,7 @@ interface PortalResult {
 
 // ── API helper ─────────────────────────────────────────────────────────
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
-  const token = localStorage.getItem('deployhub_token')
+  const token = localStorage.getItem('apsamo_token')
   const res = await fetch(`/api${path}`, {
     ...options,
     headers: {
@@ -359,7 +359,7 @@ function CheckoutDialog({
       if (!result.demo && result.url) {
         toast.success('Redirecting to Stripe Checkout…')
         try {
-          sessionStorage.setItem('deployhub_pending_checkout', result.sessionId || '1')
+          sessionStorage.setItem('apsamo_pending_checkout', result.sessionId || '1')
         } catch {
           /* ignore */
         }

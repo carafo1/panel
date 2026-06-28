@@ -2,7 +2,7 @@
  * Core Orchestration Engine
  * =========================
  *
- * The heart of DeployHub's automated provisioning pipeline. Coordinates the
+ * The heart of APSAMO's automated provisioning pipeline. Coordinates the
  * full flow:
  *
  *     domain registration → DNS configuration → web hosting → email hosting → verification
@@ -44,6 +44,12 @@ import {
 } from '@/lib/mailcow'
 import { encrypt } from '@/lib/encryption'
 import { deployProject, removeProjectContainer } from '@/lib/vps'
+import {
+  MAIL_SERVER_HOSTNAME,
+  NS1_HOSTNAME,
+  NS2_HOSTNAME,
+  APP_SUBDOMAIN_PATTERN,
+} from '@/lib/brand-config'
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -62,7 +68,7 @@ export interface ProvisioningResult {
   domainStatus: {
     status: 'success' | 'fail'
     domain: string
-    provider: string // "dynadot" or "deployhub"
+    provider: string // "dynadot" or "apsamo"
     externalId?: string
     registered: boolean
     details: string
@@ -192,9 +198,9 @@ async function resolveHostingServerIp(serverId?: string): Promise<string> {
   return '10.0.0.1' // demo default
 }
 
-/** Resolve the mail server hostname from env or fall back to a sensible default. */
+/** Resolve the mail server hostname from brand-config (env-var overridable; APSAMO default). */
 function resolveMailServerHostname(): string {
-  return process.env.MAIL_SERVER_HOSTNAME || 'mail.deployhub.io'
+  return MAIL_SERVER_HOSTNAME
 }
 
 /** Sleep for n milliseconds. */
@@ -835,7 +841,7 @@ function buildResult(
   // ─── Credentials ──────────────────────────────────────────────────
   const credentials: ProvisioningResult['credentials'] = {
     domain: {
-      registrar: domainResult?.provider === 'dynadot' ? 'Dynadot' : 'DeployHub',
+      registrar: domainResult?.provider === 'dynadot' ? 'Dynadot' : 'APSAMO',
       managementUrl:
         domainResult?.provider === 'dynadot'
           ? 'https://dynadot.com/account/manage/domain.html'
@@ -844,7 +850,7 @@ function buildResult(
     dns: {
       nameservers: ctx.nameservers.length
         ? ctx.nameservers
-        : ['ns1.deployhub.io', 'ns2.deployhub.io'],
+        : [NS1_HOSTNAME, NS2_HOSTNAME],
       managementUrl: `/dashboard/domains/${ctx.domainId || ''}/dns`,
     },
   }
@@ -937,7 +943,7 @@ async function provisionDomain(
       `[orchestration] getDomainInfo failed for ${domainName}:`,
       err instanceof Error ? err.message : err
     )
-    info = { nameservers: ['ns1.deployhub.io', 'ns2.deployhub.io'], expiry: undefined }
+    info = { nameservers: [NS1_HOSTNAME, NS2_HOSTNAME], expiry: undefined }
   }
 
   // 4. Create the Domain record in DB.
@@ -1093,7 +1099,7 @@ async function provisionHosting(
     .toLowerCase()
     .replace(/[^a-z0-9.-]+/g, '-')
     .replace(/^-|-$/g, '')
-  const subdomain = `${slug.split('.')[0]}.deployhub.io`
+  const subdomain = APP_SUBDOMAIN_PATTERN.replace('{slug}', slug.split('.')[0])
   const url = `https://${subdomain}`
 
   // 1. Auto-assign a server: prefer active + dockerInstalled=true with the

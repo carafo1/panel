@@ -34,7 +34,7 @@ interface AuthState {
 const API_BASE = '/api'
 
 export async function apiFetch(path: string, options?: RequestInit) {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('deployhub_token') : null
+  const token = typeof window !== 'undefined' ? localStorage.getItem('apsamo_token') : null
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers: {
@@ -57,7 +57,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   isAuthenticated: false,
 
   setAuth: (user, token) => {
-    localStorage.setItem('deployhub_token', token)
+    localStorage.setItem('apsamo_token', token)
     set({ user, token, isAuthenticated: true, isLoading: false })
   },
 
@@ -112,12 +112,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     } catch {
       // ignore - logout must succeed client-side even if API call fails
     }
-    localStorage.removeItem('deployhub_token')
+    localStorage.removeItem('apsamo_token')
     set({ user: null, token: null, isAuthenticated: false, isLoading: false })
   },
 
   loadUser: async () => {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('deployhub_token') : null
+    const token = typeof window !== 'undefined' ? localStorage.getItem('apsamo_token') : null
     if (!token) {
       set({ isLoading: false })
       return
@@ -126,7 +126,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const data = await apiFetch('/auth/me')
       set({ user: data.user, token, isAuthenticated: true, isLoading: false })
     } catch {
-      localStorage.removeItem('deployhub_token')
+      localStorage.removeItem('apsamo_token')
       set({ user: null, token: null, isAuthenticated: false, isLoading: false })
     }
   },

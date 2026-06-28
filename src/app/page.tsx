@@ -51,6 +51,7 @@ import UptimePanel from '@/components/monitoring/uptime-panel'
 import ProvisioningPanel from '@/components/provisioning/provisioning-panel'
 import { CommandPalette } from '@/components/command-palette'
 import { Search, Zap } from 'lucide-react'
+import { migrateStorageKeys } from '@/lib/migrate-storage'
 
 // ── Sidebar nav items ──────────────────────────────────────────────────
 const NAV_ITEMS: { id: DashboardTab; label: string; icon: React.ElementType; adminOnly?: boolean }[] = [
@@ -365,12 +366,15 @@ export default function Home() {
   const [showAuthModal, setShowAuthModal] = useState(false)
   const [showOnboarding, setShowOnboarding] = useState(() => {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem('deployhub_onboarding_complete') !== 'true'
+      return localStorage.getItem('apsamo_onboarding_complete') !== 'true'
     }
     return false
   })
 
   useEffect(() => {
+    // One-time backward-compat migration: rename deployhub_* storage keys → apsamo_*.
+    // Idempotent — safe to call on every mount. Preserves existing user sessions.
+    migrateStorageKeys()
     loadUser()
   }, [loadUser])
 
@@ -415,12 +419,12 @@ export default function Home() {
   }, [isLoading, isAuthenticated, setView])
 
   const handleOnboardingComplete = () => {
-    localStorage.setItem('deployhub_onboarding_complete', 'true')
+    localStorage.setItem('apsamo_onboarding_complete', 'true')
     setShowOnboarding(false)
   }
 
   const handleOnboardingSkip = () => {
-    localStorage.setItem('deployhub_onboarding_complete', 'true')
+    localStorage.setItem('apsamo_onboarding_complete', 'true')
     setShowOnboarding(false)
   }
 

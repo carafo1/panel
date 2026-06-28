@@ -28,6 +28,7 @@ import {
   isServerInDemoMode,
 } from './ssh'
 import { getServerCredentials } from './provisioner'
+import { ADMIN_EMAIL } from '@/lib/brand-config'
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -286,7 +287,7 @@ export function generateCaddyBlock(cfg: ProxyConfig): string {
   }`)
     // Caddy will automatically use Let's Encrypt — no explicit tls directive needed.
     // But we can be explicit about the email for ACME account.
-    const email = process.env.LE_EMAIL || process.env.ADMIN_EMAIL || 'admin@deployhub.io'
+    const email = process.env.LE_EMAIL || ADMIN_EMAIL
     lines.push(`  tls ${email} {
     on_demand
   }`)
@@ -304,9 +305,9 @@ export function generateCaddyBlock(cfg: ProxyConfig): string {
  * options block (ACME email, etc.) + one block per project.
  */
 export function generateFullCaddyfile(configs: ProxyConfig[]): string {
-  const email = process.env.LE_EMAIL || process.env.ADMIN_EMAIL || 'admin@deployhub.io'
+  const email = process.env.LE_EMAIL || ADMIN_EMAIL
   const out: string[] = [
-    `# Managed by DeployHub — DO NOT EDIT MANUALLY`,
+    `# Managed by APSAMO — DO NOT EDIT MANUALLY`,
     `# Generated: ${new Date().toISOString()}`,
     `# Sites: ${configs.length}`,
     ``,
@@ -325,8 +326,8 @@ export function generateFullCaddyfile(configs: ProxyConfig[]): string {
     out.push('')
   }
   if (configs.length === 0) {
-    out.push(`# No sites configured yet — DeployHub will add them here.`)
-    out.push(`:80 { respond "DeployHub — no sites configured" 200 }`)
+    out.push(`# No sites configured yet — APSAMO will add them here.`)
+    out.push(`:80 { respond "APSAMO — no sites configured" 200 }`)
   }
   return out.join('\n')
 }

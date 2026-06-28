@@ -110,9 +110,18 @@ export async function deliverWebhook(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        // Legacy DeployHub headers — kept for backward compatibility with
+        // existing customer webhook receivers. Do NOT remove: doing so would
+        // break signature verification on integrations customers already
+        // deployed against the old header names. Both header sets carry the
+        // same value, so receivers can migrate at their own pace.
         'X-DeployHub-Event': event,
         'X-DeployHub-Delivery': deliveryId,
         'X-DeployHub-Signature': `sha256=${signature}`,
+        // New APSAMO headers — recommended for new integrations.
+        'X-APSAMO-Event': event,
+        'X-APSAMO-Delivery': deliveryId,
+        'X-APSAMO-Signature': `sha256=${signature}`,
       },
       body: payloadStr,
       signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),

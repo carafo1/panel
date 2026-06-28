@@ -246,7 +246,7 @@ interface Plan {
 
 // Helpers
 function getAuthHeaders(): Record<string, string> {
-  const token = localStorage.getItem('deployhub_token')
+  const token = localStorage.getItem('apsamo_token')
   return {
     'Authorization': `Bearer ${token}`,
     'Content-Type': 'application/json',

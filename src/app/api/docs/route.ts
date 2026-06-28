@@ -4,6 +4,7 @@
  * Renders as Swagger UI at /api/docs (HTML) or JSON at /api/docs?format=json.
  */
 import { NextResponse } from 'next/server'
+import { SUPPORT_EMAIL } from '@/lib/brand-config'
 
 const openapiSpec = {
   openapi: '3.0.3',
@@ -15,7 +16,7 @@ const openapiSpec = {
       'Supports complete domain lifecycle: search, register, renew, transfer, DNS, nameservers, ' +
       'WHOIS privacy, registrar lock, EPP auth codes, auto-renew, pricing with $6.50 markup, ' +
       'invoices, and full audit logging.',
-    contact: { name: 'APSAMO', email: 'support@deployhub.io' },
+    contact: { name: 'APSAMO', email: SUPPORT_EMAIL },
   },
   servers: [{ url: '/', description: 'Current host' }],
   components: {

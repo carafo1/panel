@@ -170,7 +170,7 @@ export async function addDomain(
       relayhost: 0,
       dkim_selector: 'mail',
       dkim_length: 2048,
-      key_description: `DeployHub DKIM for ${opts.domain}`,
+      key_description: `APSAMO DKIM for ${opts.domain}`,
     }
     const env = await mailcowFetch<MailcowEnvelope>('/add/domain', {
       method: 'POST',
@@ -328,7 +328,7 @@ export async function generateDkim(
         domain,
         dkim_selector: selector,
         dkim_length: 2048,
-        key_description: 'DeployHub auto DKIM',
+        key_description: 'APSAMO auto DKIM',
       }
       const env = await mailcowFetch<MailcowEnvelope>('/add/dkim', {
         method: 'POST',

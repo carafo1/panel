@@ -222,7 +222,7 @@ interface ServerStats {
 function authHeaders(): Record<string, string> {
   const token =
     typeof window !== 'undefined'
-      ? localStorage.getItem('deployhub_token')
+      ? localStorage.getItem('apsamo_token')
       : null
   return {
     'Content-Type': 'application/json',

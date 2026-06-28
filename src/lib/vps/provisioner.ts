@@ -2,7 +2,7 @@
  * VPS Provisioner
  * ===============
  *
- * Idempotently installs the DeployHub hosting stack on a fresh VPS:
+ * Idempotently installs the APSAMO hosting stack on a fresh VPS:
  *
  *   1. Update apt + install essential packages (curl, git, ufw, jq, etc.)
  *   2. Install Docker Engine + docker compose plugin
@@ -136,7 +136,7 @@ export const STEP_LABELS: Record<ProvisionStepName, string> = {
   install_docker: 'Install Docker Engine',
   install_caddy: 'Install Caddy reverse proxy',
   configure_firewall: 'Configure UFW firewall',
-  setup_directories: 'Setup DeployHub directories',
+  setup_directories: 'Setup APSAMO directories',
   detect_resources: 'Detect CPU / RAM / disk',
 }
 

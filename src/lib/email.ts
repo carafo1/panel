@@ -9,6 +9,7 @@
  * success (demo mode) so the rest of the application keeps working.
  */
 import nodemailer from 'nodemailer'
+import { FROM_NAME, FROM_EMAIL } from '@/lib/brand-config'
 
 interface SendEmailOptions {
   to: string
@@ -23,9 +24,9 @@ interface SendEmailResult {
   demo?: boolean
 }
 
-const FROM_NAME = process.env.SMTP_FROM_NAME || 'APSAMO'
-const FROM_EMAIL =
-  process.env.SMTP_FROM_EMAIL || 'no-reply@deployhub.local'
+// Brand-configured From name/email (env-var overridable; APSAMO by default).
+// FROM_NAME / FROM_EMAIL are imported from brand-config so existing deployments
+// can keep their DeployHub-branded sender identity via env vars.
 
 let transporter: nodemailer.Transporter | null = null
 let transporterWarningLogged = false
@@ -73,7 +74,7 @@ export async function sendEmail(
     )
     return {
       success: true,
-      messageId: `demo-${Date.now()}@deployhub.local`,
+      messageId: `demo-${Date.now()}@${FROM_EMAIL.split('@')[1] || 'apsamo.io'}`,
       demo: true,
     }
   }

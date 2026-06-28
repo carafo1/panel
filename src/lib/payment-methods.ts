@@ -17,6 +17,7 @@
 import { db } from '@/lib/db'
 import { createCheckoutSession } from '@/lib/stripe'
 import { createPayment as createWaafiPayment, isWaafiConfigured } from '@/lib/waafi'
+import { BILLING_EMAIL } from '@/lib/brand-config'
 
 export interface PaymentMethod {
   method: string // "stripe", "waafi", "manual"
@@ -87,7 +88,7 @@ const DEFAULT_METHODS: Array<{
     sortOrder: 30,
     config: {
       instructions:
-        'Transfer the amount to the bank account below and email proof of payment to billing@deployhub.io. Your subscription will be activated once the payment is verified.',
+        `Transfer the amount to the bank account below and email proof of payment to ${BILLING_EMAIL}. Your subscription will be activated once the payment is verified.`,
       bankName: 'Bank of Example',
       accountName: 'APSAMO Inc.',
       accountNumber: '0000-0000-0000',

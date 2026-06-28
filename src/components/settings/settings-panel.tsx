@@ -112,7 +112,7 @@ function ProfileTab() {
       })
       // Update the auth store with new user data
       if (user) {
-        setAuth(data.user, localStorage.getItem('deployhub_token') || '')
+        setAuth(data.user, localStorage.getItem('apsamo_token') || '')
       }
       toast.success('Profile updated successfully')
     } catch (err) {
@@ -1158,7 +1158,7 @@ function NotificationsTab() {
 
   useEffect(() => {
     try {
-      const stored = localStorage.getItem('deployhub_notification_prefs')
+      const stored = localStorage.getItem('apsamo_notification_prefs')
       if (stored) {
         setPrefs({ ...DEFAULT_PREFS, ...JSON.parse(stored) })
       }
@@ -1175,7 +1175,7 @@ function NotificationsTab() {
   const handleSave = async () => {
     setSaving(true)
     try {
-      localStorage.setItem('deployhub_notification_prefs', JSON.stringify(prefs))
+      localStorage.setItem('apsamo_notification_prefs', JSON.stringify(prefs))
       // Simulate API delay
       await new Promise((r) => setTimeout(r, 500))
       toast.success('Notification preferences saved')

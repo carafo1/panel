@@ -1,7 +1,7 @@
 /**
  * Deployment stack definitions.
  *
- * Pure-data module describing the application stacks DeployHub knows how to
+ * Pure-data module describing the application stacks APSAMO knows how to
  * provision. Used by:
  *  - /api/provisioning/stacks (the public stack picker endpoint)
  *  - the provisioning UI (stack labels/descriptions)
@@ -12,7 +12,7 @@
  */
 
 /**
- * Static definitions for every stack DeployHub knows how to provision.
+ * Static definitions for every stack APSAMO knows how to provision.
  *
  * Each entry carries:
  *  - `name`:           human-readable label

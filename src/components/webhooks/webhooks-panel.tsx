@@ -628,6 +628,9 @@ export default function WebhooksPanel() {
               </div>
               <p className="text-xs text-muted-foreground">
                 Use this secret to verify webhook signatures. The signature is sent in the{' '}
+                <code className="rounded bg-muted px-1 py-0.5">X-APSAMO-Signature</code> header
+                (recommended for new integrations). For backward compatibility, the same signature
+                is also sent in the legacy{' '}
                 <code className="rounded bg-muted px-1 py-0.5">X-DeployHub-Signature</code> header.
               </p>
             </div>
@@ -933,7 +936,7 @@ export default function WebhooksPanel() {
               <Label htmlFor="wh-url">Payload URL</Label>
               <Input
                 id="wh-url"
-                placeholder="https://example.com/webhooks/deployhub"
+                placeholder="https://example.com/webhooks/apsamo"
                 value={createForm.url}
                 onChange={(e) => setCreateForm((p) => ({ ...p, url: e.target.value }))}
               />

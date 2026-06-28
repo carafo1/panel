@@ -79,7 +79,7 @@ interface DeploymentDetail extends Deployment {
 
 // ── API helper ─────────────────────────────────────────────────────────
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
-  const token = localStorage.getItem('deployhub_token')
+  const token = localStorage.getItem('apsamo_token')
   const res = await fetch(`/api${path}`, {
     ...options,
     headers: {
@@ -320,7 +320,7 @@ export function DeploymentsPanel() {
       }
     } catch {
       // WebSocket not available, use SSE fallback
-      const token = localStorage.getItem('deployhub_token')
+      const token = localStorage.getItem('apsamo_token')
       const eventSource = new EventSource(`/api/deployments/${selectedId}/events?token=${token}`)
 
       eventSource.onmessage = (event) => {

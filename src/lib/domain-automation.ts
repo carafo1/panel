@@ -27,6 +27,7 @@ import {
 } from './pricing'
 import { sendEmail } from './email'
 import { randomUUID } from 'crypto'
+import { MAIL_SERVER_HOSTNAME, NS1_HOSTNAME, NS2_HOSTNAME } from './brand-config'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -46,7 +47,7 @@ export interface RegisterPipelineInput {
     spf?: boolean
     dmarc?: boolean
     dkim?: boolean
-    mxTarget?: string // e.g. mail.deployhub.io
+    mxTarget?: string // e.g. mail.<brand-domain> (defaults to brand-config MAIL_SERVER_HOSTNAME)
   }
   contacts?: Array<{
     type: 'registrant' | 'admin' | 'tech' | 'billing'
@@ -121,7 +122,7 @@ export function buildEmailDnsRecords(
   domain: string,
   opts: { mxTarget?: string; dkimSelector?: string; enabled?: boolean }
 ): Array<{ type: 'TXT' | 'MX'; name: string; value: string; priority?: number }> {
-  const mxTarget = opts.mxTarget || 'mail.deployhub.io'
+  const mxTarget = opts.mxTarget || MAIL_SERVER_HOSTNAME
   const selector = opts.dkimSelector || 'mail'
   const records: Array<{ type: 'TXT' | 'MX'; name: string; value: string; priority?: number }> = []
 
@@ -273,7 +274,7 @@ export async function runRegistrationPipeline(
     begin('configure_nameservers')
     const nameservers = input.nameservers && input.nameservers.length > 0
       ? input.nameservers
-      : ['ns1.deployhub.io', 'ns2.deployhub.io']
+      : [NS1_HOSTNAME, NS2_HOSTNAME]
     try {
       await dynadotService.setNameservers(domainLower, nameservers)
       // Persist nameserver entries

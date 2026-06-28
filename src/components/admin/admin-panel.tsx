@@ -103,7 +103,7 @@ interface Job {
 
 // ── API helper ─────────────────────────────────────────────────────────
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
-  const token = localStorage.getItem('deployhub_token')
+  const token = localStorage.getItem('apsamo_token')
   const res = await fetch(`/api${path}`, {
     ...options,
     headers: {

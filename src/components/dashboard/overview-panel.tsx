@@ -49,7 +49,7 @@ export default function OverviewPanel() {
 
   useEffect(() => {
     async function loadData() {
-      const token = localStorage.getItem('deployhub_token')
+      const token = localStorage.getItem('apsamo_token')
       if (!token) return
       try {
         const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
