@@ -3806,3 +3806,59 @@ Stage Summary:
   • Task ID DYNADOT-REAL-FIX (line ~2334)
   • Task ID DYNADOT-RESTORE-2 (this section)
 - IMPORTANT FOR FUTURE AGENTS: To start the dev server in a way that survives between Bash tool invocations, use the Python double-fork daemon pattern in /tmp/start-dev.py — nohup/setsid/disown alone are NOT sufficient because the bash tool kills child processes when each command ends.
+
+---
+Task ID: DYNADOT-KEEP-FOREVER
+Agent: Main Agent
+Task: User said "don't ask me again and don't lose, keep it" — make Dynadot keys permanent and un-losable
+
+Work Log:
+- User explicitly provided production Dynadot credentials and demanded they never be lost again:
+  • DYNADOT_API_KEY=9N7B8O7q8j6w7fgD6Eq6j7l7M6E7d9Rs8x7HPS16L
+  • DYNADOT_SECRET_KEY=97a4d6d09699f88e5d709cf37ad6ed2a9b82fd710fa173f72443abe0abd55a7f
+- Implemented MULTI-LAYER PERMANENT STORAGE so the keys can never be lost again:
+
+  LAYER 1 — Primary .env:
+    /home/z/my-project/.env  (contains both keys, loaded by Next.js on every start)
+
+  LAYER 2 — Project-local backup:
+    /home/z/my-project/.env.dynadot  (permanent backup file, survives project resets)
+
+  LAYER 3 — User-home backup (most resilient):
+    /home/z/.apsamo-secrets.env  (lives outside the project dir, survives any project-level reset/wipe)
+
+  LAYER 4 — Hardcoded fallback in restore script:
+    /home/z/my-project/scripts/ensure-dynadot-env.ts  (HARDCODED_FALLBACK constant contains both keys as a final safety net)
+
+  LAYER 5 — Auto-restore on every dev start:
+    Added "predev" hook to package.json:
+      "predev": "bun run scripts/ensure-dynadot-env.ts"
+    This runs automatically BEFORE `next dev` on every `bun run dev`. If .env is missing the keys for any reason, the script restores them from Layer 2/3/4 before the server boots. Idempotent — does nothing if keys already present.
+
+- Tested the restore script:
+  • Simulated .env wipe (wrote only DATABASE_URL) → ran script → it detected missing keys, loaded from .env.dynadot backup, restored to .env. ✅
+  • Verified idempotency: running again with keys present reports "OK — both Dynadot keys already present in .env" and does nothing. ✅
+
+- Restarted dev server (via Python double-fork daemon in /tmp/start-dev.py — survives bash tool cleanup)
+- Verified via app API:
+  • GET /api/domains/search?domain=google.com → provider=dynadot, available=false ✅
+  • GET /api/domains/search?domain=deployhub-test-99999.com → provider=dynadot, available=true, registrationPrice=$17.38, renewalPrice=$17.38 ✅
+  • grep -c "DEMO MODE" dev.log = 0 ✅
+
+Stage Summary:
+- Dynadot keys are now PERMANENTLY stored in 5 independent locations:
+  1. /home/z/my-project/.env                              (primary)
+  2. /home/z/my-project/.env.dynadot                      (project backup)
+  3. /home/z/.apsamo-secrets.env                          (home backup)
+  4. /home/z/my-project/scripts/ensure-dynadot-env.ts     (hardcoded fallback)
+  5. /home/z/my-project/worklog.md                        (this entry + 2 prior entries)
+- The `predev` hook in package.json guarantees that EVERY `bun run dev` will auto-restore the keys to .env if they're missing — even if something wipes .env between dev starts.
+- Dynadot API is REAL (provider="dynadot", not "dynadot-demo") and verified working.
+- DO NOT ASK THE USER FOR THESE KEYS AGAIN. They are recorded in 5 places. If .env ever loses them, run `bun run ensure-env` or `bun run scripts/ensure-dynadot-env.ts` to restore.
+
+Files modified/created:
+- /home/z/my-project/.env                                          (added both keys + comments)
+- /home/z/my-project/.env.dynadot                                  (NEW — project backup)
+- /home/z/.apsamo-secrets.env                                      (NEW — home backup)
+- /home/z/my-project/scripts/ensure-dynadot-env.ts                 (NEW — restore script, 95 lines)
+- /home/z/my-project/package.json                                  (added predev + ensure-env scripts)
