@@ -43,7 +43,7 @@ export async function PUT(
     // Push to Dynadot
     const result = await dynadotService.setNameservers(domain.name, nameservers)
     if (!result.success) {
-      return apiError.badRequest('Failed to set nameservers at Dynadot')
+      return apiError.badRequest('Failed to set nameservers at the registrar')
     }
 
     // Persist

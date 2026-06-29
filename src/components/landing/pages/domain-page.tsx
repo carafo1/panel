@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -16,20 +17,24 @@ import { DomainSearchWidget } from '../domain-search-widget'
 import { useAppStore } from '@/store/app-store'
 import { useSiteContent, useServiceBySlug } from '../site-data-context'
 
-const TLD_TABLE = [
-  { tld: '.com', price: 12.99, popular: true, category: 'Business', desc: 'The classic. Recognised worldwide.' },
-  { tld: '.net', price: 14.99, category: 'Business', desc: 'Trusted for tech & networks.' },
-  { tld: '.org', price: 12.99, category: 'Organisation', desc: 'For nonprofits & communities.' },
-  { tld: '.io', price: 39.99, popular: true, category: 'Tech', desc: 'Developer-favourite for startups.' },
-  { tld: '.dev', price: 14.99, category: 'Tech', desc: 'HTTPS-required, built for devs.' },
-  { tld: '.app', price: 16.99, category: 'Tech', desc: 'For mobile & web apps.' },
-  { tld: '.co', price: 29.99, category: 'Business', desc: 'Short, punchy alternative.' },
-  { tld: '.ai', price: 92.1, popular: true, category: 'Premium', desc: 'For AI startups & ML products.' },
-  { tld: '.xyz', price: 3.99, category: 'Generic', desc: 'Affordable & flexible.' },
-  { tld: '.tech', price: 6.99, category: 'Tech', desc: 'For tech brands & blogs.' },
-  { tld: '.store', price: 8.99, category: 'Commerce', desc: 'For e-commerce shops.' },
-  { tld: '.design', price: 39.99, category: 'Creative', desc: 'For designers & studios.' },
-]
+// Static fallback TLD table — used only while live prices are loading
+// or if the pricing API is unreachable. Real prices are fetched from
+// /api/pricing on mount (see DomainPage component).
+const TLD_META: Record<string, { popular?: boolean; category: string; desc: string }> = {
+  '.com':   { popular: true, category: 'Business',     desc: 'The classic. Recognised worldwide.' },
+  '.net':   { category: 'Business',     desc: 'Trusted for tech & networks.' },
+  '.org':   { category: 'Organisation', desc: 'For nonprofits & communities.' },
+  '.io':    { popular: true, category: 'Tech',         desc: 'Developer-favourite for startups.' },
+  '.dev':   { category: 'Tech',         desc: 'HTTPS-required, built for devs.' },
+  '.app':   { category: 'Tech',         desc: 'For mobile & web apps.' },
+  '.co':    { category: 'Business',     desc: 'Short, punchy alternative.' },
+  '.ai':    { popular: true, category: 'Premium',      desc: 'For AI startups & ML products.' },
+  '.xyz':   { category: 'Generic',      desc: 'Affordable & flexible.' },
+  '.tech':  { category: 'Tech',         desc: 'For tech brands & blogs.' },
+  '.store': { category: 'Commerce',     desc: 'For e-commerce shops.' },
+  '.design':{ category: 'Creative',     desc: 'For designers & studios.' },
+}
+const FALLBACK_TLD_PRICE = 19.99
 
 const FEATURES = [
   { icon: Shield, title: 'Free WHOIS Privacy', desc: 'Your personal info never appears in public WHOIS records — free for the life of the domain.' },
@@ -41,7 +46,7 @@ const FEATURES = [
 ]
 
 const LIFECYCLE = [
-  { icon: Search, title: 'Search', desc: 'Check real-time availability across 100+ TLDs with live Dynadot pricing.' },
+  { icon: Search, title: 'Search', desc: 'Check real-time availability across 100+ TLDs with live wholesale pricing.' },
   { icon: ShoppingBag, title: 'Register', desc: 'Checkout in seconds. WHOIS privacy, DNS, and forwarding included free.' },
   { icon: Server, title: 'Connect', desc: 'Link your domain to an Apsamo Technology-hosted site — DNS & SSL configure automatically.' },
   { icon: RefreshCw, title: 'Renew', desc: 'Auto-renewal keeps your domain yours. Get alerts before every renewal.' },
@@ -50,7 +55,7 @@ const LIFECYCLE = [
 const FALLBACK_PLANS = [
   {
     name: '.com',
-    price: 12.99,
+    price: 17.38,
     period: '/year',
     description: 'The classic. Perfect for businesses of any size.',
     features: [
@@ -63,10 +68,10 @@ const FALLBACK_PLANS = [
     popular: true,
   },
   {
-    name: '.io / .dev',
-    price: 39.99,
+    name: '.io',
+    price: 35.39,
     period: '/year',
-    description: 'Developer-favourite TLDs for tech products.',
+    description: 'Developer-favourite TLD for tech products.',
     features: [
       'Free WHOIS privacy',
       'Automatic DNS',
@@ -94,7 +99,7 @@ const FALLBACK_PLANS = [
 const FALLBACK_FAQS = [
   {
     q: 'How much does a domain cost?',
-    a: 'Pricing varies by TLD. .com starts at $12.99/year, .io at $39.99/year, .ai at $92.10/year. Use the search above to get live pricing for any domain.',
+    a: 'Pricing varies by TLD. .com starts at $17.38/year, .io at $35.39/year, .ai at $92.10/year. Use the search above to get live pricing for any domain.',
   },
   {
     q: 'Is WHOIS privacy really free?',
@@ -120,6 +125,39 @@ export function DomainPage({ onGetStarted }: DomainPageProps) {
   const service = useServiceBySlug('domain-registration')
   const plans = service?.plans?.length ? service.plans : FALLBACK_PLANS
   const faqs = service?.faqs?.length ? service.faqs : FALLBACK_FAQS
+
+  // ── Fetch live TLD prices from the DB (synced from the registrar) ──
+  // The TLD_META map provides category + description; the API provides
+  // the real selling price (wholesale + $6.50 markup). Falls back to
+  // FALLBACK_TLD_PRICE if the API is unreachable.
+  const [tldPrices, setTldPrices] = useState<Record<string, number>>({})
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/pricing')
+      .then((r) => r.json())
+      .then((body) => {
+        if (cancelled || !body?.data?.tlds) return
+        const map: Record<string, number> = {}
+        for (const t of body.data.tlds as Array<{ tld: string; registration: number }>) {
+          map[t.tld] = t.registration
+        }
+        if (!cancelled) setTldPrices(map)
+      })
+      .catch(() => {
+        // keep fallback prices
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const tldRows = Object.keys(TLD_META).map((tld) => ({
+    tld,
+    price: tldPrices[tld] ?? FALLBACK_TLD_PRICE,
+    popular: TLD_META[tld].popular,
+    category: TLD_META[tld].category,
+    desc: TLD_META[tld].desc,
+  }))
 
   return (
     <>
@@ -148,7 +186,7 @@ export function DomainPage({ onGetStarted }: DomainPageProps) {
             <div className="text-center mb-14">
               <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">TLD Pricing</Badge>
               <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight"><span className="text-gradient-brand">{getContent('svc.domain-registration.pricing.title')}</span></h2>
-              <p className="mt-3 text-muted-foreground max-w-2xl mx-auto">Live Dynadot wholesale + a small markup. What you see is what you pay — no hidden fees at checkout.</p>
+              <p className="mt-3 text-muted-foreground max-w-2xl mx-auto">Live wholesale price + a small markup. What you see is what you pay — no hidden fees at checkout.</p>
             </div>
           </ScrollReveal>
           <ScrollReveal delay={100}>
@@ -164,7 +202,7 @@ export function DomainPage({ onGetStarted }: DomainPageProps) {
                     </tr>
                   </thead>
                   <tbody>
-                    {TLD_TABLE.map((row, i) => (
+                    {tldRows.map((row, i) => (
                       <tr
                         key={row.tld}
                         className={`border-b last:border-0 hover:bg-indigo-500/5 transition-colors ${i % 2 === 1 ? 'bg-muted/20' : ''}`}

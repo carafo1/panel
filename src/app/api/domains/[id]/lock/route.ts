@@ -35,7 +35,7 @@ export async function PUT(
 
     if (!result.success) {
       return apiError.badRequest(
-        `Failed to ${locked ? 'lock' : 'unlock'} domain at Dynadot`
+        `Failed to ${locked ? 'lock' : 'unlock'} domain at the registrar`
       )
     }
 

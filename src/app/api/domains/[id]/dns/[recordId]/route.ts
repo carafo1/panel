@@ -76,8 +76,8 @@ export async function DELETE(
         dynadotSync = {
           success: result.success,
           message: result.success
-            ? 'Pushed to Dynadot'
-            : 'Failed to push to Dynadot',
+            ? 'Pushed to the registrar'
+            : 'Failed to push to the registrar',
         }
       } catch (err) {
         console.error('[dns] Dynadot sync error (delete):', err)
@@ -86,7 +86,7 @@ export async function DELETE(
           message:
             err instanceof Error
               ? err.message
-              : 'Unknown Dynadot sync error',
+              : 'Unknown registrar sync error',
         }
       }
 

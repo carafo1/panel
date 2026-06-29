@@ -44,9 +44,9 @@ export async function POST(request: Request) {
         markup: 6.5,
         message: result.demo
           ? 'Prices re-seeded from defaults (demo mode - set DYNADOT_API_KEY for live sync)'
-          : `Prices synced live from Dynadot (${result.fetched} live, ${result.fallback} default fallback)`,
+          : `Prices synced live from the registrar (${result.fetched} live, ${result.fallback} default fallback)`,
       },
-      `Price sync completed (${result.synced} TLDs — ${result.fetched} live from Dynadot)`
+      `Price sync completed (${result.synced} TLDs — ${result.fetched} live from the registrar)`
     )
   } catch (error) {
     console.error('[pricing/sync] error:', error)

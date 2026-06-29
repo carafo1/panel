@@ -265,14 +265,14 @@ export const SERVICES: Service[] = [
   {
     slug: 'domain-registration',
     name: 'Domain Registration',
-    tagline: 'Search 100+ TLDs with real-time availability and instant Dynadot pricing.',
+    tagline: 'Search 100+ TLDs with real-time availability and instant live pricing.',
     description:
-      'Find, register, renew, and transfer domains in seconds. Real-time availability across 100+ TLDs, transparent Dynadot-powered pricing, automatic DNS, free WHOIS privacy, and one-click transfer. Apsamo Technology is your one-stop domain shop.',
+      'Find, register, renew, and transfer domains in seconds. Real-time availability across 100+ TLDs, transparent registrar-direct pricing, automatic DNS, free WHOIS privacy, and one-click transfer. Apsamo Technology is your one-stop domain shop.',
     icon: Globe,
     accent: 'from-indigo-400 to-indigo-600',
     features: [
       'Real-time availability across 100+ TLDs',
-      'Live Dynadot-powered pricing',
+      'Live registrar-direct pricing',
       'Free WHOIS privacy forever',
       'Automatic DNS management',
       'One-click domain transfers',
@@ -282,7 +282,7 @@ export const SERVICES: Service[] = [
     plans: [
       {
         name: '.com',
-        price: 12.99,
+        price: 17.38,
         period: '/year',
         description: 'The classic. Perfect for businesses of any size.',
         features: [
@@ -295,10 +295,10 @@ export const SERVICES: Service[] = [
         popular: true,
       },
       {
-        name: '.io / .dev',
-        price: 39.99,
+        name: '.io',
+        price: 35.39,
         period: '/year',
-        description: 'Developer-favourite TLDs for tech products.',
+        description: 'Developer-favourite TLD for tech products.',
         features: [
           'Free WHOIS privacy',
           'Automatic DNS',
@@ -325,12 +325,12 @@ export const SERVICES: Service[] = [
     highlights: [
       {
         title: 'Real-time availability',
-        description: 'We query Dynadot directly — no caching, no stale data. What you see is what you get.',
+        description: 'We query the registry directly — no caching, no stale data. What you see is what you get.',
         icon: Globe,
       },
       {
         title: 'Transparent pricing',
-        description: 'Live Dynadot wholesale + small markup. What you see at checkout is what you pay. No hidden fees.',
+        description: 'Live wholesale price + small markup. What you see at checkout is what you pay. No hidden fees.',
         icon: Server,
       },
       {
@@ -347,7 +347,7 @@ export const SERVICES: Service[] = [
     faqs: [
       {
         q: 'How much does a domain cost?',
-        a: 'Pricing varies by TLD. .com starts at $12.99/year, .io at $39.99/year, .ai at $92.10/year. Use the search above to get live pricing for any domain.',
+        a: 'Pricing varies by TLD. .com starts at $17.38/year, .io at $35.39/year, .ai at $92.10/year. Use the search above to get live pricing for any domain.',
       },
       {
         q: 'Is WHOIS privacy really free?',

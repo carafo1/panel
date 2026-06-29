@@ -155,7 +155,7 @@ export default function DomainsPanel() {
             Domain Reseller
           </h2>
           <p className="text-sm text-muted-foreground mt-1">
-            Search, register, renew, transfer &amp; manage domains via Dynadot
+            Search, register, renew, transfer &amp; manage domains via Apsamo
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -582,7 +582,7 @@ function RegisterDialog({
             Register {domain}
           </DialogTitle>
           <DialogDescription>
-            Register this domain through Dynadot. A paid invoice and activity log will be generated automatically.
+            Register this domain through Apsamo. A paid invoice and activity log will be generated automatically.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-2">
@@ -619,7 +619,7 @@ function RegisterDialog({
             </div>
           </div>
           <div className="rounded-md border border-indigo-500/30 bg-indigo-500/5 p-3 text-xs text-muted-foreground">
-            After payment, the system will: register via Dynadot → configure nameservers →
+            After payment, the system will: register via Apsamo → configure nameservers →
             set DNS records → save to database → create invoice → generate audit log → send confirmation email.
           </div>
         </div>
@@ -1046,7 +1046,7 @@ function NameserversSection({ domain, onUpdated }: { domain: Domain; onUpdated: 
         body: JSON.stringify({ nameservers: clean }),
       })
       toast.success('Nameservers updated', {
-        description: `${clean.length} nameservers configured via Dynadot`,
+        description: `${clean.length} nameservers configured via Apsamo`,
       })
       onUpdated()
     } catch (err) {
@@ -1140,7 +1140,7 @@ function DnsSection({ domain, onUpdated }: { domain: Domain; onUpdated: () => vo
         method: 'PUT',
         body: JSON.stringify({ records }),
       })
-      toast.success('DNS records saved', { description: `${records.length} records synced to Dynadot` })
+      toast.success('DNS records saved', { description: `${records.length} records synced to Apsamo` })
       onUpdated()
     } catch (err) {
       toast.error('Failed to save DNS', { description: (err as Error).message })
@@ -1900,7 +1900,7 @@ function AdminTab({ onSelect }: { onSelect: (id: string) => void }) {
           <AlertDialogHeader>
             <AlertDialogTitle>Suspend this domain?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will mark the domain as suspended and disable auto-renew at Dynadot. The domain record is preserved for audit.
+              This will mark the domain as suspended and disable auto-renew at the registrar. The domain record is preserved for audit.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -2003,7 +2003,7 @@ function IntegrationStatusCard() {
             <CardDescription className="mt-1">
               {data
                 ? `Provider: ${data.provider} • ${data.summary.live}/${data.summary.total} features live • Last checked ${new Date(data.checkedAt).toLocaleTimeString()}`
-                : 'Live-testing all 7 domain features against the Dynadot API…'}
+                : 'Live-testing all 7 domain features against the registrar API…'}
             </CardDescription>
           </div>
           <Button variant="outline" size="sm" onClick={load} disabled={checking}>

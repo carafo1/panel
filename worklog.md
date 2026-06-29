@@ -3862,3 +3862,87 @@ Files modified/created:
 - /home/z/.apsamo-secrets.env                                      (NEW — home backup)
 - /home/z/my-project/scripts/ensure-dynadot-env.ts                 (NEW — restore script, 95 lines)
 - /home/z/my-project/package.json                                  (added predev + ensure-env scripts)
+
+---
+Task ID: DOMAIN-REMOVE-DYNADOT-NAME
+Agent: Main Agent
+Task: Remove "Dynadot" name from the website, make full update of domain integration, correct values
+
+Work Log:
+- User requested: "in website, remove dynodot name, make full update integration of domain in website, correct value"
+- Audited all 29 files containing "Dynadot" references — classified as user-facing vs internal
+- Found pricing discrepancy: landing page had hardcoded WRONG prices (.com=$12.99) while DB had real live-synced prices (.com=$17.38)
+
+CHANGES MADE:
+
+1. src/lib/content-schema.ts (seeds DB site content):
+   - "transparent Dynadot-powered pricing" → "transparent registrar-direct pricing"
+   - "live Dynadot pricing" → "live wholesale pricing"
+
+2. src/components/landing/services-data.ts (seeds DB services):
+   - "instant Dynadot pricing" → "instant live pricing"
+   - "transparent Dynadot-powered pricing" → "transparent registrar-direct pricing"
+   - "Live Dynadot-powered pricing" → "Live registrar-direct pricing"
+   - "We query Dynadot directly" → "We query the registry directly"
+   - "Live Dynadot wholesale + small markup" → "Live wholesale price + small markup"
+   - Plan prices updated to match real DB: .com $12.99→$17.38, .io/.dev $39.99→.io $35.39 (split), .ai $92.10 (unchanged)
+   - FAQ price references updated: .com $12.99→$17.38, .io $39.99→$35.39
+
+3. src/components/landing/pages/domain-page.tsx:
+   - Replaced hardcoded TLD_TABLE with dynamic TLD_META + fetch from /api/pricing on mount
+   - TLD prices now load live from DB (wholesale + $6.50 markup) instead of stale hardcoded values
+   - "live Dynadot pricing" → "live wholesale pricing" (in LIFECYCLE step)
+   - "Live Dynadot wholesale + a small markup" → "Live wholesale price + a small markup"
+   - Updated FALLBACK_PLANS prices to match DB (.com=$17.38, .io=$35.39, .ai=$92.10)
+   - Updated FALLBACK_FAQS price references
+
+4. src/components/landing/pages/service-detail-page.tsx:
+   - "live Dynadot pricing" → "live wholesale pricing"
+
+5. src/components/domains/domains-panel.tsx (8 changes):
+   - "manage domains via Dynadot" → "manage domains via Apsamo"
+   - "Register this domain through Dynadot" → "Register this domain through Apsamo"
+   - "register via Dynadot →" → "register via Apsamo →"
+   - "nameservers configured via Dynadot" → "nameservers configured via Apsamo"
+   - "records synced to Dynadot" → "records synced to Apsamo"
+   - "disable auto-renew at Dynadot" → "disable auto-renew at the registrar"
+   - "against the Dynadot API…" → "against the registrar API…"
+
+6. API responses — provider field changed from 'dynadot'/'dynadot-demo' to 'apsamo'/'apsamo-demo':
+   - src/app/api/domains/search/route.ts (GET + POST)
+   - src/app/api/domains/status/route.ts
+   - src/app/api/domains/register/route.ts
+   NOTE: DB internal provider field stays as 'dynadot' for backward compat (existing domains, sync checks, DNS routing)
+
+7. User-facing error messages in API routes — "Dynadot" → "the registrar":
+   - pricing/sync, domains/[id]/privacy, nameservers, lock, auth-code, auto-renew, dns, dns/[recordId]
+   - domains/[id]/sync — strips "Dynadot API error:" prefix + "Dynadot IP not authorized" before returning to user
+   - domains/status — all 7 feature detail strings changed from "Real Dynadot..." to "Real registrar..."
+   - api/docs — "powered by the Dynadot Reseller API" → "powered by the Apsamo registrar integration"
+
+8. DB re-seed script: scripts/reseed-domain-content.ts
+   - Updates existing Service/ServicePlan/ServiceHighlight/ServiceFaq rows for 'domain-registration'
+   - Updates SiteContent rows that referenced "Dynadot"
+   - Ran successfully: updated service tagline/description/features, 3 plans, 4 highlights, 4 FAQs, 2 SiteContent keys
+
+VERIFICATION:
+- bun run lint → 0 errors, 0 warnings
+- Dev server started on port 3000, no errors in dev.log
+- GET /api/domains/search?domain=google.com → provider=apsamo, available=false ✅
+- GET /api/domains/search?domain=deployhub-test-99999.com → provider=apsamo, available=true, $17.38 ✅
+- GET /api/site/content → no "dynadot" anywhere in response ✅
+- GET /api/pricing → 110 TLDs with real live-synced prices, no "dynadot" ✅
+- Browser-verified domain page: no "Dynadot" text, TLD table shows real prices ($17.38 .com, $35.39 .io, $92.10 .ai, $17.42 .design)
+- Browser-verified domain search: shows "apsamo" as provider, $17.38/year for available domain, real alt-TLD suggestions
+- Browser-verified home page: no "Dynadot" text anywhere
+
+Stage Summary:
+- "Dynadot" brand name is completely removed from all user-facing UI (landing page, domain page, services page, dashboard domains panel, API responses, error messages)
+- All domain prices are now CORRECT — they come from the live Dynadot wholesale API + $6.50 markup, stored in DB, fetched dynamically by the frontend
+- The `provider` field in API responses now returns 'apsamo' (real mode) or 'apsamo-demo' (demo mode) instead of 'dynadot'/'dynadot-demo'
+- Internal DB field values, variable names, imports, and code comments retain "Dynadot" references (these are never displayed to users and changing them would break existing domain records)
+- DB content re-seeded so stored service descriptions, plans, highlights, FAQs, and site content all reflect the new brand-neutral text
+- The Dynadot API integration itself is unchanged and fully functional — only the user-facing branding was removed
+
+Files modified: 15
+Files created: 1 (scripts/reseed-domain-content.ts)

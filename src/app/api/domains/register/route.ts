@@ -178,7 +178,7 @@ export async function POST(request: Request) {
         {
           error: 'Domain registration failed at the registrar',
           details: dynadotError || 'Registrar did not return success',
-          provider: isDynadotDemoMode() ? 'dynadot-demo' : 'dynadot',
+          provider: isDynadotDemoMode() ? 'apsamo-demo' : 'apsamo',
         },
         { status: 502 }
       )
@@ -307,7 +307,7 @@ export async function POST(request: Request) {
         dnsRecords,
       },
       automation: automationResult,
-      provider: isDynadotDemoMode() ? 'dynadot-demo' : 'dynadot',
+      provider: isDynadotDemoMode() ? 'apsamo-demo' : 'apsamo',
       orderId: dynadotResult.orderId,
       registrationPrice: dynadotResult.registrationPrice,
     }, { status: 201 })

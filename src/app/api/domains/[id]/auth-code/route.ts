@@ -24,7 +24,7 @@ export async function GET(
 
     const result = await dynadotService.getAuthCode(domain.name)
     if (!result.success || !result.authCode) {
-      return apiError.badRequest('Failed to retrieve auth code from Dynadot')
+      return apiError.badRequest('Failed to retrieve auth code from the registrar')
     }
 
     // Cache the auth code on the domain record (encrypted at rest by app layer if desired)

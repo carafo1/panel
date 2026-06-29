@@ -35,7 +35,7 @@ export async function PUT(
 
     if (!result.success) {
       return apiError.badRequest(
-        `Failed to ${enabled ? 'enable' : 'disable'} WHOIS privacy at Dynadot`
+        `Failed to ${enabled ? 'enable' : 'disable'} WHOIS privacy at the registrar`
       )
     }
 

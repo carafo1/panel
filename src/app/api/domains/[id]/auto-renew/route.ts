@@ -34,7 +34,7 @@ export async function PUT(
       : await dynadotService.disableAutoRenew(domain.name)
 
     if (!result.success) {
-      return apiError.badRequest('Failed to update auto-renew setting at Dynadot')
+      return apiError.badRequest('Failed to update auto-renew setting at the registrar')
     }
 
     await db.domain.update({ where: { id }, data: { autoRenew: enabled } })

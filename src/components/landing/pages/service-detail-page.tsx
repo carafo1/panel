@@ -48,7 +48,7 @@ export function ServiceDetailPage({ slug, onGetStarted }: ServiceDetailPageProps
               onGetStarted={onGetStarted}
               variant="section"
               title="Check Domain Availability"
-              subtitle="Real-time search across 100+ TLDs with live Dynadot pricing"
+              subtitle="Real-time search across 100+ TLDs with live wholesale pricing"
             />
           </div>
         </section>

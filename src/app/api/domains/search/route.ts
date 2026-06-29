@@ -50,7 +50,7 @@ export async function GET(request: Request) {
       // In real mode, surface the error instead of simulating.
       if (!isDynadotDemoMode()) {
         return apiError.serverError(
-          `Dynadot search failed: ${dynadotError}. Domain availability could not be determined.`
+          `Search failed: ${dynadotError}. Domain availability could not be determined.`
         )
       }
     }
@@ -120,7 +120,7 @@ export async function GET(request: Request) {
         renewalPrice: available ? renewalPrice : null,
         transferPrice: available ? transferPrice : null,
         currency: 'USD',
-        provider: isDynadotDemoMode() ? 'dynadot-demo' : 'dynadot',
+        provider: isDynadotDemoMode() ? 'apsamo-demo' : 'apsamo',
         tld,
         suggestions,
       },
@@ -189,8 +189,8 @@ export async function POST(request: Request) {
       if (!isDynadotDemoMode()) {
         return NextResponse.json(
           {
-            error: `Dynadot search failed: ${dynadotError}`,
-            provider: 'dynadot',
+            error: `Search failed: ${dynadotError}`,
+            provider: 'apsamo',
           },
           { status: 502 }
         )
@@ -242,7 +242,7 @@ export async function POST(request: Request) {
         available: false,
         price: null,
         message: 'Domain is not available',
-        provider: isDynadotDemoMode() ? 'dynadot-demo' : 'dynadot',
+        provider: isDynadotDemoMode() ? 'apsamo-demo' : 'apsamo',
         suggestions,
       })
     }
@@ -252,7 +252,7 @@ export async function POST(request: Request) {
       available: true,
       price,
       message: 'Domain is available',
-      provider: isDynadotDemoMode() ? 'dynadot-demo' : 'dynadot',
+      provider: isDynadotDemoMode() ? 'apsamo-demo' : 'apsamo',
       dynadotUsed: dynadotAvailable !== null,
       dynadotError,
       suggestions,

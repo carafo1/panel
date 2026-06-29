@@ -59,7 +59,7 @@ export async function POST(
       return NextResponse.json(
         {
           error:
-            'Sync is only available for domains registered through Dynadot.',
+            'Sync is only available for domains registered through Apsamo.',
           provider: domain.provider,
         },
         { status: 400 }
@@ -134,12 +134,15 @@ export async function POST(
   } catch (error) {
     console.error('Sync domain error:', error)
     const msg = error instanceof Error ? error.message : 'Internal server error'
-    // Surface Dynadot-specific errors (e.g. "could not find domain in your
+    // Surface registrar-specific errors (e.g. "could not find domain in your
     // account") as 400s so the UI can show the real reason instead of a
-    // generic 500.
+    // generic 500. Strip any internal registrar name from the message.
     if (msg.includes('Dynadot API error:') || msg.includes('Dynadot IP not authorized')) {
+      const cleanMsg = msg
+        .replace('Dynadot API error: ', '')
+        .replace('Dynadot IP not authorized', 'IP not authorized by registrar')
       return NextResponse.json(
-        { error: msg.replace('Dynadot API error: ', '') },
+        { error: cleanMsg },
         { status: 400 }
       )
     }

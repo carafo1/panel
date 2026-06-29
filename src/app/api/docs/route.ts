@@ -12,7 +12,7 @@ const openapiSpec = {
     title: 'Apsamo Technology Domain Reseller API',
     version: '1.0.0',
     description:
-      'Production-ready domain management system powered by the Dynadot Reseller API. ' +
+      'Production-ready domain management system powered by the Apsamo registrar integration. ' +
       'Supports complete domain lifecycle: search, register, renew, transfer, DNS, nameservers, ' +
       'WHOIS privacy, registrar lock, EPP auth codes, auto-renew, pricing with $6.50 markup, ' +
       'invoices, and full audit logging.',
@@ -278,7 +278,7 @@ const openapiSpec = {
     },
     '/api/pricing/sync': {
       post: {
-        summary: 'Sync prices from Dynadot (admin only)',
+        summary: 'Sync prices from the registrar (admin only)',
         responses: { '200': { description: 'Sync result' } },
       },
     },

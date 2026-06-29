@@ -209,7 +209,7 @@ export const DEFAULT_CONTENT: Record<string, string> = {
   'svc.domain-registration.hero.badge': 'Domain Registration',
   'svc.domain-registration.hero.title': 'Find & register the perfect domain',
   'svc.domain-registration.hero.subtitle':
-    'Search 100+ TLDs with real-time availability and transparent Dynadot-powered pricing. Free WHOIS privacy, automatic DNS, and one-click transfers — Apsamo Technology is your one-stop domain shop.',
+    'Search 100+ TLDs with real-time availability and transparent registrar-direct pricing. Free WHOIS privacy, automatic DNS, and one-click transfers — Apsamo Technology is your one-stop domain shop.',
   'svc.domain-registration.pricing.title': 'Transparent pricing for every TLD',
   'svc.domain-registration.features.title': 'Every domain comes fully loaded',
   'svc.domain-registration.lifecycle.title': 'From search to live in four steps',
@@ -236,7 +236,7 @@ export const DEFAULT_CONTENT: Record<string, string> = {
   'widget.domain.title': 'Find Your Perfect Domain',
   'widget.domain.subtitle': 'Search 100+ TLDs with live availability & instant pricing',
   'widget.domain.sectionTitle': 'Check Domain Availability',
-  'widget.domain.sectionSubtitle': 'Real-time search across 100+ TLDs with live Dynadot pricing',
+  'widget.domain.sectionSubtitle': 'Real-time search across 100+ TLDs with live wholesale pricing',
 }
 
 /* ────────────────────────────────────────────────────────────────────────

@@ -46,7 +46,7 @@ export async function GET(request: Request) {
         id: 1,
         name: 'Domain search',
         status: 'simulated',
-        detail: 'Demo mode — DYNADOT_API_KEY not set. Returns fake availability.',
+        detail: 'Demo mode — API key not set. Returns fake availability.',
         lastChecked: now,
       })
     } else {
@@ -57,7 +57,7 @@ export async function GET(request: Request) {
           id: 1,
           name: 'Domain search',
           status: 'live',
-          detail: `Real Dynadot search API. google.com → available=false (confirmed taken).`,
+          detail: `Real registrar search API. google.com → available=false (confirmed taken).`,
           lastChecked: now,
         })
       } else {
@@ -65,7 +65,7 @@ export async function GET(request: Request) {
           id: 1,
           name: 'Domain search',
           status: 'error',
-          detail: `Dynadot returned google.com as available — API may be malfunctioning.`,
+          detail: `The registrar returned google.com as available — API may be malfunctioning.`,
           lastChecked: now,
         })
       }
@@ -106,7 +106,7 @@ export async function GET(request: Request) {
           id: 2,
           name: 'Domain pricing',
           status: 'live',
-          detail: `Real Dynadot wholesale prices via show_price=1. ${priceCount} TLDs priced. Last sync: ${ageHours}h ago (${recentSync.tld}=$${recentSync.wholesale}).`,
+          detail: `Real registrar wholesale prices via show_price=1. ${priceCount} TLDs priced. Last sync: ${ageHours}h ago (${recentSync.tld}=$${recentSync.wholesale}).`,
           lastChecked: now,
         })
       } else {
@@ -114,7 +114,7 @@ export async function GET(request: Request) {
           id: 2,
           name: 'Domain pricing',
           status: 'simulated',
-          detail: 'No sync has been run yet. Click "Sync Prices" to fetch live Dynadot prices.',
+          detail: 'No sync has been run yet. Click "Sync Prices" to fetch live prices.',
           lastChecked: now,
         })
       }
@@ -149,7 +149,7 @@ export async function GET(request: Request) {
         id: 3,
         name: 'Domain registration',
         status: 'live',
-        detail: 'Real Dynadot register command. API key verified via list_domain.',
+        detail: 'Real registrar register command. API key verified via list_domain.',
         lastChecked: now,
       })
     }
@@ -179,7 +179,7 @@ export async function GET(request: Request) {
         id: 4,
         name: 'DNS record sync',
         status: 'live',
-        detail: 'Real Dynadot set_dns2 command pushes records to Dynadot nameservers.',
+        detail: 'Real registrar set_dns2 command pushes records to nameservers.',
         lastChecked: now,
       })
     }
@@ -208,7 +208,7 @@ export async function GET(request: Request) {
         id: 5,
         name: 'Domain renewal',
         status: 'live',
-        detail: 'Real Dynadot renew command. API key verified.',
+        detail: 'Real registrar renew command. API key verified.',
         lastChecked: now,
       })
     }
@@ -237,7 +237,7 @@ export async function GET(request: Request) {
         id: 6,
         name: 'Domain transfer',
         status: 'live',
-        detail: 'Real Dynadot transfer command initiates real registrar transfer.',
+        detail: 'Real registrar transfer command initiates real registrar transfer.',
         lastChecked: now,
       })
     }
@@ -273,7 +273,7 @@ export async function GET(request: Request) {
           id: 7,
           name: 'Domain info sync',
           status: 'live',
-          detail: `Real Dynadot domain_info + get_ns commands. Returned status="${info.status}" for google.com.`,
+          detail: `Real registrar domain_info + get_ns commands. Returned status="${info.status}" for google.com.`,
           lastChecked: now,
         })
       } catch (innerErr) {
@@ -284,7 +284,7 @@ export async function GET(request: Request) {
             id: 7,
             name: 'Domain info sync',
             status: 'live',
-            detail: `Real Dynadot domain_info command. API responded with expected "domain not in account" error for google.com (proves live API).`,
+            detail: `Real registrar domain_info command. API responded with expected "domain not in account" error for google.com (proves live API).`,
             lastChecked: now,
           })
         } else {
@@ -314,7 +314,7 @@ export async function GET(request: Request) {
 
   return ok(
     {
-      provider: demoMode ? 'dynadot-demo' : 'dynadot',
+      provider: demoMode ? 'apsamo-demo' : 'apsamo',
       demoMode,
       apiKeyConfigured: !demoMode,
       summary: {
