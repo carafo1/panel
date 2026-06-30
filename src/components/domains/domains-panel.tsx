@@ -32,6 +32,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import {
+  Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
+} from '@/components/ui/tooltip'
+import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
@@ -1994,23 +1997,70 @@ function PricingTab({ isAdmin, globalMarkup, onMarkupChanged }: PricingTabProps)
 
 // ─── Admin Tab ────────────────────────────────────────────────────────────────
 
+interface AdminDomain {
+  id: string
+  name: string
+  status: string
+  registrar: string
+  provider: string
+  registeredAt?: string
+  expiresAt?: string
+  autoRenew: boolean
+  whoisPrivacy: boolean
+  locked: boolean
+  premium: boolean
+  emailHosted: boolean
+  transferStatus?: string | null
+  externalId?: string | null
+  nameservers: string[]
+  owner: { id: string; name: string; email: string }
+  project: { id: string; name: string; status: string; subdomain: string } | null
+  dnsRecordsCount: number
+  logsCount: number
+  ordersCount: number
+  invoicesCount: number
+  createdAt: string
+}
+
+interface DomainBreakdown {
+  total: number
+  active: number
+  pending: number
+  cancelled: number
+  deleted: number
+  expired: number
+  transferring: number
+  suspended: number
+  activeWithHosting: number
+}
+
+type StatusFilter = 'all' | 'active' | 'cancelled' | 'deleted' | 'suspended' | 'expired'
+
 function AdminTab({ onSelect }: { onSelect: (id: string) => void }) {
-  const [domains, setDomains] = useState<any[]>([])
+  const [domains, setDomains] = useState<AdminDomain[]>([])
+  const [breakdown, setBreakdown] = useState<DomainBreakdown | null>(null)
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [suspendId, setSuspendId] = useState<string | null>(null)
+  const [deleteId, setDeleteId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await apiFetch(`/admin/domains${search ? `?search=${encodeURIComponent(search)}` : ''}`)
-      setDomains(data.data || [])
+      const params = new URLSearchParams()
+      if (search) params.set('search', search)
+      if (statusFilter !== 'all') params.set('status', statusFilter)
+      const qs = params.toString()
+      const data = await apiFetch(`/admin/domains${qs ? `?${qs}` : ''}`)
+      setDomains(data.data?.domains || [])
+      setBreakdown(data.data?.breakdown || null)
     } catch (err) {
       toast.error('Failed to load domains', { description: (err as Error).message })
     } finally {
       setLoading(false)
     }
-  }, [search])
+  }, [search, statusFilter])
 
   useEffect(() => { load() }, [load])
 
@@ -2026,74 +2076,308 @@ function AdminTab({ onSelect }: { onSelect: (id: string) => void }) {
     }
   }
 
-  const remove = async (id: string) => {
+  const remove = async () => {
+    if (!deleteId) return
     try {
-      await apiFetch(`/admin/domains/${id}`, { method: 'DELETE' })
+      await apiFetch(`/admin/domains/${deleteId}`, { method: 'DELETE' })
       toast.success('Domain deleted')
+      setDeleteId(null)
       load()
     } catch (err) {
       toast.error('Delete failed', { description: (err as Error).message })
     }
   }
 
+  // Status badge with appropriate colour per status.
+  const statusBadge = (status: string) => {
+    const map: Record<string, string> = {
+      active: 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border-indigo-500/30',
+      pending: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30',
+      pending_verification: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30',
+      transferring: 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border-indigo-500/30',
+      cancelled: 'bg-gray-500/15 text-gray-600 dark:text-gray-400 border-gray-500/30',
+      expired: 'bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/30',
+      suspended: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30',
+      deleted: 'bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/30',
+    }
+    return (
+      <Badge className={map[status] || 'bg-gray-500/15 text-gray-600 border-gray-500/30'} variant="outline">
+        {status}
+      </Badge>
+    )
+  }
+
+  const formatExpiry = (iso?: string) => {
+    if (!iso) return { text: '—', days: null as number | null }
+    const d = new Date(iso)
+    const days = Math.ceil((d.getTime() - Date.now()) / (24 * 60 * 60 * 1000))
+    return { text: d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }), days }
+  }
+
+  const statusFilters: { id: StatusFilter; label: string; count: number }[] = [
+    { id: 'all', label: 'All', count: breakdown?.total ?? 0 },
+    { id: 'active', label: 'Active', count: breakdown?.active ?? 0 },
+    { id: 'cancelled', label: 'Cancelled', count: breakdown?.cancelled ?? 0 },
+    { id: 'deleted', label: 'Deleted', count: breakdown?.deleted ?? 0 },
+    { id: 'suspended', label: 'Suspended', count: breakdown?.suspended ?? 0 },
+    { id: 'expired', label: 'Expired', count: breakdown?.expired ?? 0 },
+  ]
+
+  const hostingCount = breakdown?.activeWithHosting ?? 0
+
   return (
     <div className="space-y-4">
       <IntegrationStatusCard />
 
+      {/* Real stats summary */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <Card className="p-4">
+          <div className="text-xs uppercase text-muted-foreground flex items-center gap-1">
+            <Globe className="h-3 w-3" /> Total Domains
+          </div>
+          <div className="text-2xl font-bold mt-1">{breakdown?.total ?? '—'}</div>
+          <div className="text-xs text-muted-foreground mt-0.5">across all users</div>
+        </Card>
+        <Card className="p-4 border-indigo-500/30">
+          <div className="text-xs uppercase text-muted-foreground flex items-center gap-1">
+            <CheckCircle2 className="h-3 w-3 text-indigo-500" /> Active
+          </div>
+          <div className="text-2xl font-bold mt-1 text-indigo-600 dark:text-indigo-400">
+            {breakdown?.active ?? '—'}
+          </div>
+          <div className="text-xs text-muted-foreground mt-0.5">live &amp; renewable</div>
+        </Card>
+        <Card className="p-4 border-amber-500/30">
+          <div className="text-xs uppercase text-muted-foreground flex items-center gap-1">
+            <Server className="h-3 w-3 text-amber-500" /> Currently Hosting
+          </div>
+          <div className="text-2xl font-bold mt-1 text-amber-600 dark:text-amber-400">
+            {hostingCount}
+          </div>
+          <div className="text-xs text-muted-foreground mt-0.5">active with email or project</div>
+        </Card>
+        <Card className="p-4 border-red-500/30">
+          <div className="text-xs uppercase text-muted-foreground flex items-center gap-1">
+            <XCircle className="h-3 w-3 text-red-500" /> Inactive
+          </div>
+          <div className="text-2xl font-bold mt-1 text-red-600 dark:text-red-400">
+            {(breakdown?.cancelled ?? 0) + (breakdown?.deleted ?? 0) + (breakdown?.expired ?? 0)}
+          </div>
+          <div className="text-xs text-muted-foreground mt-0.5">
+            {(breakdown?.cancelled ?? 0)} cancelled · {(breakdown?.deleted ?? 0)} deleted · {(breakdown?.expired ?? 0)} expired
+          </div>
+        </Card>
+      </div>
+
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
             <div>
               <CardTitle className="flex items-center gap-2 text-lg">
                 <Shield className="h-5 w-5 text-indigo-500" /> All Domains (Admin)
               </CardTitle>
-              <CardDescription>{domains.length} domains across all users</CardDescription>
+              <CardDescription>
+                Real domain records from the database
+                {breakdown ? ` — ${breakdown.total} total` : ''}
+              </CardDescription>
             </div>
             <div className="flex gap-2">
-              <Input placeholder="Search domains…" value={search} onChange={(e) => setSearch(e.target.value)} className="w-48" />
-              <Button variant="outline" size="sm" onClick={load}><RefreshCw className="h-4 w-4" /></Button>
+              <Input
+                placeholder="Search domains…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-48"
+              />
+              <Button variant="outline" size="sm" onClick={load} disabled={loading}>
+                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              </Button>
             </div>
+          </div>
+
+          {/* Status filter pills */}
+          <div className="flex flex-wrap gap-1.5 mt-2">
+            {statusFilters.map((f) => (
+              <button
+                key={f.id}
+                onClick={() => setStatusFilter(f.id)}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors border ${
+                  statusFilter === f.id
+                    ? 'bg-primary text-primary-foreground border-primary'
+                    : 'bg-background text-muted-foreground border-border hover:bg-muted'
+                }`}
+              >
+                {f.label} <span className="opacity-70">({f.count})</span>
+              </button>
+            ))}
           </div>
         </CardHeader>
         <CardContent>
           {loading ? (
-            <div className="space-y-2">{[1, 2, 3].map((i) => <Skeleton key={i} className="h-12" />)}</div>
+            <div className="space-y-2">{[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-12" />)}</div>
+          ) : domains.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground text-sm">
+              <Globe className="h-8 w-8 mx-auto mb-2 opacity-40" />
+              No domains match the current filter.
+            </div>
           ) : (
             <div className="rounded-md border max-h-[60vh] overflow-y-auto">
               <Table>
-                <TableHeader className="sticky top-0 bg-background">
+                <TableHeader className="sticky top-0 bg-background z-10">
                   <TableRow>
                     <TableHead>Domain</TableHead>
                     <TableHead>Owner</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead>Expires</TableHead>
-                    <TableHead>Actions</TableHead>
+                    <TableHead>Hosting</TableHead>
+                    <TableHead>Registrar</TableHead>
+                    <TableHead className="text-right">Expires</TableHead>
+                    <TableHead className="text-right">DNS</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {domains.map((d) => (
-                    <TableRow key={d.id}>
-                      <TableCell>
-                        <button className="font-medium hover:underline flex items-center gap-1" onClick={() => onSelect(d.id)}>
-                          <Globe className="h-3 w-3 text-indigo-500" />
-                          {d.name}
-                          {d.premium && <Sparkles className="h-3 w-3 text-amber-500" />}
-                        </button>
-                      </TableCell>
-                      <TableCell className="text-sm">{d.owner?.name || '—'}<div className="text-xs text-muted-foreground">{d.owner?.email}</div></TableCell>
-                      <TableCell><Badge className={statusColor(d.status)} variant="outline">{d.status}</Badge></TableCell>
-                      <TableCell className="text-sm">{d.expiresAt ? new Date(d.expiresAt).toLocaleDateString() : '—'}</TableCell>
-                      <TableCell>
-                        <div className="flex gap-1">
-                          <Button size="sm" variant="ghost" onClick={() => onSelect(d.id)}><ExternalLink className="h-3 w-3" /></Button>
-                          {d.status !== 'suspended' && (
-                            <Button size="sm" variant="ghost" onClick={() => setSuspendId(d.id)}><Power className="h-3 w-3 text-amber-500" /></Button>
+                  {domains.map((d) => {
+                    const exp = formatExpiry(d.expiresAt)
+                    return (
+                      <TableRow key={d.id} className={d.status === 'deleted' || d.status === 'cancelled' ? 'opacity-60' : ''}>
+                        <TableCell>
+                          <button
+                            className="font-medium hover:underline flex items-center gap-1.5 text-left"
+                            onClick={() => onSelect(d.id)}
+                          >
+                            <Globe className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
+                            <span className="break-all">{d.name}</span>
+                            {d.premium && (
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Sparkles className="h-3 w-3 text-amber-500 shrink-0" />
+                                  </TooltipTrigger>
+                                  <TooltipContent>Premium domain</TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            )}
+                          </button>
+                          <div className="text-xs text-muted-foreground mt-0.5 ml-5">
+                            {d.nameservers.length > 0 ? (
+                              <span className="font-mono">{d.nameservers[0]}{d.nameservers.length > 1 ? ` +${d.nameservers.length - 1}` : ''}</span>
+                            ) : (
+                              <span>no nameservers</span>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-sm align-top">
+                          <div className="font-medium">{d.owner?.name || '—'}</div>
+                          <div className="text-xs text-muted-foreground">{d.owner?.email}</div>
+                        </TableCell>
+                        <TableCell className="align-top">{statusBadge(d.status)}</TableCell>
+                        <TableCell className="align-top">
+                          <div className="flex flex-col gap-1">
+                            {d.emailHosted && (
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 border-amber-500/30 w-fit" variant="outline">
+                                      <Mail className="h-3 w-3 mr-1" /> Email
+                                    </Badge>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Email hosting active on this domain</TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            )}
+                            {d.project && (
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Badge
+                                      className={`w-fit border ${
+                                        d.project.status === 'running'
+                                          ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300 border-indigo-500/30'
+                                          : 'bg-gray-100 text-gray-700 dark:bg-gray-900/40 dark:text-gray-300 border-gray-500/30'
+                                      }`}
+                                      variant="outline"
+                                    >
+                                      <Server className="h-3 w-3 mr-1" /> {d.project.name}
+                                    </Badge>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    Linked project: {d.project.name} ({d.project.status})
+                                    <br />
+                                    Subdomain: {d.project.subdomain}
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            )}
+                            {!d.emailHosted && !d.project && (
+                              <span className="text-xs text-muted-foreground">—</span>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-sm align-top">
+                          <span className="font-mono text-xs">{d.registrar}</span>
+                          {d.locked && (
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Lock className="h-3 w-3 text-muted-foreground inline-block ml-1" />
+                                </TooltipTrigger>
+                                <TooltipContent>Registrar lock enabled</TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
                           )}
-                          <Button size="sm" variant="ghost" onClick={() => remove(d.id)}><Trash2 className="h-3 w-3 text-red-500" /></Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                        </TableCell>
+                        <TableCell className="text-right align-top">
+                          <div className="text-sm">{exp.text}</div>
+                          {exp.days !== null && (
+                            <div className={`text-xs ${exp.days < 30 ? 'text-red-500' : exp.days < 60 ? 'text-amber-500' : 'text-muted-foreground'}`}>
+                              {exp.days > 0 ? `in ${exp.days} days` : `${Math.abs(exp.days)} days ago`}
+                            </div>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right align-top">
+                          <span className="font-mono text-sm">{d.dnsRecordsCount}</span>
+                          {d.logsCount > 0 && (
+                            <div className="text-xs text-muted-foreground">{d.logsCount} logs</div>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right align-top">
+                          <div className="flex gap-1 justify-end">
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button size="sm" variant="ghost" onClick={() => onSelect(d.id)}>
+                                    <ExternalLink className="h-3 w-3" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>View details</TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                            {d.status !== 'suspended' && d.status !== 'deleted' && (
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button size="sm" variant="ghost" onClick={() => setSuspendId(d.id)}>
+                                      <Power className="h-3 w-3 text-amber-500" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Suspend domain</TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            )}
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button size="sm" variant="ghost" onClick={() => setDeleteId(d.id)}>
+                                    <Trash2 className="h-3 w-3 text-red-500" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Delete record</TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
                 </TableBody>
               </Table>
             </div>
@@ -2101,6 +2385,7 @@ function AdminTab({ onSelect }: { onSelect: (id: string) => void }) {
         </CardContent>
       </Card>
 
+      {/* Suspend dialog */}
       <AlertDialog open={!!suspendId} onOpenChange={(o) => !o && setSuspendId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -2112,6 +2397,37 @@ function AdminTab({ onSelect }: { onSelect: (id: string) => void }) {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={suspend} className="bg-amber-600 hover:bg-amber-700">Suspend Domain</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete dialog */}
+      <AlertDialog open={!!deleteId} onOpenChange={(o) => !o && setDeleteId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this domain record?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 text-sm text-muted-foreground">
+                <p>
+                  This permanently removes the domain record from the database.
+                  The domain itself remains registered at the registrar until it
+                  expires. This action cannot be undone.
+                </p>
+                <p className="text-xs">
+                  All associated DNS records, logs, and project links will be
+                  orphaned. Existing invoices are preserved for audit.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={remove}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              Delete Permanently
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

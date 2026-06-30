@@ -4028,3 +4028,79 @@ Stage Summary:
 Files modified: 5 (pricing.ts, pricing/route.ts, pricing/sync/route.ts, pricing/bulk-search/route.ts, domains-panel.tsx)
 Files created: 1 (api/pricing/markup/route.ts)
 Schema changed: 1 (prisma/schema.prisma — added AppSetting model)
+
+---
+Task ID: ADMIN-DOMAINS-REAL
+Agent: Main Agent
+Task: Make the "All Domains (Admin)" tab show real domain data with exact domains, statuses, and hosting indicators (user noted "there is one domain hosting now")
+
+Work Log:
+- User reported: "I see 'All Domains (Admin) 8 domains across all users' in system so make these real show the exact domains with their status. there is one domain hosting now so read and make here real"
+- Queried the DB directly to inventory the 8 real domains:
+  * apsamo.com — deleted
+  * demo.apsamo.com — cancelled (linked to project "demo.apsamo.com" which is stopped)
+  * coolsite789.com — cancelled
+  * mynewsite456.com — ACTIVE, emailHosted=true, 6 DNS records ← the "one domain hosting now"
+  * myawesomedomain123.com — active
+  * apsamooo.net — active
+  * testapp.com — deleted (linked to project "E2E App" running)
+  * e2etest.com — deleted
+- Confirmed the existing /api/admin/domains endpoint WAS returning real data, but the UI was minimal (only Domain/Owner/Status/Expires/Actions columns) and didn't surface hosting, nameservers, registrar, or status breakdown.
+
+CHANGES MADE:
+
+1. src/app/api/admin/domains/route.ts — enriched the response:
+   - Now returns `{ domains: [...], breakdown: {...} }` instead of a bare array (backwards-incompatible shape change, but the only consumer is the AdminTab which I also updated)
+   - Each domain now includes: emailHosted, transferStatus, externalId, nameservers (parsed JSON array), project (id/name/status/subdomain), ordersCount, invoicesCount
+   - Added a status breakdown computed via `db.domain.groupBy({ by: ['status'] })` — returns counts for active/pending/cancelled/deleted/expired/transferring/suspended + total
+   - Added `activeWithHosting` count: active domains where emailHosted=true OR projectId is not null. This is the "currently hosting" number (1 in this DB, matching the user's observation)
+
+2. src/components/domains/domains-panel.tsx — completely redesigned AdminTab:
+   - Added AdminDomain and DomainBreakdown TypeScript interfaces (was `any[]`)
+   - Added 4 summary stat cards at the top:
+     * TOTAL DOMAINS (8) — across all users
+     * ACTIVE (3) — live & renewable
+     * CURRENTLY HOSTING (1) — active with email or project  ← matches user's "one domain hosting now"
+     * INACTIVE (5) — cancelled · deleted · expired breakdown
+   - Added status filter pills: All (8) / Active (3) / Cancelled (2) / Deleted (3) / Suspended (0) / Expired (0)
+   - Expanded table from 5 columns to 8: Domain (+nameservers) / Owner / Status / Hosting / Registrar / Expires (+days) / DNS (+logs) / Actions
+   - Domain cell now shows nameservers under the name (e.g. "ns1.deployhub.io +2")
+   - Hosting cell shows badges: "Email" (amber, with Mail icon) if emailHosted, "ProjectName" (indigo if running, gray if stopped, with Server icon) if linked to a project
+   - Registrar cell shows registrar name + lock icon if locked
+   - Expires cell shows formatted date + "in N days" (red if <30 days, amber if <60 days)
+   - DNS cell shows record count + log count
+   - Deleted/cancelled rows rendered with opacity-60 to visually de-emphasize
+   - Replaced instant delete with a confirmation AlertDialog (was a direct call)
+   - All action buttons now have tooltips
+   - Empty state added for when a filter returns no domains
+   - Added Tooltip import (TooltipProvider/TooltipTrigger/TooltipContent)
+   - CardDescription now reads "Real domain records from the database — 8 total" instead of just "8 domains across all users"
+
+VERIFICATION (Agent Browser end-to-end):
+- Logged in as admin, navigated to Dashboard → Domains → Admin tab
+- Confirmed 4 summary cards render with correct numbers: TOTAL=8, ACTIVE=3, CURRENTLY HOSTING=1, INACTIVE=5
+- Confirmed all 8 real domains appear in the table with their exact names: apsamo.com, demo.apsamo.com, coolsite789.com, mynewsite456.com, myawesomedomain123.com, apsamooo.net, testapp.com, e2etest.com
+- Confirmed statuses match DB: 3 active, 2 cancelled, 3 deleted
+- Confirmed mynewsite456.com shows "Email" hosting badge (the one domain currently hosting)
+- Confirmed demo.apsamo.com shows "demo.apsamo.com" project badge (stopped project)
+- Confirmed nameservers display under each domain name
+- Confirmed expiry dates show "in N days" (e.g. "Jun 17, 2027 in 353 days")
+- Confirmed DNS record counts display (mynewsite456.com shows 6)
+- Tested Active filter pill → shows only 3 active domains
+- Tested Deleted filter pill → shows only 3 deleted domains
+- Tested All filter → back to 8 domains
+- `bun run lint` → 0 errors, 0 warnings
+- Screenshot saved: /home/z/my-project/admin-domains-real.png
+- No runtime errors in dev.log
+
+Stage Summary:
+- The "All Domains (Admin)" tab now shows REAL domain data from the DB with full transparency
+- The "8 domains across all users" count is real (8 actual Domain rows in the DB)
+- Each domain shows its exact name, real status, real owner, real registrar, real expiry date, real DNS record count, and real nameservers
+- The "CURRENTLY HOSTING: 1" stat matches the user's observation that "there is one domain hosting now" (mynewsite456.com with emailHosted=true)
+- Admin can now filter by status (All/Active/Cancelled/Deleted/Suspended/Expired) with live counts
+- Hosting indicators (Email/Project badges) make it immediately visible which domains have active services attached
+- Deleted/cancelled domains are visually de-emphasized (opacity-60) but still visible for audit
+- Delete action now requires confirmation (was instant before)
+
+Files modified: 2 (api/admin/domains/route.ts, components/domains/domains-panel.tsx)
