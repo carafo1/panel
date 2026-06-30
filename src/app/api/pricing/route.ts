@@ -4,7 +4,12 @@
  * Optional query: ?tld=.com to fetch a single TLD.
  */
 import { ok, apiError } from '@/lib/api-response'
-import { getAllPrices, getPriceForTld, seedPricing, DEFAULT_MARKUP_USD } from '@/lib/pricing'
+import {
+  getAllPrices,
+  getPriceForTld,
+  seedPricing,
+  getGlobalMarkup,
+} from '@/lib/pricing'
 
 export async function GET(request: Request) {
   try {
@@ -24,11 +29,12 @@ export async function GET(request: Request) {
       prices = await getAllPrices()
     }
 
+    const markup = await getGlobalMarkup()
     return ok(
       {
-        markup: DEFAULT_MARKUP_USD,
+        markup,
         currency: 'USD',
-        formula: 'Selling Price = Wholesale Price + $6.50 USD',
+        formula: `Selling Price = Wholesale Price + $${markup.toFixed(2)} USD`,
         count: prices.length,
         tlds: prices,
       },

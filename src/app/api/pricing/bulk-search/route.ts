@@ -5,7 +5,7 @@
  */
 import { ok, apiError } from '@/lib/api-response'
 import { dynadotService } from '@/lib/dynadot-service'
-import { getAllPrices, tldFromDomain } from '@/lib/pricing'
+import { getAllPrices, tldFromDomain, getGlobalMarkup } from '@/lib/pricing'
 
 export async function POST(request: Request) {
   try {
@@ -28,6 +28,7 @@ export async function POST(request: Request) {
 
     const results = await dynadotService.bulkSearch(queryDomains)
     const allPrices = await getAllPrices()
+    const globalMarkup = await getGlobalMarkup()
 
     const priced = results.map((r) => {
       const price = allPrices.find((p) => p.tld === tldFromDomain(r.domain))
@@ -41,7 +42,7 @@ export async function POST(request: Request) {
         renewalPrice: r.available ? price?.renewal ?? 19.99 : null,
         transferPrice: r.available ? price?.transfer ?? 19.99 : null,
         wholesale: price?.wholesale ?? null,
-        markup: price?.markup ?? 6.5,
+        markup: price?.markup ?? globalMarkup,
         currency: 'USD',
       }
     })
@@ -52,6 +53,7 @@ export async function POST(request: Request) {
         total: priced.length,
         available,
         unavailable: priced.length - available,
+        markup: globalMarkup,
         results: priced,
       },
       `Bulk search: ${available} of ${priced.length} domains available`

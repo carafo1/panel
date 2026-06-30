@@ -3946,3 +3946,85 @@ Stage Summary:
 
 Files modified: 15
 Files created: 1 (scripts/reseed-domain-content.ts)
+
+---
+Task ID: DOMAIN-MARKUP-EDITOR
+Agent: Main Agent
+Task: Make the $6.50 domain markup editable via the UI so an admin can change it
+
+Work Log:
+- User requested: "I want to change $6.50 markup so add editing to control it"
+- Found the markup was hardcoded as `DEFAULT_MARKUP_USD = 6.5` in src/lib/pricing.ts and referenced as a literal in 14 places (UI badge, API responses, docs)
+- Discovered there was no global settings table in the Prisma schema — only per-TLD markup on DomainPrice rows
+
+CHANGES MADE:
+
+1. prisma/schema.prisma — added new `AppSetting` model (key/value table for global app settings):
+   ```prisma
+   model AppSetting {
+     id        String   @id @default(cuid())
+     key       String   @unique
+     value     String
+     updatedAt DateTime @updatedAt
+     updatedBy String?
+   }
+   ```
+   Ran `bun run db:push` — table created, Prisma Client regenerated.
+
+2. src/lib/pricing.ts — added global markup functions:
+   - `MARKUP_SETTING_KEY = 'domain.markupUsd'` — the AppSetting key
+   - `getGlobalMarkup()` — reads the markup from AppSetting, falls back to DEFAULT_MARKUP_USD (6.5)
+   - `setGlobalMarkup(markup, updatedById)` — validates (non-negative, < $1000), upserts the AppSetting, then recalculates EVERY DomainPrice row's registration/renewal/transfer using the new markup. Returns `{ markup, updated }`.
+   - `seedPricing()` now calls `getGlobalMarkup()` instead of using DEFAULT_MARKUP_USD directly
+   - `syncPrices()` now calls `getGlobalMarkup()` and applies it to every upsert
+   - Fixed a pre-existing bug in `updateMarkup()` (per-TLD override) that was double-applying the markup on renewal/transfer prices — now correctly recovers wholesale from selling price first
+
+3. src/app/api/pricing/markup/route.ts — NEW endpoint:
+   - GET  /api/pricing/markup — returns `{ markup, defaultMarkup, currency, formula }` (public)
+   - POST /api/pricing/markup — admin-only. Body: `{ "markup": 8.50 }`. Validates input, calls setGlobalMarkup(), writes a DomainLog audit entry, returns `{ previousMarkup, markup, updatedTlds, formula }`
+
+4. src/app/api/pricing/route.ts — GET now returns the dynamic global markup (fetched via getGlobalMarkup) instead of the hardcoded DEFAULT_MARKUP_USD. Formula string is now dynamic: `Selling Price = Wholesale Price + $X.XX USD`
+
+5. src/app/api/pricing/sync/route.ts — response now includes the actual global markup (was hardcoded `6.5`)
+
+6. src/app/api/pricing/bulk-search/route.ts — fallback markup now uses getGlobalMarkup() instead of literal `6.5`; response also includes the top-level `markup` field
+
+7. src/components/domains/domains-panel.tsx — UI changes:
+   - Main DomainsPanel: fetches `/pricing/markup` on mount, badge now shows dynamic `$X.XX markup applied` (was hardcoded `$6.50 markup applied`). Badge has a tooltip "Editable in the Pricing tab"
+   - PricingTab: accepts new props `globalMarkup` and `onMarkupChanged`
+   - Added a new "Global Markup" admin card (amber-themed) at the top of the Pricing tab containing:
+     * Number input ($ prefix, step=0.01, min=0, max=1000) pre-filled with current markup
+     * "Save & Recalculate" button — disabled until the input differs from current
+     * 3 stat cards: Current Markup, Formula, Affected TLDs count
+     * Live example: "a .com domain with a wholesale of $8.49 sells for $X.XX at the current markup"
+   - On Save click: opens an AlertDialog confirmation showing old→new markup, affected TLD count, and an example .com price change (e.g. "$14.99 → $16.99")
+   - On confirm: POSTs to /pricing/markup, shows success toast, reloads the pricing table, updates the header badge via callback
+   - Enter key in the input also triggers the confirmation dialog
+
+VERIFICATION (Agent Browser end-to-end):
+- Logged in as admin (admin@deployhub.io), navigated to Dashboard → Domains → Pricing tab
+- Confirmed the "Global Markup" editor card renders with input showing "6.5"
+- Confirmed the header badge shows "$6.50 markup applied" (dynamic)
+- Changed input to 8.50 → "Save & Recalculate" button became enabled
+- Clicked Save → confirmation dialog appeared: "change from $6.50 to $8.50 ... 110 entries ... Example .com price: $14.99 → $16.99"
+- Clicked "Confirm & Save" → toast "Markup updated to $8.50 — 110 TLD prices recalculated"
+- Header badge updated to "$8.50 markup applied"
+- .com row in pricing table: wholesale $10.88, markup +$8.50, register $19.38 ✓ (10.88 + 8.50 = 19.38)
+- Formula subtitle updated: "Selling Price = Wholesale Price + $8.50 USD"
+- Restored markup back to $6.50 — all values reverted correctly
+- Screenshot saved: /home/z/my-project/markup-editor-verified.png
+- `bun run lint` → 0 errors, 0 warnings
+- No runtime errors in dev.log
+
+Stage Summary:
+- The $6.50 markup is now FULLY EDITABLE from the dashboard (Domains → Pricing tab → Global Markup card)
+- Changes are persisted in the new AppSetting table (key: `domain.markupUsd`) and survive server restarts
+- Every TLD's selling price is recalculated instantly when the markup changes (110 TLDs in ~1s)
+- The header badge, formula strings, API responses, and pricing table all reflect the current markup dynamically
+- An audit log entry is written to DomainLog for every markup change (action: `pricing_markup_update`)
+- Existing invoices and past orders are NOT affected (only future pricing changes)
+- DEFAULT_MARKUP_USD (6.5) is now only used as the initial/fallback value when no AppSetting row exists yet
+
+Files modified: 5 (pricing.ts, pricing/route.ts, pricing/sync/route.ts, pricing/bulk-search/route.ts, domains-panel.tsx)
+Files created: 1 (api/pricing/markup/route.ts)
+Schema changed: 1 (prisma/schema.prisma — added AppSetting model)

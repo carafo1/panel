@@ -1,6 +1,7 @@
 /**
  * POST /api/pricing/sync
- * Admin-only. Re-syncs wholesale prices from Dynadot and reapplies the $6.50 markup.
+ * Admin-only. Re-syncs wholesale prices from Dynadot and reapplies the
+ * current global markup (editable via /api/pricing/markup).
  *
  * REAL MODE (DYNADOT_API_KEY set): performs live bulk searches against Dynadot
  * across all 100+ TLDs and stores the real wholesale prices.
@@ -10,7 +11,7 @@
 import { authenticateRequest } from '@/lib/auth'
 import { db } from '@/lib/db'
 import { ok, apiError } from '@/lib/api-response'
-import { syncPrices } from '@/lib/pricing'
+import { syncPrices, getGlobalMarkup } from '@/lib/pricing'
 
 export async function POST(request: Request) {
   const user = await authenticateRequest(request)
@@ -19,6 +20,7 @@ export async function POST(request: Request) {
 
   try {
     const result = await syncPrices(user.userId)
+    const markup = await getGlobalMarkup()
 
     await db.domainLog.create({
       data: {
@@ -31,6 +33,7 @@ export async function POST(request: Request) {
           demo: result.demo,
           fetched: result.fetched,
           fallback: result.fallback,
+          markup,
         }),
       },
     })
@@ -41,7 +44,7 @@ export async function POST(request: Request) {
         demoMode: result.demo,
         fetchedLive: result.fetched,
         fallback: result.fallback,
-        markup: 6.5,
+        markup,
         message: result.demo
           ? 'Prices re-seeded from defaults (demo mode - set DYNADOT_API_KEY for live sync)'
           : `Prices synced live from the registrar (${result.fetched} live, ${result.fallback} default fallback)`,

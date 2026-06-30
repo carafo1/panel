@@ -1,19 +1,95 @@
 /**
  * Pricing service for the domain reseller module.
  *
- * Selling Price = Dynadot Wholesale Price + 6.50 USD
+ * Selling Price = Wholesale Price + Global Markup (USD)
+ *
+ * The global markup is stored in the AppSetting table under the key
+ * `domain.markupUsd` and can be changed at runtime by an admin via the
+ * /api/pricing/markup endpoint (or the Pricing tab in the dashboard).
+ * DEFAULT_MARKUP_USD is only used as the initial/fallback value.
  *
  * Maintains a pricing table for every supported TLD with:
  *  - Wholesale price
- *  - Markup amount (default $6.50)
+ *  - Markup amount (per-TLD, kept in sync with the global markup)
  *  - Final selling price (registration / renewal / transfer)
  *  - Currency
  *  - Future price synchronization (via Dynadot API)
  */
 import { db } from './db'
 
-// The automatic markup applied to every supported TLD (USD).
+// The default markup applied to every supported TLD (USD).
+// This is only used when no global markup has been set in the AppSetting
+// table yet, or as a safety fallback.
 export const DEFAULT_MARKUP_USD = 6.5
+
+// The AppSetting key used to store the global domain markup.
+export const MARKUP_SETTING_KEY = 'domain.markupUsd'
+
+/**
+ * Get the current global markup (USD) from the AppSetting table.
+ * Falls back to DEFAULT_MARKUP_USD if not set or invalid.
+ */
+export async function getGlobalMarkup(): Promise<number> {
+  try {
+    const row = await db.appSetting.findUnique({ where: { key: MARKUP_SETTING_KEY } })
+    if (!row) return DEFAULT_MARKUP_USD
+    const parsed = parseFloat(row.value)
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_MARKUP_USD
+  } catch {
+    return DEFAULT_MARKUP_USD
+  }
+}
+
+/**
+ * Set the global markup (USD) in the AppSetting table AND recalculate
+ * every DomainPrice row's selling prices using the new markup.
+ *
+ * Returns the new markup value and the number of TLD rows updated.
+ */
+export async function setGlobalMarkup(
+  markup: number,
+  updatedById?: string
+): Promise<{ markup: number; updated: number }> {
+  // Validate: must be a non-negative finite number, rounded to 2 decimals.
+  if (!Number.isFinite(markup) || markup < 0) {
+    throw new Error('Markup must be a non-negative number')
+  }
+  const rounded = Math.round(markup * 100) / 100
+
+  // 1. Persist the global setting.
+  await db.appSetting.upsert({
+    where: { key: MARKUP_SETTING_KEY },
+    update: {
+      value: String(rounded),
+      ...(updatedById ? { updatedBy: updatedById } : {}),
+    },
+    create: {
+      key: MARKUP_SETTING_KEY,
+      value: String(rounded),
+      ...(updatedById ? { updatedBy: updatedById } : {}),
+    },
+  })
+
+  // 2. Recalculate every DomainPrice row using the new markup.
+  const allRows = await db.domainPrice.findMany()
+  let updated = 0
+  for (const row of allRows) {
+    await db.domainPrice.update({
+      where: { id: row.id },
+      data: {
+        markup: rounded,
+        registration: applyMarkup(row.wholesale, rounded),
+        renewal: applyMarkup(row.renewal - row.markup, rounded), // wholesale renewal = selling - old markup
+        transfer: applyMarkup(row.transfer - row.markup, rounded), // wholesale transfer = selling - old markup
+        ...(updatedById ? { updatedById } : {}),
+        updatedAt: new Date(),
+      },
+    })
+    updated++
+  }
+
+  return { markup: rounded, updated }
+}
 
 // Base wholesale prices (USD) per TLD. These represent Dynadot's wholesale
 // registration / renewal / transfer pricing. In production these are fetched
@@ -182,27 +258,29 @@ export function tldFromDomain(domain: string): string {
 
 /**
  * Seed the pricing table from the default wholesale prices.
- * Idempotent: upserts each TLD.
+ * Idempotent: upserts each TLD. Uses the current global markup.
  */
 export async function seedPricing(updatedById?: string): Promise<number> {
+  const markup = await getGlobalMarkup()
   let count = 0
   for (const [tld, prices] of Object.entries(TLD_WHOLESALE_PRICES)) {
     await db.domainPrice.upsert({
       where: { tld },
       update: {
         wholesale: prices.registration,
-        registration: applyMarkup(prices.registration),
-        renewal: applyMarkup(prices.renewal),
-        transfer: applyMarkup(prices.transfer),
+        markup,
+        registration: applyMarkup(prices.registration, markup),
+        renewal: applyMarkup(prices.renewal, markup),
+        transfer: applyMarkup(prices.transfer, markup),
         lastSyncedAt: new Date(),
       },
       create: {
         tld,
         wholesale: prices.registration,
-        markup: DEFAULT_MARKUP_USD,
-        registration: applyMarkup(prices.registration),
-        renewal: applyMarkup(prices.renewal),
-        transfer: applyMarkup(prices.transfer),
+        markup,
+        registration: applyMarkup(prices.registration, markup),
+        renewal: applyMarkup(prices.renewal, markup),
+        transfer: applyMarkup(prices.transfer, markup),
         currency: 'USD',
         active: true,
         lastSyncedAt: new Date(),
@@ -273,6 +351,8 @@ export async function getPriceForDomain(domain: string): Promise<PricedTld | nul
  *   prices via `show_price=1`, which we store as the wholesale price. The
  *   $6.50 markup is then applied to compute the selling price. TLDs whose
  *   price can't be fetched fall back to their default wholesale price.
+ *   (The actual markup used is the current global markup from AppSetting,
+ *   which defaults to $6.50 but can be changed by an admin.)
  *
  * DEMO MODE (no API key):
  *   Re-seeds from the TLD_WHOLESALE_PRICES defaults.
@@ -298,6 +378,7 @@ export async function syncPrices(
   }
 
   // REAL MODE — fetch live wholesale prices from Dynadot.
+  const markup = await getGlobalMarkup()
   const allTlds = Object.keys(TLD_WHOLESALE_PRICES)
   const sampleBase = 'deployhubpricecheck99999' // guaranteed-available sample domain
   const CHUNK_SIZE = 10 // Dynadot bulk search limit per request
@@ -351,19 +432,20 @@ export async function syncPrices(
       where: { tld },
       update: {
         wholesale,
-        registration: applyMarkup(wholesale),
-        renewal: applyMarkup(renewalWholesale),
-        transfer: applyMarkup(transferWholesale),
+        markup,
+        registration: applyMarkup(wholesale, markup),
+        renewal: applyMarkup(renewalWholesale, markup),
+        transfer: applyMarkup(transferWholesale, markup),
         lastSyncedAt: new Date(),
         ...(updatedById ? { updatedById } : {}),
       },
       create: {
         tld,
         wholesale,
-        markup: DEFAULT_MARKUP_USD,
-        registration: applyMarkup(wholesale),
-        renewal: applyMarkup(renewalWholesale),
-        transfer: applyMarkup(transferWholesale),
+        markup,
+        registration: applyMarkup(wholesale, markup),
+        renewal: applyMarkup(renewalWholesale, markup),
+        transfer: applyMarkup(transferWholesale, markup),
         currency: 'USD',
         active: true,
         lastSyncedAt: new Date(),
@@ -377,7 +459,8 @@ export async function syncPrices(
 }
 
 /**
- * Update a single TLD's markup (admin override).
+ * Update a single TLD's markup (admin per-TLD override).
+ * Recalculates selling prices from the stored wholesale price + new markup.
  */
 export async function updateMarkup(
   tld: string,
@@ -387,13 +470,16 @@ export async function updateMarkup(
   const normalized = tld.startsWith('.') ? tld : '.' + tld
   const existing = await db.domainPrice.findUnique({ where: { tld: normalized } })
   if (!existing) return null
+  // Recover wholesale renewal/transfer from stored selling prices.
+  const renewalWholesale = existing.renewal - existing.markup
+  const transferWholesale = existing.transfer - existing.markup
   const updated = await db.domainPrice.update({
     where: { tld: normalized },
     data: {
       markup,
       registration: applyMarkup(existing.wholesale, markup),
-      renewal: applyMarkup(existing.renewal, markup),
-      transfer: applyMarkup(existing.transfer, markup),
+      renewal: applyMarkup(renewalWholesale, markup),
+      transfer: applyMarkup(transferWholesale, markup),
       updatedById,
       updatedAt: new Date(),
     },

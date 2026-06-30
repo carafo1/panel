@@ -899,3 +899,14 @@ model SiteContent {
 
   @@index([key])
 }
+
+// Global app-wide settings (key/value pairs).
+// Used for things like the global domain markup, default currency, feature
+// flags, etc. Values are stored as strings and parsed by the caller.
+model AppSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique  // e.g. "domain.markupUsd", "domain.currency"
+  value     String             // stored as string, parsed by caller
+  updatedAt DateTime @updatedAt
+  updatedBy String?
+}
