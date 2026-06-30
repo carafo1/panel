@@ -4140,3 +4140,49 @@ Stage Summary:
 - The 8 fake demo domains have been purged from the DB.
 - The Dynadot account currently has 0 registered domains (verified via real API). The admin list now truthfully shows 0 domains with a clear "No domains in your Dynadot account" message and a live sync banner confirming the real API was contacted.
 - Note: user mentioned "there is one domain hosting now" — the Dynadot `list_domain` API returns MainDomains:[] (zero). If the user registered a domain through Dynadot's own dashboard under a different account, it will not appear here. The list now shows exactly what the configured API key's account contains.
+
+---
+Task ID: real-domains-2
+Agent: Main Agent
+Task: User: "there is a domain that in process of transfer in, can't you read that" — the list_domain API only shows completed domains; pending transfer-in domains need to be read via order_list + get_transfer_status.
+
+Work Log:
+- Investigated: Dynadot `list_domain` returns MainDomains:[] (0 completed domains). But the account has $19 total spending, so something was paid for.
+- Searched Dynadot API3 docs (https://www.dynadot.com/domain/api-commands) via web-reader. Found two relevant commands:
+  * `order_list` (with search_by=date_range, start_date, end_date) — lists all orders
+  * `get_transfer_status` (with domain + transfer_type=in|away) — returns precise TransferStatus + FailedReason
+- Tested raw API: `order_list` over last 90 days returned 2 orders:
+  * OrderId 25086081 — "Domain Transfer" for apsamo.com, Status "Waiting", $10.00 via Account Balance, submitted 2026/06/28
+  * OrderId 24834440 — "Prepay" $19.00 credit (Credit Card)
+- Tested `get_transfer_status` for apsamo.com with transfer_type=in → {TransferStatus:"Waiting", FailedReason:"Transfer Pending"}; transfer_type=away → error (confirms it's a transfer IN).
+- Added `listTransferOrders(days=180)` function to /home/z/my-project/src/lib/dynadot.ts:
+  * Calls `order_list` with search_by=date_range over the last `days` days.
+  * Filters ItemList for items where ItemType/ItemTypeName includes "transfer".
+  * For each transfer, enriches with precise status via `get_transfer_status` (tries transfer_type=in first, falls back to away).
+  * Returns TransferOrder[] with orderId, domain, status, submittedDate, cost, paymentMethod, orderStatus, transferType, failedReason.
+  * REAL API calls only — no simulation.
+- Rewrote /home/z/my-project/src/app/api/admin/domains/route.ts to also fetch pending transfers:
+  * After syncing registered domains via list_domain, calls listTransferOrders().
+  * Upserts each transfer-in domain into the DB with status="transferring" and transferStatus ("pending"/"failed"/"completed").
+  * Returns a `transferDetail` object on each domain when it has a live transfer (orderId, status, failedReason, transferType, submittedDate, cost, paymentMethod).
+  * sync object now includes `transfers` count.
+  * Message: "Retrieved N domains (X registered, Y transferring, Z purged)".
+- Updated AdminTab UI in /home/z/my-project/src/components/domains/domains-panel.tsx:
+  * Added TransferDetail interface + transferDetail field on AdminDomain.
+  * Added `transfers` to SyncInfo interface.
+  * Added "Transferring" status filter pill.
+  * Changed Active card color from indigo to emerald (active = live/green is more intuitive).
+  * Added a dedicated purple "Transferring" stat card (5-column grid now: Total / Active / Transferring / Hosting / Inactive).
+  * Updated sync banner to show "0 registered · 1 transferring · N purged".
+  * Updated statusBadge: transferring = purple (was indigo), active = emerald (was indigo).
+  * Domain row: when status=transferring + transferDetail present, shows purple globe icon, "Transfer In" badge (with tooltip showing orderId + submittedDate), and a transfer detail block: "Waiting · Transfer Pending" + "Order #25086081 · submitted 2026/06/28 · extend 1 year ($10.00)".
+  * Added ArrowLeftRight icon import for the Transfer In badge.
+- Lint: passes clean (eslint . → no errors).
+- Verified end-to-end via HTTP: GET /api/admin/domains → 200, returns 1 domain (apsamo.com, status=transferring, transferStatus=pending, externalId=25086081) with full transferDetail. Response time ~1.8s (real Dynadot round-trip for list_domain + order_list + get_transfer_status).
+- Verified via agent-browser: Admin tab now shows "Live from Dynadot API · 0 registered · 1 transferring", Transferring stat card = 1, "Transferring (1)" filter pill, and the apsamo.com row with "Transfer In" badge, "Waiting" status, "Transfer Pending" detail, Order #25086081, submitted 2026/06/28, cost "extend 1 year ($10.00)". Dashboard sidebar also updated to "Domains 1" (was 0).
+- Dev log clean: GET /api/admin/domains 200 in 1851ms, no errors.
+
+Stage Summary:
+- The admin "All Domains" list now reads BOTH completed domains (list_domain) AND pending transfer-in domains (order_list + get_transfer_status) from the real Dynadot API.
+- The apsamo.com transfer-in is now visible in the admin list with full real-time detail: status "Waiting", reason "Transfer Pending", order #25086081, submitted 2026/06/28, cost "extend 1 year ($10.00)", paid via Account Balance, transfer type "in".
+- When the transfer completes at Dynadot, it will automatically flip to "active" on the next sync (list_domain will pick it up as a MainDomain).

@@ -6,6 +6,7 @@ import { apiFetch, useAuthStore } from '@/store/auth-store'
 import {
   Search, Globe, Plus, Trash2, RefreshCw, Shield, Clock, CheckCircle2,
   XCircle, Tag, Lock, Unlock, Copy, Loader2, AlertTriangle, ArrowLeft,
+  ArrowLeftRight,
   FileText, Database, Server, Mail, KeyRound, Power, Send, Eye, EyeOff,
   ShieldCheck, ShieldOff, Sparkles, Download, ShoppingBag, Wallet,
   TrendingUp, Calendar, ExternalLink, ChevronRight, Zap, BadgeDollarSign,
@@ -1997,6 +1998,16 @@ function PricingTab({ isAdmin, globalMarkup, onMarkupChanged }: PricingTabProps)
 
 // ─── Admin Tab ────────────────────────────────────────────────────────────────
 
+interface TransferDetail {
+  orderId: string
+  status: string
+  failedReason?: string
+  transferType: 'in' | 'away'
+  submittedDate?: string
+  cost?: string
+  paymentMethod?: string
+}
+
 interface AdminDomain {
   id: string
   name: string
@@ -2020,6 +2031,7 @@ interface AdminDomain {
   ordersCount: number
   invoicesCount: number
   createdAt: string
+  transferDetail: TransferDetail | null
 }
 
 interface DomainBreakdown {
@@ -2037,11 +2049,12 @@ interface DomainBreakdown {
 interface SyncInfo {
   synced: number
   purged: number
+  transfers: number
   error?: string
   source: string
 }
 
-type StatusFilter = 'all' | 'active' | 'cancelled' | 'deleted' | 'suspended' | 'expired'
+type StatusFilter = 'all' | 'active' | 'transferring' | 'cancelled' | 'deleted' | 'suspended' | 'expired'
 
 function AdminTab({ onSelect }: { onSelect: (id: string) => void }) {
   const [domains, setDomains] = useState<AdminDomain[]>([])
@@ -2101,10 +2114,10 @@ function AdminTab({ onSelect }: { onSelect: (id: string) => void }) {
   // Status badge with appropriate colour per status.
   const statusBadge = (status: string) => {
     const map: Record<string, string> = {
-      active: 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border-indigo-500/30',
+      active: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30',
       pending: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30',
       pending_verification: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30',
-      transferring: 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border-indigo-500/30',
+      transferring: 'bg-purple-500/15 text-purple-600 dark:text-purple-400 border-purple-500/30',
       cancelled: 'bg-gray-500/15 text-gray-600 dark:text-gray-400 border-gray-500/30',
       expired: 'bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/30',
       suspended: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30',
@@ -2127,6 +2140,7 @@ function AdminTab({ onSelect }: { onSelect: (id: string) => void }) {
   const statusFilters: { id: StatusFilter; label: string; count: number }[] = [
     { id: 'all', label: 'All', count: breakdown?.total ?? 0 },
     { id: 'active', label: 'Active', count: breakdown?.active ?? 0 },
+    { id: 'transferring', label: 'Transferring', count: breakdown?.transferring ?? 0 },
     { id: 'cancelled', label: 'Cancelled', count: breakdown?.cancelled ?? 0 },
     { id: 'deleted', label: 'Deleted', count: breakdown?.deleted ?? 0 },
     { id: 'suspended', label: 'Suspended', count: breakdown?.suspended ?? 0 },
@@ -2139,7 +2153,7 @@ function AdminTab({ onSelect }: { onSelect: (id: string) => void }) {
     <div className="space-y-4">
       <IntegrationStatusCard />
 
-      {/* Sync status banner — shows the result of the last Dynadot list_domain call */}
+      {/* Sync status banner — shows the result of the last Dynadot API call */}
       {sync && (
         <Card className={`p-3 ${sync.error ? 'border-amber-500/40 bg-amber-50/50 dark:bg-amber-950/20' : 'border-emerald-500/40 bg-emerald-50/50 dark:bg-emerald-950/20'}`}>
           <div className="flex items-center gap-2 text-sm flex-wrap">
@@ -2156,14 +2170,18 @@ function AdminTab({ onSelect }: { onSelect: (id: string) => void }) {
             <span className="text-muted-foreground">
               {sync.error
                 ? sync.error
-                : `${sync.synced} domain${sync.synced === 1 ? '' : 's'} synced${sync.purged > 0 ? ` · ${sync.purged} fake record${sync.purged === 1 ? '' : 's'} purged` : ''}`}
+                : [
+                    `${sync.synced} registered`,
+                    sync.transfers > 0 ? `${sync.transfers} transferring` : null,
+                    sync.purged > 0 ? `${sync.purged} purged` : null,
+                  ].filter(Boolean).join(' · ')}
             </span>
           </div>
         </Card>
       )}
 
       {/* Real stats summary */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         <Card className="p-4">
           <div className="text-xs uppercase text-muted-foreground flex items-center gap-1">
             <Globe className="h-3 w-3" /> Total Domains
@@ -2171,14 +2189,23 @@ function AdminTab({ onSelect }: { onSelect: (id: string) => void }) {
           <div className="text-2xl font-bold mt-1">{breakdown?.total ?? '—'}</div>
           <div className="text-xs text-muted-foreground mt-0.5">in Dynadot account</div>
         </Card>
-        <Card className="p-4 border-indigo-500/30">
+        <Card className="p-4 border-emerald-500/30">
           <div className="text-xs uppercase text-muted-foreground flex items-center gap-1">
-            <CheckCircle2 className="h-3 w-3 text-indigo-500" /> Active
+            <CheckCircle2 className="h-3 w-3 text-emerald-500" /> Active
           </div>
-          <div className="text-2xl font-bold mt-1 text-indigo-600 dark:text-indigo-400">
+          <div className="text-2xl font-bold mt-1 text-emerald-600 dark:text-emerald-400">
             {breakdown?.active ?? '—'}
           </div>
           <div className="text-xs text-muted-foreground mt-0.5">live &amp; renewable</div>
+        </Card>
+        <Card className="p-4 border-purple-500/30">
+          <div className="text-xs uppercase text-muted-foreground flex items-center gap-1">
+            <ArrowLeftRight className="h-3 w-3 text-purple-500" /> Transferring
+          </div>
+          <div className="text-2xl font-bold mt-1 text-purple-600 dark:text-purple-400">
+            {breakdown?.transferring ?? 0}
+          </div>
+          <div className="text-xs text-muted-foreground mt-0.5">pending transfer in/out</div>
         </Card>
         <Card className="p-4 border-amber-500/30">
           <div className="text-xs uppercase text-muted-foreground flex items-center gap-1">
@@ -2285,6 +2312,7 @@ function AdminTab({ onSelect }: { onSelect: (id: string) => void }) {
                 <TableBody>
                   {domains.map((d) => {
                     const exp = formatExpiry(d.expiresAt)
+                    const isTransferring = d.status === 'transferring' && d.transferDetail
                     return (
                       <TableRow key={d.id} className={d.status === 'deleted' || d.status === 'cancelled' ? 'opacity-60' : ''}>
                         <TableCell>
@@ -2292,7 +2320,7 @@ function AdminTab({ onSelect }: { onSelect: (id: string) => void }) {
                             className="font-medium hover:underline flex items-center gap-1.5 text-left"
                             onClick={() => onSelect(d.id)}
                           >
-                            <Globe className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
+                            <Globe className={`h-3.5 w-3.5 shrink-0 ${isTransferring ? 'text-purple-500' : 'text-indigo-500'}`} />
                             <span className="break-all">{d.name}</span>
                             {d.premium && (
                               <TooltipProvider>
@@ -2304,14 +2332,46 @@ function AdminTab({ onSelect }: { onSelect: (id: string) => void }) {
                                 </Tooltip>
                               </TooltipProvider>
                             )}
-                          </button>
-                          <div className="text-xs text-muted-foreground mt-0.5 ml-5">
-                            {d.nameservers.length > 0 ? (
-                              <span className="font-mono">{d.nameservers[0]}{d.nameservers.length > 1 ? ` +${d.nameservers.length - 1}` : ''}</span>
-                            ) : (
-                              <span>no nameservers</span>
+                            {isTransferring && d.transferDetail?.transferType === 'in' && (
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Badge className="bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 border-purple-500/30 ml-1" variant="outline">
+                                      <ArrowLeftRight className="h-3 w-3 mr-1" /> Transfer In
+                                    </Badge>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    Domain being transferred INTO this Dynadot account.
+                                    Order #{d.transferDetail.orderId} · {d.transferDetail.submittedDate}
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
                             )}
-                          </div>
+                          </button>
+                          {isTransferring ? (
+                            <div className="text-xs mt-0.5 ml-5 space-y-0.5">
+                              <div className="flex items-center gap-1 text-purple-600 dark:text-purple-400">
+                                <Clock className="h-3 w-3" />
+                                <span className="font-medium">{d.transferDetail!.status}</span>
+                                {d.transferDetail!.failedReason && (
+                                  <span className="text-muted-foreground">· {d.transferDetail!.failedReason}</span>
+                                )}
+                              </div>
+                              <div className="text-muted-foreground">
+                                Order #{d.transferDetail!.orderId}
+                                {d.transferDetail!.submittedDate && ` · submitted ${d.transferDetail!.submittedDate}`}
+                                {d.transferDetail!.cost && ` · ${d.transferDetail!.cost}`}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="text-xs text-muted-foreground mt-0.5 ml-5">
+                              {d.nameservers.length > 0 ? (
+                                <span className="font-mono">{d.nameservers[0]}{d.nameservers.length > 1 ? ` +${d.nameservers.length - 1}` : ''}</span>
+                              ) : (
+                                <span>no nameservers</span>
+                              )}
+                            </div>
+                          )}
                         </TableCell>
                         <TableCell className="text-sm align-top">
                           <div className="font-medium">{d.owner?.name || '—'}</div>

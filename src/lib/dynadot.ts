@@ -194,6 +194,154 @@ export async function listDomains(): Promise<{
   }
 }
 
+// ─── Transfer orders ──────────────────────────────────────────────────────────
+
+export interface TransferOrder {
+  orderId: string
+  domain: string
+  status: string // "Waiting", "Completed", "Cancelled", "Failed", etc.
+  submittedDate?: string
+  cost?: string
+  paymentMethod?: string
+  orderStatus?: string // top-level order status: "Processing", "Completed"
+  failedReason?: string // e.g. "Transfer Pending"
+  transferType: 'in' | 'away'
+}
+
+interface DynadotOrderItem {
+  ItemType?: string
+  ItemTypeName?: string
+  Name?: string
+  Cost?: string
+  Status?: string
+  ItemStatus?: string
+  ItemName?: string
+}
+
+interface DynadotOrderListEntry {
+  OrderId?: string | number
+  SubmittedDate?: string
+  Currency?: string
+  PaymentMethod?: string
+  TotalCost?: string
+  TotalPaid?: string
+  Status?: string
+  OrderStatus?: string
+  ItemList?: DynadotOrderItem[]
+}
+
+interface DynadotOrderListResponse {
+  OrderListResponse?: {
+    ResponseCode?: string | number
+    Status?: string
+    Error?: string
+    OrderList?: DynadotOrderListEntry[]
+  }
+}
+
+interface DynadotTransferStatusResponse {
+  GetTransferStatusResponse?: {
+    ResponseCode?: string | number
+    Status?: string
+    Error?: string
+    TransferList?: Array<{
+      OrderId?: string | number
+      TransferStatus?: string
+      FailedReason?: string
+    }>
+  }
+}
+
+/**
+ * List ALL orders in the Dynadot account within the given date range, then
+ * filter to only those that contain a "Domain Transfer" item.
+ *
+ * This is how we discover domains that are currently being transferred IN
+ * (or OUT) — they do NOT appear in the `list_domain` result until the
+ * transfer completes.
+ *
+ * @param days  How many days back to search (default 180 = ~6 months).
+ */
+export async function listTransferOrders(days = 180): Promise<TransferOrder[]> {
+  const end = new Date()
+  const start = new Date(end.getTime() - days * 24 * 60 * 60 * 1000)
+  const fmt = (d: Date) =>
+    `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(
+      d.getDate()
+    ).padStart(2, '0')}`
+
+  const json = await callDynadot({
+    command: 'order_list',
+    search_by: 'date_range',
+    start_date: fmt(start),
+    end_date: fmt(end),
+  })
+  const resp = (json as DynadotOrderListResponse).OrderListResponse
+  const orders = resp?.OrderList || []
+
+  const transfers: TransferOrder[] = []
+  for (const o of orders) {
+    const items = o.ItemList || []
+    for (const item of items) {
+      const typeRaw = String(item.ItemType || item.ItemTypeName || '').toLowerCase()
+      if (!typeRaw.includes('transfer')) continue
+      const domain = String(item.Name || item.ItemName || '').toLowerCase().trim()
+      if (!domain) continue
+      transfers.push({
+        orderId: String(o.OrderId || ''),
+        domain,
+        status: String(item.Status || item.ItemStatus || o.Status || o.OrderStatus || 'unknown'),
+        submittedDate: o.SubmittedDate,
+        cost: item.Cost || o.TotalCost,
+        paymentMethod: o.PaymentMethod,
+        orderStatus: o.Status || o.OrderStatus,
+        transferType: 'in', // order_list doesn't distinguish; we default to "in"
+      })
+    }
+  }
+
+  // Enrich each transfer with the precise TransferStatus + FailedReason via
+  // get_transfer_status. This returns e.g. "Waiting" / "Transfer Pending".
+  await Promise.all(
+    transfers.map(async (t) => {
+      try {
+        const stJson = await callDynadot({
+          command: 'get_transfer_status',
+          domain: t.domain,
+          transfer_type: 'in',
+        })
+        const stResp = (stJson as DynadotTransferStatusResponse).GetTransferStatusResponse
+        const entry = stResp?.TransferList?.[0]
+        if (entry) {
+          if (entry.TransferStatus) t.status = String(entry.TransferStatus)
+          if (entry.FailedReason) t.failedReason = String(entry.FailedReason)
+        }
+      } catch {
+        // If get_transfer_status fails (e.g. it's actually a transfer-away),
+        // try the "away" type. Otherwise leave the order_list status as-is.
+        try {
+          const stJson = await callDynadot({
+            command: 'get_transfer_status',
+            domain: t.domain,
+            transfer_type: 'away',
+          })
+          const stResp = (stJson as DynadotTransferStatusResponse).GetTransferStatusResponse
+          const entry = stResp?.TransferList?.[0]
+          if (entry) {
+            t.transferType = 'away'
+            if (entry.TransferStatus) t.status = String(entry.TransferStatus)
+            if (entry.FailedReason) t.failedReason = String(entry.FailedReason)
+          }
+        } catch {
+          // leave as-is
+        }
+      }
+    })
+  )
+
+  return transfers
+}
+
 // ─── Search ────────────────────────────────────────────────────────────────────
 
 interface SearchDomainResult {
