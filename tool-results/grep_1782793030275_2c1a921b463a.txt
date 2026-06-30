@@ -1,0 +1,252 @@
+/home/z/my-project/worklog.md:1209:- Created src/lib/dynadot.ts - Dynadot API client (api3.json endpoint); searchDomains/registerDomain/getDomainInfo/setDnsRecords/renewDomain/transferDomain; real HTTP calls when DYNADOT_API_KEY set, simulated otherwise with clear DEMO MODE logging
+/home/z/my-project/worklog.md:1217:- Verified every external API integration has DEMO MODE fallback when env vars are missing, with clear console warnings
+/home/z/my-project/worklog.md:1223:- Pattern: every integration checks for required env vars at call time and falls back to clearly-marked demo-mode behaviour (with console.log statements so users can see what would have happened)
+/home/z/my-project/worklog.md:1310:- Read existing email service at src/lib/email.ts (Wave 1) - exposes sendEmail, sendWelcomeEmail, sendPasswordResetEmail, sendTeamInvitationEmail, sendDeploymentEmail with graceful demo-mode fallback when SMTP env vars are not configured.
+/home/z/my-project/worklog.md:1435:- Read existing files: src/lib/dynadot.ts (Dynadot client with demo-mode fallback), src/lib/dns.ts (real Node.js dns lookups + propagation checker), prisma/schema.prisma (Domain + DomainVerification models), src/app/api/domains/register/route.ts, src/app/api/domains/search/route.ts, src/app/api/domains/[id]/route.ts, src/app/api/domains/[id]/dns/route.ts, src/app/api/domains/[id]/dns/[recordId]/route.ts, src/app/api/domains/route.ts, and the first ~2000 lines of src/components/domains/domains-panel.tsx.
+/home/z/my-project/worklog.md:1437:  * Imported searchDomains + isDynadotDemoMode from @/lib/dynadot.
+/home/z/my-project/worklog.md:1443:  * Imported registerDomain (as dynadotRegister) + isDynadotDemoMode from @/lib/dynadot and crypto for verification codes.
+/home/z/my-project/worklog.md:1458:  * POST: admin-or-owner only. Verifies domain.provider==="dynadot" (otherwise 400). Calls getDomainInfo(domain.name) from @/lib/dynadot (real or demo-mode data). Maps Dynadot status to our internal vocabulary (active/expired/transferring/pending). Updates Domain.status, expiresAt, and nameservers (JSON-encoded). Returns { synced, demo, domain, dynadotInfo }. Audit-logs the sync.
+/home/z/my-project/worklog.md:1475:  * POST /api/domains/search returns 200 with Dynadot demo-mode results.
+/home/z/my-project/worklog.md:1479:  * Dynadot integration gracefully runs in DEMO MODE because DYNADOT_API_KEY is not set in this environment; the code is wired so that simply setting DYNADOT_API_KEY will flip everything to live registrar calls with no further code changes.
+/home/z/my-project/worklog.md:1550:- Rewrote /api/billing/webhook to call constructWebhookEvent() for signature verification (logs a DEMO MODE warning if STRIPE_WEBHOOK_SECRET isn't set). Handles 5 Stripe event types: checkout.session.completed, customer.subscription.updated, customer.subscription.deleted, invoice.payment_succeeded, invoice.payment_failed — each updates Payment/Subscription records and creates user notifications. Maintains backward compatibility with the legacy demo webhook payload shape
+/home/z/my-project/worklog.md:1555:- Updated billing-panel.tsx: handlePurchase now branches — if result.demo === false && result.url it redirects window.location.href to Stripe Checkout, otherwise shows the in-app success dialog (existing demo-mode behavior preserved). Added "Manage Subscription" button (calls /api/billing/portal). Added "Cancel Subscription" button (DELETEs /api/billing/subscription). Redesigned Current Plan card to show status badges (active/past_due/pending/cancelling), a Stripe badge, and "Cancels on" vs "Renews" date. Added a "Transaction ID" column to the payment history table. Extended PaymentStatusBadge to handle past_due and cancelled statuses. Added new icons: Settings2, Ban, ShieldCheck
+/home/z/my-project/worklog.md:1561:- Real Stripe payment integration is fully implemented with graceful demo-mode fallback. All billing operations work in both modes:
+/home/z/my-project/worklog.md:1620:- Created /api/github/oauth/start/route.ts: GET, authenticates user, generates signed state JWT (10 min, kind: 'github-oauth'), builds authorize URL via getAuthUrl(), returns {url} or {demoMode:true} fallback
+/home/z/my-project/worklog.md:1624:- Updated /api/github/connect/route.ts: keeps manual connect for demo mode; in OAuth mode reuses the user's user-level OAuth integration access token; returns {oauthConnected, demoMode}
+/home/z/my-project/worklog.md:1635:- All GitHub API calls (listRepositories, listCommits, getBranches) now use the real access token when GITHUB_CLIENT_ID is set, with graceful demo-mode fallback for every endpoint
+/home/z/my-project/worklog.md:1659:- End-to-end verified against the live dev server: POST /api/hosting/create returns coolifyId + coolifyDemoMode=true + deployment with coolifyDeploymentId; POST /api/hosting/[id]/deploy returns deployment with coolifyDeploymentId and message "Deployment triggered - worker will poll for status updates"; GET /api/deployments/[id]/status returns live status from Coolify (status='live', coolifyStatus='running'); DELETE /api/hosting/[id] logs `[coolify] DEMO MODE: deleteApplication` and continues with DB cleanup; POST /api/admin/jobs/process (x-cron-key) returns { processed: 2, succeeded: 2, failed: 0 }; worker-service /health returns full stats with runs/successes/failures; worker-service successfully processed the deployment_status_check job and the deployment's DB status flipped from 'building' → 'live' within ~15s.
+/home/z/my-project/worklog.md:1662:- Real Coolify server provisioning is fully implemented with graceful demo-mode fallback. The entire flow (create app → deploy → poll status → delete) works out-of-the-box in demo mode and will switch to live Coolify calls the moment COOLIFY_API_URL + COOLIFY_API_TOKEN are set, with no code changes required. coolifyId is persisted on the Project; coolifyDeploymentId is persisted on the Deployment.
+/home/z/my-project/worklog.md:1667:- No existing deployment functionality was broken — audit logs, automation events, monitor auto-provisioning, environment variables, and the existing SSE/socket.io streaming all continue to work. The only behavioral change is that deployments now go through real Coolify calls (or demo-mode equivalents) instead of being immediately faked as 'live'.
+/home/z/my-project/worklog.md:1735:- Read src/lib/coolify.ts, src/lib/dynadot.ts, src/lib/encryption.ts, and .env to learn the existing API-client conventions (env-driven config, `is*DemoMode()` early-return pattern, native fetch, try/catch around every call, consistent `{ success, error?, ... }` return shapes, `[provider] DEMO MODE: ...` log markers).
+/home/z/my-project/worklog.md:1736:- Appended three env vars to /home/z/my-project/.env: MAILCOW_API_URL, MAILCOW_API_KEY, MAIL_SERVER_HOSTNAME (all blank → DEMO MODE out of the box, mirroring Coolify/Dynadot).
+/home/z/my-project/worklog.md:1749:- DEMO MODE: every function short-circuits with `[mailcow] DEMO MODE: <op> <args>` log line and returns a simulated success response with fake IDs (demo-domain-…, demo-mailbox-…). generateDkim returns a realistic-looking 2048-bit RSA DKIM TXT record built from crypto.randomBytes(270) → base64 → `v=DKIM1; k=rsa; t=s; s=email; p=<base64>`. All exported functions wrapped in try/catch; failures return `{ success: false, error: <message> }` instead of throwing.
+/home/z/my-project/worklog.md:1754:- src/lib/mailcow.ts is a complete, production-ready Mailcow REST client with graceful DEMO MODE fallback — same pattern as the existing Coolify and Dynadot clients.
+/home/z/my-project/worklog.md:1757:- Demo mode keeps the rest of the platform usable today: domains, DKIM, mailboxes, and verification all return simulated-success responses, with `[mailcow] DEMO MODE: …` log lines making the demo state obvious in the dev log.
+/home/z/my-project/worklog.md:1767:- Created src/lib/waafi.ts — Waafi Pay API client. Uses native fetch (no new packages). DEMO MODE when WAAFI_API_URL/WAAFI_MERCHANT_ID/WAAFI_API_KEY/WAAFI_API_USER_ID are unset: logs to console + returns simulated responses. Exports: isWaafiConfigured(), isWaafiDemoMode(), createPayment({ amount, currency, description, callbackUrl, returnUrl, reference }) -> { success, paymentUrl?, transactionId?, error? }, verifyPayment(transactionId) -> { success, status: 'pending'|'completed'|'failed', amount?, currency?, error? }, getPaymentStatus(transactionId) -> { success, status, error? }. Uses Waafi's request envelope (requestType, merchantId, apiUserId, apiKey). Normalises Waafi status strings (success/completed/paid/2001 -> completed; fail/cancel/declined/error -> failed) into our internal enum.
+/home/z/my-project/worklog.md:1770:- Updated src/app/api/billing/checkout/route.ts — accepts `method` in request body (defaults to "stripe" for backward compatibility); validates the requested method is active via resolveActiveMethod; routes through processPayment. PRESERVED the original Stripe demo-mode path verbatim (immediate project/domain/deployment creation, immediate Payment completed, processEvent('payment_success')) so the existing UI flow + success state keep working. Added unified path for real Stripe / Waafi / manual that returns a generic shape: { method, status: 'redirect_required'|'pending', redirectUrl, transactionId, paymentId, sessionId, url, demo, message }. No existing Stripe flow broken.
+/home/z/my-project/worklog.md:1780:- Waafi Pay runs in DEMO MODE when WAAFI_* env vars are unset (logs to console, returns simulated responses) — same pattern as the existing Stripe demo mode. Goes live the moment the env vars are populated, with no code changes.
+/home/z/my-project/worklog.md:1783:- Backward compatibility fully preserved: existing Stripe demo-mode checkout flow (immediate project/domain/deployment creation, immediate completed Payment, processEvent) is unchanged; existing response shape (sessionId, url, demo, payment, subscription, project, domain, deployment, automation) is unchanged for the demo path. New unified path adds method/status/redirectUrl/transactionId/paymentId so the UI can branch on status === 'pending' (manual) vs status === 'redirect_required' (stripe/waafi).
+/home/z/my-project/worklog.md:1794:- Read src/lib/coolify.ts (existing Coolify client with DEMO MODE pattern, coolifyFetch helper, createApplication/deployApplication/listServers) — appended rather than rewrote.
+/home/z/my-project/worklog.md:1800:- createStackApplication: DEMO MODE returns `{ id: 'demo-app-<ts>', url, demoMode: true, databaseId? }` and logs every operation it WOULD perform (custom domain, SSL, WordPress DB provisioning, initial deploy). REAL MODE: resolves the Coolify server (opts.serverId or first available), POSTs /applications with build_pack='dockerfile' (or 'dockercompose' for the docker stack), PATCHes the application with the stack's Dockerfile + ports_exposes, configures the custom domain + kicks off Let's Encrypt SSL, provisions a MySQL database + wires WORDPRESS_DB_* env vars for WordPress, triggers an initial deploy via deployApplication, returns { id, url, demoMode: false, databaseId? }. Every external call is wrapped in try/catch — partial failures are logged but non-fatal.
+/home/z/my-project/worklog.md:1806:- src/lib/coolify.ts now supports 5 stacks (nodejs/php/python/docker/wordpress) via STACK_DEFINITIONS + createStackApplication. WordPress gets a MySQL database provisioned alongside the container in real mode. DEMO MODE preserves the existing pattern (simulated success with descriptive log lines) so the rest of the platform stays usable today.
+/home/z/my-project/worklog.md:1961:- Built comprehensive Dynadot service class (`src/lib/dynadot-service.ts`) with retry+backoff, rate-limit handling, and all lifecycle methods: search, bulkSearch, suggestTlds, register, renew, transfer, getDomainInfo, listDomains, lock, unlock, enableWhoisPrivacy, disableWhoisPrivacy, getAuthCode, setNameservers, setDnsRecords, setContacts, enableAutoRenew, disableAutoRenew, getExpiration; runs in DEMO MODE when DYNADOT_API_KEY is unset
+/home/z/my-project/worklog.md:2175:- Read VPS module interfaces: deployer.ts (deployProject, removeProjectContainer, getContainerStatus — all demo-mode aware), ssh.ts (isVpsDemoMode), proxy.ts (configureProjectProxy/removeProjectProxy — invoked internally by deployer).
+/home/z/my-project/worklog.md:2207:- Replaced the soft `project.update({status: 'stopped'})` with `await removeProjectContainer(id)` which: (1) removes the Caddy proxy entry, (2) runs `docker compose down --rmi local -v` on the VPS, (3) deletes /opt/deployhub/projects/<slug>, (4) clears containerId/containerName/containerPort/externalPort/deployPath/sslCertStatus/sslCertExpiry on the Project row, (5) sets status='stopped'. All demo-mode safe.
+/home/z/my-project/worklog.md:2219:  • DEMO MODE fallback (no sshHost or VPS_DEMO_MODE=1): kept the original attempt-count-based transition (queued → building → live after attempts>=1) so dev/demo UX is unchanged.
+/home/z/my-project/worklog.md:2242:  • The deployment_status_check job is now a REAL health monitor that polls getContainerStatus() and transitions deployments to live/failed based on the actual container state, with a demo-mode fallback for environments without a real VPS.
+/home/z/my-project/worklog.md:2244:- All paths are demo-mode safe: the VPS module functions return simulated success when no Server has an sshHost (or VPS_DEMO_MODE=1), so the platform UX is intact in dev/demo environments.
+/home/z/my-project/worklog.md:2281:- All external integrations work in REAL mode when credentials are configured (Dynadot API, Mailcow API, Stripe, Waafi, GitHub OAuth, SSH/Docker/Caddy) and gracefully fall back to DEMO MODE when env vars/credentials are absent
+/home/z/my-project/worklog.md:2331:  • isDynadotDemoMode() returned true → all 7 domain features fell back to DEMO mode
+/home/z/my-project/worklog.md:2419:  - DEMO MODE (no API key): re-seeds from TLD_WHOLESALE_PRICES defaults (unchanged behavior)
+/home/z/my-project/worklog.md:2437:  - Returns {provider, demoMode, apiKeyConfigured, summary:{total,live,simulated,error}, features[], checkedAt}
+/home/z/my-project/worklog.md:2453:    • GET /api/domains/status → all 7 features LIVE, provider=dynadot, demoMode=false
+/home/z/my-project/worklog.md:3166:  - Kept unchanged (technical identifiers): `'no-reply@deployhub.local'` (L28 default FROM_EMAIL — functional email address needing MX records, mirrors prior-task rule for *.deployhub.io), `demo-${Date.now()}@deployhub.local` (L76 demo-mode messageId)
+/home/z/my-project/worklog.md:3576:    - Demo-mode `messageId` now uses `${FROM_EMAIL.split('@')[1] || 'apsamo.io'}` instead of hardcoded `@deployhub.local` — keeps the demo-mode message ID domain in sync with the configured brand.
+/home/z/my-project/worklog.md:3796:- Confirmed NO "DEMO MODE" markers in dev.log (grep -c "DEMO MODE" = 0)
+/home/z/my-project/worklog.md:3846:  • grep -c "DEMO MODE" dev.log = 0 ✅
+/home/z/my-project/src/components/github/github-panel.tsx:384:      if (data.demoMode) {
+/home/z/my-project/src/components/github/github-panel.tsx:1433:      if (data.demoMode) {
+/home/z/my-project/agent-ctx/11-coolify-worker-agent.md:6:Implemented end-to-end Coolify integration (with demo-mode fallback), real build/deploy pipeline via JobQueue + automation engine, and a standalone worker-service that drives both job processing and uptime checks via HTTP.
+/home/z/my-project/agent-ctx/11-coolify-worker-agent.md:32:  - After creating the Project row, calls `createApplication()` from `@/lib/coolify` to provision the app (demo-mode returns `demo-app-<ts>`; real Coolify returns a UUID).
+/home/z/my-project/agent-ctx/11-coolify-worker-agent.md:100:1. POST /api/hosting/create → returns project with `coolifyId: 'demo-app-<ts>'`, `coolifyDemoMode: true`, and a deployment with `coolifyDeploymentId: 'demo-deploy-<ts>'`. Dev log shows `[coolify] DEMO MODE: createApplication` + `[coolify] DEMO MODE: deployApplication`.
+/home/z/my-project/agent-ctx/11-coolify-worker-agent.md:103:4. DELETE /api/hosting/[id] → logs `[coolify] DEMO MODE: deleteApplication` and returns `{ message: 'Project stopped successfully', project: { ..., coolifyId: 'coolify-<ts>' } }`.
+/home/z/my-project/agent-ctx/11-coolify-worker-agent.md:108:   - After ~15s the worker's deployment_status_check job processed the demo-mode deployment and updated its status from 'building' → 'live' (verified via /api/deployments/[id]/status).
+/home/z/my-project/agent-ctx/11-coolify-worker-agent.md:115:- All existing deployment functionality (audit logs, automation events, monitor auto-provisioning, environment variables, etc.) is preserved. The only behavioral change is that deployments now go through real Coolify calls (or demo-mode equivalents) instead of being immediately faked as 'live'.
+/home/z/my-project/agent-ctx/10-stripe-agent.md:4:Implement real Stripe payment integration with graceful demo-mode fallback.
+/home/z/my-project/agent-ctx/10-stripe-agent.md:22:- Calls `constructWebhookEvent()` to verify the signature (logs a DEMO MODE warning if the secret isn't set)
+/home/z/my-project/agent-ctx/10-stripe-agent.md:74:- Added `handleManageSubscription` — POSTs to `/api/billing/portal`, redirects to the returned URL, or shows a demo-mode info toast
+/home/z/my-project/agent-ctx/12-github-oauth-agent.md:16:   - Returns `{ url, demoMode: false }` for the frontend to redirect to
+/home/z/my-project/agent-ctx/12-github-oauth-agent.md:17:   - In demo mode (no `GITHUB_CLIENT_ID`), returns `{ demoMode: true, message }` with instructions
+/home/z/my-project/agent-ctx/12-github-oauth-agent.md:34:   - Returns `{ branches: [{ name, protected }], demoMode }`
+/home/z/my-project/agent-ctx/12-github-oauth-agent.md:39:   - Returns `{ integration, oauthEnabled, demoMode }`
+/home/z/my-project/agent-ctx/12-github-oauth-agent.md:48:   - Returns `{ integration, oauthConnected, demoMode }`
+/home/z/my-project/agent-ctx/12-github-oauth-agent.md:53:   - Returns `{ repos: [{ id, name, fullName, private, defaultBranch, htmlUrl, description, connected }], demoMode }`
+/home/z/my-project/agent-ctx/12-github-oauth-agent.md:60:   - Returns `{ commits: [{ sha, shortSha, message, author, authorEmail, authorLogin?, authorAvatarUrl?, date, url, branch }], demoMode }`
+/home/z/my-project/agent-ctx/12-github-oauth-agent.md:73:   - Updated the demo-mode commits to include avatar URLs (`https://avatars.githubusercontent.com/{login}?v=4`)
+/home/z/my-project/agent-ctx/12-github-oauth-agent.md:133:- Comprehensive demo-mode fallback: every endpoint returns simulated data when `GITHUB_CLIENT_ID` is not set, so the GitHub panel works in all environments
+/home/z/my-project/agent-ctx/2-infrastructure-libs-agent.md:4:Created 12 new infrastructure lib files in `/home/z/my-project/src/lib/` covering encryption, rate limiting, email, audit logging, DNS, Dynadot, Stripe, Coolify, GitHub, worker, monitor, and TOTP. All external API integrations have demo-mode fallbacks.
+/home/z/my-project/agent-ctx/18-multi-payment-billing-agent.md:35:   - **Backward-compatible demo-mode path preserved**: when method is `stripe` and `STRIPE_SECRET_KEY` is unset, the original inline-success behaviour (immediate project/domain creation, immediate Payment `completed`, immediate `processEvent`) is kept so the existing UI flow and success state continue to work unchanged.
+/home/z/my-project/agent-ctx/18-multi-payment-billing-agent.md:49:- Existing Stripe demo-mode UI flow (immediate project + domain + deployment creation, immediate `completed` Payment, `processEvent('payment_success')`) is preserved verbatim.
+/home/z/my-project/agent-ctx/23-provisioning-ui-agent.md:15:  - GET /api/provisioning/check-domain?domain= — wraps Dynadot searchDomains() with a regex pre-check; returns { domain, valid, available, price?, demoMode?, suggestions? } where suggestions swaps TLDs for already-taken domains (best-effort).
+/home/z/my-project/agent-ctx/19-orchestration-engine-agent.md:9:  - `dynadot.ts`: `searchDomains`, `registerDomain`, `getDomainInfo`, `setDnsRecords`, `isDynadotDemoMode`
+/home/z/my-project/src/components/domains/domains-panel.tsx:2451:    demoMode: boolean
+/home/z/my-project/agent-ctx/22-roles-admin-payment-ui-agent.md:19:- `/home/z/my-project/src/app/api/billing/checkout/route.ts` — accepts `method` in body; returns either demo-mode success payload or unified `{ status, redirectUrl, transactionId }` shape.
+/home/z/my-project/agent-ctx/22-roles-admin-payment-ui-agent.md:100:- Existing Stripe demo-mode checkout flow is unchanged (the demo branch in `/api/billing/checkout` returns the same shape as before — `demo: true`, `sessionId`, `url`, `payment`, `subscription`, `project`, `domain`, `deployment`).
+/home/z/my-project/agent-ctx/17-mailcow-agent.md:7:1. Read `src/lib/coolify.ts`, `src/lib/dynadot.ts`, `src/lib/encryption.ts`, and `.env` to learn the existing API-client conventions (config-from-env + `is*DemoMode()` early-return pattern, native `fetch`, try/catch around every call, consistent `{ success, error?, ... }` return shapes, demo-mode `console.log('[provider] DEMO MODE: ...')` markers).
+/home/z/my-project/agent-ctx/17-mailcow-agent.md:15:   (Left blank so the client runs in DEMO MODE out of the box, mirroring the Coolify/Dynadot pattern.)
+/home/z/my-project/agent-ctx/17-mailcow-agent.md:33:   - DEMO MODE: every function short-circuits with `[mailcow] DEMO MODE: <op> <args>` log line and returns a simulated success response with fake IDs (`demo-domain-…`, `demo-mailbox-…`). `generateDkim` returns a realistic-looking 2048-bit RSA DKIM public-key TXT record built from `crypto.randomBytes(270)` → base64 → `v=DKIM1; k=rsa; t=s; s=email; p=<base64>`.
+/home/z/my-project/agent-ctx/17-mailcow-agent.md:39:- `src/lib/mailcow.ts` is a complete, production-ready Mailcow REST client with graceful DEMO MODE fallback — same pattern as the existing Coolify and Dynadot clients.
+/home/z/my-project/agent-ctx/17-mailcow-agent.md:42:- Demo mode keeps the rest of the platform usable today: domains, DKIM, mailboxes, and verification all return simulated-success responses, with `[mailcow] DEMO MODE: …` log lines making the demo state obvious in the dev log.
+/home/z/my-project/agent-ctx/9-dns-dynadot-agent.md:29:POST /api/domains/search   200   [dynadot DEMO MODE: searchDomains]
+/home/z/my-project/agent-ctx/9-dns-dynadot-agent.md:30:POST /api/domains/register 201   [dynadot DEMO MODE: registerDomain]
+/home/z/my-project/agent-ctx/9-dns-dynadot-agent.md:31:POST /api/domains/[id]/sync 200  [dynadot DEMO MODE: getDomainInfo]
+/home/z/my-project/agent-ctx/20-dns-email-coolify-stacks-agent.md:11:- `/home/z/my-project/src/lib/coolify.ts` — existing Coolify client (DEMO MODE pattern, `coolifyFetch` helper, `createApplication`, `deployApplication`, `listServers`, etc.). I appended to this file rather than rewriting.
+/home/z/my-project/agent-ctx/20-dns-email-coolify-stacks-agent.md:12:- `/home/z/my-project/src/lib/mailcow.ts` — Mailcow client. Used as the reference for the DKIM key format Mailcow returns (the demo-mode fake key emits `v=DKIM1; k=rsa; t=s; s=email; p=<base64>`, which `formatDkimTxtValue` accepts as-is).
+/home/z/my-project/agent-ctx/20-dns-email-coolify-stacks-agent.md:51:- **DEMO MODE** (no `COOLIFY_API_URL`/`COOLIFY_API_TOKEN`): logs `[coolify] DEMO MODE: createStackApplication …` and returns `{ id: 'demo-app-<ts>', url, demoMode: true, databaseId? }`. For WordPress it also logs that a MySQL DB *would* be provisioned and surfaces a fake `databaseId` (`demo-db-<ts>`) so UIs can show the dependency. If `opts.domain` is supplied it logs that the domain + Let's Encrypt SSL *would* be configured, and uses `https://{domain}` as the URL.
+/home/z/my-project/agent-ctx/20-dns-email-coolify-stacks-agent.md:60:  7. Returns `{ id, url, demoMode: false, databaseId? }`. The URL is `https://{domain}` when supplied, otherwise whatever `getApplicationStatus(appId)` reports back.
+/home/z/my-project/agent-ctx/20-dns-email-coolify-stacks-agent.md:68:- **DKIM key flexibility:** `formatDkimTxtValue` handles both the bare base64 form (what a UI would paste from Mailcow's `/get/dkim/{domain}` `public` field) and the pre-formatted form (what `mailcow.ts` demo-mode `fakeDkimPublicKey()` produces). This means a future email panel can pipe Mailcow's DKIM output straight into `generateEmailDnsRecords` without preprocessing.
+/home/z/my-project/src/components/provisioning/provisioning-panel.tsx:147:  demoMode?: boolean
+/home/z/my-project/src/components/provisioning/provisioning-panel.tsx:531:                      ? `Available${domainCheck.price ? ` · $${domainCheck.price.toFixed(2)}/yr` : ''}${domainCheck.demoMode ? ' (demo)' : ''}`
+/home/z/my-project/src/lib/vps/index.ts:7: * All modules gracefully fall back to DEMO MODE when VPS_DEMO_MODE=1 or when
+/home/z/my-project/src/lib/vps/ssh.ts:449: * Check if a server object is "demo-mode eligible" — i.e. we can't actually
+/home/z/my-project/src/lib/vps/provisioner.ts:18: * In DEMO MODE (VPS_DEMO_MODE=1 or server.sshHost is empty), every step
+/home/z/my-project/src/lib/vps/provisioner.ts:153:  // DEMO MODE: short-circuit with simulated success.
+/home/z/my-project/src/lib/vps/provisioner.ts:165:      logs: `[demo-mode] ${STEP_LABELS[step]} completed (simulated)`,
+/home/z/my-project/src/lib/vps/provisioner.ts:431:  const demoMode = server ? isServerInDemoMode(server) : true
+/home/z/my-project/src/lib/vps/provisioner.ts:433:  if (!demoMode) {
+/home/z/my-project/src/lib/vps/provisioner.ts:497:    if (!demoMode && creds.host) {
+/home/z/my-project/src/lib/vps/provisioner.ts:512:  if (demoMode) {
+/home/z/my-project/src/lib/vps/deployer.ts:18: * In DEMO MODE (VPS_DEMO_MODE=1 or no server.sshHost), the deployer returns
+/home/z/my-project/src/lib/vps/deployer.ts:98:  // ── DEMO MODE: simulated deploy with realistic build log ────────────
+/home/z/my-project/src/lib/vps/proxy.ts:19: * In DEMO MODE we keep an in-memory snapshot of what *would* be written,
+/home/z/my-project/src/lib/dynadot-service.ts:20: * When DYNADOT_API_KEY is not set, the service runs in DEMO MODE and returns
+/home/z/my-project/src/lib/dynadot-service.ts:31:import { isDynadotDemoMode } from './dynadot'
+/home/z/my-project/src/lib/dynadot-service.ts:173:  get demoMode(): boolean {
+/home/z/my-project/src/lib/dynadot-service.ts:297:    if (this.demoMode) {
+/home/z/my-project/src/lib/dynadot-service.ts:423:    if (this.demoMode) {
+/home/z/my-project/src/lib/dynadot-service.ts:456:    if (this.demoMode) {
+/home/z/my-project/src/lib/dynadot-service.ts:487:    if (this.demoMode) {
+/home/z/my-project/src/lib/dynadot-service.ts:512:    if (this.demoMode) {
+/home/z/my-project/src/lib/dynadot-service.ts:576:    if (this.demoMode) {
+/home/z/my-project/src/lib/dynadot-service.ts:600:    if (this.demoMode) {
+/home/z/my-project/src/lib/dynadot-service.ts:609:    if (this.demoMode) {
+/home/z/my-project/src/lib/dynadot-service.ts:620:    if (this.demoMode) {
+/home/z/my-project/src/lib/dynadot-service.ts:629:    if (this.demoMode) {
+/home/z/my-project/src/lib/dynadot-service.ts:640:    if (this.demoMode) {
+/home/z/my-project/src/lib/dynadot-service.ts:657:    if (this.demoMode) {
+/home/z/my-project/src/lib/dynadot-service.ts:672:    if (this.demoMode) {
+/home/z/my-project/src/lib/dynadot-service.ts:696:    if (this.demoMode) {
+/home/z/my-project/src/lib/dynadot-service.ts:712:    if (this.demoMode) {
+/home/z/my-project/src/lib/dynadot-service.ts:721:    if (this.demoMode) {
+/home/z/my-project/src/lib/dynadot-service.ts:742:export { isDynadotDemoMode }
+/home/z/my-project/src/lib/automation.ts:333:      // In DEMO MODE (no sshHost configured) the container status is
+/home/z/my-project/src/lib/email-dns.ts:74: *    the demo-mode fake key in src/lib/mailcow.ts produces).
+/home/z/my-project/src/lib/mailcow.ts:17: * runs in DEMO MODE — every call returns a simulated success response so
+/home/z/my-project/src/lib/mailcow.ts:150:    // DEMO MODE - simulated success
+/home/z/my-project/src/lib/mailcow.ts:151:    console.log('[mailcow] DEMO MODE: addDomain', opts.domain)
+/home/z/my-project/src/lib/mailcow.ts:218:    // DEMO MODE
+/home/z/my-project/src/lib/mailcow.ts:219:    console.log('[mailcow] DEMO MODE: getDomain', domain)
+/home/z/my-project/src/lib/mailcow.ts:301:    // DEMO MODE - return a realistic-looking 2048-bit RSA DKIM public key
+/home/z/my-project/src/lib/mailcow.ts:302:    console.log('[mailcow] DEMO MODE: generateDkim', domain, selector)
+/home/z/my-project/src/lib/mailcow.ts:391:    // DEMO MODE
+/home/z/my-project/src/lib/mailcow.ts:393:      '[mailcow] DEMO MODE: createMailbox',
+/home/z/my-project/src/lib/mailcow.ts:457:    // DEMO MODE
+/home/z/my-project/src/lib/mailcow.ts:458:    console.log('[mailcow] DEMO MODE: listMailboxes', domain)
+/home/z/my-project/src/lib/mailcow.ts:507:    // DEMO MODE
+/home/z/my-project/src/lib/mailcow.ts:508:    console.log('[mailcow] DEMO MODE: deleteMailbox', address)
+/home/z/my-project/src/lib/mailcow.ts:536:    // DEMO MODE
+/home/z/my-project/src/lib/mailcow.ts:537:    console.log('[mailcow] DEMO MODE: removeDomain', domain)
+/home/z/my-project/src/lib/mailcow.ts:582:    // DEMO MODE — pretend everything is green
+/home/z/my-project/src/lib/mailcow.ts:583:    console.log('[mailcow] DEMO MODE: verifyEmailSetup', domain)
+/home/z/my-project/src/lib/mailcow.ts:584:    details.push('DEMO MODE: simulated successful verification')
+/home/z/my-project/src/components/billing/billing-panel.tsx:357:      // Backward-compat: existing demo-mode response has `demo: true` +
+/home/z/my-project/src/lib/waafi.ts:15: * When the WAAFI_* env vars are not set, runs in DEMO MODE - logs to
+/home/z/my-project/src/lib/waafi.ts:132:  // ── DEMO MODE ──────────────────────────────────────────────────
+/home/z/my-project/src/lib/waafi.ts:134:    console.log('[waafi] DEMO MODE: createPayment', opts)
+/home/z/my-project/src/lib/waafi.ts:208:  // ── DEMO MODE ──────────────────────────────────────────────────
+/home/z/my-project/src/lib/waafi.ts:210:    console.log('[waafi] DEMO MODE: verifyPayment', transactionId)
+/home/z/my-project/src/lib/waafi.ts:293:    console.log('[waafi] DEMO MODE: getPaymentStatus', transactionId)
+/home/z/my-project/src/lib/dynadot.ts:12: * When DYNADOT_API_KEY env var is not set, runs in DEMO MODE - returns
+/home/z/my-project/src/lib/dynadot.ts:23:export function isDynadotDemoMode(): boolean {
+/home/z/my-project/src/lib/dynadot.ts:130:  if (isDynadotDemoMode()) {
+/home/z/my-project/src/lib/dynadot.ts:133:    console.log('[dynadot] DEMO MODE: searchDomains', domains)
+/home/z/my-project/src/lib/dynadot.ts:229:  if (isDynadotDemoMode()) {
+/home/z/my-project/src/lib/dynadot.ts:233:      `[dynadot] DEMO MODE: registerDomain(${domain}, ${duration}y)`
+/home/z/my-project/src/lib/dynadot.ts:275:  if (isDynadotDemoMode()) {
+/home/z/my-project/src/lib/dynadot.ts:278:    console.log(`[dynadot] DEMO MODE: getDomainInfo(${domain})`)
+/home/z/my-project/src/lib/dynadot.ts:336:  if (isDynadotDemoMode()) {
+/home/z/my-project/src/lib/dynadot.ts:340:      `[dynadot] DEMO MODE: setDnsRecords(${domain}, ${records.length} records)`
+/home/z/my-project/src/lib/dynadot.ts:380:  if (isDynadotDemoMode()) {
+/home/z/my-project/src/lib/dynadot.ts:382:    console.log(`[dynadot] DEMO MODE: renewDomain(${domain}, ${duration}y)`)
+/home/z/my-project/src/lib/dynadot.ts:402:  if (isDynadotDemoMode()) {
+/home/z/my-project/src/lib/dynadot.ts:404:    console.log(`[dynadot] DEMO MODE: transferDomain(${domain})`)
+/home/z/my-project/src/lib/pricing.ts:357: * DEMO MODE (no API key):
+/home/z/my-project/src/lib/pricing.ts:369:  // DEMO MODE — just re-seed the defaults.
+/home/z/my-project/src/lib/stripe.ts:7: * When STRIPE_SECRET_KEY is not set, runs in DEMO MODE - returns simulated
+/home/z/my-project/src/lib/stripe.ts:59:    console.log('[stripe] DEMO MODE: createCheckoutSession', opts)
+/home/z/my-project/src/lib/stripe.ts:102:    console.log('[stripe] DEMO MODE: retrieveSession', sessionId)
+/home/z/my-project/src/lib/stripe.ts:130:    console.log('[stripe] DEMO MODE: createSubscription', opts)
+/home/z/my-project/src/lib/stripe.ts:155:    console.log('[stripe] DEMO MODE: cancelSubscription', subscriptionId)
+/home/z/my-project/src/lib/stripe.ts:182:      '[stripe] DEMO MODE: constructWebhookEvent - signature not verified'
+/home/z/my-project/src/lib/stripe.ts:203:    console.log('[stripe] DEMO MODE: createCustomer', email)
+/home/z/my-project/src/lib/orchestration.ts:16: * All external API calls (Dynadot, Mailcow) have DEMO MODE fallbacks
+/home/z/my-project/src/lib/orchestration.ts:33:  isDynadotDemoMode,
+/home/z/my-project/src/lib/orchestration.ts:920:    if (isDynadotDemoMode()) {
+/home/z/my-project/src/lib/github.ts:7: * When GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET are not set, runs in DEMO MODE
+/home/z/my-project/src/lib/github.ts:80:    console.log('[github] DEMO MODE: exchangeCodeForToken', code)
+/home/z/my-project/src/lib/github.ts:135:    console.log('[github] DEMO MODE: getUserProfile')
+/home/z/my-project/src/lib/github.ts:177:    console.log('[github] DEMO MODE: listRepositories')
+/home/z/my-project/src/lib/github.ts:254:    console.log('[github] DEMO MODE: listCommits', owner, repo, branch)
+/home/z/my-project/src/lib/github.ts:315:    console.log('[github] DEMO MODE: getBranches', owner, repo)
+/home/z/my-project/src/lib/github.ts:346:    console.log('[github] DEMO MODE: createWebhook', owner, repo, config.url)
+/home/z/my-project/src/app/api/github/[id]/branches/route.ts:15: * Returns: { branches: [{ name, protected, commitSha? }], demoMode }
+/home/z/my-project/src/app/api/github/[id]/branches/route.ts:45:    const demoMode = isGithubDemoMode()
+/home/z/my-project/src/app/api/github/[id]/branches/route.ts:52:    if (demoMode || !hasRealToken || !repoFullName) {
+/home/z/my-project/src/app/api/github/[id]/branches/route.ts:66:        demoMode: true,
+/home/z/my-project/src/app/api/github/[id]/branches/route.ts:81:      demoMode: false,
+/home/z/my-project/src/app/api/github/[id]/branches/route.ts:88:      { error: message, branches: [], demoMode: true },
+/home/z/my-project/tool-results/read_1781675797529_96a1839dc71c.txt:1209:  1209→- Created src/lib/dynadot.ts - Dynadot API client (api3.json endpoint); searchDomains/registerDomain/getDomainInfo/setDnsRecords/renewDomain/transferDomain; real HTTP calls when DYNADOT_API_KEY set, simulated otherwise with clear DEMO MODE logging
+/home/z/my-project/tool-results/read_1781675797529_96a1839dc71c.txt:1217:  1217→- Verified every external API integration has DEMO MODE fallback when env vars are missing, with clear console warnings
+/home/z/my-project/tool-results/read_1781675797529_96a1839dc71c.txt:1223:  1223→- Pattern: every integration checks for required env vars at call time and falls back to clearly-marked demo-mode behaviour (with console.log statements so users can see what would have happened)
+/home/z/my-project/tool-results/read_1781675797529_96a1839dc71c.txt:1310:  1310→- Read existing email service at src/lib/email.ts (Wave 1) - exposes sendEmail, sendWelcomeEmail, sendPasswordResetEmail, sendTeamInvitationEmail, sendDeploymentEmail with graceful demo-mode fallback when SMTP env vars are not configured.
+/home/z/my-project/tool-results/read_1781675797529_96a1839dc71c.txt:1435:  1435→- Read existing files: src/lib/dynadot.ts (Dynadot client with demo-mode fallback), src/lib/dns.ts (real Node.js dns lookups + propagation checker), prisma/schema.prisma (Domain + DomainVerification models), src/app/api/domains/register/route.ts, src/app/api/domains/search/route.ts, src/app/api/domains/[id]/route.ts, src/app/api/domains/[id]/dns/route.ts, src/app/api/domains/[id]/dns/[recordId]/route.ts, src/app/api/domains/route.ts, and the first ~2000 lines of src/components/domains/domains-panel.tsx.
+/home/z/my-project/tool-results/read_1781675797529_96a1839dc71c.txt:1437:  1437→  * Imported searchDomains + isDynadotDemoMode from @/lib/dynadot.
+/home/z/my-project/tool-results/read_1781675797529_96a1839dc71c.txt:1443:  1443→  * Imported registerDomain (as dynadotRegister) + isDynadotDemoMode from @/lib/dynadot and crypto for verification codes.
+/home/z/my-project/tool-results/read_1781675797529_96a1839dc71c.txt:1458:  1458→  * POST: admin-or-owner only. Verifies domain.provider==="dynadot" (otherwise 400). Calls getDomainInfo(domain.name) from @/lib/dynadot (real or demo-mode data). Maps Dynadot status to our internal vocabulary (active/expired/transferring/pending). Updates Domain.status, expiresAt, and nameservers (JSON-encoded). Returns { synced, demo, domain, dynadotInfo }. Audit-logs the sync.
+/home/z/my-project/tool-results/read_1781675797529_96a1839dc71c.txt:1475:  1475→  * POST /api/domains/search returns 200 with Dynadot demo-mode results.
+/home/z/my-project/tool-results/read_1781675797529_96a1839dc71c.txt:1479:  1479→  * Dynadot integration gracefully runs in DEMO MODE because DYNADOT_API_KEY is not set in this environment; the code is wired so that simply setting DYNADOT_API_KEY will flip everything to live registrar calls with no further code changes.
+/home/z/my-project/tool-results/read_1781675797529_96a1839dc71c.txt:1550:  1550→- Rewrote /api/billing/webhook to call constructWebhookEvent() for signature verification (logs a DEMO MODE warning if STRIPE_WEBHOOK_SECRET isn't set). Handles 5 Stripe event types: checkout.session.completed, customer.subscription.updated, customer.subscription.deleted, invoice.payment_succeeded, invoice.payment_failed — each updates Payment/Subscription records and creates user notifications. Maintains backward compatibility with the legacy demo webhook payload shape
+/home/z/my-project/tool-results/read_1781675797529_96a1839dc71c.txt:1555:  1555→- Updated billing-panel.tsx: handlePurchase now branches — if result.demo === false && result.url it redirects window.location.href to Stripe Checkout, otherwise shows the in-app success dialog (existing demo-mode behavior preserved). Added "Manage Subscription" button (calls /api/billing/portal). Added "Cancel Subscription" button (DELETEs /api/billing/subscription). Redesigned Current Plan card to show status badges (active/past_due/pending/cancelling), a Stripe badge, and "Cancels on" vs "Renews" date. Added a "Transaction ID" column to the payment history table. Extended PaymentStatusBadge to handle past_due and cancelled statuses. Added new icons: Settings2, Ban, ShieldCheck
+/home/z/my-project/tool-results/read_1781675797529_96a1839dc71c.txt:1561:  1561→- Real Stripe payment integration is fully implemented with graceful demo-mode fallback. All billing operations work in both modes:
+/home/z/my-project/src/app/api/github/[id]/commits/route.ts:23: *            demoMode }
+/home/z/my-project/src/app/api/github/[id]/commits/route.ts:54:    const demoMode = isGithubDemoMode()
+/home/z/my-project/src/app/api/github/[id]/commits/route.ts:66:    if (!demoMode && hasRealToken && repoFullName) {
+/home/z/my-project/src/app/api/github/[id]/commits/route.ts:86:        return NextResponse.json({ commits, demoMode: false })
+/home/z/my-project/src/app/api/github/[id]/commits/route.ts:116:    return NextResponse.json({ commits, demoMode: true })
+/home/z/my-project/src/app/api/github/[id]/repos/route.ts:20: *            demoMode }
+/home/z/my-project/src/app/api/github/[id]/repos/route.ts:50:    const demoMode = isGithubDemoMode()
+/home/z/my-project/src/app/api/github/[id]/repos/route.ts:56:    if (!demoMode && hasRealToken) {
+/home/z/my-project/src/app/api/github/[id]/repos/route.ts:75:        return NextResponse.json({ repos, demoMode: false })
+/home/z/my-project/src/app/api/github/[id]/repos/route.ts:107:    return NextResponse.json({ repos, demoMode: true })
+/home/z/my-project/src/app/api/github/me/route.ts:10: * (projectId=null) along with the current demo-mode flag. The frontend
+/home/z/my-project/src/app/api/github/me/route.ts:19: *     demoMode: boolean
+/home/z/my-project/src/app/api/github/me/route.ts:34:    const demoMode = isGithubDemoMode()
+/home/z/my-project/src/app/api/github/me/route.ts:35:    const oauthEnabled = !demoMode
+/home/z/my-project/src/app/api/github/me/route.ts:65:      demoMode,
+/home/z/my-project/src/app/api/github/oauth/start/route.ts:68:        demoMode: true,
+/home/z/my-project/src/app/api/github/oauth/start/route.ts:84:    return NextResponse.json({ url, demoMode: false })
+/home/z/my-project/tool-results/read_1782275933677_3bba565c81a0.txt:20:    20→ * When DYNADOT_API_KEY is not set, the service runs in DEMO MODE and returns
+/home/z/my-project/tool-results/read_1782275933677_3bba565c81a0.txt:31:    31→import { isDynadotDemoMode } from './dynadot'
+/home/z/my-project/tool-results/read_1782275933677_3bba565c81a0.txt:173:   173→  get demoMode(): boolean {
+/home/z/my-project/tool-results/read_1782275933677_3bba565c81a0.txt:294:   294→    if (this.demoMode) {
+/home/z/my-project/tool-results/read_1782275933677_3bba565c81a0.txt:391:   391→    if (this.demoMode) {
+/home/z/my-project/tool-results/read_1782275933677_3bba565c81a0.txt:424:   424→    if (this.demoMode) {
+/home/z/my-project/tool-results/read_1782275933677_3bba565c81a0.txt:455:   455→    if (this.demoMode) {
+/home/z/my-project/tool-results/read_1782275933677_3bba565c81a0.txt:480:   480→    if (this.demoMode) {
+/home/z/my-project/tool-results/read_1782275933677_3bba565c81a0.txt:544:   544→    if (this.demoMode) {
+/home/z/my-project/tool-results/read_1782275933677_3bba565c81a0.txt:568:   568→    if (this.demoMode) {
+/home/z/my-project/tool-results/read_1782275933677_3bba565c81a0.txt:577:   577→    if (this.demoMode) {
+/home/z/my-project/tool-results/read_1782275933677_3bba565c81a0.txt:588:   588→    if (this.demoMode) {
+/home/z/my-project/tool-results/read_1782275933677_3bba565c81a0.txt:597:   597→    if (this.demoMode) {
+/home/z/my-project/tool-results/read_1782275933677_3bba565c81a0.txt:608:   608→    if (this.demoMode) {
+/home/z/my-project/tool-results/read_1782275933677_3bba565c81a0.txt:625:   625→    if (this.demoMode) {
+/home/z/my-project/tool-results/read_1782275933677_3bba565c81a0.txt:640:   640→    if (this.demoMode) {
+/home/z/my-project/tool-results/read_1782275933677_3bba565c81a0.txt:664:   664→    if (this.demoMode) {
+/home/z/my-project/tool-results/read_1782275933677_3bba565c81a0.txt:680:   680→    if (this.demoMode) {
+/home/z/my-project/tool-results/read_1782275933677_3bba565c81a0.txt:689:   689→    if (this.demoMode) {
+/home/z/my-project/tool-results/read_1782275933677_3bba565c81a0.txt:710:   710→export { isDynadotDemoMode }
+/home/z/my-project/src/app/api/github/connect/route.ts:92:    const demoMode = isGithubDemoMode()
+/home/z/my-project/src/app/api/github/connect/route.ts:98:    if (!demoMode) {
+/home/z/my-project/src/app/api/github/connect/route.ts:151:        demoMode,
+/home/z/my-project/src/app/api/billing/webhook/route.ts:39:        '[stripe-webhook] DEMO MODE: accepting webhook without signature verification'
+/home/z/my-project/src/app/api/billing/subscription/route.ts:157:    const demoMode = isStripeDemoMode()
+/home/z/my-project/src/app/api/billing/subscription/route.ts:184:    if (!demoMode) {
+/home/z/my-project/src/app/api/billing/subscription/route.ts:221:        status: demoMode ? 'active' : 'active',
+/home/z/my-project/src/app/api/billing/subscription/route.ts:247:        status: demoMode ? 'completed' : 'pending',
+/home/z/my-project/src/app/api/billing/subscription/route.ts:249:        stripePaymentId: demoMode ? `pay_demo_${Date.now()}` : null,
+/home/z/my-project/src/app/api/billing/subscription/route.ts:250:        stripeInvoiceId: demoMode ? `in_demo_${Date.now()}` : null,
+/home/z/my-project/src/app/api/billing/subscription/route.ts:257:          demoMode,
+/home/z/my-project/src/app/api/billing/subscription/route.ts:265:      message: demoMode
+/home/z/my-project/src/app/api/billing/subscription/route.ts:288:        demoMode,
+
+[Showing results with pagination = limit: 250]

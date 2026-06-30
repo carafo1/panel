@@ -4104,3 +4104,39 @@ Stage Summary:
 - Delete action now requires confirmation (was instant before)
 
 Files modified: 2 (api/admin/domains/route.ts, components/domains/domains-panel.tsx)
+
+---
+Task ID: real-domains-1
+Agent: Main Agent
+Task: Remove all simulation/mockup from admin domains list and make it show REAL Dynadot API results. User: "It is mockup you did, it is fake still you don't read dynadot api for real there is one domain. please remove simulation, hardcode, and make real api result"
+
+Work Log:
+- Investigated: admin domains API (/api/admin/domains) only read from local DB. DB contained 8 FAKE domains (externalId=demo-order-*, registrar=openprovider, provider=apsamo-demo) created during earlier demo-mode testing.
+- Tested real Dynadot `list_domain` API directly: `curl "https://api.dynadot.com/api3.json?key=...&command=list_domain"` → returns `{"ListDomainInfoResponse":{"ResponseCode":0,"Status":"success","MainDomains":[]}}` (0 real domains in the account).
+- Rewrote /home/z/my-project/src/lib/dynadot.ts:
+  * Added `listDomains()` function — REAL call to Dynadot `list_domain` API, returns {main, deleted} with name, status, expiresAt, registeredAt, autoRenew, locked, premium, whoisPrivacy.
+  * REMOVED all demo-mode/simulation branches from searchDomains, registerDomain, getDomainInfo, setDnsRecords, renewDomain, transferDomain. Every function now makes a REAL API call and throws if DYNADOT_API_KEY is missing.
+  * Kept `isDynadotDemoMode()` exported (returns !key) for backward compat with callers that surface UI warnings — but it no longer triggers any simulation.
+- Rewrote /home/z/my-project/src/app/api/admin/domains/route.ts:
+  * Now calls `listDomains()` from Dynadot on every GET (sync=true by default).
+  * PURGES fake domains (externalId startsWith demo-order-, registrar=openprovider, or provider=apsamo-demo) that are not in the real Dynadot list.
+  * UPSERTS every real Dynadot domain (main + deleted) into the DB with real status/expiry/autoRenew/locked/premium/whoisPrivacy.
+  * Returns a `sync` object: {synced, purged, error?, source:"dynadot_api"}.
+  * Falls back to cached DB data if the Dynadot API call fails, with sync.error set.
+- Cleaned DB: deleted all 8 fake domains + their child rows (dnsRecords, domainLogs, domainOrders, invoices, renewals, contacts, nameserverEntries, emailMailboxes, automationLogs). DB now has 0 domains — matches Dynadot's real 0.
+- Updated AdminTab UI in /home/z/my-project/src/components/domains/domains-panel.tsx:
+  * Added `sync` state + SyncInfo interface.
+  * Added sync-status banner (emerald when live, amber on error) showing "Live from Dynadot API · N domains synced · M fake records purged".
+  * Updated card description: "Live from Dynadot list_domain API" (was "Real domain records from the database").
+  * Updated Total Domains card subtitle: "in Dynadot account" (was "across all users").
+  * Updated empty state: "No domains in your Dynadot account" with helpful explanation + "Sync from Dynadot" button.
+  * Refresh button now acts as the "Sync from Dynadot" trigger (with sr-only label).
+- Lint: passes clean (eslint . → no errors).
+- Verified end-to-end via HTTP: login → GET /api/admin/domains → 200, message="Retrieved 0 domains (synced 0, purged 0)", breakdown all zeros, sync.source="dynadot_api".
+
+Stage Summary:
+- All simulation/mockup/demo-mode removed from the Dynadot client core (dynadot.ts).
+- Admin "All Domains" list now reads REAL data from Dynadot's `list_domain` API on every load.
+- The 8 fake demo domains have been purged from the DB.
+- The Dynadot account currently has 0 registered domains (verified via real API). The admin list now truthfully shows 0 domains with a clear "No domains in your Dynadot account" message and a live sync banner confirming the real API was contacted.
+- Note: user mentioned "there is one domain hosting now" — the Dynadot `list_domain` API returns MainDomains:[] (zero). If the user registered a domain through Dynadot's own dashboard under a different account, it will not appear here. The list now shows exactly what the configured API key's account contains.

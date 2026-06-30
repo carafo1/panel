@@ -1,0 +1,2002 @@
+     1→'use client'
+     2→
+     3→import { useState, useEffect, useCallback } from 'react'
+     4→import { toast } from 'sonner'
+     5→import { apiFetch, useAuthStore } from '@/store/auth-store'
+     6→import {
+     7→  Search, Globe, Plus, Trash2, RefreshCw, Shield, Clock, CheckCircle2,
+     8→  XCircle, Tag, Lock, Unlock, Copy, Loader2, AlertTriangle, ArrowLeft,
+     9→  FileText, Database, Server, Mail, KeyRound, Power, Send, Eye, EyeOff,
+    10→  ShieldCheck, ShieldOff, Sparkles, Download, ShoppingBag, Wallet,
+    11→  TrendingUp, Calendar, ExternalLink, ChevronRight, Zap, BadgeDollarSign,
+    12→} from 'lucide-react'
+    13→import {
+    14→  Card, CardContent, CardDescription, CardHeader, CardTitle,
+    15→} from '@/components/ui/card'
+    16→import { Button } from '@/components/ui/button'
+    17→import { Input } from '@/components/ui/input'
+    18→import { Label } from '@/components/ui/label'
+    19→import { Badge } from '@/components/ui/badge'
+    20→import { Skeleton } from '@/components/ui/skeleton'
+    21→import { Separator } from '@/components/ui/separator'
+    22→import {
+    23→  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+    24→} from '@/components/ui/dialog'
+    25→import {
+    26→  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+    27→} from '@/components/ui/select'
+    28→import {
+    29→  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+    30→} from '@/components/ui/table'
+    31→import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+    32→import { Switch } from '@/components/ui/switch'
+    33→import { Textarea } from '@/components/ui/textarea'
+    34→import {
+    35→  Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
+    36→} from '@/components/ui/tooltip'
+    37→import {
+    38→  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+    39→  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+    40→} from '@/components/ui/alert-dialog'
+    41→
+    42→// ─── Types ────────────────────────────────────────────────────────────────────
+    43→
+    44→interface SearchResult {
+    45→  domain: string
+    46→  available: boolean
+    47→  premium: boolean
+    48→  registrationPrice: number | null
+    49→  renewalPrice: number | null
+    50→  transferPrice: number | null
+    51→  currency: string
+    52→  suggestions?: Array<{ domain: string; available: boolean; premium: boolean; registrationPrice: number }>
+    53→}
+    54→
+    55→interface Domain {
+    56→  id: string
+    57→  name: string
+    58→  status: string
+    59→  registrar: string
+    60→  provider: string
+    61→  registeredAt?: string
+    62→  expiresAt?: string
+    63→  autoRenew: boolean
+    64→  whoisPrivacy: boolean
+    65→  locked: boolean
+    66→  premium: boolean
+    67→  nameservers?: string | null
+    68→  dnsRecords?: DnsRecord[]
+    69→  projectId?: string | null
+    70→}
+    71→
+    72→interface DnsRecord {
+    73→  id?: string
+    74→  type: string
+    75→  name: string
+    76→  value: string
+    77→  ttl: number
+    78→  priority?: number | null
+    79→  proxied?: boolean
+    80→}
+    81→
+    82→interface TldPrice {
+    83→  tld: string
+    84→  wholesale: number
+    85→  markup: number
+    86→  registration: number
+    87→  renewal: number
+    88→  transfer: number
+    89→  currency: string
+    90→  active: boolean
+    91→}
+    92→
+    93→interface Invoice {
+    94→  id: string
+    95→  number: string
+    96→  domainName?: string | null
+    97→  total: number
+    98→  currency: string
+    99→  status: string
+   100→  paidAt?: string
+   101→  createdAt: string
+   102→  items?: Array<{ description: string; quantity: number; unitPrice: number; total: number }>
+   103→}
+   104→
+   105→interface DomainLog {
+   106→  id: string
+   107→  action: string
+   108→  status: string
+   109→  message: string
+   110→  createdAt: string
+   111→}
+   112→
+   113→type Tab = 'search' | 'domains' | 'invoices' | 'pricing' | 'admin'
+   114→
+   115→// ─── Helpers ──────────────────────────────────────────────────────────────────
+   116→
+   117→function statusColor(status: string): string {
+   118→  switch (status) {
+   119→    case 'active': return 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border-indigo-500/30'
+   120→    case 'pending': case 'pending_verification': return 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30'
+   121→    case 'transferring': return 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border-indigo-500/30'
+   122→    case 'expired': case 'suspended': case 'deleted': return 'bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/30'
+   123→    default: return 'bg-gray-500/15 text-gray-600 dark:text-gray-400 border-gray-500/30'
+   124→  }
+   125→}
+   126→
+   127→function daysUntil(dateStr?: string): number | null {
+   128→  if (!dateStr) return null
+   129→  const diff = new Date(dateStr).getTime() - Date.now()
+   130→  return Math.ceil(diff / (24 * 60 * 60 * 1000))
+   131→}
+   132→
+   133→// ─── Main Panel ───────────────────────────────────────────────────────────────
+   134→
+   135→export default function DomainsPanel() {
+   136→  const [tab, setTab] = useState<Tab>('search')
+   137→  const [selectedDomainId, setSelectedDomainId] = useState<string | null>(null)
+   138→  const [transferOpen, setTransferOpen] = useState(false)
+   139→  const [globalMarkup, setGlobalMarkup] = useState<number | null>(null)
+   140→  const { user } = useAuthStore()
+   141→  const isAdmin = user?.role === 'admin' || user?.role === 'super_admin'
+   142→
+   143→  // Fetch the current global markup once on mount so the badge can show it.
+   144→  useEffect(() => {
+   145→    apiFetch('/pricing/markup')
+   146→      .then((data) => setGlobalMarkup(typeof data.data?.markup === 'number' ? data.data.markup : null))
+   147→      .catch(() => setGlobalMarkup(null))
+   148→  }, [])
+   149→
+   150→  if (selectedDomainId) {
+   151→    return (
+   152→      <DomainDetail
+   153→        domainId={selectedDomainId}
+   154→        onBack={() => setSelectedDomainId(null)}
+   155→        isAdmin={isAdmin}
+   156→      />
+   157→    )
+   158→  }
+   159→
+   160→  return (
+   161→    <div className="space-y-6">
+   162→      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+   163→        <div>
+   164→          <h2 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+   165→            <Globe className="h-6 w-6 text-indigo-500" />
+   166→            Domain Reseller
+   167→          </h2>
+   168→          <p className="text-sm text-muted-foreground mt-1">
+   169→            Search, register, renew, transfer &amp; manage domains via Apsamo
+   170→          </p>
+   171→        </div>
+   172→        <div className="flex items-center gap-2">
+   173→          <Badge variant="outline" className="w-fit" title="Editable in the Pricing tab">
+   174→            <Sparkles className="h-3 w-3 mr-1 text-amber-500" />
+   175→            {globalMarkup !== null
+   176→              ? `$${globalMarkup.toFixed(2)} markup applied`
+   177→              : 'markup loading…'}
+   178→          </Badge>
+   179→          <Button variant="outline" size="sm" onClick={() => setTransferOpen(true)}>
+   180→            <Send className="h-4 w-4 mr-1.5" />
+   181→            Transfer Domain
+   182→          </Button>
+   183→        </div>
+   184→      </div>
+   185→
+   186→      {transferOpen && (
+   187→        <TransferDomainDialog
+   188→          onClose={() => setTransferOpen(false)}
+   189→          onTransferred={() => setTab('domains')}
+   190→        />
+   191→      )}
+   192→
+   193→      <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
+   194→        <TabsList className="grid w-full grid-cols-2 sm:grid-cols-5 h-auto">
+   195→          <TabsTrigger value="search" className="flex items-center gap-1.5">
+   196→            <Search className="h-4 w-4" /> Search
+   197→          </TabsTrigger>
+   198→          <TabsTrigger value="domains" className="flex items-center gap-1.5">
+   199→            <Globe className="h-4 w-4" /> My Domains
+   200→          </TabsTrigger>
+   201→          <TabsTrigger value="invoices" className="flex items-center gap-1.5">
+   202→            <FileText className="h-4 w-4" /> Invoices
+   203→          </TabsTrigger>
+   204→          <TabsTrigger value="pricing" className="flex items-center gap-1.5">
+   205→            <BadgeDollarSign className="h-4 w-4" /> Pricing
+   206→          </TabsTrigger>
+   207→          {isAdmin && (
+   208→            <TabsTrigger value="admin" className="flex items-center gap-1.5">
+   209→              <Shield className="h-4 w-4" /> Admin
+   210→            </TabsTrigger>
+   211→          )}
+   212→        </TabsList>
+   213→
+   214→        <TabsContent value="search" className="mt-6">
+   215→          <SearchTab onRegistered={() => setTab('domains')} />
+   216→        </TabsContent>
+   217→        <TabsContent value="domains" className="mt-6">
+   218→          <DomainsListTab onSelect={setSelectedDomainId} />
+   219→        </TabsContent>
+   220→        <TabsContent value="invoices" className="mt-6">
+   221→          <InvoicesTab />
+   222→        </TabsContent>
+   223→        <TabsContent value="pricing" className="mt-6">
+   224→          <PricingTab
+   225→            isAdmin={isAdmin}
+   226→            globalMarkup={globalMarkup}
+   227→            onMarkupChanged={(m) => setGlobalMarkup(m)}
+   228→          />
+   229→        </TabsContent>
+   230→        {isAdmin && (
+   231→          <TabsContent value="admin" className="mt-6">
+   232→            <AdminTab onSelect={setSelectedDomainId} />
+   233→          </TabsContent>
+   234→        )}
+   235→      </Tabs>
+   236→    </div>
+   237→  )
+   238→}
+   239→
+   240→// ─── Search Tab ───────────────────────────────────────────────────────────────
+   241→
+   242→function SearchTab({ onRegistered }: { onRegistered: () => void }) {
+   243→  const [query, setQuery] = useState('')
+   244→  const [loading, setLoading] = useState(false)
+   245→  const [result, setResult] = useState<SearchResult | null>(null)
+   246→  const [bulkMode, setBulkMode] = useState(false)
+   247→  const [bulkQuery, setBulkQuery] = useState('')
+   248→  const [bulkResults, setBulkResults] = useState<SearchResult[]>([])
+   249→  const [registering, setRegistering] = useState<string | null>(null)
+   250→  const [registerDialog, setRegisterDialog] = useState<{ domain: string; price: number } | null>(null)
+   251→
+   252→  const handleSearch = useCallback(async () => {
+   253→    if (!query.trim()) return
+   254→    setLoading(true)
+   255→    setResult(null)
+   256→    try {
+   257→      const data = await apiFetch(`/domains/search?domain=${encodeURIComponent(query.trim())}`)
+   258→      setResult(data.data)
+   259→    } catch (err) {
+   260→      toast.error('Search failed', { description: (err as Error).message })
+   261→    } finally {
+   262→      setLoading(false)
+   263→    }
+   264→  }, [query])
+   265→
+   266→  const handleBulkSearch = useCallback(async () => {
+   267→    const domains = bulkQuery.split('\n').map((d) => d.trim()).filter(Boolean)
+   268→    if (domains.length === 0) return
+   269→    setLoading(true)
+   270→    try {
+   271→      const data = await apiFetch('/domains/search', {
+   272→        method: 'POST',
+   273→        body: JSON.stringify({ domains }),
+   274→      })
+   275→      setBulkResults(data.data || [])
+   276→    } catch (err) {
+   277→      toast.error('Bulk search failed', { description: (err as Error).message })
+   278→    } finally {
+   279→      setLoading(false)
+   280→    }
+   281→  }, [bulkQuery])
+   282→
+   283→  const handleRegister = async (domain: string, duration: number) => {
+   284→    setRegistering(domain)
+   285→    try {
+   286→      await apiFetch('/domains/register', {
+   287→        method: 'POST',
+   288→        body: JSON.stringify({ name: domain, duration, provider: 'dynadot' }),
+   289→      })
+   290→      toast.success('Domain registered!', {
+   291→        description: `${domain} is now active. Invoice generated.`,
+   292→      })
+   293→      setRegisterDialog(null)
+   294→      onRegistered()
+   295→    } catch (err) {
+   296→      toast.error('Registration failed', { description: (err as Error).message })
+   297→    } finally {
+   298→      setRegistering(null)
+   299→    }
+   300→  }
+   301→
+   302→  return (
+   303→    <div className="space-y-6">
+   304→      <Card>
+   305→        <CardHeader>
+   306→          <div className="flex items-center justify-between">
+   307→            <div>
+   308→              <CardTitle className="flex items-center gap-2">
+   309→                <Search className="h-5 w-5 text-indigo-500" />
+   310→                Domain Search
+   311→              </CardTitle>
+   312→              <CardDescription>Instant availability with registration, renewal &amp; transfer pricing</CardDescription>
+   313→            </div>
+   314→            <Button
+   315→              variant={bulkMode ? 'default' : 'outline'}
+   316→              size="sm"
+   317→              onClick={() => { setBulkMode(!bulkMode); setResult(null); setBulkResults([]) }}
+   318→            >
+   319→              {bulkMode ? 'Single Search' : 'Bulk Search'}
+   320→            </Button>
+   321→          </div>
+   322→        </CardHeader>
+   323→        <CardContent className="space-y-4">
+   324→          {!bulkMode ? (
+   325→            <>
+   326→              <div className="flex gap-2">
+   327→                <Input
+   328→                  placeholder="example.com"
+   329→                  value={query}
+   330→                  onChange={(e) => setQuery(e.target.value)}
+   331→                  onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+   332→                  className="text-base"
+   333→                />
+   334→                <Button onClick={handleSearch} disabled={loading || !query.trim()}>
+   335→                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+   336→                  Search
+   337→                </Button>
+   338→              </div>
+   339→
+   340→              {loading && <SearchSkeleton />}
+   341→
+   342→              {result && (
+   343→                <SearchResultCard
+   344→                  result={result}
+   345→                  onRegister={(domain, price) => setRegisterDialog({ domain, price })}
+   346→                  registering={registering}
+   347→                />
+   348→              )}
+   349→            </>
+   350→          ) : (
+   351→            <>
+   352→              <div className="space-y-2">
+   353→                <Label>Enter one domain per line (max 50)</Label>
+   354→                <Textarea
+   355→                  placeholder={'example.com\nmybrand.net\nawesome.io'}
+   356→                  value={bulkQuery}
+   357→                  onChange={(e) => setBulkQuery(e.target.value)}
+   358→                  rows={6}
+   359→                  className="font-mono text-sm"
+   360→                />
+   361→                <Button onClick={handleBulkSearch} disabled={loading || !bulkQuery.trim()}>
+   362→                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+   363→                  Search {bulkQuery.split('\n').filter(Boolean).length} Domains
+   364→                </Button>
+   365→              </div>
+   366→
+   367→              {bulkResults.length > 0 && (
+   368→                <div className="rounded-md border">
+   369→                  <Table>
+   370→                    <TableHeader>
+   371→                      <TableRow>
+   372→                        <TableHead>Domain</TableHead>
+   373→                        <TableHead>Status</TableHead>
+   374→                        <TableHead className="text-right">Register</TableHead>
+   375→                        <TableHead className="text-right">Renew</TableHead>
+   376→                        <TableHead className="text-right">Transfer</TableHead>
+   377→                        <TableHead></TableHead>
+   378→                      </TableRow>
+   379→                    </TableHeader>
+   380→                    <TableBody>
+   381→                      {bulkResults.map((r) => (
+   382→                        <TableRow key={r.domain}>
+   383→                          <TableCell className="font-medium flex items-center gap-2">
+   384→                            {r.premium && <Sparkles className="h-3 w-3 text-amber-500" />}
+   385→                            {r.domain}
+   386→                          </TableCell>
+   387→                          <TableCell>
+   388→                            {r.available ? (
+   389→                              <Badge className="bg-indigo-500/15 text-indigo-600 border-indigo-500/30">Available</Badge>
+   390→                            ) : (
+   391→                              <Badge variant="secondary">Taken</Badge>
+   392→                            )}
+   393→                          </TableCell>
+   394→                          <TableCell className="text-right font-mono">
+   395→                            {r.registrationPrice ? `$${r.registrationPrice}` : '—'}
+   396→                          </TableCell>
+   397→                          <TableCell className="text-right font-mono">
+   398→                            {r.renewalPrice ? `$${r.renewalPrice}` : '—'}
+   399→                          </TableCell>
+   400→                          <TableCell className="text-right font-mono">
+   401→                            {r.transferPrice ? `$${r.transferPrice}` : '—'}
+   402→                          </TableCell>
+   403→                          <TableCell>
+   404→                            {r.available && r.registrationPrice && (
+   405→                              <Button
+   406→                                size="sm"
+   407→                                variant="outline"
+   408→                                onClick={() => setRegisterDialog({ domain: r.domain, price: r.registrationPrice! })}
+   409→                              >
+   410→                                <ShoppingBag className="h-3 w-3 mr-1" /> Buy
+   411→                              </Button>
+   412→                            )}
+   413→                          </TableCell>
+   414→                        </TableRow>
+   415→                      ))}
+   416→                    </TableBody>
+   417→                  </Table>
+   418→                </div>
+   419→              )}
+   420→            </>
+   421→          )}
+   422→        </CardContent>
+   423→      </Card>
+   424→
+   425→      {registerDialog && (
+   426→        <RegisterDialog
+   427→          domain={registerDialog.domain}
+   428→          price={registerDialog.price}
+   429→          loading={registering === registerDialog.domain}
+   430→          onClose={() => setRegisterDialog(null)}
+   431→          onConfirm={(duration) => handleRegister(registerDialog.domain, duration)}
+   432→        />
+   433→      )}
+   434→    </div>
+   435→  )
+   436→}
+   437→
+   438→function SearchSkeleton() {
+   439→  return (
+   440→    <div className="space-y-3">
+   441→      <Skeleton className="h-24 w-full" />
+   442→      <Skeleton className="h-32 w-full" />
+   443→    </div>
+   444→  )
+   445→}
+   446→
+   447→function SearchResultCard({
+   448→  result, onRegister, registering,
+   449→}: {
+   450→  result: SearchResult
+   451→  onRegister: (domain: string, price: number) => void
+   452→  registering: string | null
+   453→}) {
+   454→  const copy = (text: string) => {
+   455→    navigator.clipboard.writeText(text)
+   456→    toast.success('Copied to clipboard')
+   457→  }
+   458→
+   459→  return (
+   460→    <div className="space-y-4">
+   461→      <div className={`rounded-lg border p-4 ${result.available ? 'border-indigo-500/30 bg-indigo-500/5' : 'border-red-500/30 bg-red-500/5'}`}>
+   462→        <div className="flex items-start justify-between">
+   463→          <div className="space-y-1">
+   464→            <div className="flex items-center gap-2">
+   465→              <h3 className="text-xl font-bold">{result.domain}</h3>
+   466→              {result.premium && (
+   467→                <Badge className="bg-amber-500/15 text-amber-600 border-amber-500/30">
+   468→                  <Sparkles className="h-3 w-3 mr-1" /> Premium
+   469→                </Badge>
+   470→              )}
+   471→            </div>
+   472→            {result.available ? (
+   473→              <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400">
+   474→                <CheckCircle2 className="h-4 w-4" />
+   475→                <span className="text-sm font-medium">Available</span>
+   476→                <Badge variant="outline" className="ml-2">{result.provider}</Badge>
+   477→              </div>
+   478→            ) : (
+   479→              <div className="flex items-center gap-2 text-red-600 dark:text-red-400">
+   480→                <XCircle className="h-4 w-4" />
+   481→                <span className="text-sm font-medium">Not Available</span>
+   482→              </div>
+   483→            )}
+   484→          </div>
+   485→          {result.available && result.registrationPrice && (
+   486→            <div className="text-right">
+   487→              <div className="text-2xl font-bold text-indigo-600 dark:text-indigo-400">
+   488→                ${result.registrationPrice}
+   489→              </div>
+   490→              <div className="text-xs text-muted-foreground">/year</div>
+   491→            </div>
+   492→          )}
+   493→        </div>
+   494→
+   495→        {result.available && (
+   496→          <div className="grid grid-cols-3 gap-3 mt-4">
+   497→            <div className="rounded-md bg-background/60 p-2 text-center">
+   498→              <div className="text-xs text-muted-foreground">Register</div>
+   499→              <div className="font-semibold">${result.registrationPrice}</div>
+   500→            </div>
+   501→            <div className="rounded-md bg-background/60 p-2 text-center">
+   502→              <div className="text-xs text-muted-foreground">Renew</div>
+   503→              <div className="font-semibold">${result.renewalPrice}</div>
+   504→            </div>
+   505→            <div className="rounded-md bg-background/60 p-2 text-center">
+   506→              <div className="text-xs text-muted-foreground">Transfer</div>
+   507→              <div className="font-semibold">${result.transferPrice}</div>
+   508→            </div>
+   509→          </div>
+   510→        )}
+   511→
+   512→        {result.available && result.registrationPrice && (
+   513→          <div className="flex gap-2 mt-4">
+   514→            <Button
+   515→              onClick={() => onRegister(result.domain, result.registrationPrice!)}
+   516→              disabled={registering === result.domain}
+   517→              className="flex-1"
+   518→            >
+   519→              {registering === result.domain ? (
+   520→                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+   521→              ) : (
+   522→                <ShoppingBag className="h-4 w-4 mr-2" />
+   523→              )}
+   524→              Register Now
+   525→            </Button>
+   526→            <Button variant="outline" size="icon" onClick={() => copy(result.domain)}>
+   527→              <Copy className="h-4 w-4" />
+   528→            </Button>
+   529→          </div>
+   530→        )}
+   531→      </div>
+   532→
+   533→      {result.suggestions && result.suggestions.length > 0 && (
+   534→        <Card>
+   535→          <CardHeader>
+   536→            <CardTitle className="text-base flex items-center gap-2">
+   537→              <Sparkles className="h-4 w-4 text-amber-500" />
+   538→              Alternative TLDs
+   539→            </CardTitle>
+   540→          </CardHeader>
+   541→          <CardContent>
+   542→            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+   543→              {result.suggestions.map((s) => (
+   544→                <div
+   545→                  key={s.domain}
+   546→                  className="flex items-center justify-between rounded-md border p-2 hover:bg-accent/50 transition-colors"
+   547→                >
+   548→                  <div className="flex items-center gap-2">
+   549→                    {s.available ? (
+   550→                      <CheckCircle2 className="h-4 w-4 text-indigo-500" />
+   551→                    ) : (
+   552→                      <XCircle className="h-4 w-4 text-muted-foreground" />
+   553→                    )}
+   554→                    <span className="font-medium text-sm">{s.domain}</span>
+   555→                    {s.premium && <Sparkles className="h-3 w-3 text-amber-500" />}
+   556→                  </div>
+   557→                  <div className="flex items-center gap-2">
+   558→                    {s.available && (
+   559→                      <span className="text-sm font-mono text-indigo-600">${s.registrationPrice}</span>
+   560→                    )}
+   561→                    {s.available && (
+   562→                      <Button
+   563→                        size="sm"
+   564→                        variant="ghost"
+   565→                        onClick={() => onRegister(s.domain, s.registrationPrice)}
+   566→                      >
+   567→                        Buy
+   568→                      </Button>
+   569→                    )}
+   570→                  </div>
+   571→                </div>
+   572→              ))}
+   573→            </div>
+   574→          </CardContent>
+   575→        </Card>
+   576→      )}
+   577→    </div>
+   578→  )
+   579→}
+   580→
+   581→function RegisterDialog({
+   582→  domain, price, loading, onClose, onConfirm,
+   583→}: {
+   584→  domain: string
+   585→  price: number
+   586→  loading: boolean
+   587→  onClose: () => void
+   588→  onConfirm: (duration: number) => void
+   589→}) {
+   590→  const [duration, setDuration] = useState(1)
+   591→  const total = (price * duration).toFixed(2)
+   592→
+   593→  return (
+   594→    <Dialog open onOpenChange={onClose}>
+   595→      <DialogContent>
+   596→        <DialogHeader>
+   597→          <DialogTitle className="flex items-center gap-2">
+   598→            <ShoppingBag className="h-5 w-5 text-indigo-500" />
+   599→            Register {domain}
+   600→          </DialogTitle>
+   601→          <DialogDescription>
+   602→            Register this domain through Apsamo. A paid invoice and activity log will be generated automatically.
+   603→          </DialogDescription>
+   604→        </DialogHeader>
+   605→        <div className="space-y-4 py-2">
+   606→          <div className="space-y-2">
+   607→            <Label>Registration Period</Label>
+   608→            <Select value={String(duration)} onValueChange={(v) => setDuration(Number(v))}>
+   609→              <SelectTrigger>
+   610→                <SelectValue />
+   611→              </SelectTrigger>
+   612→              <SelectContent>
+   613→                {[1, 2, 3, 5, 10].map((y) => (
+   614→                  <SelectItem key={y} value={String(y)}>{y} year{y > 1 ? 's' : ''}</SelectItem>
+   615→                ))}
+   616→              </SelectContent>
+   617→            </Select>
+   618→          </div>
+   619→          <div className="rounded-md bg-muted/50 p-4 space-y-2">
+   620→            <div className="flex justify-between text-sm">
+   621→              <span className="text-muted-foreground">Domain</span>
+   622→              <span className="font-medium">{domain}</span>
+   623→            </div>
+   624→            <div className="flex justify-between text-sm">
+   625→              <span className="text-muted-foreground">Price / year</span>
+   626→              <span className="font-mono">${price}</span>
+   627→            </div>
+   628→            <div className="flex justify-between text-sm">
+   629→              <span className="text-muted-foreground">Duration</span>
+   630→              <span>{duration} year{duration > 1 ? 's' : ''}</span>
+   631→            </div>
+   632→            <Separator />
+   633→            <div className="flex justify-between font-semibold">
+   634→              <span>Total</span>
+   635→              <span className="text-indigo-600">${total}</span>
+   636→            </div>
+   637→          </div>
+   638→          <div className="rounded-md border border-indigo-500/30 bg-indigo-500/5 p-3 text-xs text-muted-foreground">
+   639→            After payment, the system will: register via Apsamo → configure nameservers →
+   640→            set DNS records → save to database → create invoice → generate audit log → send confirmation email.
+   641→          </div>
+   642→        </div>
+   643→        <DialogFooter>
+   644→          <Button variant="outline" onClick={onClose} disabled={loading}>Cancel</Button>
+   645→          <Button onClick={() => onConfirm(duration)} disabled={loading}>
+   646→            {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Zap className="h-4 w-4 mr-2" />}
+   647→            Complete Purchase (${total})
+   648→          </Button>
+   649→        </DialogFooter>
+   650→      </DialogContent>
+   651→    </Dialog>
+   652→  )
+   653→}
+   654→
+   655→// ─── Transfer Domain Dialog (standalone — opens from main panel header) ───────
+   656→
+   657→function TransferDomainDialog({
+   658→  onClose,
+   659→  onTransferred,
+   660→}: {
+   661→  onClose: () => void
+   662→  onTransferred: () => void
+   663→}) {
+   664→  const [domain, setDomain] = useState('')
+   665→  const [authCode, setAuthCode] = useState('')
+   666→  const [transferring, setTransferring] = useState(false)
+   667→
+   668→  const submit = async () => {
+   669→    if (!domain.trim() || !authCode.trim()) {
+   670→      toast.error('Domain and auth code are required')
+   671→      return
+   672→    }
+   673→    setTransferring(true)
+   674→    try {
+   675→      const data = await apiFetch('/domains/transfer', {
+   676→        method: 'POST',
+   677→        body: JSON.stringify({ domain: domain.trim(), authCode: authCode.trim() }),
+   678→      })
+   679→      toast.success('Transfer initiated!', {
+   680→        description: `${data.data?.domain || domain} — invoice ${data.data?.invoiceNumber || 'created'}`,
+   681→      })
+   682→      onTransferred()
+   683→      onClose()
+   684→    } catch (err) {
+   685→      toast.error('Transfer failed', { description: (err as Error).message })
+   686→    } finally {
+   687→      setTransferring(false)
+   688→    }
+   689→  }
+   690→
+   691→  return (
+   692→    <Dialog open onOpenChange={onClose}>
+   693→      <DialogContent>
+   694→        <DialogHeader>
+   695→          <DialogTitle className="flex items-center gap-2">
+   696→            <Send className="h-5 w-5 text-indigo-500" />
+   697→            Transfer Domain
+   698→          </DialogTitle>
+   699→          <DialogDescription>
+   700→            Bring a domain from another registrar to your account. You&apos;ll need
+   701→            the EPP authorization code from your current registrar.
+   702→          </DialogDescription>
+   703→        </DialogHeader>
+   704→        <div className="space-y-4 py-2">
+   705→          <div className="space-y-2">
+   706→            <Label>Domain to transfer</Label>
+   707→            <Input
+   708→              placeholder="example.com"
+   709→              value={domain}
+   710→              onChange={(e) => setDomain(e.target.value)}
+   711→              className="font-mono"
+   712→              autoFocus
+   713→            />
+   714→          </div>
+   715→          <div className="space-y-2">
+   716→            <Label>EPP / Auth code</Label>
+   717→            <Input
+   718→              placeholder="Authorization code from current registrar"
+   719→              value={authCode}
+   720→              onChange={(e) => setAuthCode(e.target.value)}
+   721→              type="password"
+   722→              className="font-mono"
+   723→            />
+   724→          </div>
+   725→          <div className="rounded-md border border-indigo-500/30 bg-indigo-500/5 p-3 text-xs text-muted-foreground space-y-1">
+   726→            <div className="flex items-center gap-1.5 font-medium text-indigo-700 dark:text-indigo-400">
+   727→              <AlertTriangle className="h-3.5 w-3.5" />
+   728→              Before transferring
+   729→            </div>
+   730→            <ul className="list-disc list-inside space-y-0.5 ml-1">
+   731→              <li>Unlock the domain at your current registrar</li>
+   732→              <li>Disable WHOIS privacy if enabled</li>
+   733→              <li>Ensure the domain has 7+ days until expiry</li>
+   734→              <li>Transfers typically take 5–7 days to complete</li>
+   735→            </ul>
+   736→          </div>
+   737→        </div>
+   738→        <DialogFooter>
+   739→          <Button variant="outline" onClick={onClose} disabled={transferring}>
+   740→            Cancel
+   741→          </Button>
+   742→          <Button onClick={submit} disabled={transferring || !domain.trim() || !authCode.trim()}>
+   743→            {transferring ? (
+   744→              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+   745→            ) : (
+   746→              <Send className="h-4 w-4 mr-2" />
+   747→            )}
+   748→            Initiate Transfer
+   749→          </Button>
+   750→        </DialogFooter>
+   751→      </DialogContent>
+   752→    </Dialog>
+   753→  )
+   754→}
+   755→
+   756→// ─── Domains List Tab ─────────────────────────────────────────────────────────
+   757→
+   758→function DomainsListTab({ onSelect }: { onSelect: (id: string) => void }) {
+   759→  const [domains, setDomains] = useState<Domain[]>([])
+   760→  const [loading, setLoading] = useState(true)
+   761→
+   762→  const load = useCallback(async () => {
+   763→    setLoading(true)
+   764→    try {
+   765→      const data = await apiFetch('/domains')
+   766→      // Handle both array and envelope responses
+   767→      const list = Array.isArray(data) ? data : data.data || data.domains || []
+   768→      setDomains(list)
+   769→    } catch (err) {
+   770→      toast.error('Failed to load domains', { description: (err as Error).message })
+   771→    } finally {
+   772→      setLoading(false)
+   773→    }
+   774→  }, [])
+   775→
+   776→  useEffect(() => { load() }, [load])
+   777→
+   778→  if (loading) {
+   779→    return (
+   780→      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+   781→        {[1, 2, 3, 4, 5, 6].map((i) => <Skeleton key={i} className="h-40" />)}
+   782→      </div>
+   783→    )
+   784→  }
+   785→
+   786→  if (domains.length === 0) {
+   787→    return (
+   788→      <Card>
+   789→        <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+   790→          <Globe className="h-12 w-12 text-muted-foreground mb-3" />
+   791→          <h3 className="font-semibold text-lg">No domains yet</h3>
+   792→          <p className="text-sm text-muted-foreground mt-1 max-w-sm">
+   793→            Search for a domain and register it to get started. All your domains will appear here.
+   794→          </p>
+   795→        </CardContent>
+   796→      </Card>
+   797→    )
+   798→  }
+   799→
+   800→  return (
+   801→    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+   802→      {domains.map((d) => {
+   803→        const days = daysUntil(d.expiresAt)
+   804→        const expiringSoon = days !== null && days < 30 && days >= 0
+   805→        return (
+   806→          <Card
+   807→            key={d.id}
+   808→            className="cursor-pointer hover:border-indigo-500/40 hover:shadow-md transition-all"
+   809→            onClick={() => onSelect(d.id)}
+   810→          >
+   811→            <CardHeader className="pb-3">
+   812→              <div className="flex items-start justify-between">
+   813→                <div className="min-w-0 flex-1">
+   814→                  <CardTitle className="text-base truncate flex items-center gap-2">
+   815→                    <Globe className="h-4 w-4 text-indigo-500 flex-shrink-0" />
+   816→                    <span className="truncate">{d.name}</span>
+   817→                  </CardTitle>
+   818→                  <div className="flex items-center gap-2 mt-2 flex-wrap">
+   819→                    <Badge className={statusColor(d.status)} variant="outline">
+   820→                      {d.status}
+   821→                    </Badge>
+   822→                    {d.premium && (
+   823→                      <Badge className="bg-amber-500/15 text-amber-600 border-amber-500/30" variant="outline">
+   824→                        <Sparkles className="h-3 w-3 mr-1" />Premium
+   825→                      </Badge>
+   826→                    )}
+   827→                  </div>
+   828→                </div>
+   829→                <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+   830→              </div>
+   831→            </CardHeader>
+   832→            <CardContent className="space-y-2 text-sm">
+   833→              <div className="flex items-center justify-between">
+   834→                <span className="text-muted-foreground flex items-center gap-1">
+   835→                  <Calendar className="h-3 w-3" /> Expires
+   836→                </span>
+   837→                <span className={expiringSoon ? 'text-amber-600 font-medium' : ''}>
+   838→                  {d.expiresAt ? new Date(d.expiresAt).toLocaleDateString() : '—'}
+   839→                  {expiringSoon && ` (${days}d)`}
+   840→                </span>
+   841→              </div>
+   842→              <div className="flex items-center justify-between">
+   843→                <span className="text-muted-foreground flex items-center gap-1">
+   844→                  {d.locked ? <Lock className="h-3 w-3" /> : <Unlock className="h-3 w-3" />}
+   845→                  Lock
+   846→                </span>
+   847→                <span>{d.locked ? 'Locked' : 'Unlocked'}</span>
+   848→              </div>
+   849→              <div className="flex items-center justify-between">
+   850→                <span className="text-muted-foreground flex items-center gap-1">
+   851→                  <Shield className="h-3 w-3" /> Privacy
+   852→                </span>
+   853→                <span>{d.whoisPrivacy ? 'On' : 'Off'}</span>
+   854→              </div>
+   855→              <div className="flex items-center justify-between">
+   856→                <span className="text-muted-foreground flex items-center gap-1">
+   857→                  <RefreshCw className="h-3 w-3" /> Auto-renew
+   858→                </span>
+   859→                <span>{d.autoRenew ? 'On' : 'Off'}</span>
+   860→              </div>
+   861→            </CardContent>
+   862→          </Card>
+   863→        )
+   864→      })}
+   865→    </div>
+   866→  )
+   867→}
+   868→
+   869→// ─── Domain Detail ────────────────────────────────────────────────────────────
+   870→
+   871→function DomainDetail({
+   872→  domainId, onBack, isAdmin,
+   873→}: {
+   874→  domainId: string
+   875→  onBack: () => void
+   876→  isAdmin: boolean
+   877→}) {
+   878→  const [domain, setDomain] = useState<Domain | null>(null)
+   879→  const [logs, setLogs] = useState<DomainLog[]>([])
+   880→  const [loading, setLoading] = useState(true)
+   881→  const [section, setSection] = useState<'overview' | 'nameservers' | 'dns' | 'security' | 'renew' | 'logs'>('overview')
+   882→
+   883→  const load = useCallback(async () => {
+   884→    setLoading(true)
+   885→    try {
+   886→      const data = await apiFetch(`/domains/${domainId}`)
+   887→      setDomain(data.data || data.domain || data)
+   888→      try {
+   889→        const logData = await apiFetch(`/domains/${domainId}/logs`)
+   890→        setLogs(logData.data || [])
+   891→      } catch { /* logs optional */ }
+   892→    } catch (err) {
+   893→      toast.error('Failed to load domain', { description: (err as Error).message })
+   894→    } finally {
+   895→      setLoading(false)
+   896→    }
+   897→  }, [domainId])
+   898→
+   899→  useEffect(() => { load() }, [load])
+   900→
+   901→  if (loading) {
+   902→    return (
+   903→      <div className="space-y-4">
+   904→        <Skeleton className="h-10 w-32" />
+   905→        <Skeleton className="h-32 w-full" />
+   906→        <Skeleton className="h-64 w-full" />
+   907→      </div>
+   908→    )
+   909→  }
+   910→
+   911→  if (!domain) {
+   912→    return (
+   913→      <Card>
+   914→        <CardContent className="py-16 text-center">
+   915→          <AlertTriangle className="h-10 w-10 text-amber-500 mx-auto mb-3" />
+   916→          <p>Domain not found.</p>
+   917→          <Button variant="outline" onClick={onBack} className="mt-4">Back to Domains</Button>
+   918→        </CardContent>
+   919→      </Card>
+   920→    )
+   921→  }
+   922→
+   923→  const days = daysUntil(domain.expiresAt)
+   924→
+   925→  return (
+   926→    <div className="space-y-6">
+   927→      <div className="flex items-center gap-3">
+   928→        <Button variant="ghost" size="sm" onClick={onBack}>
+   929→          <ArrowLeft className="h-4 w-4 mr-1" /> Back
+   930→        </Button>
+   931→      </div>
+   932→
+   933→      <Card>
+   934→        <CardHeader>
+   935→          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+   936→            <div>
+   937→              <CardTitle className="text-2xl flex items-center gap-2">
+   938→                <Globe className="h-6 w-6 text-indigo-500" />
+   939→                {domain.name}
+   940→              </CardTitle>
+   941→              <div className="flex items-center gap-2 mt-2 flex-wrap">
+   942→                <Badge className={statusColor(domain.status)} variant="outline">{domain.status}</Badge>
+   943→                <Badge variant="outline">{domain.registrar}</Badge>
+   944→                {domain.premium && (
+   945→                  <Badge className="bg-amber-500/15 text-amber-600 border-amber-500/30" variant="outline">
+   946→                    <Sparkles className="h-3 w-3 mr-1" />Premium
+   947→                  </Badge>
+   948→                )}
+   949→              </div>
+   950→            </div>
+   951→            <div className="grid grid-cols-2 gap-2 text-sm">
+   952→              <div className="rounded-md bg-muted/50 px-3 py-2">
+   953→                <div className="text-xs text-muted-foreground">Expires</div>
+   954→                <div className="font-medium">
+   955→                  {domain.expiresAt ? new Date(domain.expiresAt).toLocaleDateString() : '—'}
+   956→                </div>
+   957→                {days !== null && (
+   958→                  <div className={`text-xs ${days < 30 ? 'text-amber-600' : 'text-muted-foreground'}`}>
+   959→                    {days > 0 ? `${days} days left` : 'Expired'}
+   960→                  </div>
+   961→                )}
+   962→              </div>
+   963→              <div className="rounded-md bg-muted/50 px-3 py-2">
+   964→                <div className="text-xs text-muted-foreground">Registered</div>
+   965→                <div className="font-medium">
+   966→                  {domain.registeredAt ? new Date(domain.registeredAt).toLocaleDateString() : '—'}
+   967→                </div>
+   968→              </div>
+   969→            </div>
+   970→          </div>
+   971→        </CardHeader>
+   972→      </Card>
+   973→
+   974→      <Tabs value={section} onValueChange={(v) => setSection(v as typeof section)}>
+   975→        <TabsList className="grid w-full grid-cols-3 sm:grid-cols-6 h-auto">
+   976→          <TabsTrigger value="overview" className="text-xs">Overview</TabsTrigger>
+   977→          <TabsTrigger value="nameservers" className="text-xs">Nameservers</TabsTrigger>
+   978→          <TabsTrigger value="dns" className="text-xs">DNS</TabsTrigger>
+   979→          <TabsTrigger value="security" className="text-xs">Security</TabsTrigger>
+   980→          <TabsTrigger value="renew" className="text-xs">Renew/Transfer</TabsTrigger>
+   981→          <TabsTrigger value="logs" className="text-xs">Logs</TabsTrigger>
+   982→        </TabsList>
+   983→
+   984→        <TabsContent value="overview" className="mt-4">
+   985→          <OverviewSection domain={domain} />
+   986→        </TabsContent>
+   987→        <TabsContent value="nameservers" className="mt-4">
+   988→          <NameserversSection domain={domain} onUpdated={load} />
+   989→        </TabsContent>
+   990→        <TabsContent value="dns" className="mt-4">
+   991→          <DnsSection domain={domain} onUpdated={load} />
+   992→        </TabsContent>
+   993→        <TabsContent value="security" className="mt-4">
+   994→          <SecuritySection domain={domain} onUpdated={load} />
+   995→        </TabsContent>
+   996→        <TabsContent value="renew" className="mt-4">
+   997→          <RenewTransferSection domain={domain} onUpdated={load} />
+   998→        </TabsContent>
+   999→        <TabsContent value="logs" className="mt-4">
+  1000→          <LogsSection logs={logs} />
+  1001→        </TabsContent>
+  1002→      </Tabs>
+  1003→      {isAdmin && <div className="text-xs text-muted-foreground">Admin mode: full access to this domain.</div>}
+  1004→    </div>
+  1005→  )
+  1006→}
+  1007→
+  1008→function OverviewSection({ domain }: { domain: Domain }) {
+  1009→  const stats = [
+  1010→    { label: 'Status', value: domain.status, icon: Globe, color: 'text-indigo-500' },
+  1011→    { label: 'Registrar', value: domain.registrar, icon: Server, color: 'text-indigo-500' },
+  1012→    { label: 'Auto-Renew', value: domain.autoRenew ? 'Enabled' : 'Disabled', icon: RefreshCw, color: domain.autoRenew ? 'text-indigo-500' : 'text-muted-foreground' },
+  1013→    { label: 'WHOIS Privacy', value: domain.whoisPrivacy ? 'Enabled' : 'Disabled', icon: Shield, color: domain.whoisPrivacy ? 'text-indigo-500' : 'text-muted-foreground' },
+  1014→    { label: 'Registrar Lock', value: domain.locked ? 'Locked' : 'Unlocked', icon: Lock, color: domain.locked ? 'text-indigo-500' : 'text-amber-500' },
+  1015→    { label: 'Premium', value: domain.premium ? 'Yes' : 'No', icon: Sparkles, color: domain.premium ? 'text-amber-500' : 'text-muted-foreground' },
+  1016→  ]
+  1017→  return (
+  1018→    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+  1019→      {stats.map((s) => (
+  1020→        <Card key={s.label}>
+  1021→          <CardContent className="pt-5">
+  1022→            <div className="flex items-center justify-between">
+  1023→              <span className="text-sm text-muted-foreground">{s.label}</span>
+  1024→              <s.icon className={`h-4 w-4 ${s.color}`} />
+  1025→            </div>
+  1026→            <div className="text-lg font-semibold mt-1">{s.value}</div>
+  1027→          </CardContent>
+  1028→        </Card>
+  1029→      ))}
+  1030→    </div>
+  1031→  )
+  1032→}
+  1033→
+  1034→function NameserversSection({ domain, onUpdated }: { domain: Domain; onUpdated: () => void }) {
+  1035→  const [nameservers, setNameservers] = useState<string[]>(['', ''])
+  1036→  const [saving, setSaving] = useState(false)
+  1037→
+  1038→  useEffect(() => {
+  1039→    try {
+  1040→      const ns = domain.nameservers ? JSON.parse(domain.nameservers) : []
+  1041→      setNameservers(ns.length >= 2 ? ns : [...ns, '', ''].slice(0, 2))
+  1042→    } catch {
+  1043→      setNameservers(['', ''])
+  1044→    }
+  1045→  }, [domain.nameservers])
+  1046→
+  1047→  const update = (i: number, val: string) => {
+  1048→    const next = [...nameservers]
+  1049→    next[i] = val
+  1050→    setNameservers(next)
+  1051→  }
+  1052→
+  1053→  const add = () => setNameservers([...nameservers, ''])
+  1054→  const remove = (i: number) => nameservers.length > 2 && setNameservers(nameservers.filter((_, idx) => idx !== i))
+  1055→
+  1056→  const save = async () => {
+  1057→    const clean = nameservers.map((n) => n.trim()).filter(Boolean)
+  1058→    if (clean.length < 2) { toast.error('At least 2 nameservers required'); return }
+  1059→    setSaving(true)
+  1060→    try {
+  1061→      await apiFetch(`/domains/${domain.id}/nameservers`, {
+  1062→        method: 'PUT',
+  1063→        body: JSON.stringify({ nameservers: clean }),
+  1064→      })
+  1065→      toast.success('Nameservers updated', {
+  1066→        description: `${clean.length} nameservers configured via Apsamo`,
+  1067→      })
+  1068→      onUpdated()
+  1069→    } catch (err) {
+  1070→      toast.error('Failed to update nameservers', { description: (err as Error).message })
+  1071→    } finally {
+  1072→      setSaving(false)
+  1073→    }
+  1074→  }
+  1075→
+  1076→  return (
+  1077→    <Card>
+  1078→      <CardHeader>
+  1079→        <CardTitle className="flex items-center gap-2 text-lg">
+  1080→          <Server className="h-5 w-5 text-indigo-500" />
+  1081→          Custom Nameservers
+  1082→        </CardTitle>
+  1083→        <CardDescription>Set the authoritative nameservers for this domain (2–13 allowed)</CardDescription>
+  1084→      </CardHeader>
+  1085→      <CardContent className="space-y-3">
+  1086→        {nameservers.map((ns, i) => (
+  1087→          <div key={i} className="flex gap-2">
+  1088→            <div className="flex items-center gap-2 text-sm text-muted-foreground w-8">ns{i + 1}</div>
+  1089→            <Input
+  1090→              placeholder={`ns${i + 1}.example.com`}
+  1091→              value={ns}
+  1092→              onChange={(e) => update(i, e.target.value)}
+  1093→              className="font-mono"
+  1094→            />
+  1095→            {nameservers.length > 2 && (
+  1096→              <Button variant="outline" size="icon" onClick={() => remove(i)}>
+  1097→                <Trash2 className="h-4 w-4" />
+  1098→              </Button>
+  1099→            )}
+  1100→          </div>
+  1101→        ))}
+  1102→        <div className="flex gap-2">
+  1103→          {nameservers.length < 13 && (
+  1104→            <Button variant="outline" size="sm" onClick={add}>
+  1105→              <Plus className="h-4 w-4 mr-1" /> Add Nameserver
+  1106→            </Button>
+  1107→          )}
+  1108→          <Button onClick={save} disabled={saving} className="ml-auto">
+  1109→            {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+  1110→            Save Nameservers
+  1111→          </Button>
+  1112→        </div>
+  1113→      </CardContent>
+  1114→    </Card>
+  1115→  )
+  1116→}
+  1117→
+  1118→function DnsSection({ domain, onUpdated }: { domain: Domain; onUpdated: () => void }) {
+  1119→  const [records, setRecords] = useState<DnsRecord[]>([])
+  1120→  const [saving, setSaving] = useState(false)
+  1121→  const [showEmailGen, setShowEmailGen] = useState(false)
+  1122→  const [mxTarget, setMxTarget] = useState('mail.deployhub.io')
+  1123→
+  1124→  useEffect(() => {
+  1125→    setRecords(domain.dnsRecords || [])
+  1126→  }, [domain.dnsRecords])
+  1127→
+  1128→  const RECORD_TYPES = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'SRV', 'CAA', 'NS']
+  1129→
+  1130→  const addRecord = () => {
+  1131→    setRecords([...records, { type: 'A', name: '@', value: '', ttl: 3600, priority: null }])
+  1132→  }
+  1133→  const updateRecord = (i: number, field: keyof DnsRecord, val: string | number) => {
+  1134→    const next = [...records]
+  1135→    next[i] = { ...next[i], [field]: val }
+  1136→    setRecords(next)
+  1137→  }
+  1138→  const removeRecord = (i: number) => setRecords(records.filter((_, idx) => idx !== i))
+  1139→
+  1140→  const generateEmailDns = () => {
+  1141→    const emailRecords: DnsRecord[] = [
+  1142→      { type: 'MX', name: '@', value: mxTarget, ttl: 3600, priority: 10 },
+  1143→      { type: 'TXT', name: '@', value: `v=spf1 mx a:${mxTarget} ~all`, ttl: 3600 },
+  1144→      { type: 'TXT', name: '_dmarc', value: `v=DMARC1; p=quarantine; rua=mailto:postmaster@${domain.name}`, ttl: 3600 },
+  1145→      { type: 'TXT', name: 'mail._domainkey', value: 'v=DKIM1; k=rsa; p=PLACEHOLDER_REPLACE_WITH_DKIM_KEY', ttl: 3600 },
+  1146→    ]
+  1147→    setRecords([...records.filter((r) => !(r.type === 'MX' || r.name === '_dmarc' || r.name === 'mail._domainkey' || (r.type === 'TXT' && r.name === '@' && r.value?.startsWith('v=spf1')))), ...emailRecords])
+  1148→    setShowEmailGen(false)
+  1149→    toast.success('Email DNS records added', { description: 'SPF, DKIM, DMARC & MX generated' })
+  1150→  }
+  1151→
+  1152→  const save = async () => {
+  1153→    setSaving(true)
+  1154→    try {
+  1155→      // Save via the DNS endpoint (existing route handles upsert)
+  1156→      await apiFetch(`/domains/${domain.id}/dns`, {
+  1157→        method: 'PUT',
+  1158→        body: JSON.stringify({ records }),
+  1159→      })
+  1160→      toast.success('DNS records saved', { description: `${records.length} records synced to Apsamo` })
+  1161→      onUpdated()
+  1162→    } catch (err) {
+  1163→      toast.error('Failed to save DNS', { description: (err as Error).message })
+  1164→    } finally {
+  1165→      setSaving(false)
+  1166→    }
+  1167→  }
+  1168→
+  1169→  return (
+  1170→    <Card>
+  1171→      <CardHeader>
+  1172→        <div className="flex items-center justify-between">
+  1173→          <div>
+  1174→            <CardTitle className="flex items-center gap-2 text-lg">
+  1175→              <Database className="h-5 w-5 text-indigo-500" />
+  1176→              DNS Records
+  1177→            </CardTitle>
+  1178→            <CardDescription>A, AAAA, CNAME, MX, TXT, SRV, CAA, NS</CardDescription>
+  1179→          </div>
+  1180→          <Button variant="outline" size="sm" onClick={() => setShowEmailGen(true)}>
+  1181→            <Mail className="h-4 w-4 mr-1" /> Email DNS
+  1182→          </Button>
+  1183→        </div>
+  1184→      </CardHeader>
+  1185→      <CardContent className="space-y-3">
+  1186→        <div className="rounded-md border max-h-96 overflow-y-auto">
+  1187→          <Table>
+  1188→            <TableHeader className="sticky top-0 bg-background">
+  1189→              <TableRow>
+  1190→                <TableHead className="w-24">Type</TableHead>
+  1191→                <TableHead className="w-28">Name</TableHead>
+  1192→                <TableHead>Value</TableHead>
+  1193→                <TableHead className="w-20">TTL</TableHead>
+  1194→                <TableHead className="w-16">Prio</TableHead>
+  1195→                <TableHead className="w-10"></TableHead>
+  1196→              </TableRow>
+  1197→            </TableHeader>
+  1198→            <TableBody>
+  1199→              {records.map((r, i) => (
+  1200→                <TableRow key={i}>
+  1201→                  <TableCell>
+  1202→                    <Select value={r.type} onValueChange={(v) => updateRecord(i, 'type', v)}>
+  1203→                      <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+  1204→                      <SelectContent>
+  1205→                        {RECORD_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+  1206→                      </SelectContent>
+  1207→                    </Select>
+  1208→                  </TableCell>
+  1209→                  <TableCell>
+  1210→                    <Input className="h-8 text-xs font-mono" value={r.name} onChange={(e) => updateRecord(i, 'name', e.target.value)} />
+  1211→                  </TableCell>
+  1212→                  <TableCell>
+  1213→                    <Input className="h-8 text-xs font-mono" value={r.value} onChange={(e) => updateRecord(i, 'value', e.target.value)} />
+  1214→                  </TableCell>
+  1215→                  <TableCell>
+  1216→                    <Input className="h-8 text-xs font-mono" type="number" value={r.ttl} onChange={(e) => updateRecord(i, 'ttl', Number(e.target.value))} />
+  1217→                  </TableCell>
+  1218→                  <TableCell>
+  1219→                    <Input className="h-8 text-xs font-mono" type="number" value={r.priority || ''} onChange={(e) => updateRecord(i, 'priority', Number(e.target.value))} />
+  1220→                  </TableCell>
+  1221→                  <TableCell>
+  1222→                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => removeRecord(i)}>
+  1223→                      <Trash2 className="h-3 w-3 text-red-500" />
+  1224→                    </Button>
+  1225→                  </TableCell>
+  1226→                </TableRow>
+  1227→              ))}
+  1228→            </TableBody>
+  1229→          </Table>
+  1230→        </div>
+  1231→        <div className="flex gap-2">
+  1232→          <Button variant="outline" size="sm" onClick={addRecord}>
+  1233→            <Plus className="h-4 w-4 mr-1" /> Add Record
+  1234→          </Button>
+  1235→          <Button onClick={save} disabled={saving} className="ml-auto">
+  1236→            {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+  1237→            Save All Records
+  1238→          </Button>
+  1239→        </div>
+  1240→
+  1241→        <Dialog open={showEmailGen} onOpenChange={setShowEmailGen}>
+  1242→          <DialogContent>
+  1243→            <DialogHeader>
+  1244→              <DialogTitle className="flex items-center gap-2">
+  1245→                <Mail className="h-5 w-5 text-indigo-500" /> Generate Email DNS Records
+  1246→              </DialogTitle>
+  1247→              <DialogDescription>
+  1248→                Automatically adds SPF, DKIM, DMARC &amp; MX records for email delivery.
+  1249→              </DialogDescription>
+  1250→            </DialogHeader>
+  1251→            <div className="space-y-3 py-2">
+  1252→              <div className="space-y-2">
+  1253→                <Label>Mail Server (MX target)</Label>
+  1254→                <Input value={mxTarget} onChange={(e) => setMxTarget(e.target.value)} className="font-mono" />
+  1255→              </div>
+  1256→              <div className="rounded-md bg-muted/50 p-3 text-xs space-y-1">
+  1257→                <div><strong>MX</strong> → {mxTarget} (priority 10)</div>
+  1258→                <div><strong>SPF</strong> → v=spf1 mx a:{mxTarget} ~all</div>
+  1259→                <div><strong>DMARC</strong> → v=DMARC1; p=quarantine; ...</div>
+  1260→                <div><strong>DKIM</strong> → mail._domainkey (placeholder — replace with real key)</div>
+  1261→              </div>
+  1262→            </div>
+  1263→            <DialogFooter>
+  1264→              <Button variant="outline" onClick={() => setShowEmailGen(false)}>Cancel</Button>
+  1265→              <Button onClick={generateEmailDns}>Generate Records</Button>
+  1266→            </DialogFooter>
+  1267→          </DialogContent>
+  1268→        </Dialog>
+  1269→      </CardContent>
+  1270→    </Card>
+  1271→  )
+  1272→}
+  1273→
+  1274→function SecuritySection({ domain, onUpdated }: { domain: Domain; onUpdated: () => void }) {
+  1275→  const [busy, setBusy] = useState<string | null>(null)
+  1276→  const [authCode, setAuthCode] = useState<string | null>(null)
+  1277→  const [showCode, setShowCode] = useState(false)
+  1278→
+  1279→  const toggle = async (field: 'whoisPrivacy' | 'locked' | 'autoRenew', value: boolean) => {
+  1280→    setBusy(field)
+  1281→    try {
+  1282→      const endpoint = field === 'whoisPrivacy' ? 'privacy' : field === 'locked' ? 'lock' : 'auto-renew'
+  1283→      const bodyKey = field === 'whoisPrivacy' ? 'enabled' : field === 'locked' ? 'locked' : 'enabled'
+  1284→      await apiFetch(`/domains/${domain.id}/${endpoint}`, {
+  1285→        method: 'PUT',
+  1286→        body: JSON.stringify({ [bodyKey]: value }),
+  1287→      })
+  1288→      toast.success(`${field} ${value ? 'enabled' : 'disabled'}`)
+  1289→      onUpdated()
+  1290→    } catch (err) {
+  1291→      toast.error('Update failed', { description: (err as Error).message })
+  1292→    } finally {
+  1293→      setBusy(null)
+  1294→    }
+  1295→  }
+  1296→
+  1297→  const getAuthCode = async () => {
+  1298→    setBusy('authCode')
+  1299→    try {
+  1300→      const data = await apiFetch(`/domains/${domain.id}/auth-code`)
+  1301→      setAuthCode(data.data?.authCode || null)
+  1302→      setShowCode(true)
+  1303→    } catch (err) {
+  1304→      toast.error('Failed to get auth code', { description: (err as Error).message })
+  1305→    } finally {
+  1306→      setBusy(null)
+  1307→    }
+  1308→  }
+  1309→
+  1310→  return (
+  1311→    <div className="space-y-4">
+  1312→      <Card>
+  1313→        <CardHeader>
+  1314→          <CardTitle className="flex items-center gap-2 text-lg">
+  1315→            <Shield className="h-5 w-5 text-indigo-500" /> Security &amp; Privacy
+  1316→          </CardTitle>
+  1317→        </CardHeader>
+  1318→        <CardContent className="space-y-4">
+  1319→          <SecurityToggle
+  1320→            icon={domain.whoisPrivacy ? ShieldCheck : ShieldOff}
+  1321→            title="WHOIS Privacy"
+  1322→            description="Hide your personal contact info from public WHOIS lookups"
+  1323→            checked={domain.whoisPrivacy}
+  1324→            disabled={busy === 'whoisPrivacy'}
+  1325→            onToggle={(v) => toggle('whoisPrivacy', v)}
+  1326→          />
+  1327→          <Separator />
+  1328→          <SecurityToggle
+  1329→            icon={domain.locked ? Lock : Unlock}
+  1330→            title="Registrar Lock"
+  1331→            description="Prevent unauthorized domain transfers (recommended: ON)"
+  1332→            checked={domain.locked}
+  1333→            disabled={busy === 'locked'}
+  1334→            onToggle={(v) => toggle('locked', v)}
+  1335→          />
+  1336→          <Separator />
+  1337→          <SecurityToggle
+  1338→            icon={RefreshCw}
+  1339→            title="Auto-Renew"
+  1340→            description="Automatically renew before expiration to prevent loss"
+  1341→            checked={domain.autoRenew}
+  1342→            disabled={busy === 'autoRenew'}
+  1343→            onToggle={(v) => toggle('autoRenew', v)}
+  1344→          />
+  1345→        </CardContent>
+  1346→      </Card>
+  1347→
+  1348→      <Card>
+  1349→        <CardHeader>
+  1350→          <CardTitle className="flex items-center gap-2 text-lg">
+  1351→            <KeyRound className="h-5 w-5 text-amber-500" /> EPP / Auth Code
+  1352→          </CardTitle>
+  1353→          <CardDescription>Required to transfer this domain to another registrar</CardDescription>
+  1354→        </CardHeader>
+  1355→        <CardContent className="space-y-3">
+  1356→          {authCode && showCode ? (
+  1357→            <div className="flex items-center gap-2">
+  1358→              <Input value={authCode} readOnly className="font-mono" />
+  1359→              <Button variant="outline" size="icon" onClick={() => { navigator.clipboard.writeText(authCode); toast.success('Auth code copied') }}>
+  1360→                <Copy className="h-4 w-4" />
+  1361→              </Button>
+  1362→              <Button variant="outline" size="icon" onClick={() => setShowCode(false)}>
+  1363→                <EyeOff className="h-4 w-4" />
+  1364→              </Button>
+  1365→            </div>
+  1366→          ) : (
+  1367→            <Button variant="outline" onClick={getAuthCode} disabled={busy === 'authCode'}>
+  1368→              {busy === 'authCode' ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <KeyRound className="h-4 w-4 mr-2" />}
+  1369→              Reveal Auth Code
+  1370→            </Button>
+  1371→          )}
+  1372→          <p className="text-xs text-muted-foreground">
+  1373→            Keep this code secure. Anyone with it can initiate a transfer of your domain.
+  1374→          </p>
+  1375→        </CardContent>
+  1376→      </Card>
+  1377→    </div>
+  1378→  )
+  1379→}
+  1380→
+  1381→function SecurityToggle({
+  1382→  icon: Icon, title, description, checked, disabled, onToggle,
+  1383→}: {
+  1384→  icon: React.ElementType
+  1385→  title: string
+  1386→  description: string
+  1387→  checked: boolean
+  1388→  disabled: boolean
+  1389→  onToggle: (v: boolean) => void
+  1390→}) {
+  1391→  return (
+  1392→    <div className="flex items-center justify-between">
+  1393→      <div className="flex items-start gap-3">
+  1394→        <div className={`mt-0.5 rounded-md p-1.5 ${checked ? 'bg-indigo-500/15' : 'bg-muted'}`}>
+  1395→          <Icon className={`h-4 w-4 ${checked ? 'text-indigo-500' : 'text-muted-foreground'}`} />
+  1396→        </div>
+  1397→        <div>
+  1398→          <div className="font-medium text-sm">{title}</div>
+  1399→          <div className="text-xs text-muted-foreground">{description}</div>
+  1400→        </div>
+  1401→      </div>
+  1402→      <Switch checked={checked} disabled={disabled} onCheckedChange={onToggle} />
+  1403→    </div>
+  1404→  )
+  1405→}
+  1406→
+  1407→function RenewTransferSection({ domain, onUpdated }: { domain: Domain; onUpdated: () => void }) {
+  1408→  const [years, setYears] = useState(1)
+  1409→  const [renewing, setRenewing] = useState(false)
+  1410→  const [transferDomain, setTransferDomain] = useState('')
+  1411→  const [transferCode, setTransferCode] = useState('')
+  1412→  const [transferring, setTransferring] = useState(false)
+  1413→
+  1414→  const renew = async () => {
+  1415→    setRenewing(true)
+  1416→    try {
+  1417→      const data = await apiFetch('/domains/renew', {
+  1418→        method: 'POST',
+  1419→        body: JSON.stringify({ domainId: domain.id, duration: years }),
+  1420→      })
+  1421→      toast.success('Domain renewed!', {
+  1422→        description: `Invoice ${data.data?.invoiceNumber || 'generated'} · ${years} year${years > 1 ? 's' : ''} added`,
+  1423→      })
+  1424→      onUpdated()
+  1425→    } catch (err) {
+  1426→      toast.error('Renewal failed', { description: (err as Error).message })
+  1427→    } finally {
+  1428→      setRenewing(false)
+  1429→    }
+  1430→  }
+  1431→
+  1432→  const transfer = async () => {
+  1433→    if (!transferDomain.trim() || !transferCode.trim()) {
+  1434→      toast.error('Domain and auth code are required')
+  1435→      return
+  1436→    }
+  1437→    setTransferring(true)
+  1438→    try {
+  1439→      const data = await apiFetch('/domains/transfer', {
+  1440→        method: 'POST',
+  1441→        body: JSON.stringify({ domain: transferDomain, authCode: transferCode }),
+  1442→      })
+  1443→      toast.success('Transfer initiated!', {
+  1444→        description: `${data.data?.domain} — invoice ${data.data?.invoiceNumber || 'created'}`,
+  1445→      })
+  1446→      setTransferDomain('')
+  1447→      setTransferCode('')
+  1448→    } catch (err) {
+  1449→      toast.error('Transfer failed', { description: (err as Error).message })
+  1450→    } finally {
+  1451→      setTransferring(false)
+  1452→    }
+  1453→  }
+  1454→
+  1455→  return (
+  1456→    <div className="grid gap-4 md:grid-cols-2">
+  1457→      <Card>
+  1458→        <CardHeader>
+  1459→          <CardTitle className="flex items-center gap-2 text-lg">
+  1460→            <RefreshCw className="h-5 w-5 text-indigo-500" /> Renew Domain
+  1461→          </CardTitle>
+  1462→          <CardDescription>Extend the registration period</CardDescription>
+  1463→        </CardHeader>
+  1464→        <CardContent className="space-y-3">
+  1465→          <div className="rounded-md bg-muted/50 p-3 text-sm">
+  1466→            <div className="flex justify-between">
+  1467→              <span className="text-muted-foreground">Domain</span>
+  1468→              <span className="font-medium">{domain.name}</span>
+  1469→            </div>
+  1470→            <div className="flex justify-between mt-1">
+  1471→              <span className="text-muted-foreground">Expires</span>
+  1472→              <span className="font-medium">{domain.expiresAt ? new Date(domain.expiresAt).toLocaleDateString() : '—'}</span>
+  1473→            </div>
+  1474→          </div>
+  1475→          <div className="space-y-2">
+  1476→            <Label>Renew for</Label>
+  1477→            <Select value={String(years)} onValueChange={(v) => setYears(Number(v))}>
+  1478→              <SelectTrigger><SelectValue /></SelectTrigger>
+  1479→              <SelectContent>
+  1480→                {[1, 2, 3, 5, 10].map((y) => <SelectItem key={y} value={String(y)}>{y} year{y > 1 ? 's' : ''}</SelectItem>)}
+  1481→              </SelectContent>
+  1482→            </Select>
+  1483→          </div>
+  1484→          <Button onClick={renew} disabled={renewing} className="w-full">
+  1485→            {renewing ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+  1486→            Renew {years} Year{years > 1 ? 's' : ''}
+  1487→          </Button>
+  1488→        </CardContent>
+  1489→      </Card>
+  1490→
+  1491→      <Card>
+  1492→        <CardHeader>
+  1493→          <CardTitle className="flex items-center gap-2 text-lg">
+  1494→            <Send className="h-5 w-5 text-indigo-500" /> Transfer Domain
+  1495→          </CardTitle>
+  1496→          <CardDescription>Bring a domain from another registrar</CardDescription>
+  1497→        </CardHeader>
+  1498→        <CardContent className="space-y-3">
+  1499→          <div className="space-y-2">
+  1500→            <Label>Domain to transfer</Label>
+  1501→            <Input placeholder="example.com" value={transferDomain} onChange={(e) => setTransferDomain(e.target.value)} className="font-mono" />
+  1502→          </div>
+  1503→          <div className="space-y-2">
+  1504→            <Label>EPP / Auth code</Label>
+  1505→            <Input placeholder="Authorization code from current registrar" value={transferCode} onChange={(e) => setTransferCode(e.target.value)} type="password" className="font-mono" />
+  1506→          </div>
+  1507→          <Button onClick={transfer} disabled={transferring} className="w-full" variant="outline">
+  1508→            {transferring ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
+  1509→            Initiate Transfer
+  1510→          </Button>
+  1511→          <p className="text-xs text-muted-foreground">
+  1512→            Transfers typically take 5–7 days. Ensure the domain is unlocked at the current registrar.
+  1513→          </p>
+  1514→        </CardContent>
+  1515→      </Card>
+  1516→    </div>
+  1517→  )
+  1518→}
+  1519→
+  1520→function LogsSection({ logs }: { logs: DomainLog[] }) {
+  1521→  if (logs.length === 0) {
+  1522→    return (
+  1523→      <Card>
+  1524→        <CardContent className="py-12 text-center text-muted-foreground">
+  1525→          <Clock className="h-8 w-8 mx-auto mb-2 opacity-50" />
+  1526→          No activity yet
+  1527→        </CardContent>
+  1528→      </Card>
+  1529→    )
+  1530→  }
+  1531→  return (
+  1532→    <Card>
+  1533→      <CardHeader>
+  1534→        <CardTitle className="flex items-center gap-2 text-lg">
+  1535→          <Clock className="h-5 w-5 text-indigo-500" /> Activity Log
+  1536→        </CardTitle>
+  1537→        <CardDescription>Last {logs.length} events</CardDescription>
+  1538→      </CardHeader>
+  1539→      <CardContent>
+  1540→        <div className="space-y-2 max-h-96 overflow-y-auto pr-2">
+  1541→          {logs.map((log) => (
+  1542→            <div key={log.id} className="flex items-start gap-3 rounded-md border p-2.5 text-sm">
+  1543→              <div className="mt-0.5">
+  1544→                {log.status === 'success' ? (
+  1545→                  <CheckCircle2 className="h-4 w-4 text-indigo-500" />
+  1546→                ) : log.status === 'failed' ? (
+  1547→                  <XCircle className="h-4 w-4 text-red-500" />
+  1548→                ) : (
+  1549→                  <AlertTriangle className="h-4 w-4 text-amber-500" />
+  1550→                )}
+  1551→              </div>
+  1552→              <div className="flex-1 min-w-0">
+  1553→                <div className="flex items-center gap-2">
+  1554→                  <Badge variant="outline" className="text-xs">{log.action}</Badge>
+  1555→                  <span className="text-xs text-muted-foreground">
+  1556→                    {new Date(log.createdAt).toLocaleString()}
+  1557→                  </span>
+  1558→                </div>
+  1559→                <p className="text-xs mt-1 text-muted-foreground">{log.message}</p>
+  1560→              </div>
+  1561→            </div>
+  1562→          ))}
+  1563→        </div>
+  1564→      </CardContent>
+  1565→    </Card>
+  1566→  )
+  1567→}
+  1568→
+  1569→// ─── Invoices Tab ─────────────────────────────────────────────────────────────
+  1570→
+  1571→function InvoicesTab() {
+  1572→  const [invoices, setInvoices] = useState<Invoice[]>([])
+  1573→  const [loading, setLoading] = useState(true)
+  1574→  const [selected, setSelected] = useState<Invoice | null>(null)
+  1575→
+  1576→  const load = useCallback(async () => {
+  1577→    setLoading(true)
+  1578→    try {
+  1579→      const data = await apiFetch('/invoices')
+  1580→      setInvoices(data.data || [])
+  1581→    } catch (err) {
+  1582→      toast.error('Failed to load invoices', { description: (err as Error).message })
+  1583→    } finally {
+  1584→      setLoading(false)
+  1585→    }
+  1586→  }, [])
+  1587→
+  1588→  useEffect(() => { load() }, [load])
+  1589→
+  1590→  if (loading) {
+  1591→    return <div className="grid gap-3">{[1, 2, 3].map((i) => <Skeleton key={i} className="h-20" />)}</div>
+  1592→  }
+  1593→
+  1594→  if (selected) {
+  1595→    return <InvoiceDetail invoice={selected} onBack={() => setSelected(null)} />
+  1596→  }
+  1597→
+  1598→  if (invoices.length === 0) {
+  1599→    return (
+  1600→      <Card>
+  1601→        <CardContent className="flex flex-col items-center justify-center py-16">
+  1602→          <FileText className="h-10 w-10 text-muted-foreground mb-2" />
+  1603→          <p className="text-muted-foreground">No invoices yet</p>
+  1604→        </CardContent>
+  1605→      </Card>
+  1606→    )
+  1607→  }
+  1608→
+  1609→  return (
+  1610→    <Card>
+  1611→      <CardHeader>
+  1612→        <CardTitle className="flex items-center gap-2 text-lg">
+  1613→          <FileText className="h-5 w-5 text-indigo-500" /> Invoices
+  1614→        </CardTitle>
+  1615→      </CardHeader>
+  1616→      <CardContent>
+  1617→        <div className="rounded-md border">
+  1618→          <Table>
+  1619→            <TableHeader>
+  1620→              <TableRow>
+  1621→                <TableHead>Invoice #</TableHead>
+  1622→                <TableHead>Domain</TableHead>
+  1623→                <TableHead className="text-right">Amount</TableHead>
+  1624→                <TableHead>Status</TableHead>
+  1625→                <TableHead>Date</TableHead>
+  1626→                <TableHead></TableHead>
+  1627→              </TableRow>
+  1628→            </TableHeader>
+  1629→            <TableBody>
+  1630→              {invoices.map((inv) => (
+  1631→                <TableRow key={inv.id} className="cursor-pointer hover:bg-accent/50" onClick={() => setSelected(inv)}>
+  1632→                  <TableCell className="font-mono text-sm">{inv.number}</TableCell>
+  1633→                  <TableCell>{inv.domainName || '—'}</TableCell>
+  1634→                  <TableCell className="text-right font-mono">${inv.total} {inv.currency}</TableCell>
+  1635→                  <TableCell>
+  1636→                    <Badge variant="outline" className={inv.status === 'paid' ? 'bg-indigo-500/15 text-indigo-600 border-indigo-500/30' : ''}>
+  1637→                      {inv.status}
+  1638→                    </Badge>
+  1639→                  </TableCell>
+  1640→                  <TableCell className="text-sm text-muted-foreground">{new Date(inv.createdAt).toLocaleDateString()}</TableCell>
+  1641→                  <TableCell>
+  1642→                    <Button size="sm" variant="ghost"><Download className="h-3 w-3" /></Button>
+  1643→                  </TableCell>
+  1644→                </TableRow>
+  1645→              ))}
+  1646→            </TableBody>
+  1647→          </Table>
+  1648→        </div>
+  1649→      </CardContent>
+  1650→    </Card>
+  1651→  )
+  1652→}
+  1653→
+  1654→function InvoiceDetail({ invoice, onBack }: { invoice: Invoice; onBack: () => void }) {
+  1655→  return (
+  1656→    <div className="space-y-4">
+  1657→      <Button variant="ghost" size="sm" onClick={onBack}>
+  1658→        <ArrowLeft className="h-4 w-4 mr-1" /> Back to Invoices
+  1659→      </Button>
+  1660→      <Card>
+  1661→        <CardHeader className="flex flex-row items-center justify-between">
+  1662→          <div>
+  1663→            <CardTitle>Invoice {invoice.number}</CardTitle>
+  1664→            <CardDescription>{new Date(invoice.createdAt).toLocaleDateString()}</CardDescription>
+  1665→          </div>
+  1666→          <Badge variant="outline" className={invoice.status === 'paid' ? 'bg-indigo-500/15 text-indigo-600 border-indigo-500/30' : ''}>
+  1667→            {invoice.status}
+  1668→          </Badge>
+  1669→        </CardHeader>
+  1670→        <CardContent className="space-y-4">
+  1671→          <div className="rounded-md border">
+  1672→            <Table>
+  1673→              <TableHeader>
+  1674→                <TableRow>
+  1675→                  <TableHead>Description</TableHead>
+  1676→                  <TableHead className="text-right">Qty</TableHead>
+  1677→                  <TableHead className="text-right">Unit Price</TableHead>
+  1678→                  <TableHead className="text-right">Total</TableHead>
+  1679→                </TableRow>
+  1680→              </TableHeader>
+  1681→              <TableBody>
+  1682→                {(invoice.items || []).map((item, i) => (
+  1683→                  <TableRow key={i}>
+  1684→                    <TableCell>{item.description}</TableCell>
+  1685→                    <TableCell className="text-right">{item.quantity}</TableCell>
+  1686→                    <TableCell className="text-right font-mono">${item.unitPrice}</TableCell>
+  1687→                    <TableCell className="text-right font-mono">${item.total}</TableCell>
+  1688→                  </TableRow>
+  1689→                ))}
+  1690→              </TableBody>
+  1691→            </Table>
+  1692→          </div>
+  1693→          <div className="flex justify-end">
+  1694→            <div className="w-64 space-y-2 text-sm">
+  1695→              <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span className="font-mono">${invoice.total}</span></div>
+  1696→              <div className="flex justify-between"><span className="text-muted-foreground">Tax</span><span className="font-mono">$0.00</span></div>
+  1697→              <Separator />
+  1698→              <div className="flex justify-between font-bold text-base"><span>Total</span><span className="font-mono text-indigo-600">${invoice.total} {invoice.currency}</span></div>
+  1699→            </div>
+  1700→          </div>
+  1701→          <Button variant="outline" onClick={() => window.print()}>
+  1702→            <Download className="h-4 w-4 mr-2" /> Download Receipt
+  1703→          </Button>
+  1704→        </CardContent>
+  1705→      </Card>
+  1706→    </div>
+  1707→  )
+  1708→}
+  1709→
+  1710→// ─── Pricing Tab ──────────────────────────────────────────────────────────────
+  1711→
+  1712→interface PricingTabProps {
+  1713→  isAdmin: boolean
+  1714→  globalMarkup?: number | null
+  1715→  onMarkupChanged?: (markup: number) => void
+  1716→}
+  1717→
+  1718→function PricingTab({ isAdmin, globalMarkup, onMarkupChanged }: PricingTabProps) {
+  1719→  const [prices, setPrices] = useState<TldPrice[]>([])
+  1720→  const [loading, setLoading] = useState(true)
+  1721→  const [syncing, setSyncing] = useState(false)
+  1722→  const [info, setInfo] = useState<{ markup: number; formula: string } | null>(null)
+  1723→
+  1724→  // Markup editor state
+  1725→  const [markupInput, setMarkupInput] = useState<string>('')
+  1726→  const [savingMarkup, setSavingMarkup] = useState(false)
+  1727→  const [markupConfirmOpen, setMarkupConfirmOpen] = useState(false)
+  1728→
+  1729→  const load = useCallback(async () => {
+  1730→    setLoading(true)
+  1731→    try {
+  1732→      const data = await apiFetch('/pricing')
+  1733→      setPrices(data.data?.tlds || [])
+  1734→      const m = data.data?.markup
+  1735→      setInfo({ markup: m, formula: data.data?.formula })
+  1736→      if (typeof m === 'number') {
+  1737→        setMarkupInput(m.toFixed(2))
+  1738→      }
+  1739→    } catch (err) {
+  1740→      toast.error('Failed to load pricing', { description: (err as Error).message })
+  1741→    } finally {
+  1742→      setLoading(false)
+  1743→    }
+  1744→  }, [])
+  1745→
+  1746→  useEffect(() => { load() }, [load])
+  1747→
+  1748→  // Keep the input in sync with the parent badge's value too.
+  1749→  useEffect(() => {
+  1750→    if (typeof globalMarkup === 'number' && !savingMarkup) {
+  1751→      setMarkupInput(globalMarkup.toFixed(2))
+  1752→    }
+  1753→  }, [globalMarkup, savingMarkup])
+  1754→
+  1755→  const sync = async () => {
+  1756→    setSyncing(true)
+  1757→    try {
+  1758→      const data = await apiFetch('/pricing/sync', { method: 'POST' })
+  1759→      toast.success('Prices synced', { description: data.message })
+  1760→      load()
+  1761→    } catch (err) {
+  1762→      toast.error('Sync failed', { description: (err as Error).message })
+  1763→    } finally {
+  1764→      setSyncing(false)
+  1765→    }
+  1766→  }
+  1767→
+  1768→  const saveMarkup = async () => {
+  1769→    const parsed = parseFloat(markupInput)
+  1770→    if (!Number.isFinite(parsed) || parsed < 0) {
+  1771→      toast.error('Invalid markup', { description: 'Enter a non-negative number, e.g. 8.50' })
+  1772→      return
+  1773→    }
+  1774→    if (parsed > 1000) {
+  1775→      toast.error('Invalid markup', { description: 'Markup must be less than $1000 USD' })
+  1776→      return
+  1777→    }
+  1778→    setSavingMarkup(true)
+  1779→    try {
+  1780→      const data = await apiFetch('/pricing/markup', {
+  1781→        method: 'POST',
+  1782→        body: JSON.stringify({ markup: parsed }),
+  1783→        headers: { 'Content-Type': 'application/json' },
+  1784→      })
+  1785→      const newMarkup = data.data?.markup
+  1786→      toast.success('Markup updated', {
+  1787→        description: data.message || `Now $${newMarkup?.toFixed(2)} — all prices recalculated`,
+  1788→      })
+  1789→      setMarkupConfirmOpen(false)
+  1790→      if (typeof newMarkup === 'number') {
+  1791→        setMarkupInput(newMarkup.toFixed(2))
+  1792→        onMarkupChanged?.(newMarkup)
+  1793→      }
+  1794→      load() // reload the table with new prices
+  1795→    } catch (err) {
+  1796→      toast.error('Failed to update markup', { description: (err as Error).message })
+  1797→    } finally {
+  1798→      setSavingMarkup(false)
+  1799→    }
+  1800→  }
+  1801→
+  1802→  const currentMarkup = typeof globalMarkup === 'number' ? globalMarkup : info?.markup
+  1803→  const hasMarkupChanged =
+  1804→    currentMarkup !== undefined &&
+  1805→    Math.abs((parseFloat(markupInput) || 0) - currentMarkup) > 0.001
+  1806→
+  1807→  return (
+  1808→    <div className="space-y-4">
+  1809→      {isAdmin && (
+  1810→        <Card className="border-amber-500/30 bg-amber-50/40 dark:bg-amber-950/10">
+  1811→          <CardHeader>
+  1812→            <div className="flex items-center justify-between gap-3 flex-wrap">
+  1813→              <div>
+  1814→                <CardTitle className="flex items-center gap-2 text-lg">
+  1815→                  <Sparkles className="h-5 w-5 text-amber-500" /> Global Markup
+  1816→                </CardTitle>
+  1817→                <CardDescription>
+  1818→                  The markup (USD) added to every TLD's wholesale price. Changing
+  1819→                  it instantly recalculates all selling prices.
+  1820→                </CardDescription>
+  1821→              </div>
+  1822→              <div className="flex items-center gap-2">
+  1823→                <div className="relative">
+  1824→                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-mono text-sm pointer-events-none">$</span>
+  1825→                  <Input
+  1826→                    type="number"
+  1827→                    step="0.01"
+  1828→                    min="0"
+  1829→                    max="1000"
+  1830→                    inputMode="decimal"
+  1831→                    value={markupInput}
+  1832→                    onChange={(e) => setMarkupInput(e.target.value)}
+  1833→                    onKeyDown={(e) => {
+  1834→                      if (e.key === 'Enter' && hasMarkupChanged) setMarkupConfirmOpen(true)
+  1835→                    }}
+  1836→                    className="w-32 pl-7 font-mono"
+  1837→                    placeholder="6.50"
+  1838→                    aria-label="Markup amount in USD"
+  1839→                  />
+  1840→                </div>
+  1841→                <Button
+  1842→                  size="sm"
+  1843→                  onClick={() => setMarkupConfirmOpen(true)}
+  1844→                  disabled={!hasMarkupChanged || savingMarkup}
+  1845→                >
+  1846→                  {savingMarkup ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <BadgeDollarSign className="h-4 w-4 mr-1" />}
+  1847→                  Save &amp; Recalculate
+  1848→                </Button>
+  1849→              </div>
+  1850→            </div>
+  1851→          </CardHeader>
+  1852→          <CardContent>
+  1853→            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+  1854→              <div className="rounded-lg border bg-background/60 p-3">
+  1855→                <div className="text-xs uppercase text-muted-foreground">Current markup</div>
+  1856→                <div className="text-lg font-mono font-semibold text-amber-600 mt-1">
+  1857→                  {currentMarkup !== undefined ? `$${currentMarkup.toFixed(2)}` : '—'}
+  1858→                </div>
+  1859→              </div>
+  1860→              <div className="rounded-lg border bg-background/60 p-3">
+  1861→                <div className="text-xs uppercase text-muted-foreground">Formula</div>
+  1862→                <div className="text-sm font-mono mt-1 break-words">
+  1863→                  {info?.formula || `Selling = Wholesale + $${currentMarkup?.toFixed(2) ?? '6.50'}`}
+  1864→                </div>
+  1865→              </div>
+  1866→              <div className="rounded-lg border bg-background/60 p-3">
+  1867→                <div className="text-xs uppercase text-muted-foreground">Affected TLDs</div>
+  1868→                <div className="text-lg font-mono font-semibold mt-1">
+  1869→                  {prices.length || '—'}
+  1870→                </div>
+  1871→              </div>
+  1872→            </div>
+  1873→            <p className="text-xs text-muted-foreground mt-3">
+  1874→              Example: a <span className="font-mono">.com</span> domain with a wholesale
+  1875→              of <span className="font-mono">$8.49</span> sells for{' '}
+  1876→              <span className="font-mono font-semibold">
+  1877→                ${currentMarkup !== undefined ? (8.49 + currentMarkup).toFixed(2) : '14.99'}
+  1878→              </span>{' '}
+  1879→              at the current markup.
+  1880→            </p>
+  1881→          </CardContent>
+  1882→        </Card>
+  1883→      )}
+  1884→
+  1885→      <Card>
+  1886→        <CardHeader>
+  1887→          <div className="flex items-center justify-between">
+  1888→            <div>
+  1889→              <CardTitle className="flex items-center gap-2 text-lg">
+  1890→                <BadgeDollarSign className="h-5 w-5 text-indigo-500" /> Domain Pricing
+  1891→              </CardTitle>
+  1892→              <CardDescription>
+  1893→                {info && (
+  1894→                  <span className="font-mono">{info.formula}</span>
+  1895→                )}
+  1896→              </CardDescription>
+  1897→            </div>
+  1898→            {isAdmin && (
+  1899→              <Button variant="outline" size="sm" onClick={sync} disabled={syncing}>
+  1900→                {syncing ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <RefreshCw className="h-4 w-4 mr-1" />}
+  1901→                Sync Prices
+  1902→              </Button>
+  1903→            )}
+  1904→          </div>
+  1905→        </CardHeader>
+  1906→        <CardContent>
+  1907→          {loading ? (
+  1908→            <div className="space-y-2">{[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-10" />)}</div>
+  1909→          ) : (
+  1910→            <div className="rounded-md border max-h-[60vh] overflow-y-auto">
+  1911→              <Table>
+  1912→                <TableHeader className="sticky top-0 bg-background">
+  1913→                  <TableRow>
+  1914→                    <TableHead>TLD</TableHead>
+  1915→                    <TableHead className="text-right">Wholesale</TableHead>
+  1916→                    <TableHead className="text-right">Markup</TableHead>
+  1917→                    <TableHead className="text-right">Register</TableHead>
+  1918→                    <TableHead className="text-right">Renew</TableHead>
+  1919→                    <TableHead className="text-right">Transfer</TableHead>
+  1920→                  </TableRow>
+  1921→                </TableHeader>
+  1922→                <TableBody>
+  1923→                  {prices.map((p) => (
+  1924→                    <TableRow key={p.tld}>
+  1925→                      <TableCell className="font-mono font-medium">{p.tld}</TableCell>
+  1926→                      <TableCell className="text-right font-mono text-muted-foreground">${p.wholesale.toFixed(2)}</TableCell>
+  1927→                      <TableCell className="text-right font-mono text-amber-600">+${p.markup.toFixed(2)}</TableCell>
+  1928→                      <TableCell className="text-right font-mono font-semibold text-indigo-600">${p.registration.toFixed(2)}</TableCell>
+  1929→                      <TableCell className="text-right font-mono">${p.renewal.toFixed(2)}</TableCell>
+  1930→                      <TableCell className="text-right font-mono">${p.transfer.toFixed(2)}</TableCell>
+  1931→                    </TableRow>
+  1932→                  ))}
+  1933→                </TableBody>
+  1934→              </Table>
+  1935→            </div>
+  1936→          )}
+  1937→        </CardContent>
+  1938→      </Card>
+  1939→
+  1940→      {/* Markup change confirmation */}
+  1941→      <AlertDialog open={markupConfirmOpen} onOpenChange={setMarkupConfirmOpen}>
+  1942→        <AlertDialogContent>
+  1943→          <AlertDialogHeader>
+  1944→            <AlertDialogTitle>Change global markup?</AlertDialogTitle>
+  1945→            <AlertDialogDescription asChild>
+  1946→              <div className="space-y-2">
+  1947→                <p>
+  1948→                  This will change the markup from{' '}
+  1949→                  <span className="font-mono font-semibold text-amber-600">
+  1950→                    ${currentMarkup?.toFixed(2) ?? '—'}
+  1951→                  </span>{' '}
+  1952→                  to{' '}
+  1953→                  <span className="font-mono font-semibold text-amber-600">
+  1954→                    ${(parseFloat(markupInput) || 0).toFixed(2)}
+  1955→                  </span>{' '}
+  1956→                  and immediately recalculate the selling price of every TLD
+  1957→                  ({prices.length} entries). Existing invoices and past orders
+  1958→                  are not affected.
+  1959→                </p>
+  1960→                <p className="text-xs">
+  1961→                  Example .com price:{' '}
+  1962→                  <span className="font-mono">
+  1963→                    ${(8.49 + (currentMarkup ?? 0)).toFixed(2)}
+  1964→                  </span>{' '}
+  1965→                  →{' '}
+  1966→                  <span className="font-mono font-semibold">
+  1967→                    ${(8.49 + (parseFloat(markupInput) || 0)).toFixed(2)}
+  1968→                  </span>
+  1969→                </p>
+  1970→              </div>
+  1971→            </AlertDialogDescription>
+  1972→          </AlertDialogHeader>
+  1973→          <AlertDialogFooter>
+  1974→            <AlertDialogCancel disabled={savingMarkup}>Cancel</AlertDialogCancel>
+  1975→            <AlertDialogAction
+  1976→              onClick={(e) => {
+  1977→                e.preventDefault()
+  1978→                saveMarkup()
+  1979→              }}
+  1980→              disabled={savingMarkup}
+  1981→              className="bg-amber-600 hover:bg-amber-700 text-white"
+  1982→            >
+  1983→              {savingMarkup ? (
+  1984→                <>
+  1985→                  <Loader2 className="h-4 w-4 animate-spin mr-2" /> Saving…
+  1986→                </>
+  1987→              ) : (
+  1988→                'Confirm & Save'
+  1989→              )}
+  1990→            </AlertDialogAction>
+  1991→          </AlertDialogFooter>
+  1992→        </AlertDialogContent>
+  1993→      </AlertDialog>
+  1994→    </div>
+  1995→  )
+  1996→}
+  1997→
+  1998→// ─── Admin Tab ────────────────────────────────────────────────────────────────
+  1999→
+  2000→interface AdminDomain {
+
+[showing lines 1-2000 of 2573; use offset=2001 with limit to continue reading]

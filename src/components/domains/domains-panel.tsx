@@ -2034,11 +2034,19 @@ interface DomainBreakdown {
   activeWithHosting: number
 }
 
+interface SyncInfo {
+  synced: number
+  purged: number
+  error?: string
+  source: string
+}
+
 type StatusFilter = 'all' | 'active' | 'cancelled' | 'deleted' | 'suspended' | 'expired'
 
 function AdminTab({ onSelect }: { onSelect: (id: string) => void }) {
   const [domains, setDomains] = useState<AdminDomain[]>([])
   const [breakdown, setBreakdown] = useState<DomainBreakdown | null>(null)
+  const [sync, setSync] = useState<SyncInfo | null>(null)
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
@@ -2051,10 +2059,12 @@ function AdminTab({ onSelect }: { onSelect: (id: string) => void }) {
       const params = new URLSearchParams()
       if (search) params.set('search', search)
       if (statusFilter !== 'all') params.set('status', statusFilter)
+      // sync=true (default) forces a live call to Dynadot's list_domain API.
       const qs = params.toString()
       const data = await apiFetch(`/admin/domains${qs ? `?${qs}` : ''}`)
       setDomains(data.data?.domains || [])
       setBreakdown(data.data?.breakdown || null)
+      setSync(data.data?.sync || null)
     } catch (err) {
       toast.error('Failed to load domains', { description: (err as Error).message })
     } finally {
@@ -2129,6 +2139,29 @@ function AdminTab({ onSelect }: { onSelect: (id: string) => void }) {
     <div className="space-y-4">
       <IntegrationStatusCard />
 
+      {/* Sync status banner — shows the result of the last Dynadot list_domain call */}
+      {sync && (
+        <Card className={`p-3 ${sync.error ? 'border-amber-500/40 bg-amber-50/50 dark:bg-amber-950/20' : 'border-emerald-500/40 bg-emerald-50/50 dark:bg-emerald-950/20'}`}>
+          <div className="flex items-center gap-2 text-sm flex-wrap">
+            {sync.error ? (
+              <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
+            ) : (
+              <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
+            )}
+            <span className="font-medium">
+              {sync.error
+                ? 'Dynadot sync failed — showing cached DB data'
+                : `Live from Dynadot API`}
+            </span>
+            <span className="text-muted-foreground">
+              {sync.error
+                ? sync.error
+                : `${sync.synced} domain${sync.synced === 1 ? '' : 's'} synced${sync.purged > 0 ? ` · ${sync.purged} fake record${sync.purged === 1 ? '' : 's'} purged` : ''}`}
+            </span>
+          </div>
+        </Card>
+      )}
+
       {/* Real stats summary */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <Card className="p-4">
@@ -2136,7 +2169,7 @@ function AdminTab({ onSelect }: { onSelect: (id: string) => void }) {
             <Globe className="h-3 w-3" /> Total Domains
           </div>
           <div className="text-2xl font-bold mt-1">{breakdown?.total ?? '—'}</div>
-          <div className="text-xs text-muted-foreground mt-0.5">across all users</div>
+          <div className="text-xs text-muted-foreground mt-0.5">in Dynadot account</div>
         </Card>
         <Card className="p-4 border-indigo-500/30">
           <div className="text-xs uppercase text-muted-foreground flex items-center gap-1">
@@ -2177,7 +2210,7 @@ function AdminTab({ onSelect }: { onSelect: (id: string) => void }) {
                 <Shield className="h-5 w-5 text-indigo-500" /> All Domains (Admin)
               </CardTitle>
               <CardDescription>
-                Real domain records from the database
+                Live from Dynadot <code className="text-xs font-mono">list_domain</code> API
                 {breakdown ? ` — ${breakdown.total} total` : ''}
               </CardDescription>
             </div>
@@ -2190,6 +2223,7 @@ function AdminTab({ onSelect }: { onSelect: (id: string) => void }) {
               />
               <Button variant="outline" size="sm" onClick={load} disabled={loading}>
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                <span className="sr-only">Sync from Dynadot</span>
               </Button>
             </div>
           </div>
@@ -2215,9 +2249,23 @@ function AdminTab({ onSelect }: { onSelect: (id: string) => void }) {
           {loading ? (
             <div className="space-y-2">{[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-12" />)}</div>
           ) : domains.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground text-sm">
-              <Globe className="h-8 w-8 mx-auto mb-2 opacity-40" />
-              No domains match the current filter.
+            <div className="text-center py-10 text-muted-foreground">
+              <Globe className="h-10 w-10 mx-auto mb-3 opacity-30" />
+              <p className="text-sm font-medium">
+                {statusFilter === 'all'
+                  ? 'No domains in your Dynadot account'
+                  : `No ${statusFilter} domains found`}
+              </p>
+              <p className="text-xs mt-1 max-w-sm mx-auto">
+                {sync?.error
+                  ? `Could not reach Dynadot: ${sync.error}`
+                  : statusFilter === 'all'
+                  ? 'Domains you register through Dynadot (via the website or Dynadot dashboard) will appear here in real time.'
+                  : 'Try a different status filter or sync again.'}
+              </p>
+              <Button variant="outline" size="sm" className="mt-3" onClick={load} disabled={loading}>
+                <RefreshCw className="h-3.5 w-3.5 mr-1" /> Sync from Dynadot
+              </Button>
             </div>
           ) : (
             <div className="rounded-md border max-h-[60vh] overflow-y-auto">

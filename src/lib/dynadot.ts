@@ -3,15 +3,16 @@
  *
  * Used by:
  *  - Dynadot domain provider integration
+ *  - Admin "All Domains" list (real API result via listDomains)
  *
  * API docs: https://www.dynadot.com/domain/api3.html
  *
  * The Dynadot API returns XML by default, but supports JSON via the
  * `api3.json` endpoint. We use the JSON form for easier parsing.
  *
- * When DYNADOT_API_KEY env var is not set, runs in DEMO MODE - returns
- * simulated data so the rest of the application can be exercised without
- * a real registrar account.
+ * NOTE: This client ONLY performs REAL API calls. There is NO simulation,
+ * no mock data, and no demo-mode fallback. Every function will throw if
+ * DYNADOT_API_KEY is not configured.
  */
 
 const API_BASE = 'https://api.dynadot.com/api3.json'
@@ -20,14 +21,19 @@ function getApiKey(): string | null {
   return process.env.DYNADOT_API_KEY || null
 }
 
+/**
+ * Returns true when no Dynadot API key is configured.
+ *
+ * This is kept for backward-compatibility with code that wants to surface a
+ * "key not configured" warning in the UI. It does NOT trigger any simulation —
+ * all API functions below will throw if the key is missing.
+ */
 export function isDynadotDemoMode(): boolean {
   return !getApiKey()
 }
 
 interface DynadotResponse {
   // Dynadot JSON envelope — the top-level key varies by command.
-  // Most commands use "Response", but domain_info uses "DomainInfoResponse",
-  // get_ns uses "GetNsResponse", etc.
   Response?: {
     Status?: string
     Error?: string
@@ -48,6 +54,34 @@ interface DynadotResponse {
     Ns?: string | string[]
     [k: string]: unknown
   }
+  ListDomainInfoResponse?: {
+    ResponseCode?: string | number
+    Status?: string
+    Error?: string
+    MainDomains?: DynadotListedDomain[]
+    DeletedDomains?: DynadotListedDomain[]
+    [k: string]: unknown
+  }
+  SearchResponse?: {
+    ResponseCode?: string | number
+    Status?: string
+    SearchResults?: Array<Record<string, unknown>>
+    [k: string]: unknown
+  }
+  [k: string]: unknown
+}
+
+interface DynadotListedDomain {
+  Name?: string
+  Status?: string
+  Expiration?: string | number
+  Registration?: string | number
+  NameServerSettings?: string
+  Lock?: string
+  AutoRenew?: string
+  AutoRenewal?: string
+  Premium?: string
+  Whois?: string
   [k: string]: unknown
 }
 
@@ -71,9 +105,12 @@ async function callDynadot(params: Record<string, string>): Promise<DynadotRespo
   const json = (await res.json()) as DynadotResponse
   // Detect embedded Dynadot body errors (HTTP 200 + ResponseCode -1).
   // Errors can appear in ANY top-level *Response envelope, not just "Response".
-  const envelopes = [json.Response, json.DomainInfoResponse, json.GetNsResponse].filter(
-    Boolean
-  ) as Array<Record<string, unknown>>
+  const envelopes = [
+    json.Response,
+    json.DomainInfoResponse,
+    json.GetNsResponse,
+    json.ListDomainInfoResponse,
+  ].filter(Boolean) as Array<Record<string, unknown>>
   for (const env of envelopes) {
     if (env.Status === 'error' || env.ResponseCode === '-1' || env.ResponseCode === -1) {
       throw new Error(`Dynadot API error: ${env.Error || 'Unknown error'}`)
@@ -81,6 +118,83 @@ async function callDynadot(params: Record<string, string>): Promise<DynadotRespo
   }
   return json
 }
+
+// ─── Domain listing ────────────────────────────────────────────────────────────
+
+export interface ListedDomain {
+  name: string
+  status: string
+  expiresAt?: string
+  registeredAt?: string
+  autoRenew: boolean
+  locked: boolean
+  premium: boolean
+  whoisPrivacy: boolean
+  nameServerSettings?: string
+}
+
+/**
+ * Parse a Dynadot timestamp. Dynadot returns expiration/registration dates as
+ * Unix timestamps in MILLISECONDS (e.g. 1781675135000).
+ */
+function parseDynadotDate(raw: unknown): string | undefined {
+  if (!raw) return undefined
+  const n = typeof raw === 'number' ? raw : parseInt(String(raw), 10)
+  if (!Number.isFinite(n) || n <= 0) return undefined
+  return new Date(n).toISOString()
+}
+
+function yesNo(v: unknown): boolean {
+  return String(v || '').toLowerCase() === 'yes'
+}
+
+/**
+ * List ALL domains registered in the Dynadot account.
+ *
+ * Uses the API3 `list_domain` command which returns both MainDomains (active)
+ * and DeletedDomains (deleted/expired). We merge them into one list so the
+ * admin UI can show the complete, real picture.
+ *
+ * This is a REAL API call — no simulation, no fallback.
+ */
+export async function listDomains(): Promise<{
+  main: ListedDomain[]
+  deleted: ListedDomain[]
+}> {
+  const json = await callDynadot({ command: 'list_domain' })
+  const resp = json.ListDomainInfoResponse
+  if (!resp) {
+    throw new Error('Dynadot list_domain returned no ListDomainInfoResponse body')
+  }
+
+  const mapList = (arr: DynadotListedDomain[] | undefined): ListedDomain[] => {
+    if (!Array.isArray(arr)) return []
+    return arr
+      .map((d) => {
+        const name = String(d.Name || '').toLowerCase().trim()
+        if (!name) return null
+        return {
+          name,
+          status: String(d.Status || 'unknown'),
+          expiresAt: parseDynadotDate(d.Expiration),
+          registeredAt: parseDynadotDate(d.Registration),
+          autoRenew: yesNo(d.AutoRenew) || yesNo(d.AutoRenewal),
+          locked: yesNo(d.Lock),
+          premium: yesNo(d.Premium),
+          whoisPrivacy: yesNo(d.Whois),
+          nameServerSettings: d.NameServerSettings ? String(d.NameServerSettings) : undefined,
+        } as ListedDomain
+      })
+      .filter((d): d is ListedDomain => d !== null)
+  }
+
+  return {
+    main: mapList(resp.MainDomains),
+    deleted: mapList(resp.DeletedDomains),
+  }
+}
+
+// ─── Search ────────────────────────────────────────────────────────────────────
 
 interface SearchDomainResult {
   domain: string
@@ -97,16 +211,11 @@ interface SearchDomainResult {
  *
  * Example input:
  *   "Registration Price: 10.88 in USD and Renewal price: 10.88 in USD and Domain is not a Premium Domain"
- *   "Registration Price: 10.88 in USD and Renewal price: 10.88 in USD and Domain is a Premium Domain"
- *
- * Returns the registration + renewal prices (transfer = renewal for Dynadot).
- * Returns nulls if the string can't be parsed.
  */
 function parseDynadotPriceString(
   raw: string
 ): { registration: number; renewal: number; premium: boolean } | null {
   if (!raw || typeof raw !== 'string') return null
-  // Extract all "X.XX in USD" prices — registration always comes first, renewal second.
   const matches = raw.match(/([\d.]+)\s+in\s+USD/gi)
   if (!matches || matches.length < 1) return null
   const nums = matches.map((m) => parseFloat(m.replace(/[^\d.]/g, '')))
@@ -120,43 +229,12 @@ function parseDynadotPriceString(
  * Search domain availability for one or more domains.
  *
  * Uses `show_price=1` so Dynadot returns real Registration + Renewal prices
- * (the reseller wholesale price we pay) in the `Price` field. The Price field
- * is a human-readable string like:
- *   "Registration Price: 10.88 in USD and Renewal price: 10.88 in USD and ..."
+ * (the reseller wholesale price we pay) in the `Price` field.
  */
 export async function searchDomains(
   domains: string[]
 ): Promise<SearchDomainResult[]> {
-  if (isDynadotDemoMode()) {
-    // Demo mode - simulate availability for common TLDs
-     
-    console.log('[dynadot] DEMO MODE: searchDomains', domains)
-    return domains.map((domain) => {
-      const tld = domain.split('.').pop()?.toLowerCase() || ''
-      const knownTlds = ['com', 'net', 'org', 'io', 'dev', 'app', 'co']
-      const isKnownTld = knownTlds.includes(tld)
-      // Pretend very long / hyphenated domains are available, others taken
-      const available = isKnownTld && (domain.length > 12 || domain.includes('-'))
-      const priceMap: Record<string, number> = {
-        com: 9.99,
-        net: 11.99,
-        org: 10.99,
-        io: 32.0,
-        dev: 14.99,
-        app: 16.99,
-        co: 24.99,
-      }
-      return {
-        domain,
-        available,
-        price: available ? priceMap[tld] || 12.99 : undefined,
-      }
-    })
-  }
-
   // Dynadot's search API requires separate domain0, domain1, domain2... params.
-  // A single comma-separated domain0 value returns "invalid characters in domain".
-  // show_price=1 makes Dynadot return real Registration + Renewal prices.
   const searchParams: Record<string, string> = {
     command: 'search',
     show_price: '1',
@@ -169,11 +247,7 @@ export async function searchDomains(
 
   const results: SearchDomainResult[] = []
 
-  // Dynadot search API returns:
-  //   { SearchResponse: { ResponseCode: "0", SearchResults: [{ DomainName, Status, Available: "yes"|"no", Price?, Premium? }] } }
-  const searchResp = json.SearchResponse as
-    | { SearchResults?: Array<Record<string, unknown>> }
-    | undefined
+  const searchResp = json.SearchResponse
   if (searchResp?.SearchResults && Array.isArray(searchResp.SearchResults)) {
     for (const item of searchResp.SearchResults) {
       const priceRaw = item.Price ? String(item.Price) : ''
@@ -184,7 +258,7 @@ export async function searchDomains(
         price: parsed?.registration,
         registrationPrice: parsed?.registration,
         renewalPrice: parsed?.renewal,
-        transferPrice: parsed?.renewal, // Dynadot transfer price = renewal price
+        transferPrice: parsed?.renewal,
         premium: parsed?.premium ?? (String(item.Premium || '').toLowerCase() === 'yes'),
       })
     }
@@ -213,6 +287,8 @@ export async function searchDomains(
   return results
 }
 
+// ─── Register ──────────────────────────────────────────────────────────────────
+
 interface RegisterDomainResult {
   success: boolean
   orderId?: string
@@ -226,19 +302,6 @@ export async function registerDomain(
   domain: string,
   duration: number
 ): Promise<RegisterDomainResult> {
-  if (isDynadotDemoMode()) {
-    // Demo mode - simulate a successful registration
-     
-    console.log(
-      `[dynadot] DEMO MODE: registerDomain(${domain}, ${duration}y)`
-    )
-    return {
-      success: true,
-      orderId: `demo-order-${Date.now()}`,
-      registrationPrice: 9.99 * duration,
-    }
-  }
-
   const json = await callDynadot({
     command: 'register',
     domain,
@@ -254,6 +317,8 @@ export async function registerDomain(
   }
 }
 
+// ─── Domain info ───────────────────────────────────────────────────────────────
+
 interface DomainInfo {
   status: string
   expiry?: string
@@ -263,31 +328,18 @@ interface DomainInfo {
 /**
  * Get info about a registered domain.
  *
- * Uses the Dynadot API3 `domain_info` command (NOT `get_domain_info`, which
- * Dynadot rejects with "incorrect command name"). The response is returned
- * under the `DomainInfoResponse` envelope (not `Response`).
+ * Uses the API3 `domain_info` command (NOT `get_domain_data`). The response
+ * comes under the `DomainInfoResponse` envelope.
  *
- * Note: `domain_info` returns `NameServerSettings` (a mode object like
- * "Dynadot Parking"), NOT the actual nameserver hostnames. To get the real
- * hostnames (ns1.example.com, ...) we make a second `get_ns` call.
+ * Note: `domain_info` returns `NameServerSettings` (a mode like "Dynadot
+ * Parking"), NOT the actual hostnames. To get the real hostnames we make a
+ * second `get_ns` call.
  */
 export async function getDomainInfo(domain: string): Promise<DomainInfo> {
-  if (isDynadotDemoMode()) {
-    // Demo mode
-     
-    console.log(`[dynadot] DEMO MODE: getDomainInfo(${domain})`)
-    return {
-      status: 'active',
-      expiry: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
-      nameservers: ['ns1.deployhub.io', 'ns2.deployhub.io'],
-    }
-  }
-
   const json = await callDynadot({ command: 'domain_info', domain })
   const resp = json.DomainInfoResponse
   const info = resp?.DomainInfo || {}
 
-  // Expiration is a Unix timestamp in MILLISECONDS
   const expiryRaw = info.Expiration ? String(info.Expiration) : undefined
   const expiry = expiryRaw && !isNaN(Number(expiryRaw))
     ? new Date(Number(expiryRaw)).toISOString()
@@ -318,6 +370,8 @@ export async function getDomainInfo(domain: string): Promise<DomainInfo> {
   }
 }
 
+// ─── DNS records ───────────────────────────────────────────────────────────────
+
 interface DnsRecordInput {
   type: string // A, AAAA, CNAME, MX, TXT, etc.
   name: string // subdomain or @
@@ -333,18 +387,6 @@ export async function setDnsRecords(
   domain: string,
   records: DnsRecordInput[]
 ): Promise<{ success: boolean }> {
-  if (isDynadotDemoMode()) {
-    // Demo mode - simulate success
-     
-    console.log(
-      `[dynadot] DEMO MODE: setDnsRecords(${domain}, ${records.length} records)`
-    )
-    return { success: true }
-  }
-
-  // Dynadot expects a specific JSON structure for DNS records.
-  // We pass them as `main_record_typeN`, `main_recordN`, `sub_recordN`, etc.
-  // For simplicity, use the set_dns2 command which takes a JSON config.
   const dnsConfig = records.map((r, i) => ({
     index: i,
     type: r.type,
@@ -360,7 +402,6 @@ export async function setDnsRecords(
     main_record0: dnsConfig[0]?.value || '127.0.0.1',
     main_record_type1: dnsConfig[1]?.type || '',
     main_record1: dnsConfig[1]?.value || '',
-    // Add up to a few records - Dynadot supports many but we cap for simplicity
     main_record_type2: dnsConfig[2]?.type || '',
     main_record2: dnsConfig[2]?.value || '',
     main_record_type3: dnsConfig[3]?.type || '',
@@ -370,6 +411,8 @@ export async function setDnsRecords(
   return { success: status === 'success' }
 }
 
+// ─── Renew ─────────────────────────────────────────────────────────────────────
+
 /**
  * Renew a domain registration.
  */
@@ -377,12 +420,6 @@ export async function renewDomain(
   domain: string,
   duration: number
 ): Promise<{ success: boolean }> {
-  if (isDynadotDemoMode()) {
-     
-    console.log(`[dynadot] DEMO MODE: renewDomain(${domain}, ${duration}y)`)
-    return { success: true }
-  }
-
   const json = await callDynadot({
     command: 'renew',
     domain,
@@ -392,6 +429,8 @@ export async function renewDomain(
   return { success: status === 'success' || status === 'renew success' }
 }
 
+// ─── Transfer ──────────────────────────────────────────────────────────────────
+
 /**
  * Transfer a domain from another registrar using an auth/EPP code.
  */
@@ -399,12 +438,6 @@ export async function transferDomain(
   domain: string,
   authCode: string
 ): Promise<{ success: boolean }> {
-  if (isDynadotDemoMode()) {
-     
-    console.log(`[dynadot] DEMO MODE: transferDomain(${domain})`)
-    return { success: true }
-  }
-
   const json = await callDynadot({
     command: 'transfer',
     domain,
