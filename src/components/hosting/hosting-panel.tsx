@@ -65,6 +65,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import CreateWebsiteWizard from '@/components/hosting/create-website-wizard'
 import {
   Dialog,
   DialogContent,
@@ -106,6 +107,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuLabel,
 } from '@/components/ui/dropdown-menu'
+import {
+  DatabaseTab,
+  BackupsTab,
+  FilesTab,
+  TerminalTab,
+  ResourcesTab,
+  DomainsTab,
+} from '@/components/hosting/website-management-tabs'
 
 // Types
 interface Project {
@@ -2673,6 +2682,16 @@ function ProjectDetailView({
         </AlertDialogContent>
       </AlertDialog>
 
+      {/* ─── Website Management Tabs (Phase 2-c) ────────────────────────── */}
+      {/* New management sections added by the Frontend Management Tabs subagent.
+          Each is a self-contained Card component consuming its own REST endpoint. */}
+      <DatabaseTab projectId={project.id} />
+      <BackupsTab projectId={project.id} />
+      <FilesTab projectId={project.id} />
+      <TerminalTab projectId={project.id} />
+      <ResourcesTab projectId={project.id} />
+      <DomainsTab projectId={project.id} onProjectChanged={fetchProject} />
+
       {/* Danger Zone */}
       <Card className="border-red-200 dark:border-red-900/50">
         <CardHeader>
@@ -3105,7 +3124,7 @@ export default function HostingPanel() {
           className="bg-indigo-600 hover:bg-indigo-700 text-white shrink-0"
         >
           <Plus className="size-4 mr-2" />
-          New Project
+          Create Website
         </Button>
       </div>
 
@@ -3355,7 +3374,7 @@ export default function HostingPanel() {
                   className="bg-indigo-600 hover:bg-indigo-700 text-white"
                 >
                   <Plus className="size-4 mr-2" />
-                  Create Project
+                  Create Website
                 </Button>
               </>
             )}
@@ -3394,10 +3413,10 @@ export default function HostingPanel() {
         </>
       )}
 
-      <CreateProjectDialog
+      <CreateWebsiteWizard
         open={showCreate}
         onClose={() => setShowCreate(false)}
-        onCreated={fetchProjects}
+        onCreated={() => fetchProjects()}
       />
 
       {/* Bulk Delete Confirmation */}

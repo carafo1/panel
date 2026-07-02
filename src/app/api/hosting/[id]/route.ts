@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
-import { removeProjectContainer } from '@/lib/vps'
+import { removeProjectContainer, dropProjectDatabase, deleteBackup } from '@/lib/vps'
 
 export async function GET(
   request: Request,
@@ -41,6 +41,9 @@ export async function GET(
           include: { dnsRecords: true },
         },
         githubIntegration: true,
+        websiteDatabases: true,
+        websiteBackups: true,
+        websiteDomains: true,
       },
     })
 
@@ -84,6 +87,62 @@ export async function GET(
         sslCertStatus: project.sslCertStatus,
         sslCertExpiry: project.sslCertExpiry?.toISOString() ?? null,
         lastDeployedAt: project.lastDeployedAt?.toISOString() ?? null,
+        // ── NEW: Wizard fields ───────────────────────────────────────────
+        deploymentMethod: project.deploymentMethod,
+        deploymentSource: project.deploymentSource,
+        sourceProvider: project.sourceProvider,
+        sourceBranch: project.sourceBranch,
+        sourceCommit: project.sourceCommit,
+        runtime: project.runtime,
+        runtimeVersion: project.runtimeVersion,
+        buildCommand: project.buildCommand,
+        startCommand: project.startCommand,
+        appPort: project.appPort,
+        documentRoot: project.documentRoot,
+        wpAdminUser: project.wpAdminUser,
+        wpAdminEmail: project.wpAdminEmail,
+        // wpAdminPassword is intentionally NOT exposed here.
+        databaseType: project.databaseType,
+        databaseName: project.databaseName,
+        databaseUser: project.databaseUser,
+        databaseHost: project.databaseHost,
+        databasePort: project.databasePort,
+        resourceCpuCores: project.resourceCpuCores,
+        resourceRamMB: project.resourceRamMB,
+        resourceStorageGB: project.resourceStorageGB,
+        installSettings: project.installSettings
+          ? (() => {
+              try {
+                return JSON.parse(project.installSettings)
+              } catch {
+                return null
+              }
+            })()
+          : null,
+        // ── NEW: Related-row counts (for sidebar / dashboard badges) ─────
+        websiteDomains: project.websiteDomains.map((d) => ({
+          id: d.id,
+          domain: d.domain,
+          isPrimary: d.isPrimary,
+          sslEnabled: d.sslEnabled,
+          sslStatus: d.sslStatus,
+          verified: d.verified,
+          createdAt: d.createdAt.toISOString(),
+        })),
+        websiteDatabases: project.websiteDatabases.map((d) => ({
+          id: d.id,
+          name: d.name,
+          type: d.type,
+          host: d.host,
+          port: d.port,
+          username: d.username,
+          isPrimary: d.isPrimary,
+          externalRef: d.externalRef,
+          createdAt: d.createdAt.toISOString(),
+        })),
+        websiteBackupsCount: project.websiteBackups.length,
+        websiteDatabasesCount: project.websiteDatabases.length,
+        websiteDomainsCount: project.websiteDomains.length,
         lastDeployment,
         server: project.server ? {
           id: project.server.id,
@@ -283,6 +342,34 @@ export async function DELETE(
         })
         .catch(() => {})
     }
+
+    // ── NEW: Clean up related rows (DBs, backups, domains, stages) ────
+    // Each of these best-effort: a failure to drop one DB doesn't block
+    // the rest of the cleanup.
+    try {
+      const dbs = await db.websiteDatabase.findMany({ where: { projectId: id }, select: { id: true } })
+      for (const d of dbs) {
+        await dropProjectDatabase(id, d.id).catch((err) => {
+          console.error(`[hosting/delete] dropProjectDatabase ${d.id} failed:`, err)
+        })
+      }
+    } catch (err) {
+      console.error('[hosting/delete] database cleanup failed:', err)
+    }
+
+    try {
+      const backups = await db.websiteBackup.findMany({ where: { projectId: id }, select: { id: true } })
+      for (const b of backups) {
+        await deleteBackup(id, b.id).catch((err) => {
+          console.error(`[hosting/delete] deleteBackup ${b.id} failed:`, err)
+        })
+      }
+    } catch (err) {
+      console.error('[hosting/delete] backup cleanup failed:', err)
+    }
+
+    // WebsiteDomain rows cascade automatically (onDelete: Cascade in Prisma).
+    // DeploymentStage rows cascade from Deployment, which itself stays (for audit history).
 
     // Audit project delete (stop)
     await logAudit({

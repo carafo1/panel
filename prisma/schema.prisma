@@ -107,13 +107,13 @@ model Project {
   name         String
   slug         String
   description  String?
-  framework    String   @default("nextjs") // nextjs, react, node, static
-  stack        String   @default("nodejs") // "nodejs", "php", "python", "docker", "wordpress"
-  status       String   @default("creating") // creating, running, stopped, error
+  framework    String   @default("nextjs") // nextjs, react, node, static, wordpress, laravel, flask, django, fastapi, nuxt, nestjs, express, astro, vue, angular
+  stack        String   @default("nodejs") // "nodejs", "php", "python", "docker", "wordpress", "static", "ruby", "go", "java"
+  status       String   @default("creating") // creating, running, stopped, error, deploying
   serverId     String?
   subdomain    String   // e.g. myapp.deployhub.io
   customDomain String?
-  repoUrl      String?  // GitHub repo URL
+  repoUrl      String?  // Git repo URL
   autoDeploy   Boolean  @default(true)
   sslEnabled   Boolean  @default(true)
   // Real VPS deployment fields
@@ -125,6 +125,41 @@ model Project {
   sslCertStatus  String   @default("none") // none, pending, issued, failed, renewing
   sslCertExpiry  DateTime?
   lastDeployedAt DateTime?
+
+  // ── NEW: Create-Website-Wizard fields ─────────────────────────────────
+  // Which of the 8 deployment methods the user picked.
+  deploymentMethod   String?  // wordpress | laravel | nodejs | php | static | python | docker | custom
+  // Where the source code came from.
+  deploymentSource   String?  // git | zip | manual | template
+  sourceProvider     String?  // github | gitlab | bitbucket | custom
+  sourceBranch       String?  @default("main")
+  sourceCommit       String?  // last deployed commit sha
+  // Runtime + build configuration (used by all methods).
+  runtime            String?  // nodejs | php | python | ruby | go | java | static | docker | bun
+  runtimeVersion     String?  // e.g. "20", "8.2", "3.11"
+  buildCommand       String?  // e.g. "npm run build", "composer install --no-dev"
+  startCommand       String?  // e.g. "npm start", "php artisan serve"
+  appPort            Int?     // port the app listens on inside the container
+  documentRoot       String?  // for PHP/static: e.g. /var/www/html, /app/dist
+  // WordPress one-click install settings.
+  wpAdminUser        String?
+  wpAdminEmail       String?
+  wpAdminPassword    String?  // encrypted at rest
+  // Auto-provisioned database (for wordpress/laravel/python DB apps).
+  databaseType       String?  // mysql | mariadb | postgres | sqlite | none
+  databaseName       String?
+  databaseUser       String?
+  databasePassword   String?  // encrypted at rest
+  databaseHost       String?
+  databasePort       Int?
+  // Resource limits snapshot from the user's plan at creation time.
+  resourceCpuCores   Float?
+  resourceRamMB      Int?
+  resourceStorageGB  Int?
+  // Free-form JSON blob capturing every option chosen in the wizard
+  // (kept for audit + future re-deploys). Schema is open-ended on purpose.
+  installSettings    String?  // JSON string
+
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -141,6 +176,9 @@ model Project {
   webhooks           Webhook[]
   pipelines          Pipeline[]
   monitors           UptimeMonitor[]
+  websiteDatabases   WebsiteDatabase[]
+  websiteBackups     WebsiteBackup[]
+  websiteDomains     WebsiteDomain[]
 }
 
 model Domain {
@@ -249,6 +287,90 @@ model Deployment {
 
   project Project @relation(fields: [projectId], references: [id])
   user    User    @relation(fields: [userId], references: [id])
+  stages  DeploymentStage[]
+}
+
+// Per-stage progress tracking for the live deployment progress UI.
+// Each Deployment is broken into ordered stages (creating_container,
+// downloading_source, installing_dependencies, building_project,
+// starting_services, running_migrations, configuring_ssl, etc.).
+model DeploymentStage {
+  id           String   @id @default(cuid())
+  deploymentId String
+  name         String   // machine id: create_container, download_source, ...
+  label        String   // human label: "Creating container…"
+  status       String   @default("pending") // pending, running, completed, failed, skipped
+  message      String?  // short status line
+  log          String?  // detailed chunk output
+  order        Int      @default(0)
+  startedAt    DateTime?
+  completedAt  DateTime?
+  durationMs   Int?
+  createdAt    DateTime @default(now())
+
+  deployment Deployment @relation(fields: [deploymentId], references: [id], onDelete: Cascade)
+
+  @@index([deploymentId])
+  @@index([deploymentId, order])
+}
+
+// Auto-provisioned databases for a project (WordPress, Laravel, etc.).
+// One project may have multiple databases (a primary app DB + extra DBs
+// the user creates later). The password is encrypted at rest.
+model WebsiteDatabase {
+  id           String   @id @default(cuid())
+  projectId    String
+  name         String   // database name
+  type         String   // mysql, mariadb, postgres, sqlite
+  host         String   // container name or external host
+  port         Int
+  username     String
+  password     String   // encrypted at rest
+  externalRef  String?  // docker container name of the DB service, if any
+  isPrimary    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+// Project-level backups (database dump + files archive).
+// Stored on the VPS under /opt/deployhub/backups/<projectSlug>/.
+model WebsiteBackup {
+  id           String   @id @default(cuid())
+  projectId    String
+  filename     String   // basename on disk
+  sizeBytes    Int      @default(0)
+  status       String   @default("completed") // pending, running, completed, failed
+  type         String   @default("manual")    // manual, scheduled, pre-deploy
+  note         String?
+  createdAt    DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([createdAt])
+}
+
+// Additional domains attached to a project (the primary customDomain stays
+// on the Project row for back-compat; this table holds the secondary ones).
+// SSL is per-domain because each hostname needs its own cert.
+model WebsiteDomain {
+  id           String   @id @default(cuid())
+  projectId    String
+  domain       String   // e.g. www.example.com, app.example.com
+  isPrimary    Boolean  @default(false)
+  sslEnabled   Boolean  @default(true)
+  sslStatus    String   @default("none") // none, pending, issued, failed, renewing
+  verified     Boolean  @default(false)
+  verificationMethod String? // dns-txt, a-record, cname
+  createdAt    DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, domain])
+  @@index([projectId])
 }
 
 model AutomationLog {

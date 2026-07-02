@@ -215,8 +215,28 @@ export async function POST(request: Request) {
 
           results.push({ id: project.id, success: true })
         } else if (action === 'delete') {
-          // Hard-delete: cascade removes deployments, env vars, etc.
-          // (Schema uses onDelete: Cascade for related tables.)
+          // Hard-delete: cascade removes env vars, analytics events,
+          // pipelines, uptime monitors, website databases/backups/domains
+          // (those relations have onDelete: Cascade in the schema).
+          // The relations below are NOT cascaded (FK is nullable or required
+          // without cascade), so we have to clean them up explicitly before
+          // removing the Project row, otherwise SQLite raises a FK violation.
+          await db.deployment.deleteMany({ where: { projectId: project.id } })
+          await db.automationLog.deleteMany({ where: { projectId: project.id } })
+          await db.githubIntegration.deleteMany({ where: { projectId: project.id } })
+          await db.webhook.deleteMany({ where: { projectId: project.id } })
+          // Domains keep their projectId nullable but reference the project —
+          // detach them rather than deleting (the user may still own the domain).
+          await db.domain.updateMany({
+            where: { projectId: project.id },
+            data: { projectId: null },
+          })
+          // Teams can own projects — detach.
+          await db.project.update({
+            where: { id: project.id },
+            data: { teamId: null },
+          })
+          // Finally, remove the project row.
           await db.project.delete({
             where: { id: project.id },
           })
