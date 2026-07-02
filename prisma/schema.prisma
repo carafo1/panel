@@ -179,6 +179,10 @@ model Project {
   websiteDatabases   WebsiteDatabase[]
   websiteBackups     WebsiteBackup[]
   websiteDomains     WebsiteDomain[]
+  cronJobs           CronJob[]
+  ftpAccounts        FtpAccount[]
+  redirects          Redirect[]
+  ipBlocks           IpBlock[]
 }
 
 model Domain {
@@ -1031,4 +1035,95 @@ model AppSetting {
   value     String             // stored as string, parsed by caller
   updatedAt DateTime @updatedAt
   updatedBy String?
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// cPanel-style feature models (Cron Jobs, FTP Accounts, Redirects, IP Blocks)
+// Added for the cPanel feature parity upgrade.
+// ────────────────────────────────────────────────────────────────────────────
+
+// Scheduled tasks (cron). Runs inside the project's Docker container via
+// `docker exec <container> crond` or a per-container crontab.
+model CronJob {
+  id          String   @id @default(cuid())
+  projectId   String
+  // Cron expression: minute hour day month weekday (e.g. "0 3 * * *" = daily 3am)
+  // Special strings (@daily, @hourly, @weekly, @monthly, @reboot) also supported.
+  expression  String
+  command     String   // shell command to run inside the container
+  description String?  // human label
+  enabled     Boolean  @default(true)
+  lastRunAt   DateTime?
+  lastStatus  String?  // success | failed | running
+  lastOutput  String?  // truncated stdout+stderr of last run
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+// FTP / SFTP accounts for file access to the project's deployPath.
+// Backed by a lightweight pure-ftpd sidecar container or system user on the VPS.
+model FtpAccount {
+  id          String   @id @default(cuid())
+  projectId   String
+  username    String   // full username e.g. "user@projectslug"
+  password    String   // encrypted (AES-256-GCM)
+  // Directory path (relative to deployPath) this account can access. "/" = whole site.
+  directory   String   @default("/")
+  // Whether this is read-only access (download only) or read-write.
+  readOnly    Boolean  @default(false)
+  quotaMB     Int?     // optional storage cap in MB; null = unlimited
+  enabled     Boolean  @default(true)
+  lastLoginAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, username])
+  @@index([projectId])
+}
+
+// URL redirects (301/302) configured at the Caddy/reverse-proxy layer.
+model Redirect {
+  id          String   @id @default(cuid())
+  projectId   String
+  // Source path on this project's domain, e.g. "/old-page" or "/blog/*"
+  fromPath    String
+  // Destination URL (absolute or path), e.g. "https://example.com/new" or "/new"
+  toUrl       String
+  // 301 (permanent) or 302 (temporary)
+  statusCode  Int      @default(301)
+  // Optional: match query string exactly; null = wildcard
+  matchQuery  String?
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+// IP blocks / firewall rules. Deny or allow specific IPs/subnets from
+// accessing this project's site. Enforced via Caddy layer or iptables.
+model IpBlock {
+  id          String   @id @default(cuid())
+  projectId   String
+  // IP address or CIDR, e.g. "192.168.1.5" or "10.0.0.0/8"
+  ipAddress   String
+  // "deny" (block) or "allow" (whitelist). Default deny.
+  action      String   @default("deny")
+  // Optional reason note
+  reason      String?
+  enabled     Boolean  @default(true)
+  expiresAt   DateTime? // null = permanent
+  createdAt   DateTime @default(now())
+
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
 }

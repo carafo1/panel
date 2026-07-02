@@ -11,7 +11,7 @@ import { provisionProjectDatabase, listProjectDatabases } from '@/lib/vps'
  *   GET  /api/hosting/[id]/databases              — list all DBs for the project
  *                                                   (?reveal=true to decrypt passwords)
  *   POST /api/hosting/[id]/databases              — provision a new DB container
- *                                                   body: { type?: 'mysql'|'mariadb', name? }
+ *                                                   body: { type?: 'mysql'|'mariadb'|'postgres', name? }
  */
 
 export async function GET(
@@ -54,7 +54,15 @@ export async function POST(
     }
 
     const body = await request.json().catch(() => ({}))
-    const type = body?.type === 'mysql' ? 'mysql' : 'mariadb'
+    // Normalize type: accept 'mysql', 'mariadb', 'postgres', or 'postgresql'
+    // (alias). Default to mariadb for back-compat with older callers.
+    const rawType = typeof body?.type === 'string' ? body.type.toLowerCase() : 'mariadb'
+    const type: 'mysql' | 'mariadb' | 'postgres' =
+      rawType === 'mysql'
+        ? 'mysql'
+        : rawType === 'postgres' || rawType === 'postgresql'
+          ? 'postgres'
+          : 'mariadb'
     const name = typeof body?.name === 'string' && body.name.trim() ? body.name.trim() : undefined
 
     const pdb = await provisionProjectDatabase(projectId, { type, name })

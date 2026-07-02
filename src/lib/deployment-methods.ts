@@ -23,7 +23,8 @@
  *   - `supportsGit`  : can deploy from a Git repo
  *   - `supportsZip`  : can deploy from a ZIP upload
  *   - `supportsManual`: can be created with just placeholder files
- *   - `needsDatabase`: auto-provisions a DB at deploy time
+ *   - `needsDatabase`: auto-provisions a DB at deploy time (MySQL, MariaDB,
+ *                     or PostgreSQL — see `src/lib/vps/database.ts`)
  *   - `detectable`   : whether the build detector can auto-pick this method
  *                      from project files (e.g. composer.json → laravel)
  *   - `fields`       : per-method extra config fields rendered in the wizard

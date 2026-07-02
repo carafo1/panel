@@ -114,7 +114,14 @@ import {
   TerminalTab,
   ResourcesTab,
   DomainsTab,
+  EmailTab,
 } from '@/components/hosting/website-management-tabs'
+import {
+  CronTab,
+  FtpTab,
+  RedirectsTab,
+  SecurityTab,
+} from '@/components/hosting/cpanel-management-tabs'
 
 // Types
 interface Project {
@@ -2686,11 +2693,19 @@ function ProjectDetailView({
       {/* New management sections added by the Frontend Management Tabs subagent.
           Each is a self-contained Card component consuming its own REST endpoint. */}
       <DatabaseTab projectId={project.id} />
+      <EmailTab projectId={project.id} />
       <BackupsTab projectId={project.id} />
       <FilesTab projectId={project.id} />
       <TerminalTab projectId={project.id} />
       <ResourcesTab projectId={project.id} />
       <DomainsTab projectId={project.id} onProjectChanged={fetchProject} />
+
+      {/* ─── cPanel-style features (Phase 2-c upgrade) ─────────────────── */}
+      {/* Cron + FTP near Files/Terminal; Redirects + Security near Domains. */}
+      <CronTab projectId={project.id} />
+      <FtpTab projectId={project.id} />
+      <RedirectsTab projectId={project.id} />
+      <SecurityTab projectId={project.id} />
 
       {/* Danger Zone */}
       <Card className="border-red-200 dark:border-red-900/50">

@@ -2,12 +2,14 @@
  * Database Provisioning Module
  * ============================
  *
- * Provisions and manages per-project databases (MariaDB / MySQL) running as
- * Docker containers on the deployhub docker network. Each project can have
- * one primary database (auto-created for WordPress / Laravel) and any number
- * of additional databases the user creates later from the panel.
+ * Provisions and manages per-project databases (MariaDB / MySQL / PostgreSQL)
+ * running as Docker containers on the deployhub docker network. Each project
+ * can have one primary database (auto-created for WordPress / Laravel) and
+ * any number of additional databases the user creates later from the panel.
  *
- * Each database is a dedicated container:
+ * Each database is a dedicated container. MySQL / MariaDB uses MYSQL_* env
+ * vars and `mysqladmin ping` for health checks; PostgreSQL uses POSTGRES_*
+ * env vars and `pg_isready` for health checks.
  *
  *   docker run -d --name deployhub-db-<slug> --network deployhub \
  *     -e MYSQL_ROOT_PASSWORD=<rand> \
@@ -15,6 +17,12 @@
  *     -e MYSQL_USER=<wp_<slug>> \
  *     -e MYSQL_PASSWORD=<rand> \
  *     mariadb:11
+ *
+ *   docker run -d --name deployhub-db-<slug> --network deployhub \
+ *     -e POSTGRES_PASSWORD=<rand> \
+ *     -e POSTGRES_DB=<wp_<slug>> \
+ *     -e POSTGRES_USER=<wp_<slug>> \
+ *     postgres:16-alpine
  *
  * The password is stored AES-256-GCM encrypted in the WebsiteDatabase row.
  * Only the host/port/name/username are returned to the UI by default; the
@@ -152,7 +160,11 @@ function toRow(
  */
 export async function provisionProjectDatabase(
   projectId: string,
-  opts: { type?: 'mysql' | 'mariadb'; name?: string; onLog?: (m: string) => void } = {}
+  opts: {
+    type?: 'mysql' | 'mariadb' | 'postgres' | 'postgresql'
+    name?: string
+    onLog?: (m: string) => void
+  } = {}
 ): Promise<ProvisionedDatabase> {
   const log = (m: string) => opts.onLog?.(m)
   const project = await db.project.findUnique({
@@ -164,8 +176,21 @@ export async function provisionProjectDatabase(
     throw new Error('Project has no server assigned')
   }
 
-  const type = opts.type === 'mysql' ? 'mysql' : 'mariadb'
-  const image = type === 'mysql' ? 'mysql:8' : 'mariadb:11'
+  // Normalize the requested type. Accept 'postgresql' as an alias for 'postgres'.
+  const rawType = (opts.type || 'mariadb').toLowerCase()
+  const type: 'mysql' | 'mariadb' | 'postgres' =
+    rawType === 'mysql'
+      ? 'mysql'
+      : rawType === 'postgres' || rawType === 'postgresql'
+        ? 'postgres'
+        : 'mariadb'
+  const isPostgres = type === 'postgres'
+  const image = isPostgres
+    ? 'postgres:16-alpine'
+    : type === 'mysql'
+      ? 'mysql:8'
+      : 'mariadb:11'
+  const defaultPort = isPostgres ? 5432 : 3306
   const slug = slug8(project.slug || project.name)
   const short = randomHex(4)
   const dbName = opts.name || `wp_${slug}_${short}`
@@ -187,17 +212,27 @@ export async function provisionProjectDatabase(
         log(`Pulling ${image}…`)
         await exec(client, `docker pull ${image}`, { timeoutMs: 300000 })
 
-        // Run the container.
+        // Run the container. Env vars differ between MySQL/MariaDB (MYSQL_*)
+        // and PostgreSQL (POSTGRES_*).
         log(`Starting container ${containerName}…`)
+        const envFlags = isPostgres
+          ? [
+              `-e POSTGRES_PASSWORD=${shellQuote(rootPass)}`,
+              `-e POSTGRES_DB=${shellQuote(dbName)}`,
+              `-e POSTGRES_USER=${shellQuote(dbUser)}`,
+            ]
+          : [
+              `-e MYSQL_ROOT_PASSWORD=${shellQuote(rootPass)}`,
+              `-e MYSQL_DATABASE=${shellQuote(dbName)}`,
+              `-e MYSQL_USER=${shellQuote(dbUser)}`,
+              `-e MYSQL_PASSWORD=${shellQuote(dbPass)}`,
+            ]
         const runCmd = [
           'docker run -d',
           `--name ${containerName}`,
           '--network deployhub',
           '--restart unless-stopped',
-          `-e MYSQL_ROOT_PASSWORD=${shellQuote(rootPass)}`,
-          `-e MYSQL_DATABASE=${shellQuote(dbName)}`,
-          `-e MYSQL_USER=${shellQuote(dbUser)}`,
-          `-e MYSQL_PASSWORD=${shellQuote(dbPass)}`,
+          ...envFlags,
           image,
         ].join(' ')
         const run = await exec(client, runCmd, { timeoutMs: 60000 })
@@ -205,15 +240,18 @@ export async function provisionProjectDatabase(
           throw new Error(`docker run failed: ${run.stderr || run.stdout}`)
         }
 
-        // Wait for the DB to be ready (mysqladmin ping up to 30 retries).
+        // Wait for the DB to be ready. mysqladmin ping for MySQL/MariaDB,
+        // pg_isready for PostgreSQL. Up to 30 retries (60s).
         log('Waiting for database to accept connections…')
+        const readyCmd = isPostgres
+          ? `docker exec ${containerName} pg_isready -U ${shellQuote(dbUser)} -d ${shellQuote(dbName)}`
+          : `docker exec ${containerName} mysqladmin ping -h localhost --silent 2>/dev/null`
         for (let i = 0; i < 30; i++) {
-          const ping = await exec(
-            client,
-            `docker exec ${containerName} mysqladmin ping -h localhost --silent 2>/dev/null`,
-            { timeoutMs: 10000 }
-          )
-          if (ping.exitCode === 0 && ping.stdout.trim() === 'mysqld is alive') {
+          const ping = await exec(client, readyCmd, { timeoutMs: 10000 })
+          const ready = isPostgres
+            ? ping.exitCode === 0 && /accepting connections/i.test(ping.stdout)
+            : ping.exitCode === 0 && ping.stdout.trim() === 'mysqld is alive'
+          if (ready) {
             log('Database is ready.')
             break
           }
@@ -229,7 +267,12 @@ export async function provisionProjectDatabase(
       throw err
     }
   } else {
-    log(`[demo] Would run: docker run -d --name ${containerName} --network deployhub ${image}`)
+    const envPreview = isPostgres
+      ? `-e POSTGRES_PASSWORD=*** -e POSTGRES_DB=${dbName} -e POSTGRES_USER=${dbUser}`
+      : `-e MYSQL_ROOT_PASSWORD=*** -e MYSQL_DATABASE=${dbName} -e MYSQL_USER=${dbUser} -e MYSQL_PASSWORD=***`
+    log(
+      `[demo] Would run: docker run -d --name ${containerName} --network deployhub ${envPreview} ${image}`
+    )
     await sleep(300)
     log('[demo] Simulated database container is ready.')
   }
@@ -241,7 +284,7 @@ export async function provisionProjectDatabase(
       name: dbName,
       type,
       host: containerName,
-      port: 3306,
+      port: defaultPort,
       username: dbUser,
       password: encrypt(dbPass),
       externalRef: containerName,
@@ -260,7 +303,7 @@ export async function provisionProjectDatabase(
         databaseUser: dbUser,
         databasePassword: encrypt(dbPass),
         databaseHost: containerName,
-        databasePort: 3306,
+        databasePort: defaultPort,
       },
     })
   }
@@ -271,7 +314,7 @@ export async function provisionProjectDatabase(
     name: dbName,
     type,
     host: containerName,
-    port: 3306,
+    port: defaultPort,
     username: dbUser,
     password: dbPass,
     externalRef: containerName,
@@ -354,8 +397,10 @@ export async function listProjectDatabases(
 }
 
 /**
- * Test that the database container responds to `mysqladmin ping`. Returns
- * `{ ok, message }`. Demo mode returns a simulated success.
+ * Test that the database container responds to a readiness probe. For
+ * MySQL / MariaDB we use `mysqladmin ping`; for PostgreSQL we use
+ * `pg_isready`. Returns `{ ok, message }`. Demo mode returns a simulated
+ * success.
  */
 export async function testDatabaseConnection(
   projectId: string,
@@ -373,6 +418,7 @@ export async function testDatabaseConnection(
   if (!project) return { ok: false, message: 'Project not found' }
 
   const container = row.externalRef || row.host
+  const isPostgres = (row.type || '').toLowerCase() === 'postgres'
 
   if (isServerInDemoMode(project.server)) {
     return { ok: true, message: '[demo] Database is reachable (simulated).' }
@@ -381,17 +427,25 @@ export async function testDatabaseConnection(
   try {
     const creds = await getServerCredentials(project.serverId!)
     return await withConnection(creds, async (client) => {
-      const r = await exec(
-        client,
-        `docker exec ${shellQuote(container)} mysqladmin ping -h localhost --silent 2>&1`,
-        { timeoutMs: 15000 }
-      )
-      if (r.exitCode === 0 && r.stdout.trim() === 'mysqld is alive') {
+      const cmd = isPostgres
+        ? `docker exec ${shellQuote(container)} pg_isready -U ${shellQuote(row.username)} -d ${shellQuote(row.name)} 2>&1`
+        : `docker exec ${shellQuote(container)} mysqladmin ping -h localhost --silent 2>&1`
+      const r = await exec(client, cmd, { timeoutMs: 15000 })
+      if (
+        r.exitCode === 0 &&
+        (isPostgres
+          ? /accepting connections/i.test(r.stdout)
+          : r.stdout.trim() === 'mysqld is alive')
+      ) {
         return { ok: true, message: 'Database is reachable.' }
       }
       return {
         ok: false,
-        message: `mysqladmin ping failed: ${(r.stderr || r.stdout).trim().slice(0, 200)}`,
+        message: `${isPostgres ? 'pg_isready' : 'mysqladmin ping'} failed: ${(
+          r.stderr || r.stdout
+        )
+          .trim()
+          .slice(0, 200)}`,
       }
     })
   } catch (err) {

@@ -7,7 +7,7 @@
  * module of Apsamo Panel. Each component is a self-contained client UI that
  * consumes the new REST endpoints documented in the API contract:
  *
- *   1. DatabaseTab    — auto-provisioned MySQL/MariaDB databases (CRUD + reveal + test)
+ *   1. DatabaseTab    — auto-provisioned MySQL/MariaDB/PostgreSQL databases (CRUD + reveal + test)
  *   2. BackupsTab     — project-level backup files (CRUD + blob download + restore)
  *   3. FilesTab       — file manager (navigate/upload/edit/rename/mkdir/delete)
  *   4. TerminalTab    — interactive shell inside the project container
@@ -67,6 +67,11 @@ import {
   Link2,
   CircleAlert,
   TrendingUp,
+  Mail,
+  AtSign,
+  KeyRound,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react'
 import {
   Card,
@@ -123,6 +128,11 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
 
 // ─── Shared helpers ──────────────────────────────────────────────────
 
@@ -312,6 +322,40 @@ interface WebsiteDomain {
   createdAt: string
 }
 
+interface EmailMailbox {
+  id: string
+  address: string
+  localPart: string
+  domainId: string
+  domainName: string | null
+  password: string // masked unless just-created
+  quota: number // bytes
+  active: boolean
+  isDefault: boolean
+  mailcowId?: string | null
+  dkimEnabled: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+interface EmailDnsRecord {
+  type: string
+  name: string
+  value: string
+  priority?: number
+}
+
+interface EmailDnsRecordsResponse {
+  domain: string
+  mailServer: string
+  records: {
+    mx: EmailDnsRecord
+    spf: EmailDnsRecord
+    dmarc: EmailDnsRecord
+    dkim: EmailDnsRecord
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 // 1. DatabaseTab
 // ═══════════════════════════════════════════════════════════════════════
@@ -323,7 +367,7 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
   const [revealing, setRevealing] = useState<Record<string, boolean>>({})
   const [testing, setTesting] = useState<Record<string, boolean>>({})
   const [createOpen, setCreateOpen] = useState(false)
-  const [createType, setCreateType] = useState<'mysql' | 'mariadb'>('mysql')
+  const [createType, setCreateType] = useState<'mysql' | 'mariadb' | 'postgres'>('mysql')
   const [createName, setCreateName] = useState('')
   const [creating, setCreating] = useState(false)
   const [createdDb, setCreatedDb] = useState<WebsiteDatabase | null>(null)
@@ -469,10 +513,12 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
         </Badge>
       )
     }
-    if (lower === 'postgres') {
-      <Badge variant="outline" className="bg-sky-50 text-sky-700 dark:bg-sky-900/20 dark:text-sky-400 border-sky-200 dark:border-sky-900/50">
+    if (lower === 'postgres' || lower === 'postgresql') {
+      return (
+        <Badge variant="outline" className="bg-cyan-100 text-cyan-700 dark:bg-cyan-950 dark:text-cyan-300 border-cyan-200 dark:border-cyan-900/50">
           PostgreSQL
         </Badge>
+      )
     }
     if (lower === 'sqlite') {
       return (
@@ -498,7 +544,7 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
               Databases
             </CardTitle>
             <CardDescription className="mt-1">
-              Auto-provisioned MySQL / MariaDB databases for this project.
+              Auto-provisioned MySQL / MariaDB / PostgreSQL databases for this project.
               Credentials are encrypted at rest.
             </CardDescription>
           </div>
@@ -655,13 +701,14 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
               <Label>Type</Label>
-              <Select value={createType} onValueChange={(v) => setCreateType(v as 'mysql' | 'mariadb')}>
+              <Select value={createType} onValueChange={(v) => setCreateType(v as 'mysql' | 'mariadb' | 'postgres')}>
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Select type" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="mysql">MySQL</SelectItem>
                   <SelectItem value="mariadb">MariaDB</SelectItem>
+                  <SelectItem value="postgres">PostgreSQL</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -3354,6 +3401,904 @@ export function DomainsTab({
                 <>
                   <Trash2 className="size-4 mr-2" />
                   Remove
+                </>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </Card>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// 7. EmailTab
+// ═══════════════════════════════════════════════════════════════════════
+
+function generateRandomPassword(): string {
+  // 24-char password with letters, digits and a fixed set of specials.
+  // Avoids ambiguous characters (O/0/I/1/l) for readability.
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%^&*-_=+'
+  const bytes = new Uint32Array(24)
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    crypto.getRandomValues(bytes)
+  } else {
+    // Fallback for very old browsers
+    for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 0xffffffff)
+  }
+  let out = ''
+  for (let i = 0; i < bytes.length; i++) {
+    out += alphabet[bytes[i] % alphabet.length]
+  }
+  return out
+}
+
+function formatQuota(bytes: number): string {
+  if (!bytes || bytes <= 0) return '—'
+  const gb = bytes / (1024 * 1024 * 1024)
+  if (gb >= 1) return `${gb.toFixed(gb < 10 ? 1 : 0)} GB`
+  const mb = bytes / (1024 * 1024)
+  return `${mb.toFixed(0)} MB`
+}
+
+export function EmailTab({ projectId }: { projectId: string }) {
+  const [mailboxes, setMailboxes] = useState<EmailMailbox[]>([])
+  const [projectDomains, setProjectDomains] = useState<string[]>([])
+  const [loading, setLoading] = useState(true)
+  const [createOpen, setCreateOpen] = useState(false)
+  const [createLocalPart, setCreateLocalPart] = useState('')
+  const [createDomain, setCreateDomain] = useState('')
+  const [createPassword, setCreatePassword] = useState('')
+  const [createShowPw, setCreateShowPw] = useState(false)
+  const [createQuotaGb, setCreateQuotaGb] = useState('1')
+  const [creating, setCreating] = useState(false)
+  const [createdMailbox, setCreatedMailbox] = useState<{
+    address: string
+    password: string
+  } | null>(null)
+
+  // Change-password dialog state
+  const [pwMailbox, setPwMailbox] = useState<EmailMailbox | null>(null)
+  const [pwNew, setPwNew] = useState('')
+  const [pwConfirm, setPwConfirm] = useState('')
+  const [pwShow, setPwShow] = useState(false)
+  const [pwSaving, setPwSaving] = useState(false)
+
+  // Delete state
+  const [deleteMailbox, setDeleteMailbox] = useState<EmailMailbox | null>(null)
+  const [deleting, setDeleting] = useState(false)
+
+  // Toggle active state
+  const [toggling, setToggling] = useState<Record<string, boolean>>({})
+
+  // DNS records state
+  const [dnsOpen, setDnsOpen] = useState(false)
+  const [dnsDomain, setDnsDomain] = useState('')
+  const [dnsRecords, setDnsRecords] = useState<EmailDnsRecordsResponse | null>(null)
+  const [dnsLoading, setDnsLoading] = useState(false)
+
+  const fetchMailboxes = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await fetch(`/api/hosting/${projectId}/email`, {
+        headers: getAuthHeaders(),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setMailboxes(data.mailboxes || [])
+        const domains: string[] = data.domains || []
+        setProjectDomains(domains)
+        // Pre-select the first domain for the create + DNS dropdowns.
+        setCreateDomain((prev) => prev || domains[0] || '')
+        setDnsDomain((prev) => prev || domains[0] || '')
+      } else {
+        toast.error(data.error || 'Failed to load mailboxes')
+      }
+    } catch {
+      toast.error('Network error loading mailboxes')
+    } finally {
+      setLoading(false)
+    }
+  }, [projectId])
+
+  useEffect(() => {
+    fetchMailboxes()
+  }, [fetchMailboxes])
+
+  const fetchDnsRecords = useCallback(async (domain: string) => {
+    if (!domain) {
+      setDnsRecords(null)
+      return
+    }
+    setDnsLoading(true)
+    try {
+      const res = await fetch(
+        `/api/hosting/${projectId}/email/dns-records?domain=${encodeURIComponent(domain)}`,
+        { headers: getAuthHeaders() }
+      )
+      const data = await res.json()
+      if (res.ok) {
+        setDnsRecords(data)
+      } else {
+        toast.error(data.error || 'Failed to load DNS records')
+        setDnsRecords(null)
+      }
+    } catch {
+      toast.error('Network error loading DNS records')
+      setDnsRecords(null)
+    } finally {
+      setDnsLoading(false)
+    }
+  }, [projectId])
+
+  useEffect(() => {
+    if (dnsOpen && dnsDomain && !dnsRecords) {
+      fetchDnsRecords(dnsDomain)
+    }
+  }, [dnsOpen, dnsDomain, dnsRecords, fetchDnsRecords])
+
+  const handleCreate = async () => {
+    const localPart = createLocalPart.trim().toLowerCase()
+    const domainName = createDomain.trim().toLowerCase()
+    if (!localPart) {
+      toast.error('Enter a local part (e.g. "info")')
+      return
+    }
+    if (!domainName) {
+      toast.error('Select a domain')
+      return
+    }
+    if (createPassword.length < 8) {
+      toast.error('Password must be at least 8 characters')
+      return
+    }
+    const gb = parseFloat(createQuotaGb) || 1
+    if (gb <= 0 || gb > 50) {
+      toast.error('Quota must be between 0.1 and 50 GB')
+      return
+    }
+    setCreating(true)
+    try {
+      const res = await fetch(`/api/hosting/${projectId}/email`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          localPart,
+          domainName,
+          password: createPassword,
+          quota: Math.round(gb * 1024 * 1024 * 1024),
+        }),
+      })
+      const data = await res.json()
+      if (res.ok && data.mailbox) {
+        setCreatedMailbox({
+          address: data.mailbox.address,
+          password: data.mailbox.plaintextPassword || createPassword,
+        })
+        setCreateOpen(false)
+        setCreateLocalPart('')
+        setCreatePassword('')
+        setCreateQuotaGb('1')
+        setCreateShowPw(false)
+        fetchMailboxes()
+        toast.success('Mailbox created')
+      } else {
+        toast.error(data.error || 'Failed to create mailbox')
+      }
+    } catch {
+      toast.error('Network error creating mailbox')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const handleToggleActive = async (mb: EmailMailbox) => {
+    setToggling((p) => ({ ...p, [mb.id]: true }))
+    try {
+      const res = await fetch(`/api/hosting/${projectId}/email/${mb.id}`, {
+        method: 'PATCH',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ active: !mb.active }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        toast.success(mb.active ? 'Mailbox disabled' : 'Mailbox enabled')
+        fetchMailboxes()
+      } else {
+        toast.error(data.error || 'Failed to update mailbox')
+      }
+    } catch {
+      toast.error('Network error updating mailbox')
+    } finally {
+      setToggling((p) => ({ ...p, [mb.id]: false }))
+    }
+  }
+
+  const handleChangePassword = async () => {
+    if (!pwMailbox) return
+    if (pwNew.length < 8) {
+      toast.error('Password must be at least 8 characters')
+      return
+    }
+    if (pwNew !== pwConfirm) {
+      toast.error('Passwords do not match')
+      return
+    }
+    setPwSaving(true)
+    try {
+      const res = await fetch(`/api/hosting/${projectId}/email/${pwMailbox.id}`, {
+        method: 'PATCH',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ password: pwNew }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        toast.success('Password updated')
+        setPwMailbox(null)
+        setPwNew('')
+        setPwConfirm('')
+        setPwShow(false)
+        fetchMailboxes()
+      } else {
+        toast.error(data.error || 'Failed to update password')
+      }
+    } catch {
+      toast.error('Network error updating password')
+    } finally {
+      setPwSaving(false)
+    }
+  }
+
+  const handleDelete = async () => {
+    if (!deleteMailbox) return
+    setDeleting(true)
+    try {
+      const res = await fetch(`/api/hosting/${projectId}/email/${deleteMailbox.id}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        toast.success('Mailbox deleted')
+        setDeleteMailbox(null)
+        fetchMailboxes()
+      } else {
+        toast.error(data.error || 'Failed to delete mailbox')
+      }
+    } catch {
+      toast.error('Network error deleting mailbox')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  const dnsRows: Array<{ label: string; record: EmailDnsRecord }> = dnsRecords
+    ? [
+        { label: 'MX', record: dnsRecords.records.mx },
+        { label: 'SPF (TXT)', record: dnsRecords.records.spf },
+        { label: 'DMARC (TXT)', record: dnsRecords.records.dmarc },
+        { label: 'DKIM (TXT)', record: dnsRecords.records.dkim },
+      ]
+    : []
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Mail className={`size-5 ${primaryText}`} />
+              Email Accounts
+            </CardTitle>
+            <CardDescription className="mt-1">
+              Create mailboxes at your domain. Passwords are encrypted at rest;
+              DNS records are generated for easy setup.
+            </CardDescription>
+          </div>
+          <Button
+            size="sm"
+            className={primaryBtn}
+            onClick={() => setCreateOpen(true)}
+          >
+            <Plus className="size-3.5 mr-1" />
+            Create Mailbox
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <div className="space-y-3">
+            <Skeleton className="h-14 w-full" />
+            <Skeleton className="h-14 w-full" />
+          </div>
+        ) : mailboxes.length === 0 ? (
+          <div className="text-center py-10 text-muted-foreground">
+            <Mail className="size-10 mx-auto mb-3 opacity-30" />
+            <p className="text-sm font-medium">No email accounts</p>
+            <p className="text-xs mt-1 max-w-md mx-auto">
+              Create your first mailbox to start sending and receiving mail at
+              your domain.
+            </p>
+            <Button className={`${primaryBtn} mt-4`} size="sm" onClick={() => setCreateOpen(true)}>
+              <Plus className="size-3.5 mr-1" />
+              Create First Mailbox
+            </Button>
+          </div>
+        ) : (
+          <>
+            <div className="max-h-96 overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/20">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Address</TableHead>
+                    <TableHead>Quota</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>DKIM</TableHead>
+                    <TableHead>Created</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {mailboxes.map((mb) => (
+                    <TableRow
+                      key={mb.id}
+                      className="hover:bg-emerald-50/40 dark:hover:bg-emerald-950/10 transition-colors"
+                    >
+                      <TableCell>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-mono text-sm font-medium">{mb.address}</span>
+                          {mb.isDefault && (
+                            <Badge
+                              variant="outline"
+                              className="bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/50 text-[10px] h-5"
+                            >
+                              Default
+                            </Badge>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground">
+                        {formatQuota(mb.quota)}
+                      </TableCell>
+                      <TableCell>
+                        {mb.active ? (
+                          <Badge
+                            variant="outline"
+                            className="bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/50 text-xs"
+                          >
+                            <span className="size-1.5 rounded-full bg-emerald-500 mr-1.5" />
+                            Active
+                          </Badge>
+                        ) : (
+                          <Badge
+                            variant="outline"
+                            className="bg-gray-50 text-gray-600 dark:bg-gray-800/30 dark:text-gray-400 border-gray-200 dark:border-gray-700 text-xs"
+                          >
+                            <span className="size-1.5 rounded-full bg-gray-400 mr-1.5" />
+                            Disabled
+                          </Badge>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {mb.dkimEnabled ? (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="inline-flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
+                                <ShieldCheck className="size-4" />
+                                On
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>DKIM signing enabled</TooltipContent>
+                          </Tooltip>
+                        ) : (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
+                                <ShieldAlert className="size-4" />
+                                Off
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>DKIM not configured</TooltipContent>
+                          </Tooltip>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {timeAgo(mb.createdAt)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-1 flex-wrap">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs"
+                            onClick={() => {
+                              setPwMailbox(mb)
+                              setPwNew('')
+                              setPwConfirm('')
+                              setPwShow(false)
+                            }}
+                          >
+                            <KeyRound className="size-3 mr-1" />
+                            Password
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs"
+                            disabled={!!toggling[mb.id]}
+                            onClick={() => handleToggleActive(mb)}
+                          >
+                            {toggling[mb.id] ? (
+                              <Loader2 className="size-3 mr-1 animate-spin" />
+                            ) : mb.active ? (
+                              <XCircle className="size-3 mr-1" />
+                            ) : (
+                              <CheckCircle2 className="size-3 mr-1" />
+                            )}
+                            {mb.active ? 'Disable' : 'Enable'}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/20"
+                            onClick={() => setDeleteMailbox(mb)}
+                          >
+                            <Trash2 className="size-3 mr-1" />
+                            Delete
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+
+            {/* DNS records helper */}
+            <Collapsible open={dnsOpen} onOpenChange={setDnsOpen} className="mt-4">
+              <div className="flex items-center justify-between gap-2 flex-wrap rounded-lg border bg-muted/30 px-3 py-2">
+                <div className="flex items-center gap-2 text-sm">
+                  <Globe className="size-4 text-muted-foreground" />
+                  <span className="font-medium">DNS records for email delivery</span>
+                  <span className="text-xs text-muted-foreground">
+                    MX / SPF / DKIM / DMARC
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Select
+                    value={dnsDomain}
+                    onValueChange={(v) => {
+                      setDnsDomain(v)
+                      setDnsRecords(null)
+                    }}
+                  >
+                    <SelectTrigger className="h-8 w-[200px] text-xs">
+                      <SelectValue placeholder="Select domain" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {projectDomains.length === 0 ? (
+                        <SelectItem value="_none" disabled>
+                          No domains — add one first
+                        </SelectItem>
+                      ) : (
+                        projectDomains.map((d) => (
+                          <SelectItem key={d} value={d}>
+                            {d}
+                          </SelectItem>
+                        ))
+                      )}
+                    </SelectContent>
+                  </Select>
+                  <CollapsibleTrigger asChild>
+                    <Button variant="ghost" size="sm" className="h-8">
+                      {dnsOpen ? (
+                        <ChevronUp className="size-4" />
+                      ) : (
+                        <ChevronDown className="size-4" />
+                      )}
+                    </Button>
+                  </CollapsibleTrigger>
+                </div>
+              </div>
+              <CollapsibleContent>
+                <div className="mt-3 rounded-lg border p-3 space-y-2">
+                  {dnsLoading ? (
+                    <div className="space-y-2">
+                      <Skeleton className="h-10 w-full" />
+                      <Skeleton className="h-10 w-full" />
+                    </div>
+                  ) : !dnsDomain || dnsDomain === '_none' ? (
+                    <p className="text-xs text-muted-foreground py-2">
+                      Add a custom domain to your project to see its DNS records.
+                    </p>
+                  ) : dnsRecords ? (
+                    <>
+                      <p className="text-xs text-muted-foreground">
+                        Add these records at your DNS provider to enable mail
+                        delivery for <span className="font-mono">{dnsRecords.domain}</span>.
+                        Mail server:{' '}
+                        <span className="font-mono">{dnsRecords.mailServer}</span>
+                      </p>
+                      {dnsRows.map((row) => (
+                        <div
+                          key={row.label}
+                          className="grid grid-cols-1 sm:grid-cols-[100px_120px_1fr_auto] gap-2 sm:items-center rounded-md border bg-background px-3 py-2 text-xs"
+                        >
+                          <span className="font-medium text-muted-foreground">
+                            {row.label}
+                          </span>
+                          <span className="font-mono">{row.record.name}</span>
+                          <code className="font-mono text-[11px] break-all text-foreground">
+                            {row.record.priority
+                              ? `${row.record.priority} ${row.record.value}`
+                              : row.record.value}
+                          </code>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="size-7"
+                            onClick={() =>
+                              copyToClipboard(
+                                row.record.priority
+                                  ? `${row.record.priority} ${row.record.value}`
+                                  : row.record.value,
+                                `${row.label} record copied`
+                              )
+                            }
+                          >
+                            <Copy className="size-3.5" />
+                          </Button>
+                        </div>
+                      ))}
+                    </>
+                  ) : (
+                    <p className="text-xs text-muted-foreground py-2">
+                      No DNS records available.
+                    </p>
+                  )}
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
+          </>
+        )}
+      </CardContent>
+
+      {/* Create Mailbox Dialog */}
+      <Dialog open={createOpen} onOpenChange={(v) => !v && setCreateOpen(false)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Mail className={`size-5 ${primaryText}`} />
+              Create Mailbox
+            </DialogTitle>
+            <DialogDescription>
+              Provision a new email account at your domain. The password is
+              shown once after creation — save it somewhere safe.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="email-local">Local part</Label>
+              <div className="flex items-center gap-2">
+                <AtSign className="size-4 text-muted-foreground shrink-0" />
+                <Input
+                  id="email-local"
+                  placeholder="info"
+                  value={createLocalPart}
+                  onChange={(e) =>
+                    setCreateLocalPart(e.target.value.replace(/[^a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]/g, ''))
+                  }
+                  className="font-mono text-sm flex-1"
+                  autoFocus
+                />
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <Label>Domain</Label>
+              <Select value={createDomain} onValueChange={setCreateDomain}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select domain" />
+                </SelectTrigger>
+                <SelectContent>
+                  {projectDomains.length === 0 ? (
+                    <SelectItem value="_none" disabled>
+                      No domains — add a custom domain first
+                    </SelectItem>
+                  ) : (
+                    projectDomains.map((d) => (
+                      <SelectItem key={d} value={d}>
+                        {d}
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
+              {projectDomains.length === 0 && (
+                <p className="text-xs text-amber-600 dark:text-amber-400">
+                  Add a custom domain in the Custom Domains section above to
+                  create mailboxes.
+                </p>
+              )}
+            </div>
+            <div className="grid gap-2">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="email-password">Password</Label>
+                <Button
+                  variant="link"
+                  size="sm"
+                  className="h-auto p-0 text-xs"
+                  onClick={() => {
+                    const pw = generateRandomPassword()
+                    setCreatePassword(pw)
+                    setCreateShowPw(true)
+                  }}
+                >
+                  Generate
+                </Button>
+              </div>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="email-password"
+                  type={createShowPw ? 'text' : 'password'}
+                  placeholder="At least 8 characters"
+                  value={createPassword}
+                  onChange={(e) => setCreatePassword(e.target.value)}
+                  className="font-mono text-sm flex-1"
+                />
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-9 shrink-0"
+                      onClick={() => setCreateShowPw((v) => !v)}
+                    >
+                      {createShowPw ? (
+                        <EyeOff className="size-4" />
+                      ) : (
+                        <Eye className="size-4" />
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {createShowPw ? 'Hide password' : 'Show password'}
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="email-quota">Quota (GB)</Label>
+              <Input
+                id="email-quota"
+                type="number"
+                min="0.1"
+                max="50"
+                step="0.1"
+                value={createQuotaGb}
+                onChange={(e) => setCreateQuotaGb(e.target.value)}
+                className="font-mono text-sm"
+              />
+              <p className="text-xs text-muted-foreground">
+                Storage limit for this mailbox. Default: 1 GB.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreateOpen(false)} disabled={creating}>
+              Cancel
+            </Button>
+            <Button
+              className={primaryBtn}
+              onClick={handleCreate}
+              disabled={creating || !createDomain || createDomain === '_none'}
+            >
+              {creating ? (
+                <>
+                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  Creating...
+                </>
+              ) : (
+                <>
+                  <Plus className="size-4 mr-2" />
+                  Create
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Show credentials once after creation */}
+      <Dialog open={!!createdMailbox} onOpenChange={(v) => !v && setCreatedMailbox(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CheckCircle2 className="size-5 text-emerald-600" />
+              Mailbox Created
+            </DialogTitle>
+            <DialogDescription>
+              Save these credentials now — the password will be masked
+              afterwards and cannot be recovered.
+            </DialogDescription>
+          </DialogHeader>
+          {createdMailbox && (
+            <div className="grid gap-3 py-2 text-sm">
+              <div className="space-y-1">
+                <div className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">Email address</span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() =>
+                      copyToClipboard(createdMailbox.address, 'Address copied')
+                    }
+                  >
+                    <Copy className="size-3 mr-1" />
+                    Copy
+                  </Button>
+                </div>
+                <code className="block w-full rounded-md bg-muted px-3 py-2 font-mono text-xs break-all">
+                  {createdMailbox.address}
+                </code>
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-muted-foreground">Password</span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() =>
+                      copyToClipboard(createdMailbox.password, 'Password copied')
+                    }
+                  >
+                    <Copy className="size-3 mr-1" />
+                    Copy
+                  </Button>
+                </div>
+                <code className="block w-full rounded-md bg-muted px-3 py-2 font-mono text-xs break-all">
+                  {createdMailbox.password}
+                </code>
+              </div>
+              <div className="rounded-md border border-amber-200 dark:border-amber-900/50 bg-amber-50/50 dark:bg-amber-950/10 p-3 text-xs text-amber-700 dark:text-amber-400 flex items-start gap-2">
+                <AlertTriangle className="size-4 shrink-0 mt-0.5" />
+                <span>
+                  These credentials are shown only once. Use a password manager
+                  or copy them somewhere safe before closing this dialog.
+                </span>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button className={primaryBtn} onClick={() => setCreatedMailbox(null)}>
+              Done
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Change Password Dialog */}
+      <Dialog open={!!pwMailbox} onOpenChange={(v) => !v && setPwMailbox(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <KeyRound className={`size-5 ${primaryText}`} />
+              Change Password
+            </DialogTitle>
+            <DialogDescription>
+              Set a new password for{' '}
+              <span className="font-mono">{pwMailbox?.address}</span>. The new
+              password will be shown once after saving.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="pw-new">New password</Label>
+                <Button
+                  variant="link"
+                  size="sm"
+                  className="h-auto p-0 text-xs"
+                  onClick={() => {
+                    const pw = generateRandomPassword()
+                    setPwNew(pw)
+                    setPwConfirm(pw)
+                    setPwShow(true)
+                  }}
+                >
+                  Generate
+                </Button>
+              </div>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="pw-new"
+                  type={pwShow ? 'text' : 'password'}
+                  placeholder="At least 8 characters"
+                  value={pwNew}
+                  onChange={(e) => setPwNew(e.target.value)}
+                  className="font-mono text-sm flex-1"
+                />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-9 shrink-0"
+                  onClick={() => setPwShow((v) => !v)}
+                >
+                  {pwShow ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                </Button>
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="pw-confirm">Confirm password</Label>
+              <Input
+                id="pw-confirm"
+                type={pwShow ? 'text' : 'password'}
+                placeholder="Re-enter the new password"
+                value={pwConfirm}
+                onChange={(e) => setPwConfirm(e.target.value)}
+                className="font-mono text-sm"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPwMailbox(null)} disabled={pwSaving}>
+              Cancel
+            </Button>
+            <Button
+              className={primaryBtn}
+              onClick={handleChangePassword}
+              disabled={pwSaving || pwNew.length < 8 || pwNew !== pwConfirm}
+            >
+              {pwSaving ? (
+                <>
+                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <KeyRound className="size-4 mr-2" />
+                  Update Password
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete confirmation */}
+      <AlertDialog
+        open={!!deleteMailbox}
+        onOpenChange={(v) => !v && setDeleteMailbox(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="size-5 text-red-500" />
+              Delete Mailbox
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Permanently delete <span className="font-mono">{deleteMailbox?.address}</span>?
+              All messages stored in this mailbox will be lost. This action
+              cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              disabled={deleting}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              {deleting ? (
+                <>
+                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="size-4 mr-2" />
+                  Delete
                 </>
               )}
             </AlertDialogAction>
