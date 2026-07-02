@@ -2,23 +2,35 @@
  * File Manager Module
  * ===================
  *
- * Provides safe, project-scoped file operations on a project's `deployPath`
- * on the VPS. Every operation resolves the requested path against the
- * project root and rejects any attempt to escape via `..` or absolute paths
- * — see {@link safePath}.
+ * Provides safe, project-scoped file operations.
+ *
+ * Two execution modes:
+ *
+ *   - LOCAL (server.sshHost === 'localhost' / 127.0.0.1 / ::1):
+ *       Every operation runs against a per-project storage root at
+ *       `<STORAGE_ROOT>/projects/<projectId>/` on the panel host via the
+ *       LocalClient (child_process + local fs). Path traversal is rejected
+ *       by `pathTraversalSafe`. The "home" directory is the project root,
+ *       created lazily on first access (ensureDir).
+ *
+ *   - REMOTE (real VPS over SSH):
+ *       Operations run against the project's `deployPath` on the remote
+ *       host via SFTP (`putFile`/`getFile`) + `exec` for ls/mkdir/rm/mv.
+ *       Path safety is enforced by `safePath`.
+ *
+ *   - DEMO (no sshHost + no creds):
+ *       Synthetic in-memory listing so the panel's file manager UI still
+ *       works in pure-demo mode.
  *
  * Operations:
  *   - listFiles      — `ls -la --time-style=full-iso` parsed into FileEntry[]
- *   - uploadFile     — SFTP putFile
- *   - downloadFile   — SFTP getFile, returns Buffer
+ *   - uploadFile     — SFTP putFile (local: copyFile via LocalSftp)
+ *   - downloadFile   — SFTP getFile (local: copyFile via LocalSftp)
  *   - deleteFile     — `rm -rf` (use with care; path validation is enforced)
  *   - createDirectory— `mkdir -p`
  *   - renameFile     — `mv`
  *   - getFileContent — `cat` (with optional truncation)
  *   - saveFileContent— SFTP putFile (overwrites)
- *
- * In DEMO MODE (no real SSH), every operation works against a synthetic
- * in-memory file tree so the panel's file manager UI is fully functional.
  */
 import path from 'path'
 import { db } from '@/lib/db'
@@ -28,9 +40,60 @@ import {
   putFile,
   getFile,
   isServerInDemoMode,
+  isLocalHost,
   type SshCredentials,
 } from './ssh'
+import { ensureDir } from './local-exec'
 import { getServerCredentials } from './provisioner'
+
+// ─── Per-project storage root (LOCAL mode) ──────────────────────────────
+
+/**
+ * Root directory for all panel-managed local storage. Defaults to
+ * `<cwd>/storage` (i.e. `/home/z/my-project/storage` in the sandbox).
+ * Override with the STORAGE_ROOT env var.
+ */
+const STORAGE_ROOT = process.env.STORAGE_ROOT || path.join(process.cwd(), 'storage')
+
+/**
+ * Per-project local storage root for the file manager.
+ *
+ * In LOCAL mode every file the user creates/uploads lives under this
+ * directory. Path traversal checks guarantee no operation can escape it.
+ */
+function PROJECT_ROOT(projectId: string): string {
+  return path.join(STORAGE_ROOT, 'projects', projectId)
+}
+
+/**
+ * Resolve a user-supplied relative path against an arbitrary root and ensure
+ * the result stays *inside* the root. Throws if the path:
+ *   - is empty
+ *   - is absolute (starts with `/`)
+ *   - contains `..` segments (literal check before normalization, so users
+ *     can't sneak a `..` past us via encoded characters etc.)
+ *   - escapes the root after posix normalization
+ *
+ * Returns the resolved absolute path on the host filesystem.
+ */
+export function pathTraversalSafe(root: string, requested: string): string {
+  if (!requested || typeof requested !== 'string') {
+    throw new Error('Path is required')
+  }
+  if (path.isAbsolute(requested)) {
+    throw new Error('Absolute paths are not allowed')
+  }
+  const segments = requested.split('/')
+  if (segments.some((s) => s === '..')) {
+    throw new Error('Parent-directory (..) segments are not allowed')
+  }
+  const base = root.replace(/\/$/, '')
+  const resolved = path.posix.normalize(`${base}/${requested}`)
+  if (resolved !== base && !resolved.startsWith(base + '/')) {
+    throw new Error('Resolved path escapes the project directory')
+  }
+  return resolved
+}
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -47,7 +110,7 @@ export interface FileEntry {
   permissions: string
 }
 
-// ─── Path safety ─────────────────────────────────────────────────────────
+// ─── Path safety (REMOTE mode — kept for backwards compat) ──────────────
 
 /**
  * Resolve a user-supplied path against the project's deployPath and ensure
@@ -78,6 +141,61 @@ export function safePath(deployPath: string, requested: string): string {
     throw new Error('Resolved path escapes the project directory')
   }
   return resolved
+}
+
+// ─── Path resolution helper ──────────────────────────────────────────────
+
+interface ResolvedPath {
+  /** Absolute path on the host filesystem. */
+  abs: string
+  /** The base directory the path was resolved against. */
+  base: string
+  /** True when running in LOCAL mode (LocalClient on the panel host). */
+  localMode: boolean
+  /** True when the project's server is in DEMO mode (synthetic). */
+  isDemo: boolean
+}
+
+/**
+ * Resolve a relative path against the project's base directory, branching on
+ * the server's execution mode:
+ *
+ *   - LOCAL  → PROJECT_ROOT(projectId) with pathTraversalSafe (root created
+ *              lazily via ensureDir).
+ *   - REMOTE → project.deployPath with safePath (requires deployPath).
+ *   - DEMO   → project.deployPath with safePath (synthetic; deployPath can
+ *              be empty — the demo branch doesn't actually use the result).
+ */
+async function resolveProjectPath(
+  project: {
+    id: string
+    deployPath?: string | null
+    server: { sshHost?: string | null } | null
+  },
+  relative: string
+): Promise<ResolvedPath> {
+  const localMode = isLocalHost(project.server?.sshHost)
+  if (localMode) {
+    const base = PROJECT_ROOT(project.id)
+    await ensureDir(base)
+    return {
+      abs: pathTraversalSafe(base, relative || '.'),
+      base,
+      localMode: true,
+      isDemo: false,
+    }
+  }
+  // No server configured → demo mode (synthetic listing).
+  const isDemo = project.server ? isServerInDemoMode(project.server) : true
+  if (!project.deployPath) {
+    throw new Error('Project has no deployPath (not deployed yet)')
+  }
+  return {
+    abs: safePath(project.deployPath, relative || '.'),
+    base: project.deployPath,
+    localMode: false,
+    isDemo,
+  }
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
@@ -146,13 +264,12 @@ export async function listFiles(
     include: { server: true },
   })
   if (!project) throw new Error('Project not found')
-  if (!project.deployPath) throw new Error('Project has no deployPath (not deployed yet)')
 
-  const resolved = safePath(project.deployPath, subdir || '.')
+  const { abs: resolved, base, isDemo } = await resolveProjectPath(project, subdir || '.')
 
   // Demo mode: synthetic listing.
-  if (isServerInDemoMode(project.server)) {
-    return demoListing(resolved, project.deployPath)
+  if (isDemo) {
+    return demoListing(resolved, base)
   }
 
   const creds: SshCredentials = await getServerCredentials(project.serverId!)
@@ -188,11 +305,10 @@ export async function uploadFile(
     include: { server: true },
   })
   if (!project) throw new Error('Project not found')
-  if (!project.deployPath) throw new Error('Project has no deployPath')
 
-  const abs = safePath(project.deployPath, pathArg)
+  const { abs, isDemo } = await resolveProjectPath(project, pathArg)
 
-  if (isServerInDemoMode(project.server)) {
+  if (isDemo) {
     return { ok: true, message: `[demo] Uploaded ${path.basename(abs)} (${content.length} bytes)` }
   }
 
@@ -217,12 +333,11 @@ export async function downloadFile(
     include: { server: true },
   })
   if (!project) throw new Error('Project not found')
-  if (!project.deployPath) throw new Error('Project has no deployPath')
 
-  const abs = safePath(project.deployPath, pathArg)
+  const { abs, isDemo } = await resolveProjectPath(project, pathArg)
   const filename = path.posix.basename(abs)
 
-  if (isServerInDemoMode(project.server)) {
+  if (isDemo) {
     // Synthetic 1KB text body so the browser triggers a download.
     const body = Buffer.from(
       `# ${filename}\n\nThis is a demo-mode placeholder file.\nProject: ${project.slug}\n`
@@ -248,11 +363,10 @@ export async function deleteFile(
     include: { server: true },
   })
   if (!project) throw new Error('Project not found')
-  if (!project.deployPath) throw new Error('Project has no deployPath')
 
-  const abs = safePath(project.deployPath, pathArg)
+  const { abs, isDemo } = await resolveProjectPath(project, pathArg)
 
-  if (isServerInDemoMode(project.server)) {
+  if (isDemo) {
     return { ok: true, message: `[demo] Deleted ${path.posix.basename(abs)}` }
   }
 
@@ -274,11 +388,10 @@ export async function createDirectory(
     include: { server: true },
   })
   if (!project) throw new Error('Project not found')
-  if (!project.deployPath) throw new Error('Project has no deployPath')
 
-  const abs = safePath(project.deployPath, pathArg)
+  const { abs, isDemo } = await resolveProjectPath(project, pathArg)
 
-  if (isServerInDemoMode(project.server)) {
+  if (isDemo) {
     return { ok: true, message: `[demo] Created directory ${path.posix.basename(abs)}` }
   }
 
@@ -301,20 +414,23 @@ export async function renameFile(
     include: { server: true },
   })
   if (!project) throw new Error('Project not found')
-  if (!project.deployPath) throw new Error('Project has no deployPath')
 
-  const absOld = safePath(project.deployPath, oldPath)
-  const absNew = safePath(project.deployPath, newPath)
+  const resolvedOld = await resolveProjectPath(project, oldPath)
+  const resolvedNew = await resolveProjectPath(project, newPath)
 
-  if (isServerInDemoMode(project.server)) {
+  if (resolvedOld.isDemo || resolvedNew.isDemo) {
     return { ok: true, message: `[demo] Renamed ${oldPath} → ${newPath}` }
   }
 
   const creds = await getServerCredentials(project.serverId!)
   await withConnection(creds, async (client) => {
-    const parent = path.posix.dirname(absNew)
+    const parent = path.posix.dirname(resolvedNew.abs)
     await exec(client, `mkdir -p ${shellQuote(parent)}`, { timeoutMs: 10000 })
-    await exec(client, `mv ${shellQuote(absOld)} ${shellQuote(absNew)}`, { timeoutMs: 30000 })
+    await exec(
+      client,
+      `mv ${shellQuote(resolvedOld.abs)} ${shellQuote(resolvedNew.abs)}`,
+      { timeoutMs: 30000 }
+    )
   })
   return { ok: true, message: 'Renamed' }
 }
@@ -333,11 +449,10 @@ export async function getFileContent(
     include: { server: true },
   })
   if (!project) throw new Error('Project not found')
-  if (!project.deployPath) throw new Error('Project has no deployPath')
 
-  const abs = safePath(project.deployPath, pathArg)
+  const { abs, isDemo } = await resolveProjectPath(project, pathArg)
 
-  if (isServerInDemoMode(project.server)) {
+  if (isDemo) {
     const demo = `# ${path.posix.basename(abs)}\n\nThis is a demo-mode placeholder.\n`
     return { content: demo, size: demo.length, truncated: false }
   }
@@ -370,11 +485,10 @@ export async function saveFileContent(
     include: { server: true },
   })
   if (!project) throw new Error('Project not found')
-  if (!project.deployPath) throw new Error('Project has no deployPath')
 
-  const abs = safePath(project.deployPath, pathArg)
+  const { abs, isDemo } = await resolveProjectPath(project, pathArg)
 
-  if (isServerInDemoMode(project.server)) {
+  if (isDemo) {
     return { ok: true, message: `[demo] Saved ${path.posix.basename(abs)} (${content.length} bytes)` }
   }
 

@@ -103,7 +103,13 @@ export async function getServerCredentials(serverId: string): Promise<ServerCred
     }
   }
 
-  if (!privateKey && !password && !process.env.SSH_AUTH_SOCK) {
+  // Localhost servers use LocalClient (child_process) — no SSH creds needed.
+  const isLocal =
+    sshHost === 'localhost' ||
+    sshHost === '127.0.0.1' ||
+    sshHost === '::1' ||
+    sshHost === '0.0.0.0'
+  if (!isLocal && !privateKey && !password && !process.env.SSH_AUTH_SOCK) {
     throw new Error('Server has no SSH credentials (need private key or password)')
   }
 

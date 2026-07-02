@@ -4,23 +4,32 @@
  *
  * Creates, lists, restores, downloads, and deletes per-project backups.
  *
- * Each backup is stored on the VPS under `/opt/deployhub/backups/<slug>/`
- * as a single `.tar.gz` file containing:
+ * Two execution modes:
  *
- *   - The full contents of `project.deployPath` (filesystem snapshot).
- *   - A `database.sql.gz` file appended into the same tar (when the project
- *     has any WebsiteDatabase rows), produced via `docker exec <dbcontainer>
- *     mysqldump | gzip`.
+ *   - LOCAL (server.sshHost === 'localhost' / 127.0.0.1 / ::1):
+ *       Backups live at `<STORAGE_ROOT>/backups/<projectId>/` on the panel
+ *       host. The filesystem snapshot is a real `tar -czf` of the project
+ *       root. SQLite databases (which is what localhost servers actually
+ *       provision — see database.ts) are backed up by copying the `.db`
+ *       file (the `externalRef`) alongside the tar as
+ *       `<archive>.db-<name>.sqlite`. Restore extracts the tar back over the
+ *       project root and copies the SQLite file back over the live `externalRef`.
+ *       Non-SQLite databases (MySQL/MariaDB/Postgres) require Docker for a
+ *       real dump — when Docker is unavailable on a localhost server, those
+ *       are skipped with a warning.
  *
- * So the final artifact is one self-contained `.tar.gz` per backup. The
- * restore step extracts the files back to deployPath and pipes the
- * database.sql.gz back into `docker exec -i <dbcontainer> mysql`.
+ *   - REMOTE (real VPS over SSH + Docker):
+ *       Existing Docker-based path: tar of `project.deployPath` on the VPS,
+ *       `docker exec <dbcontainer> mysqldump | gzip` per database, stored at
+ *       `/opt/deployhub/backups/<slug>/` on the remote VPS.
  *
- * In DEMO MODE we still persist a WebsiteBackup row with a synthetic
- * filename + 1KB size so the panel's backup list looks alive; download
- * returns a small synthetic tar-like buffer.
+ *   - DEMO (no sshHost + no creds):
+ *       Synthetic WebsiteBackup row + small placeholder download so the
+ *       panel's backup list looks alive in pure-demo mode.
  */
 import crypto from 'crypto'
+import path from 'path'
+import { copyFile, stat } from 'fs/promises'
 import { db } from '@/lib/db'
 import { encrypt, decrypt } from '@/lib/encryption'
 import {
@@ -29,9 +38,23 @@ import {
   getFile,
   putFile,
   isServerInDemoMode,
+  isLocalHost,
   type SshCredentials,
 } from './ssh'
+import { ensureDir } from './local-exec'
 import { getServerCredentials } from './provisioner'
+
+// ─── Per-project storage root (LOCAL mode) ──────────────────────────────
+
+const STORAGE_ROOT = process.env.STORAGE_ROOT || path.join(process.cwd(), 'storage')
+
+function PROJECT_ROOT(projectId: string): string {
+  return path.join(STORAGE_ROOT, 'projects', projectId)
+}
+
+function BACKUP_DIR(projectId: string): string {
+  return path.join(STORAGE_ROOT, 'backups', projectId)
+}
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -90,20 +113,27 @@ export async function createBackup(
     include: { server: true, websiteDatabases: true },
   })
   if (!project) throw new Error('Project not found')
+
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+  const rand = crypto.randomBytes(4).toString('hex')
+  const filename = `${timestamp}-${rand}.tar.gz`
+  const backupType = opts.type || 'manual'
+
+  log(`Creating backup "${filename}" for project ${project.slug || project.name}…`)
+
+  const localMode = isLocalHost(project.server?.sshHost)
+  if (localMode) {
+    return await createLocalBackup(project, filename, backupType, opts)
+  }
+
+  // ── REMOTE / DEMO path (existing behavior) ─────────────────────────
   if (!project.deployPath) throw new Error('Project has no deployPath')
 
   const slug = projectSlug(project.name, project.slug)
   const backupDir = `/opt/deployhub/backups/${slug}`
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
-  const rand = crypto.randomBytes(4).toString('hex')
-  const filename = `${timestamp}-${rand}.tar.gz`
   const remotePath = `${backupDir}/${filename}`
-  const backupType = opts.type || 'manual'
 
-  log(`Creating backup "${filename}" for project ${slug}…`)
-
-  const demoMode = isServerInDemoMode(project.server)
-
+  const demoMode = project.server ? isServerInDemoMode(project.server) : true
   if (demoMode) {
     log('[demo] Simulated backup of /opt/deployhub/projects/' + slug)
     await sleep(400)
@@ -127,7 +157,7 @@ export async function createBackup(
     }
   }
 
-  // Real mode.
+  // Real remote mode (SSH + Docker).
   const creds: SshCredentials = await getServerCredentials(project.serverId!)
   try {
     await withConnection(creds, async (client) => {
@@ -136,7 +166,7 @@ export async function createBackup(
 
       // Step 1: tar+gzip the deployPath.
       log(`Archiving ${project.deployPath}…`)
-      const tarCmd = `tar -czf ${shellQuote(remotePath)} -C ${shellQuote(project.deployPath)} . 2>&1`
+      const tarCmd = `tar -czf ${shellQuote(remotePath)} -C ${shellQuote(project.deployPath!)} . 2>&1`
       const tar = await exec(client, tarCmd, { timeoutMs: 300000 })
       if (tar.exitCode !== 0) {
         throw new Error(`tar failed: ${(tar.stderr || tar.stdout).slice(0, 500)}`)
@@ -218,6 +248,121 @@ export async function createBackup(
   }
 }
 
+/**
+ * LOCAL-mode backup: tar+gzip the project root + copy SQLite .db files.
+ * The tarball is created via `exec(client, 'tar -czf …')` which routes
+ * through LocalClient → real local bash. SQLite files are copied directly
+ * with `fs.promises.copyFile` (no Docker required).
+ */
+async function createLocalBackup(
+  project: {
+    id: string
+    name: string
+    slug: string | null
+    serverId: string | null
+    server: { sshHost?: string | null } | null
+    websiteDatabases: Array<{
+      id: string
+      name: string
+      type: string
+      externalRef: string | null
+    }>
+  },
+  filename: string,
+  backupType: string,
+  opts: { note?: string; onLog?: (m: string) => void }
+): Promise<BackupResult> {
+  const log = (m: string) => opts.onLog?.(m)
+  const projectId = project.id
+  const backupDir = BACKUP_DIR(projectId)
+  const backupPath = path.join(backupDir, filename)
+  const projectRoot = PROJECT_ROOT(projectId)
+
+  try {
+    await ensureDir(backupDir)
+    await ensureDir(projectRoot)
+
+    // Step 1: tar+gzip the project root.
+    log(`Archiving ${projectRoot}…`)
+    const creds: SshCredentials = await getServerCredentials(project.serverId!)
+    await withConnection(creds, async (client) => {
+      const tarCmd = `tar -czf ${shellQuote(backupPath)} -C ${shellQuote(projectRoot)} . 2>&1`
+      const tar = await exec(client, tarCmd, { timeoutMs: 300000 })
+      if (tar.exitCode !== 0) {
+        throw new Error(`tar failed: ${(tar.stderr || tar.stdout).slice(0, 500)}`)
+      }
+    })
+
+    // Step 2: copy SQLite .db files (externalRef) alongside the tar.
+    // Non-SQLite DBs require Docker for a real dump — skip with a warning
+    // (in practice the database.ts module auto-converts to SQLite for
+    // localhost servers without Docker, so this branch is rare).
+    for (const dbRow of project.websiteDatabases) {
+      const isSqlite = (dbRow.type || '').toLowerCase() === 'sqlite'
+      if (!isSqlite) {
+        log(`Skipping non-SQLite database ${dbRow.name} (requires Docker for dump).`)
+        continue
+      }
+      const srcPath = dbRow.externalRef
+      if (!srcPath) {
+        log(`No externalRef for ${dbRow.name}; skipping.`)
+        continue
+      }
+      const destPath = `${backupPath}.db-${dbRow.name}.sqlite`
+      try {
+        await copyFile(srcPath, destPath)
+        log(`Copied SQLite database ${dbRow.name} → ${path.basename(destPath)}.`)
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        log(`WARNING: copy SQLite ${dbRow.name} failed: ${msg}`)
+      }
+    }
+
+    // Step 3: stat the tarball for the size.
+    let sizeBytes = 0
+    try {
+      const s = await stat(backupPath)
+      sizeBytes = s.size
+    } catch {
+      /* leave at 0 */
+    }
+
+    const row = await db.websiteBackup.create({
+      data: {
+        projectId,
+        filename,
+        sizeBytes,
+        status: 'completed',
+        type: backupType,
+        note: opts.note || null,
+      },
+    })
+
+    log(`Backup complete: ${backupPath} (${sizeBytes} bytes).`)
+    return {
+      id: row.id,
+      filename,
+      sizeBytes,
+      status: 'completed',
+      message: `Backup created at ${backupPath}`,
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    log(`Backup FAILED: ${msg}`)
+    const row = await db.websiteBackup.create({
+      data: {
+        projectId,
+        filename,
+        sizeBytes: 0,
+        status: 'failed',
+        type: backupType,
+        note: opts.note || null,
+      },
+    })
+    return { id: row.id, filename, sizeBytes: 0, status: 'failed', message: msg }
+  }
+}
+
 // ─── List ────────────────────────────────────────────────────────────────
 
 export async function listBackups(projectId: string): Promise<BackupRow[]> {
@@ -253,20 +398,22 @@ export async function downloadBackup(
   })
   if (!project) throw new Error('Project not found')
 
-  const slug = projectSlug(project.name, project.slug)
-  const remotePath = `/opt/deployhub/backups/${slug}/${row.filename}`
+  const localMode = isLocalHost(project.server?.sshHost)
+  const backupPath = localMode
+    ? path.join(BACKUP_DIR(projectId), row.filename)
+    : `/opt/deployhub/backups/${projectSlug(project.name, project.slug)}/${row.filename}`
 
-  if (isServerInDemoMode(project.server)) {
+  if (!localMode && (project.server ? isServerInDemoMode(project.server) : true)) {
     // Synthetic tar.gz-like buffer (gzip header + minimal payload).
     const body = Buffer.from(
-      `APSAMO BACKUP (demo)\nproject=${slug}\nfile=${row.filename}\ncreated=${row.createdAt.toISOString()}\n`
+      `APSAMO BACKUP (demo)\nproject=${project.slug}\nfile=${row.filename}\ncreated=${row.createdAt.toISOString()}\n`
     )
     return { content: body, filename: row.filename, size: body.length }
   }
 
   const creds = await getServerCredentials(project.serverId!)
   const content = await withConnection(creds, async (client) => {
-    return await getFile(client, remotePath)
+    return await getFile(client, backupPath)
   })
   return { content, filename: row.filename, size: content.length }
 }
@@ -292,14 +439,21 @@ export async function restoreBackup(
     include: { server: true, websiteDatabases: true },
   })
   if (!project) return { ok: false, message: 'Project not found' }
+
+  log(`Restoring backup ${row.filename}…`)
+
+  const localMode = isLocalHost(project.server?.sshHost)
+  if (localMode) {
+    return await restoreLocalBackup(project, row, opts)
+  }
+
+  // ── REMOTE / DEMO path (existing behavior) ─────────────────────────
   if (!project.deployPath) return { ok: false, message: 'Project has no deployPath' }
 
   const slug = projectSlug(project.name, project.slug)
   const remotePath = `/opt/deployhub/backups/${slug}/${row.filename}`
 
-  log(`Restoring backup ${row.filename}…`)
-
-  if (isServerInDemoMode(project.server)) {
+  if (project.server ? isServerInDemoMode(project.server) : true) {
     log('[demo] Stopping container…')
     await sleep(200)
     log('[demo] Extracting files…')
@@ -326,13 +480,13 @@ export async function restoreBackup(
       log(`Clearing ${project.deployPath}…`)
       await exec(
         client,
-        `rm -rf ${shellQuote(project.deployPath)}/* ${shellQuote(project.deployPath)}/.[!.]* 2>/dev/null; true`,
+        `rm -rf ${shellQuote(project.deployPath!)}/* ${shellQuote(project.deployPath!)}/.[!.]* 2>/dev/null; true`,
         { timeoutMs: 30000 }
       )
       log('Extracting backup…')
       const ex = await exec(
         client,
-        `tar -xzf ${shellQuote(remotePath)} -C ${shellQuote(project.deployPath)} 2>&1`,
+        `tar -xzf ${shellQuote(remotePath)} -C ${shellQuote(project.deployPath!)} 2>&1`,
         { timeoutMs: 300000 }
       )
       if (ex.exitCode !== 0) {
@@ -387,6 +541,93 @@ export async function restoreBackup(
   }
 }
 
+/**
+ * LOCAL-mode restore: extract the tar over the project root, then copy each
+ * SQLite .db file back over its live `externalRef`. No Docker required.
+ *
+ * Note: SQLite file restore happens while the panel process may still hold
+ * a connection to the live .db file (via better-sqlite3 in database.ts).
+ * better-sqlite3 opens connections per-query and closes them, so by the time
+ * restore runs the file is unlocked. If a query is in-flight, the copy may
+ * fail; the caller will see a clear error and can retry.
+ */
+async function restoreLocalBackup(
+  project: {
+    id: string
+    serverId: string | null
+    server: { sshHost?: string | null } | null
+    websiteDatabases: Array<{
+      id: string
+      name: string
+      type: string
+      externalRef: string | null
+    }>
+  },
+  row: { id: string; filename: string },
+  opts: { onLog?: (m: string) => void }
+): Promise<{ ok: boolean; message: string }> {
+  const log = (m: string) => opts.onLog?.(m)
+  const projectId = project.id
+  const backupPath = path.join(BACKUP_DIR(projectId), row.filename)
+  const projectRoot = PROJECT_ROOT(projectId)
+
+  try {
+    await ensureDir(projectRoot)
+
+    const creds: SshCredentials = await getServerCredentials(project.serverId!)
+    await withConnection(creds, async (client) => {
+      // 1. Clear the project root (preserve the dir itself).
+      log(`Clearing ${projectRoot}…`)
+      await exec(
+        client,
+        `rm -rf ${shellQuote(projectRoot)}/* ${shellQuote(projectRoot)}/.[!.]* 2>/dev/null; true`,
+        { timeoutMs: 30000 }
+      )
+
+      // 2. Extract the tar back into the project root.
+      log('Extracting backup…')
+      const ex = await exec(
+        client,
+        `tar -xzf ${shellQuote(backupPath)} -C ${shellQuote(projectRoot)} 2>&1`,
+        { timeoutMs: 300000 }
+      )
+      if (ex.exitCode !== 0) {
+        throw new Error(`tar extract failed: ${(ex.stderr || ex.stdout).slice(0, 500)}`)
+      }
+    })
+
+    // 3. Restore SQLite .db files (copy over externalRef).
+    for (const dbRow of project.websiteDatabases) {
+      const isSqlite = (dbRow.type || '').toLowerCase() === 'sqlite'
+      if (!isSqlite) {
+        log(`Skipping non-SQLite database ${dbRow.name} (requires Docker for restore).`)
+        continue
+      }
+      const livePath = dbRow.externalRef
+      if (!livePath) {
+        log(`No externalRef for ${dbRow.name}; skipping.`)
+        continue
+      }
+      const srcPath = `${backupPath}.db-${dbRow.name}.sqlite`
+      try {
+        await ensureDir(path.dirname(livePath))
+        await copyFile(srcPath, livePath)
+        log(`Restored SQLite database ${dbRow.name} → ${path.basename(livePath)}.`)
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        log(`WARNING: restore SQLite ${dbRow.name} failed: ${msg}`)
+      }
+    }
+
+    log('Restore complete.')
+    return { ok: true, message: 'Backup restored successfully.' }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    log(`Restore FAILED: ${msg}`)
+    return { ok: false, message: msg }
+  }
+}
+
 // ─── Delete ──────────────────────────────────────────────────────────────
 
 export async function deleteBackup(
@@ -404,16 +645,23 @@ export async function deleteBackup(
   })
   if (!project) return { ok: false, message: 'Project not found' }
 
-  const slug = projectSlug(project.name, project.slug)
-  const remotePath = `/opt/deployhub/backups/${slug}/${row.filename}`
+  const localMode = isLocalHost(project.server?.sshHost)
+  const backupPath = localMode
+    ? path.join(BACKUP_DIR(projectId), row.filename)
+    : `/opt/deployhub/backups/${projectSlug(project.name, project.slug)}/${row.filename}`
 
-  if (!isServerInDemoMode(project.server) && project.serverId) {
+  // Delete the backup file (and any sibling .db-<name>.* files) on the host.
+  // For LOCAL mode, this runs `rm -f` via LocalClient on the local fs.
+  // For REMOTE mode (real VPS), it runs over SSH. For DEMO mode, skip.
+  if (!localMode && (project.server ? isServerInDemoMode(project.server) : true)) {
+    // Demo mode — no file to delete.
+  } else if (project.serverId) {
     try {
       const creds = await getServerCredentials(project.serverId)
       await withConnection(creds, async (client) => {
         await exec(
           client,
-          `rm -f ${shellQuote(remotePath)} ${shellQuote(remotePath + '.*')} 2>/dev/null; true`,
+          `rm -f ${shellQuote(backupPath)} ${shellQuote(backupPath + '.*')} 2>/dev/null; true`,
           { timeoutMs: 15000 }
         )
       })

@@ -42,18 +42,27 @@ import {
   type SshCredentials,
 } from './ssh'
 import { getServerCredentials } from './provisioner'
+import { isDockerAvailable, isLocalHost, execLocal, ensureDir } from './local-exec'
+import path from 'path'
+import fs from 'fs'
+
+// ─── Storage paths ────────────────────────────────────────────────────────
+
+const STORAGE_ROOT =
+  process.env.STORAGE_ROOT || path.join(process.cwd(), 'storage')
+const DB_DIR = path.join(STORAGE_ROOT, 'databases')
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
 export interface ProvisionedDatabase {
   name: string
-  type: 'mysql' | 'mariadb' | 'postgres'
-  host: string // docker container name on deployhub network
+  type: 'mysql' | 'mariadb' | 'postgres' | 'sqlite'
+  host: string // docker container name on deployhub network, or localhost for sqlite
   port: number
   username: string
   /** Plaintext password — caller is responsible for encrypting at rest. */
   password: string
-  externalRef: string // docker container name
+  externalRef: string // docker container name, or sqlite file path
 }
 
 export interface WebsiteDatabaseRow {
@@ -178,33 +187,82 @@ export async function provisionProjectDatabase(
 
   // Normalize the requested type. Accept 'postgresql' as an alias for 'postgres'.
   const rawType = (opts.type || 'mariadb').toLowerCase()
-  const type: 'mysql' | 'mariadb' | 'postgres' =
+  let type: 'mysql' | 'mariadb' | 'postgres' | 'sqlite' =
     rawType === 'mysql'
       ? 'mysql'
       : rawType === 'postgres' || rawType === 'postgresql'
         ? 'postgres'
-        : 'mariadb'
+        : rawType === 'sqlite'
+          ? 'sqlite'
+          : 'mariadb'
+
+  const isLocal = isLocalHost(project.server?.sshHost)
+  const dockerUp = isLocal ? await isDockerAvailable() : true
+  const requestedType = type
+  // If the user asked for a server DB (MySQL/MariaDB/Postgres) but Docker is
+  // unavailable on the local host, transparently fall back to a REAL SQLite
+  // database file so the project still gets a working, queryable database.
+  // The row is stored with type='sqlite' and a note in the log.
+  if (isLocal && !dockerUp && type !== 'sqlite') {
+    log(
+      `Docker is not available on this host — provisioning a real SQLite database instead of ${type}. (In production with Docker, ${type} would be used.)`
+    )
+    type = 'sqlite'
+  }
+
   const isPostgres = type === 'postgres'
+  const isSqlite = type === 'sqlite'
   const image = isPostgres
     ? 'postgres:16-alpine'
     : type === 'mysql'
       ? 'mysql:8'
       : 'mariadb:11'
-  const defaultPort = isPostgres ? 5432 : 3306
+  const defaultPort = isPostgres ? 5432 : isSqlite ? 0 : 3306
   const slug = slug8(project.slug || project.name)
   const short = randomHex(4)
-  const dbName = opts.name || `wp_${slug}_${short}`
-  const dbUser = `wp_${slug}_${short}`
+  const dbName = opts.name || (isSqlite ? `${slug}_${short}` : `wp_${slug}_${short}`)
+  const dbUser = isSqlite ? 'sqlite' : `wp_${slug}_${short}`
   const dbPass = randomPassword(32)
   const rootPass = randomPassword(32)
   const containerName = `deployhub-db-${slug}-${short}`
+  const sqlitePath = path.join(DB_DIR, projectId, `${dbName}.db`)
   const isPrimary = (await db.websiteDatabase.count({ where: { projectId } })) === 0
 
-  log(`Provisioning ${type} database "${dbName}" (container: ${containerName})…`)
+  log(`Provisioning ${type} database "${dbName}"…`)
 
   const demoMode = isServerInDemoMode(project.server)
 
-  if (!demoMode) {
+  // ── SQLite path: real local file via better-sqlite3 ─────────────────
+  if (isSqlite && !demoMode) {
+    try {
+      await ensureDir(path.dirname(sqlitePath))
+      // Dynamically import better-sqlite3 (native dep) only when needed.
+      const { default: Database } = await import('better-sqlite3')
+      const sqlite = new Database(sqlitePath)
+      // Create a metadata table so the DB isn't empty + proves it's real.
+      sqlite.exec(`
+        CREATE TABLE IF NOT EXISTS _apsamo_meta (
+          key TEXT PRIMARY KEY,
+          value TEXT
+        );
+        CREATE TABLE IF NOT EXISTS sessions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          data TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        INSERT OR REPLACE INTO _apsamo_meta (key, value) VALUES ('created_by', 'apsamo-panel');
+        INSERT OR REPLACE INTO _apsamo_meta (key, value) VALUES ('created_at', datetime('now'));
+        INSERT OR REPLACE INTO _apsamo_meta (key, value) VALUES ('project_slug', '${slug}');
+        INSERT OR REPLACE INTO _apsamo_meta (key, value) VALUES ('requested_type', '${requestedType}');
+      `)
+      sqlite.close()
+      log(`SQLite database created at ${sqlitePath}`)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      log(`SQLite provisioning failed: ${msg}`)
+      throw err
+    }
+  } else if (!demoMode && !isSqlite) {
     const creds: SshCredentials = await getServerCredentials(project.serverId)
     try {
       await withConnection(creds, async (client) => {
@@ -283,11 +341,11 @@ export async function provisionProjectDatabase(
       projectId,
       name: dbName,
       type,
-      host: containerName,
+      host: isSqlite ? 'localhost' : containerName,
       port: defaultPort,
       username: dbUser,
       password: encrypt(dbPass),
-      externalRef: containerName,
+      externalRef: isSqlite ? sqlitePath : containerName,
       isPrimary,
     },
   })
@@ -302,22 +360,22 @@ export async function provisionProjectDatabase(
         databaseName: dbName,
         databaseUser: dbUser,
         databasePassword: encrypt(dbPass),
-        databaseHost: containerName,
+        databaseHost: isSqlite ? 'localhost' : containerName,
         databasePort: defaultPort,
       },
     })
   }
 
-  log(`Database "${dbName}" provisioned (user: ${dbUser}).`)
+  log(`Database "${dbName}" provisioned (${type}).`)
 
   return {
     name: dbName,
     type,
-    host: containerName,
+    host: isSqlite ? 'localhost' : containerName,
     port: defaultPort,
     username: dbUser,
     password: dbPass,
-    externalRef: containerName,
+    externalRef: isSqlite ? sqlitePath : containerName,
   }
 }
 
@@ -343,7 +401,8 @@ export async function dropProjectDatabase(
   if (!project) return { ok: false, message: 'Project not found' }
 
   const container = row.externalRef || row.host
-  if (!isServerInDemoMode(project.server) && project.serverId && container) {
+  const isSqlite = (row.type || '').toLowerCase() === 'sqlite'
+  if (!isServerInDemoMode(project.server) && project.serverId && container && !isSqlite) {
     try {
       const creds = await getServerCredentials(project.serverId)
       await withConnection(creds, async (client) => {
@@ -356,6 +415,15 @@ export async function dropProjectDatabase(
     } catch (err) {
       // Best-effort — still delete the row so the UI updates.
       console.error('[vps-database] drop container error:', err)
+    }
+  } else if (!isServerInDemoMode(project.server) && isSqlite && container) {
+    // SQLite: delete the real .db file from disk.
+    try {
+      if (fs.existsSync(container)) {
+        fs.unlinkSync(container)
+      }
+    } catch (err) {
+      console.error('[vps-database] delete sqlite file error:', err)
     }
   }
 
@@ -419,9 +487,32 @@ export async function testDatabaseConnection(
 
   const container = row.externalRef || row.host
   const isPostgres = (row.type || '').toLowerCase() === 'postgres'
+  const isSqlite = (row.type || '').toLowerCase() === 'sqlite'
 
   if (isServerInDemoMode(project.server)) {
     return { ok: true, message: '[demo] Database is reachable (simulated).' }
+  }
+
+  // ── SQLite: open the file and run SELECT 1 ───────────────────────────
+  if (isSqlite) {
+    try {
+      if (!fs.existsSync(container)) {
+        return { ok: false, message: `SQLite file not found: ${container}` }
+      }
+      const { default: Database } = await import('better-sqlite3')
+      const sqlite = new Database(container, { readonly: true })
+      const row = sqlite.prepare('SELECT 1 AS ok').get() as { ok: number } | undefined
+      sqlite.close()
+      if (row && row.ok === 1) {
+        return { ok: true, message: `SQLite database is reachable (${container}).` }
+      }
+      return { ok: false, message: 'SQLite SELECT 1 returned no row' }
+    } catch (err) {
+      return {
+        ok: false,
+        message: `SQLite error: ${err instanceof Error ? err.message : String(err)}`,
+      }
+    }
   }
 
   try {

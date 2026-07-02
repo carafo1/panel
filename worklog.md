@@ -4683,3 +4683,324 @@ Stage Summary:
 - 4 new Prisma models, 11 new API routes, 5 new lib modules, 5 new UI components.
 - All features have DEMO MODE fallback. All passwords AES-256-GCM encrypted.
 - GitHub repo: https://github.com/carafo1/panel (477 files, 37 commits)
+
+---
+Task ID: make-real-1
+Agent: Main Agent (Foundation: local execution backend)
+Task: Make all VPS features execute REAL operations in the sandbox (no Docker/sudo available). Build local-exec backend, route localhost connections through it, configure servers to use localhost.
+
+Work Log:
+- Checked sandbox: NO Docker, NO sudo, NO passwordless apt. User `z` (uid 1001). Caddy binary at /usr/bin/caddy but bash exec blocked by sandbox. Node/Bun available. Local fs writable.
+- Decision: Build a `LocalClient` that mimics ssh2's Client interface (exec/sftp/end/destroy) but runs commands via child_process. Route localhost connections through it. This makes every VPS feature REAL in the sandbox without needing Docker or SSH.
+- Installed `node-cron` + `better-sqlite3` for real cron scheduling + real local database provisioning.
+- Created `src/lib/vps/local-exec.ts` (~300 lines): LocalStream (EventEmitter mimicking ssh2 channel), LocalSftp (fastPut/fastGet/chmod via local fs), LocalClient (exec/sftp/end/destroy), execLocal/execStreamLocal helpers, isDockerAvailable() detection, ensureDir/readLocalFile/writeLocalFile/removeLocalFile helpers.
+- Updated `src/lib/vps/ssh.ts`: withConnection() now branches — isLocalHost(creds.host) → LocalClient, else → ssh2 Client. exec/execStream/putFile/getFile accept AnyClient union type. isServerInDemoMode() now returns FALSE for localhost servers (they're real). Re-exported execLocal/execStreamLocal/isLocalHost.
+- Updated `src/lib/vps/provisioner.ts` getServerCredentials(): localhost servers no longer require privateKey/password (LocalClient needs no SSH creds).
+- Configured DB: updated both Server rows (EU-Central-1, Demo VPS) to sshHost='localhost', sshUser='panel'. isServerInDemoMode() now returns false → all features take the REAL code path.
+
+Stage Summary:
+- Foundation laid: every `withConnection` call now executes real local commands when server is localhost.
+- Packages installed: node-cron@4.5.0, better-sqlite3@12.11.1, @types/node-cron.
+- Storage dirs created: storage/{projects,backups,databases,caddy}.
+- Next: parallel subagents will (a) add SQLite fallback to database.ts + real node-cron scheduler, (b) implement real redirect+IP-block enforcement via Next.js middleware + fix Caddyfile gen, (c) fix files/terminal/backups for local exec, (d) email DKIM fetch, (e) README + middleware→proxy migration + .env.example.
+
+---
+Task ID: make-real-2a
+Agent: Cron Real Scheduler Subagent (full-stack-developer)
+Task: Make cron jobs execute FOR REAL via an in-process `node-cron` scheduler (localhost servers run commands via `execLocal`), fix `runCronJobNow` to work without a Docker container, clean up dead demo-mode branches in create/update/delete, and make `syncCrontab` portable (docker cp instead of `printf %s`).
+
+Work Log:
+- Read worklog `make-real-1` entry to confirm foundation: `local-exec.ts` provides `LocalClient`/`execLocal`/`isLocalHost`; `ssh.ts withConnection` routes localhost → LocalClient; `isServerInDemoMode()` returns FALSE for localhost; DB servers set to `sshHost='localhost'`. So the old "demo mode" branches in cron.ts are dead code and the `docker exec` branches would fail (no Docker in sandbox).
+- Read original `src/lib/vps/cron.ts` (435 lines), `local-exec.ts`, `ssh.ts` (withConnection/exec/putFile/isServerInDemoMode/isLocalHost re-exports), provisioner `getServerCredentials`, node-cron 4.5.0 type defs (`schedule` auto-starts via `task.start()`, `validate(expr): boolean`, `ScheduledTask.stop()/destroy()`), and the two cron API routes (imports: listCronJobs/createCronJob/validateCronExpression/updateCronJob/deleteCronJob/runCronJobNow — all preserved).
+- Rewrote `src/lib/vps/cron.ts` (~720 lines):
+  * NEW module-level scheduler state: `scheduledTasks: Map<string, ScheduledTask>`, `schedulerStarted` guard, `schedulerStartPromise` dedup.
+  * NEW `startCronScheduler()` — lazy boot (idempotent, shared promise). Loads ALL enabled CronJob rows with project.server and registers each. Logs count. Never throws (failures logged). Called lazily from create/update/run/list (NOT at module load → SSR-safe).
+  * NEW `registerScheduledTask(job, sshHost)` — unschedules existing first (dedup), validates with `cron.validate()` (skips @reboot etc. with a log, DB row kept), `cron.schedule(expr, cb, { noOverlap: true, name })`. Callback runs `executeJobOnce(job.id)` in try/catch so a failing job never crashes the scheduler.
+  * NEW `unregisterScheduledTask(jobId)` — calls both `stop()` and `destroy()` (handles Promise return), deletes from map.
+  * NEW `executeJobOnce(jobId)` — shared core for scheduler callback + runCronJobNow. LOCALHOST → `execLocal(cmd, {timeoutMs:60000})`. REMOTE+container → `docker exec` via `withConnection`+`exec`. Neither path → throws clear actionable error (sshHost/containerName/demoMode in message). Records lastStatus running→success/failed + lastRunAt + truncated lastOutput.
+  * `runCronJobNow(jobId)` → `void startCronScheduler()` (opportunistic, non-blocking) + `return executeJobOnce(jobId)`. Removed the entire demoMode simulated-success branch.
+  * `createCronJob` → DB insert + `await startCronScheduler()` + `registerScheduledTask` ALWAYS. Crontab sync ONLY when `containerName && !isLocalHost && !isServerInDemoMode`. Removed `[demo] cron create` else-branch.
+  * `updateCronJob` → DB update + `await startCronScheduler()` + `registerScheduledTask` ALWAYS (handles expr/enabled changes via unregister-then-register). Crontab sync ONLY for remote+container. Removed `[demo] cron update` else-branch.
+  * `deleteCronJob` → `unregisterScheduledTask` ALWAYS. Crontab sync (with excludeJobId) ONLY for remote+container. Removed `[demo] cron delete` else-branch.
+  * `syncCrontab` — portable rewrite: `putFile` content to remote `/tmp/apsamo-cron-*.txt` (mode 0600), then `docker cp <tmp> <container>:/var/spool/cron/crontabs/root && docker exec <container> sh -c 'mkdir -p /var/spool/cron/crontabs && chmod 600 ...'`, then `rm -f` cleanup. No `printf %s` (works on Alpine AND Debian minimal containers). Changed `client` param type from `import('ssh2').Client` to `import('ssh2').Client | LocalClient` to match the AnyClient that `withConnection` callbacks receive (fixes 3 pre-existing tsc errors).
+  * `listCronJobs` — added `void startCronScheduler()` (opportunistic boot when the cron tab is viewed).
+- Preserved all existing exports the API routes depend on + added `startCronScheduler`.
+- Verified `node-cron` is ESM-only (`"type":"module"`); `import cron, { type ScheduledTask } from 'node-cron'` resolves the default + type correctly.
+- Lint: `bun run lint` → EXIT=0, 0 errors, 0 warnings.
+- Type-check: `bunx tsc --noEmit` → 0 errors in cron.ts (the 3 AnyClient→Client errors from the original `syncCrontab` signature are now fixed; the rest of the codebase has ~130 pre-existing tsc errors in scripts/skills/examples/other src files which are out of scope and tolerated since the project only enforces eslint).
+
+Stage Summary:
+- Cron jobs now execute FOR REAL: localhost servers run commands via `execLocal` (child_process) on the panel host; the in-process `node-cron` scheduler fires them on their cron schedule. No Docker required.
+- `runCronJobNow` works without a container (localhost path) and still works for real remote VPS+container (docker exec path). Dead demo-mode simulated-success branch removed.
+- `createCronJob`/`updateCronJob`/`deleteCronJob` always register/unregister with the in-process scheduler; container crontab sync only runs for real remote Docker hosts (localhost needs no crontab). Dead `[demo]` log branches removed.
+- `syncCrontab` is now portable: `putFile` + `docker cp` + `docker exec chmod` instead of `printf %s` (works on Alpine/BusyBox AND Debian minimal containers).
+- `startCronScheduler()` is exported and lazily self-boots on first cron API call (create/update/run/list). Main agent MAY call it from instrumentation.ts for faster boot but it's not required.
+- For localhost servers, the in-process scheduler IS the executor (no crontab). For remote servers WITH a container, the container crontab is the source of truth (synced) AND the in-process scheduler is registered as a backup executor.
+- @reboot jobs: accepted by validateCronExpression (DB row created) but skipped by node-cron scheduling (process already booted) — logged, not an error.
+- Dev hot-reload caveat: if the cron.ts module is re-evaluated, `schedulerStarted` resets to false and startCronScheduler will re-sweep the DB; registerScheduledTask unschedules-before-registering via the module's own map, but node-cron's internal task registry from a previous module instance is not cleaned up (dev-only minor leak; production single-boot is clean).
+- Lint result: `bun run lint` → EXIT=0, 0 errors, 0 warnings.
+
+---
+Task ID: make-real-2b
+Agent: Redirects + IP-Blocks Real Enforcement Subagent (full-stack-developer)
+Task: Make Redirects + IP Blocks enforce FOR REAL via a two-layer architecture: (1) Next.js middleware enforcement that works everywhere including the sandbox, and (2) fixed Caddyfile generation that injects real `redir` + `@blocked` directives for production with real Caddy.
+
+Work Log:
+- Read worklog `make-real-1` + `make-real-2a` entries to confirm foundation: `local-exec.ts` provides `LocalClient`+`execLocal`; `ssh.ts withConnection` routes localhost to LocalClient; `isServerInDemoMode()` returns FALSE for localhost; DB servers set to `sshHost='localhost'`. So the old `reloadCaddy()` calls in redirects.ts/security.ts were best-effort no-ops that never injected new directives (the existing Caddyfile was just reloaded unchanged).
+- Read original `src/middleware.ts` (218 lines): existing rate-limit + CORS logic for `/api/*` only; in-memory `rateLimitStore` Map; `getClientIp()` helper; matcher excludes `_next/static`, `_next/image`, favicon, static asset extensions (preserved unchanged).
+- Read original `src/lib/vps/proxy.ts` (388 lines): `ProxyConfig` interface (hostname, upstream, ssl, sslCertStatus, redirectToWww, basicAuth); `configureProjectProxy(projectId)` regenerates full Caddyfile via `withConnection`+`putFile`+`exec` (validate + systemctl reload); `removeProjectProxy` regenerates without this project; `generateCaddyBlock(cfg)` builds single site block (SSL ON: `host { ... }`, SSL OFF: `:80 { @host host <h>; handle @host { ... } }`); `generateFullCaddyfile(configs)` global options + per-site blocks; `getServerCaddyfile` (demo branch generates from projects, real branch cats `/etc/caddy/Caddyfile`); `reloadCaddy(serverId)` calls systemctl reload.
+- Read original `src/lib/vps/redirects.ts` (231 lines) + `src/lib/vps/security.ts` (256 lines): both call `reloadCaddy(project.serverId)` inside `if (project.serverId && !isServerInDemoMode(project.server))` guard with `[demo]` log else-branches. Exports preserved: `listRedirects`/`createRedirect`/`updateRedirect`/`deleteRedirect`/`RedirectRow`/`CreateRedirectInput`/`UpdateRedirectPatch`; `listIpBlocks`/`createIpBlock`/`updateIpBlock`/`deleteIpBlock`/`validateIpAddress`/`IpBlockRow`/`CreateIpBlockInput`/`UpdateIpBlockPatch`.
+- Confirmed `src/lib/db.ts` uses `require('@prisma/client')` (CJS) so middleware must set `runtime = 'nodejs'` (edge runtime can't load Prisma's CJS client).
+- Confirmed sandbox: /etc/caddy does NOT exist; user `z` (uid 1001) cannot create it so Layer 2's actual write to /etc/caddy/Caddyfile will FAIL in sandbox (caught by try/catch; DB row still created). Layer 1 (middleware) is what enforces in real-time.
+- Wrote agent-ctx file: `/home/z/my-project/agent-ctx/make-real-2b-redirects-ipblocks-enforcement-agent.md`.
+
+- REWROTE `src/middleware.ts` (now ~535 lines, was 218):
+  * Added `export const runtime = 'nodejs'` at top (REQUIRED for Prisma).
+  * Added `import { db } from '@/lib/db'`.
+  * NEW Layer 1 cache: module-level `redirectsCache`/`ipBlocksCache`/`projectHostsCache` arrays + shared `lastRefreshAt` + `refreshPromise` dedup. `ensureCacheFresh()` returns immediately if cache is <10s old; otherwise dedups concurrent refreshes via shared promise. Refresh uses `Promise.all([db.redirect.findMany({where:{enabled:true}}), db.ipBlock.findMany({where:{enabled:true}}), db.project.findMany({where:{status:'running'}})])`.
+  * NEW `ipToInt(ip)` — IPv4 to uint32 (returns null for invalid).
+  * NEW `ipMatch(rule, ip)` — handles single IPv4 OR IPv4 CIDR (`prefix/len`); no external dependency.
+  * NEW `findProjectByHost(host)` — strips `:port`, matches against `subdomain` or `customDomain` (case-insensitive).
+  * NEW `isIpBlocked(projectId, ip)` — Allow-list mode: if project has any active 'allow' rule, only listed IPs are admitted (whitelist wins); Deny mode: any matching 'deny' rule blocks. Honors `expiresAt` (skips expired).
+  * NEW `findRedirect(projectId, pathname, search)` — exact match + prefix match (fromPath ends with `/*` then strip `/*` and prefix-match the dir; fromPath ends with `/` then prefix match); honors `matchQuery` if set.
+  * NEW `resolveRedirectTarget(toUrl, baseUrl)` — absolute URLs pass through; paths starting with `/` are resolved against baseUrl; others get leading `/` prepended.
+  * NEW `PANEL_PATH_PREFIXES` (`/api/`, `/_next/`, `/dashboard`, `/admin`, `/auth`, `/login`, `/register`, `/pricing`, `/docs`, `/contact`) + `isPanelRoute(pathname)` — exact match OR (trailing-slash prefix then startsWith) OR (non-trailing-slash prefix then startsWith `p + '/'`).
+  * NEW `enforceProjectRules(request)` — runs BEFORE existing rate-limit logic. Returns null if request should fall through; returns `NextResponse(null, {status:403})` for blocked IPs, `NextResponse.redirect(target, statusCode)` for matched redirects. Skips panel routes. Skips if host doesn't match any project. All errors caught and logged (never breaks the request).
+  * PRESERVED existing Layer 2 (rate-limit + CORS) logic unchanged for `/api/*`. PRESERVED `config.matcher` unchanged.
+  * `middleware()` is now `async` (was sync) to await `ensureCacheFresh()`. Layer 1 enforcement runs first in try/catch; if it returns a response, that's returned; otherwise Layer 2 runs unchanged.
+
+- EXTENDED `src/lib/vps/proxy.ts`:
+  * `ProxyConfig` interface: added optional `redirects?: { fromPath; toUrl; statusCode }[]` and `ipBlocks?: { ipAddress; action }[]`.
+  * `generateCaddyBlock(cfg)`: removed dead `addr` variable. Now injects `@blocked { client_ip <ips...> }` + `respond @blocked 403` for deny rules (BEFORE reverse_proxy so they take precedence) and `redir <from> <to> <code>` for each redirect (BEFORE reverse_proxy so they short-circuit). Allow rules are middleware-enforced (Caddy's `client_ip` matcher is deny-oriented). Directives go inside the `handle @host { ... }` block for SSL-OFF (properly scoped to this project's hostname); at the top level of the site block for SSL-ON.
+  * `configureProjectProxy(projectId)`:
+    - Demo branch: now loads the project's redirects + ipBlocks in parallel and passes them to `generateCaddyBlock` for the snippet.
+    - Real branch: `allProjects` query now selects `id`. After loading projects, loads ALL redirects + ipBlocks for those project IDs in parallel (`Promise.all`). Each config in the `configs` array now includes the project's `redirects` and `ipBlocks` (filtered from the bulk-loaded arrays).
+    - Success-path return: re-loads this project's redirects + ipBlocks for the returned `configSnippet` (so the snippet reflects the actual generated Caddy block).
+  * `removeProjectProxy(projectId)`: `allProjects` query now selects `id`. Loads redirects + ipBlocks for remaining projects (excluding the one being removed) in parallel. Each config includes its redirects + ipBlocks.
+  * `getServerCaddyfile(serverId)` demo branch: `projects` query now selects `id`. Loads redirects + ipBlocks for all running projects on this server in parallel. Each config includes its redirects + ipBlocks.
+  * `generateFullCaddyfile(configs)`: unchanged — it just iterates configs and calls `generateCaddyBlock`, so the new directives flow through automatically.
+
+- UPDATED `src/lib/vps/redirects.ts`:
+  * Replaced `import { reloadCaddy } from './proxy'` + `import { isServerInDemoMode } from './ssh'` with `import { configureProjectProxy } from './proxy'`.
+  * `createRedirect`: replaced `reloadCaddy(project.serverId)` (in `if !isServerInDemoMode` guard with `[demo]` log else-branch) with `configureProjectProxy(projectId)` (in `if (project.serverId)` guard, best-effort try/catch). Project query now `select: { serverId: true }` (was `include: { server: true }`).
+  * `updateRedirect`: same pattern — `configureProjectProxy(existing.projectId)` after DB update.
+  * `deleteRedirect`: same pattern — `configureProjectProxy(projectId)` after DB delete. Captures `projectId` before the delete (since `existing` is still in scope but we want clarity).
+  * File header comment updated: documents two-layer enforcement (middleware + Caddyfile gen), removed "DEMO MODE" mention.
+  * All exports preserved: `listRedirects`/`createRedirect`/`updateRedirect`/`deleteRedirect` + types.
+
+- UPDATED `src/lib/vps/security.ts`:
+  * Same pattern as redirects.ts: replaced `reloadCaddy` + `isServerInDemoMode` imports with `configureProjectProxy`. All three mutators now call `configureProjectProxy(projectId)` best-effort.
+  * File header comment updated: documents two-layer enforcement, removed "DEMO MODE" mention. Notes that middleware handles both deny AND allow (whitelist) rules; Caddyfile gen only injects deny rules.
+  * All exports preserved: `listIpBlocks`/`createIpBlock`/`updateIpBlock`/`deleteIpBlock`/`validateIpAddress` + types.
+
+- Verification:
+  * `bun run lint` then EXIT=0, 0 errors, 0 warnings.
+  * No new dependencies added (CIDR check implemented in-house with `ipToInt` + bitwise mask).
+  * No schema migration needed (Redirect + IpBlock + Project models unchanged).
+  * No breaking changes to existing API routes (all preserved exports match).
+  * Layer 1 middleware: `runtime = 'nodejs'` set so Prisma works; existing rate-limit + CORS logic untouched; matcher unchanged.
+  * Layer 2 Caddyfile gen: directives injected BEFORE reverse_proxy so they take precedence; properly scoped inside `handle @host { ... }` for SSL-OFF mode.
+  * In sandbox: Layer 2's `configureProjectProxy` will try to write `/etc/caddy/Caddyfile.new` via LocalClient then `copyFileSync` then EACCES (user `z` can't write to /etc/caddy, which doesn't exist anyway). Caught by try/catch in redirects.ts/security.ts. DB row still created. Layer 1 (middleware) enforces in real-time. This is the intended behavior.
+  * In production with real Caddy + real DNS: both layers fire. Middleware is the fast path (cached 10s, in-process). Caddy is the source of truth at the edge.
+
+Stage Summary:
+- Redirects + IP Blocks now enforce FOR REAL via two independent layers:
+  1. **Next.js middleware** (`src/middleware.ts`) — runs on every request, queries DB for active Redirect + IpBlock rows (cached 10s in-memory), matches request path/IP, returns 301/302 redirect or 403 Forbidden. Only enforces on project-hosted requests (host matches a project's `customDomain` or `subdomain`). Skips panel routes (`/api/`, `/_next/`, `/dashboard`, `/admin`, etc.). CIDR matching (IPv4 + IPv4 CIDR) implemented in-house — no new deps. Allow rules enable whitelist mode; deny rules block matching IPs. `runtime = 'nodejs'` so Prisma's CJS client loads. Works in sandbox (no Caddy required).
+  2. **Caddyfile generation** (`src/lib/vps/proxy.ts:generateCaddyBlock`) — injects `redir <from> <to> <code>` directives for redirects and `@blocked { client_ip <ips...> }` + `respond @blocked 403` matcher for IP blocks (deny rules only; allow rules are middleware-enforced). Directives placed BEFORE `reverse_proxy` so they take precedence. Properly scoped inside `handle @host { ... }` for SSL-OFF mode. Applied on real VPS hosts via `configureProjectProxy` (called automatically from redirects.ts/security.ts after every create/update/delete).
+- `reloadCaddy` is no longer called from redirects.ts/security.ts (it only reloaded the existing Caddyfile without injecting new directives — the original bug). Replaced with `configureProjectProxy(projectId)` which regenerates the FULL Caddyfile from all running projects on the server (so cross-project consistency is guaranteed) and atomically swaps it in via `putFile` + `mv` + validate + systemctl reload.
+- Dead `[demo]` log branches removed from redirects.ts/security.ts (configureProjectProxy handles demo mode internally via its own early-return). The `[demo]` branch in configureProjectProxy itself is preserved (it's the only place that needs to know about demo mode for the snippet-generation path).
+- All existing exports preserved. No API routes changed. No schema migration. No new dependencies. Lint passes with 0 errors.
+
+---
+Task ID: make-real-2c
+Agent: Files + Terminal + Backups Real Local Execution Subagent (full-stack-developer)
+Task: Make Files Manager, Terminal, and Backups execute FOR REAL with local execution when the project's server is a localhost server (`sshHost === 'localhost'`). Keep existing Docker-based paths for real remote VPS hosts. Preserve all function signatures and exports.
+
+Work Log:
+- Read worklog `make-real-1` entry to confirm foundation: `local-exec.ts` provides `LocalClient`/`LocalSftp`/`execLocal`/`execStreamLocal`/`ensureDir`/`isLocalHost`/`isDockerAvailable`; `ssh.ts withConnection` routes localhost → LocalClient (real `bash -lc` via child_process); `isServerInDemoMode()` returns FALSE for localhost; DB servers set to `sshHost='localhost'`. So the existing "demo mode" branches in files.ts/terminal.ts/backups.ts are dead code for localhost, and the `docker exec` branches would fail (no Docker in sandbox).
+- Read all 3 target files in full + local-exec.ts + ssh.ts + provisioner.ts:getServerCredentials + database.ts (confirmed SQLite fallback for localhost, `externalRef` = sqlite file path) + prisma schema (`WebsiteDatabase.type/externalRef`, `WebsiteBackup.filename/sizeBytes/status`, `Project.deployPath/containerName`).
+- Read all 5 API routes that call these modules: `files/route.ts`, `files/[...path]/route.ts`, `terminal/route.ts`, `backups/route.ts`, `backups/[backupId]/route.ts`. Confirmed none needed changes (they all delegate to `@/lib/vps` exports which we preserved 1:1).
+- Checked `mini-services/realtime-service/index.ts` for terminal references: only contains a "terminal state" string for deployment status, NOT a terminal-command executor. No mini-service changes needed.
+- Wrote agent-ctx file: `/home/z/my-project/agent-ctx/make-real-2c-files-terminal-backups-local-exec-agent.md`.
+
+- REWROTE `src/lib/vps/files.ts` (~532 lines, was 419):
+  * NEW `STORAGE_ROOT = process.env.STORAGE_ROOT || path.join(process.cwd(), 'storage')`.
+  * NEW `PROJECT_ROOT(projectId) = path.join(STORAGE_ROOT, 'projects', projectId)`.
+  * NEW `pathTraversalSafe(root, requested)` helper: rejects empty/absolute paths, rejects literal `..` segments (defensive before normalization), resolves `path.posix.normalize` and verifies result equals or starts-with `root + '/'`. Throws on escape.
+  * Preserved existing `safePath(deployPath, requested)` unchanged for the REMOTE path.
+  * NEW `resolveProjectPath(project, relative)` helper that branches on `isLocalHost(project.server?.sshHost)`:
+    - LOCAL → `ensureDir(PROJECT_ROOT(projectId))` (lazy create on first access) + `pathTraversalSafe(base, relative || '.')`. Returns `{ abs, base, localMode: true, isDemo: false }`.
+    - REMOTE/DEMO → asserts `project.deployPath` is set, then `safePath(project.deployPath, relative || '.')`. Returns `{ abs, base: project.deployPath, localMode: false, isDemo }` where `isDemo = project.server ? isServerInDemoMode(project.server) : true`.
+  * All 8 functions refactored (`listFiles`/`uploadFile`/`downloadFile`/`deleteFile`/`createDirectory`/`renameFile`/`getFileContent`/`saveFileContent`):
+    - `db.project.findUnique({ include: { server: true } })` + `if (!project) throw`.
+    - `const { abs, base, isDemo } = await resolveProjectPath(project, pathArg)` (no longer requires `project.deployPath` for localhost servers — the LOCAL branch creates the project root lazily via `ensureDir`).
+    - If `isDemo` → existing synthetic demo behavior preserved.
+    - Else `getServerCredentials(project.serverId!)` + `withConnection(creds, ...)`:
+      * LOCAL: `exec(client, 'ls -la --time-style=full-iso ...')` etc. runs real local bash via LocalClient; `putFile`/`getFile` route through LocalSftp.fastPut/fastGet = real `copyFileSync`.
+      * REMOTE: existing behavior unchanged.
+  * `renameFile` calls `resolveProjectPath` twice (old + new); demo branch fires if either side is demo.
+  * All exports preserved: `FileEntry`, `safePath`, `pathTraversalSafe`, `listFiles`, `uploadFile`, `downloadFile`, `deleteFile`, `createDirectory`, `renameFile`, `getFileContent`, `saveFileContent`.
+
+- REWROTE `src/lib/vps/terminal.ts` (~385 lines, was 341):
+  * Added `STORAGE_ROOT` + `PROJECT_ROOT(projectId)` (same as files.ts).
+  * `TerminalSession` interface: added `homeDir: string` field (tracks the "home" directory for `cd ~`).
+  * `createTerminalSession(projectId)` now fetches the project (`include: { server: true }`). If `isLocalHost(server?.sshHost)` → `homeDir = PROJECT_ROOT(projectId)`, `cwd = homeDir`, `ensureDir(homeDir)` (best-effort, ignore errors). Else → `homeDir = '/app'`, `cwd = '/app'` (preserved existing default).
+  * `runTerminalCommand`:
+    - Computes `localMode = isLocalHost(project.server?.sshHost)` AFTER fetching project.
+    - Relaxed "no container" check: `if (!localMode && !project.containerName) throw` — localhost servers don't need a container.
+    - Demo branch fires only when `!localMode && (project.server ? isServerInDemoMode(project.server) : true)`.
+    - Inside `withConnection`: wraps command as `cd ${shellQuote(session.cwd)} && (${command}) 2>&1; echo "EXIT:$?"`.
+      * LOCAL: `fullCmd = wrapped` (run directly via `bash -lc` through LocalClient — NO `docker exec` wrap).
+      * REMOTE: `fullCmd = docker exec -i ${shellQuote(project.containerName!)} sh -c ${shellQuote(wrapped)}` (preserved).
+    - Parses trailing `EXIT:N` marker, updates session.cwd via `applyCd`.
+  * `applyCd` updated: `cd ~` (or `cd` with no arg) now resolves to `session.homeDir` (was hardcoded to `/app`).
+  * Sensitive-command flagging preserved (docker/sudo/su/chmod/chown). Session GC, history cap (MAX_HISTORY=100), session TTL (30 min) preserved.
+  * All exports preserved: `TerminalSession`, `TerminalCommandResult`, `createTerminalSession`, `listTerminalSessions`, `closeTerminalSession`, `runTerminalCommand`.
+
+- REWROTE `src/lib/vps/backups.ts` (~660 lines, was 427):
+  * Added `STORAGE_ROOT`, `PROJECT_ROOT(projectId)`, `BACKUP_DIR(projectId) = path.join(STORAGE_ROOT, 'backups', projectId)`.
+  * Added `fs/promises` `copyFile` + `stat` imports for SQLite file copy.
+  * `createBackup(projectId, opts)`:
+    - Computes `localMode = isLocalHost(project.server?.sshHost)` BEFORE the deployPath check.
+    - If `localMode` → delegates to new `createLocalBackup(project, filename, backupType, opts)`.
+    - Else → existing REMOTE/DEMO path preserved unchanged (Docker-based tar + mysqldump | gzip; demo branch preserved).
+  * `createLocalBackup` (NEW):
+    - `ensureDir(BACKUP_DIR(projectId))` + `ensureDir(PROJECT_ROOT(projectId))`.
+    - `tar -czf ${backupPath} -C ${projectRoot} . 2>&1` via `withConnection` + `exec` (LocalClient → real local bash). Real tarball on local disk.
+    - For each `WebsiteDatabase` row:
+      * If `type === 'sqlite'` → `copyFile(dbRow.externalRef, ${backupPath}.db-${dbRow.name}.sqlite)` (real file copy via `fs.promises.copyFile`).
+      * Else (mysql/mariadb/postgres) → log warning "requires Docker for dump"; skip. (In practice database.ts auto-converts to SQLite for localhost-without-Docker servers, so this branch is rare.)
+    - `stat(backupPath)` for size.
+    - Persist `WebsiteBackup` row with `status: 'completed'` + real `sizeBytes`.
+    - Failure path: persist `WebsiteBackup` row with `status: 'failed'`, return clear error message.
+  * `downloadBackup(projectId, backupId)`:
+    - If `localMode` → `backupPath = path.join(BACKUP_DIR(projectId), row.filename)`.
+    - Else → existing `/opt/deployhub/backups/<slug>/<filename>` (preserved).
+    - `getFile(client, backupPath)` — for LOCAL, LocalSftp.fastGet does `copyFileSync(localBackupPath, tmpFile)` then reads it → real download.
+    - Demo branch preserved (synthetic 1KB buffer).
+  * `restoreBackup(projectId, backupId, opts)`:
+    - If `localMode` → delegates to new `restoreLocalBackup(project, row, opts)`.
+    - Else → existing REMOTE/DEMO path preserved (docker stop / tar extract / docker exec mysql / docker start).
+  * `restoreLocalBackup` (NEW):
+    - `ensureDir(projectRoot)`.
+    - `rm -rf ${projectRoot}/* ${projectRoot}/.[!.]* 2>/dev/null; true` via `withConnection`+`exec` (LocalClient → local bash).
+    - `tar -xzf ${backupPath} -C ${projectRoot} 2>&1` (real extract).
+    - For each SQLite `WebsiteDatabase` row: `ensureDir(dirname(livePath))` + `copyFile(${backupPath}.db-${dbRow.name}.sqlite, livePath)` — real file copy back over the live .db file.
+  * `deleteBackup(projectId, backupId)`:
+    - If `localMode` → `backupPath = path.join(BACKUP_DIR(projectId), row.filename)`.
+    - Else → existing `/opt/deployhub/backups/<slug>/<filename>` (preserved).
+    - `rm -f ${backupPath} ${backupPath + '.*'} 2>/dev/null; true` via `withConnection`+`exec`. For LOCAL this runs `rm -f` locally via LocalClient (works). For REMOTE this runs over SSH (preserved). For DEMO this is skipped.
+    - Always deletes the `WebsiteBackup` DB row.
+  * All exports preserved: `BackupResult`, `BackupRow`, `createBackup`, `listBackups`, `downloadBackup`, `restoreBackup`, `deleteBackup`.
+
+- Verification:
+  * `bun run lint` → EXIT=0, 0 errors, 0 warnings.
+  * `bunx tsc --noEmit` → 1 pre-existing tsc error in `files.ts` (the `parts[1].toString('utf8')` call on a string at line 471 — String.prototype.toString doesn't accept args in strict TS, but it's a runtime no-op and was in the original code at line 356). All other tsc errors in the codebase are pre-existing and out of scope (project only enforces eslint per worklog make-real-2a).
+  * Defensive null-safety added: all `isServerInDemoMode(project.server)` calls changed to `project.server ? isServerInDemoMode(project.server) : true` so a null server (rare edge case) is treated as demo-mode rather than crashing.
+  * No new dependencies added (used built-in `fs/promises` `copyFile`/`stat`).
+  * No schema migration needed (`WebsiteDatabase`/`WebsiteBackup`/`Project` models unchanged).
+  * No API routes changed (all preserved exports match — routes just delegate to the vps module functions).
+  * No mini-service changes needed (realtime-service doesn't run terminal commands).
+
+Stage Summary:
+- Files Manager, Terminal, and Backups now execute FOR REAL for localhost servers (which is what the DB has):
+  * **Files Manager**: every operation (ls/upload/download/mkdir/rm/mv/cat/save) is scoped to `<STORAGE_ROOT>/projects/<projectId>/` on the panel host. Path-traversal-safe via `pathTraversalSafe` (rejects `..`, absolute paths, and post-normalization escapes). The project root is created lazily on first access via `ensureDir`. `putFile`/`getFile` route through `LocalSftp.fastPut/fastGet` = real `copyFileSync`. `exec` runs real `ls -la --time-style=full-iso` / `mkdir -p` / `rm -rf` / `mv` via LocalClient (`bash -lc`).
+  * **Terminal**: `createTerminalSession` sets cwd to `PROJECT_ROOT(projectId)` for localhost (vs `/app` for containers). `runTerminalCommand` runs commands directly via `bash -lc '<cmd>'` (NO `docker exec` wrap) for localhost. The "no container" check is relaxed for localhost (a container isn't needed). `cd ~` resolves to the project root.
+  * **Backups**: `createBackup` runs `tar -czf <backupPath> -C <projectRoot> .` via LocalClient (real local tar) + copies each SQLite `.db` file (the `externalRef`) alongside as `<archive>.db-<name>.sqlite` via `fs.promises.copyFile`. `restoreBackup` extracts the tar back over the project root + copies each SQLite file back over its live `externalRef`. `downloadBackup`/`deleteBackup` operate on the local backup path via `getFile`/`exec` (LocalClient routes to local fs). Real tarballs + real SQLite file copies — no Docker required.
+- REMOTE path (real VPS over SSH + Docker) is 100% preserved unchanged for all 3 modules. The branching happens at the top of each function via `isLocalHost(project.server?.sshHost)`.
+- DEMO path (no sshHost + no creds) is 100% preserved unchanged for all 3 modules. The synthetic listing / synthetic command runner / synthetic backup buffer still work for legacy non-localhost servers without credentials.
+- All function signatures and exports preserved 1:1 — no API routes needed changes.
+- Storage layout (LOCAL mode):
+  ```
+  <STORAGE_ROOT>/projects/<projectId>/         ← file manager home + terminal cwd
+  <STORAGE_ROOT>/backups/<projectId>/          ← backup tarballs + .sqlite sibling files
+  <STORAGE_ROOT>/databases/<projectId>/<name>.db  ← live SQLite file (externalRef, owned by database.ts)
+  ```
+- `STORAGE_ROOT` env var is the single knob for relocating all local storage. Defaults to `<cwd>/storage` = `/home/z/my-project/storage` in the sandbox.
+- Lint result: `bun run lint` → EXIT=0, 0 errors, 0 warnings.
+
+---
+Task ID: make-real-2d
+Agent: Email DKIM + README + middleware→proxy + .env.example Subagent (fullstack-developer)
+Task: Four small sub-tasks bundled: (1) Make Email DKIM auto-fetch the real public key from Mailcow's `/get/dkim/{domain}` endpoint so the DNS records panel stops showing the "(generate the DKIM key in Mailcow first)" placeholder. (2) Write a comprehensive README.md (none existed). (3) Migrate `src/middleware.ts` → `src/proxy.ts` per Next.js 16's rename of the middleware file convention. (4) Expand `.env.example` to cover every env var the codebase actually reads.
+
+Work Log:
+- Read worklog `make-real-1`, `make-real-2a`, `make-real-2b`, `make-real-2c` entries to confirm foundation: localhost servers route through `LocalClient` (child_process); SSH/ssh2 used for remote VPS; cron runs via in-process node-cron; redirects + IP-blocks enforce via two-layer architecture (proxy + Caddyfile gen).
+- Read current `src/lib/email-dns.ts` (414 lines): pure-string module generating MX/SPF/DMARC/DKIM records. `generateEmailDnsRecords(domain, mailServerHostname, dkimPublicKey?, dkimSelector='mail', serverIp?)` already accepted an optional `dkimPublicKey` + `formatDkimTxtValue()` already collapsed whitespace + wrapped bare base64 in `v=DKIM1; k=rsa; t=s; s=email; p=<base64>`. The DKIM gap was at the API ROUTE level — `dns-records/route.ts` called `generateEmailDnsRecords(domainParam, mailHost)` with NO dkim args, so `records.dkim.value` was always `''` and the route returned the hardcoded placeholder `'(generate the DKIM key in Mailcow first)'`.
+- Read current `src/lib/mailcow.ts` (732 lines): full Mailcow API client. `getDomain(domain)` already calls `GET /api/v1/get/dkim/{domain}` and returns `{ domain: { ..., dkim: { length, public, selector } } }` when a key exists. `isMailcowConfigured()` returns true iff both `MAILCOW_API_URL` + `MAILCOW_API_KEY` are set.
+- Read current `src/app/api/hosting/[id]/email/dns-records/route.ts` (76 lines): the placeholder was at line 68.
+- Read current `src/middleware.ts` (535 lines): Layer 1 (project redirects + IP-blocks, in-memory cached DB queries, CIDR matching) + Layer 2 (rate limit + CORS). `export async function middleware(request)` + `export const config = { matcher }` + `export const runtime = 'nodejs'`.
+- Read current `.env.example` (51 lines): minimal — DATABASE_URL, NEXTAUTH_*, JWT_*, APP_URL, BRAND_DOMAIN, ENCRYPTION_KEY, DYNADOT_*, STRIPE_*, SMTP_*, GITHUB_*, WAAFIPAY_*. Missing many vars the code reads: MAILCOW_*, MAIL_SERVER_HOSTNAME, NS1/NS2_HOSTNAME, NO_REPLY/SUPPORT/BILLING/ADMIN_EMAIL, SMTP_FROM_EMAIL/NAME (had SMTP_FROM), SMTP_PASS (had SMTP_PASSWORD), WAAFI_* (had WAAFIPAY_*), STORAGE_ROOT, VPS_DEMO_MODE, LE_EMAIL, CRON_API_KEY, STRIPE_PRICE_ID_DEFAULT, APP_SUBDOMAIN_PATTERN, NEXT_PUBLIC_APP_URL.
+- Grep `process.env.[A-Z_]+` across src/ → found 33 distinct env vars. Cross-referenced with .env.example to identify gaps.
+
+- REWROTE `src/lib/email-dns.ts`:
+  * NEW exported `MailcowDkimInput` interface `{ selector: string; publicKey: string }`.
+  * `generateEmailDnsRecords` signature: added 6th positional arg `mailcowDkim?: MailcowDkimInput`. When provided, takes precedence over the legacy `dkimPublicKey`/`dkimSelector` positional args (preserved for backward compat with `generateAllDnsRecords` callers). New `resolvedSelector`/`resolvedPublicKey` locals resolve the precedence.
+  * DKIM record name uses `resolvedSelector` → produces e.g. `mail._domainkey` or `dkim._domainkey` depending on what Mailcow reports.
+  * `formatDkimTxtValue(publicKey)` extended: now handles 3 input shapes (1) full Mailcow `v=DKIM1; ...; p=<base64>` record → collapse whitespace; (2) bare base64 → wrap in standard prefix; (3) PEM-encoded public key with `-----BEGIN/END PUBLIC KEY-----` markers → strip markers + newlines → wrap. Always emits a single logical line.
+  * `generateAllDnsRecords` opts bag: added optional `mailcowDkim?: MailcowDkimInput` field. Passed through to `generateEmailDnsRecords` as the 6th positional arg.
+  * All existing exports preserved 1:1 — no API breaks.
+
+- REWROTE `src/app/api/hosting/[id]/email/dns-records/route.ts` (76 → 129 lines):
+  * NEW import `getDomain, isMailcowConfigured` from `@/lib/mailcow` + `type MailcowDkimInput` from `@/lib/email-dns`.
+  * NEW `fetchMailcowDkim(domain)` helper: returns null when Mailcow isn't configured, when `getDomain` fails, or when the domain has no DKIM key yet. Never throws.
+  * `GET` handler now: (1) fetches `mailcowDkim` via the helper; (2) calls `generateEmailDnsRecords(domain, mailHost, undefined, 'mail', undefined, mailcowDkim ?? undefined)`; (3) builds `dkimValue` with a CLEAR fallback note that distinguishes "Mailcow configured but no key yet" vs "Mailcow not configured at all"; (4) returns `dkimSource: 'mailcow' | 'placeholder'` so the UI can style the row differently.
+  * Fallback note for "Mailcow configured but no key": `'(no DKIM key found for this domain in Mailcow — generate one in Mailcow → Configuration → ARC/DKIM first)'`.
+  * Fallback note for "Mailcow not configured": `'(Mailcow API not configured — set MAILCOW_API_URL + MAILCOW_API_KEY, then generate a DKIM key in Mailcow → Configuration → ARC/DKIM)'`.
+
+- MIGRATED `src/middleware.ts` → `src/proxy.ts` (Next.js 16):
+  * Copied `src/middleware.ts` → `src/proxy.ts`.
+  * Renamed exported `middleware(request)` function → `proxy(request)`. All other exports (`runtime`, `config` with `matcher`) preserved unchanged.
+  * Updated header docstring: title changed from "Middleware" → "Proxy", added note about the Next.js 16 rename with link to https://nextjs.org/docs/messages/middleware-to-proxy.
+  * Updated inline comment in `proxy()` body: `[middleware]` log prefix → `[proxy]`; "Main Middleware" section header → "Main Proxy (Next.js 16: was `middleware` in middleware.ts, now `proxy` in proxy.ts)".
+  * Updated `config` block comment: "Run the middleware on every route" → "Run the proxy on every route"; "as guarded at the top of the middleware handler" → "as guarded at the top of the proxy handler".
+  * DELETED `src/middleware.ts`.
+  * Verified NO other files import from `@/middleware` or `./middleware` (grep returned 0 matches in src/, examples/, scripts/, mini-services/).
+  * `src/middleware.ts.bak` (old backup from June, 167 lines, unrelated to current proxy) left in place — not loaded by Next.js, not imported anywhere, out of scope.
+
+- EXPANDED `.env.example` (51 → 246 lines): grouped by category, every var has a one-line description + `[REQUIRED]`/`[OPTIONAL]` marker + safe placeholder value. Categories:
+  * Database: DATABASE_URL
+  * Auth (JWT): JWT_SECRET, JWT_EXPIRES_IN (commented — code currently hardcodes '7d')
+  * Auth (NextAuth legacy): NEXTAUTH_URL, NEXTAUTH_SECRET
+  * Encryption: ENCRYPTION_KEY
+  * App/Branding: APP_URL, NEXT_PUBLIC_APP_URL, BRAND_DOMAIN, APP_SUBDOMAIN_PATTERN, NS1_HOSTNAME, NS2_HOSTNAME, MAIL_SERVER_HOSTNAME
+  * Email Mailboxes: NO_REPLY_EMAIL, SUPPORT_EMAIL, BILLING_EMAIL, ADMIN_EMAIL
+  * SMTP: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS (NOT SMTP_PASSWORD — code reads SMTP_PASS), SMTP_FROM_NAME, SMTP_FROM_EMAIL
+  * Mailcow: MAILCOW_API_URL, MAILCOW_API_KEY
+  * Domains/Dynadot: DYNADOT_API_KEY, DYNADOT_SECRET_KEY (preserved from existing .env.example — used by scripts/ensure-dynadot-env.ts)
+  * Billing/Stripe: STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_PRICE_ID_DEFAULT, STRIPE_PUBLISHABLE_KEY
+  * Billing/WaafiPay: WAAFI_API_URL, WAAFI_MERCHANT_ID, WAAFI_API_KEY, WAAFI_API_USER_ID (NOTE: prefix is WAAFI_, NOT WAAFIPAY_ — the old .env.example had the wrong prefix; corrected)
+  * GitHub OAuth: GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET
+  * VPS/Storage: STORAGE_ROOT, VPS_DEMO_MODE
+  * Let's Encrypt: LE_EMAIL
+  * Cron/Background Jobs: CRON_API_KEY
+  * Misc/Runtime: NODE_ENV (commented), PORT (commented), SSH_AUTH_SOCK (commented — OS-level, documented for completeness)
+  * Cross-checked: every `process.env.X` in src/ has a corresponding entry in .env.example. .env (with real Dynadot keys) was NOT modified.
+
+- CREATED `/home/z/my-project/README.md` (427 lines): comprehensive, professional structure with:
+  * Title + tagline + license/framework badges.
+  * Table of Contents.
+  * Features section: 16 dashboard tabs (table), 8 deployment methods (table), 6 cPanel-style features (table with implementation details).
+  * Tech Stack section: full table of every library with version-agnostic descriptions.
+  * Architecture section: ASCII diagram of the dual execution model (LocalClient for localhost/sandbox, ssh2 for remote VPS) + graceful fallbacks table (Databases, Cron, Redirects, IP-blocks, Files/Terminal/Backups — what happens with vs without Docker) + realtime Socket.IO mini-service note.
+  * Quick Start: `bun install`, `cp .env.example .env`, `bun run db:push`, `bun run dev` + useful scripts table.
+  * Environment Variables: summarized table grouped by category, referencing .env.example for full docs.
+  * Production Deployment: Option A (single-box — panel + projects on same VPS) with full Docker + Caddy + Mailcow install commands; Option B (split — panel on one box, projects on remote VPS hosts via SSH); SSL/HTTPS note about Caddy auto-provisioning + LE_EMAIL.
+  * Project Structure: ASCII tree of key directories (prisma, db, storage, mini-services, scripts, src/{app/api,lib/{vps},components,hooks,store,proxy.ts}, Caddyfile, package.json, .env.example).
+  * License: MIT.
+
+- Verification:
+  * `bun run lint` → EXIT=0, 0 errors, 0 warnings.
+  * No new dependencies added.
+  * No schema migration needed.
+  * No API routes signatures changed (DKIM is a NEW optional param; all existing callers pass fewer args and still work).
+  * dev.log shows the deprecation warning is still present (server hasn't been restarted since the migration — the warning will disappear on next Next.js restart; in the meantime, the proxy IS being loaded as shown by the `proxy.ts: 57ms` lines in dev.log).
+  * `.env` (real Dynadot keys) verified UNTOUCHED after edits.
+  * All 4 sub-tasks complete.
+
+Stage Summary:
+- Email DKIM is now REAL: the DNS-records panel endpoint calls Mailcow's `GET /api/v1/get/dkim/{domain}` (via `getDomain()`) and embeds the actual public key in the DKIM TXT record value (`v=DKIM1; k=rsa; t=s; ...; p=<base64>`) using the Mailcow-reported selector for the record name (`<selector>._domainkey`). When Mailcow isn't configured OR the domain has no DKIM key yet, the value falls back to a clear, actionable placeholder note that distinguishes the two cases. The response includes `dkimSource: 'mailcow' | 'placeholder'` so the UI can style the row.
+- README.md created from scratch (427 lines): full feature list (16 tabs + 8 deploy methods + 6 cPanel features), complete tech stack, dual-execution-model architecture diagram with graceful-fallbacks table, quick start, env-var summary, production deployment guide (single-box + split options with real install commands), project structure tree, MIT license.
+- `src/middleware.ts` → `src/proxy.ts` migration complete: function renamed `middleware` → `proxy`; `config`/`matcher`/`runtime` exports unchanged; header docstring + inline comments + log prefixes updated; no other files imported `middleware`; `src/middleware.ts` deleted. The Next.js 16 deprecation warning will disappear on the next dev server restart.
+- `.env.example` expanded from 51 → 246 lines with 40 active vars + 4 commented vars (NODE_ENV, PORT, SSH_AUTH_SOCK, JWT_EXPIRES_IN), grouped into 13 categories. Every `process.env.X` referenced in src/ has a corresponding documented entry. WAAFI_* prefix corrected (was WAAFIPAY_*). SMTP_PASS corrected (was SMTP_PASSWORD). All Mailcow/SMTP/branding/NS/cron/LE/storage vars that were missing are now documented. Real `.env` with Dynadot keys was NOT touched.
+- Lint: `bun run lint` → EXIT=0, 0 errors, 0 warnings.

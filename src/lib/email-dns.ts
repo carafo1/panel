@@ -68,23 +68,44 @@ export interface DnsRecord {
  * Normalise the DKIM public key into a single-line `v=DKIM1; ...; p=<base64>`
  * TXT value.
  *
- * Mailcow's `/get/dkim/{domain}` endpoint returns the public key either as:
- *  - a bare base64 string (just the `p=` portion), or
- *  - the full `v=DKIM1; k=rsa; t=s; s=email; p=<base64>` string (this is what
- *    the demo-mode fake key in src/lib/mailcow.ts produces).
+ * Accepts any of the following input shapes (and produces a single-line
+ * RFC 6376 §3.6.1-compatible TXT value from each):
  *
- * Both forms are accepted here; if the input already starts with `v=DKIM1`
- * we treat it as the finished value and just collapse any embedded newlines
- * (DKIM TXT records must be a single logical line — DNS providers split long
- * values into 255-char chunks themselves).
+ *   1. The full DKIM record string returned by Mailcow's
+ *      `GET /api/v1/get/dkim/{domain}` endpoint in its `public` field
+ *      (e.g. `v=DKIM1; k=rsa; t=s; s=email; p=<base64>`). The whitespace
+ *      newlines that Mailcow inserts for readability are collapsed.
+ *
+ *   2. A bare base64 blob (just the `p=` portion). We wrap it in the
+ *      standard `v=DKIM1; k=rsa; t=s; s=email; p=<base64>` prefix.
+ *
+ *   3. A PEM-encoded RSA public key (with `-----BEGIN PUBLIC KEY-----` /
+ *      `-----END PUBLIC KEY-----` markers). The PEM headers/footers and
+ *      embedded newlines are stripped, leaving the bare base64 which is
+ *      then wrapped as in (2).
+ *
+ * The final value is always a single logical line — DNS providers split
+ * long TXT values into 255-char chunks themselves, so we never emit
+ * embedded newlines.
  */
 function formatDkimTxtValue(publicKey: string): string {
-  const trimmed = publicKey.trim()
+  let trimmed = publicKey.trim()
+
+  // Strip PEM headers/footers if present (case 3).
+  if (/-----BEGIN[^-]*-----/.test(trimmed)) {
+    trimmed = trimmed
+      .replace(/-----BEGIN[^-]*-----/g, '')
+      .replace(/-----END[^-]*-----/g, '')
+  }
+
   if (/^v=DKIM1/i.test(trimmed)) {
-    // Already a full DKIM record — collapse whitespace/newlines.
+    // Already a full DKIM record — collapse whitespace/newlines (case 1).
     return trimmed.replace(/\s+/g, '')
   }
-  // Bare base64 — wrap it in the standard DKIM prefix.
+
+  // Bare base64 — wrap it in the standard DKIM prefix (cases 2 & 3 after
+  // PEM stripping). Collapse any internal whitespace first so multi-line
+  // PEM base64 survives the conversion.
   const bare = trimmed.replace(/\s+/g, '')
   return `v=DKIM1; k=rsa; t=s; s=email; p=${bare}`
 }
@@ -103,29 +124,61 @@ function stripTrailingDot(name: string): string {
 // ---------------------------------------------------------------------------
 
 /**
+ * Optional Mailcow-sourced DKIM parameters.
+ *
+ * When provided, this takes precedence over the positional `dkimPublicKey` /
+ * `dkimSelector` arguments (kept for backward compatibility with callers
+ * that pre-date the Mailcow integration).
+ *
+ * `publicKey` may be either:
+ *   - a bare base64 blob (just the `p=` value), or
+ *   - the full `v=DKIM1; k=rsa; t=s; s=email; p=<base64>` string that
+ *     Mailcow's `GET /api/v1/get/dkim/{domain}` returns in its `public`
+ *     field. Both forms are normalised by `formatDkimTxtValue`.
+ *
+ * `selector` is the DKIM selector (commonly `mail` or `dkim`). It is used
+ * to build the record name (`<selector>._domainkey`) AND to override the
+ * default selector argument.
+ */
+export interface MailcowDkimInput {
+  selector: string
+  publicKey: string
+}
+
+/**
  * Generate the standard email DNS records for a domain.
  *
  * @param domain               The apex domain, e.g. `example.com`.
  * @param mailServerHostname   The MX target, e.g. `mail.example.com`.
- * @param dkimPublicKey        (Optional) base64 DKIM public key from Mailcow.
- *                             If omitted, no DKIM record is emitted (the
- *                             returned `dkim` field will have an empty value).
- * @param dkimSelector         (Optional) DKIM selector, default `mail`.
+ * @param dkimPublicKey        (Optional, legacy) base64 DKIM public key.
+ *                             Ignored when `mailcowDkim` is supplied.
+ * @param dkimSelector         (Optional, default `mail`) DKIM selector.
+ *                             Ignored when `mailcowDkim` is supplied.
  * @param serverIp             (Optional) hosting server IP. When provided the
  *                             SPF record includes an explicit `ip4:` mechanism
  *                             for the server (recommended); when omitted the
  *                             SPF relies on the `mx` + `a` mechanisms only.
+ * @param mailcowDkim          (Optional) DKIM key + selector fetched live from
+ *                             Mailcow's `/get/dkim/{domain}` endpoint. When
+ *                             provided, takes precedence over the positional
+ *                             `dkimPublicKey`/`dkimSelector` arguments and
+ *                             produces a real, ready-to-publish DKIM TXT record.
  */
 export function generateEmailDnsRecords(
   domain: string,
   mailServerHostname: string,
   dkimPublicKey?: string,
   dkimSelector: string = 'mail',
-  serverIp?: string
+  serverIp?: string,
+  mailcowDkim?: MailcowDkimInput
 ): EmailDnsRecords {
   const apex = stripTrailingDot(domain.toLowerCase())
   const mxHost = stripTrailingDot(mailServerHostname.toLowerCase())
-  const selector = (dkimSelector || 'mail').trim().toLowerCase()
+
+  // mailcowDkim (when provided) overrides the legacy positional args.
+  const resolvedSelector =
+    (mailcowDkim?.selector || dkimSelector || 'mail').trim().toLowerCase()
+  const resolvedPublicKey = mailcowDkim?.publicKey ?? dkimPublicKey
 
   const mx: MxRecord = {
     type: 'MX',
@@ -156,10 +209,14 @@ export function generateEmailDnsRecords(
   }
 
   // DKIM is optional — only emit when a public key is provided.
+  // When `mailcowDkim` is supplied we use its selector for the record name
+  // (typically `mail._domainkey` or `dkim._domainkey`) and `formatDkimTxtValue`
+  // normalises the public key into a single-line `v=DKIM1; k=rsa; ...; p=<b64>`
+  // TXT value.
   const dkim: TxtRecord = {
     type: 'TXT',
-    name: `${selector}._domainkey`,
-    value: dkimPublicKey ? formatDkimTxtValue(dkimPublicKey) : '',
+    name: `${resolvedSelector}._domainkey`,
+    value: resolvedPublicKey ? formatDkimTxtValue(resolvedPublicKey) : '',
   }
 
   return { mx, spf, dmarc, dkim }
@@ -216,6 +273,8 @@ export function generateAllDnsRecords(opts: {
   mailServerHostname: string
   dkimPublicKey?: string
   dkimSelector?: string
+  /** When provided, takes precedence over dkimPublicKey/dkimSelector. */
+  mailcowDkim?: MailcowDkimInput
 }): DnsRecord[] {
   const {
     domain,
@@ -223,6 +282,7 @@ export function generateAllDnsRecords(opts: {
     mailServerHostname,
     dkimPublicKey,
     dkimSelector,
+    mailcowDkim,
   } = opts
 
   const hosting = generateHostingDnsRecords(domain, serverIp)
@@ -231,7 +291,8 @@ export function generateAllDnsRecords(opts: {
     mailServerHostname,
     dkimPublicKey,
     dkimSelector,
-    serverIp
+    serverIp,
+    mailcowDkim
   )
 
   const records: DnsRecord[] = []

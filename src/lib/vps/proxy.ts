@@ -28,9 +28,17 @@ import {
   isServerInDemoMode,
 } from './ssh'
 import { getServerCredentials } from './provisioner'
+import { isLocalHost, ensureDir } from './local-exec'
 import { ADMIN_EMAIL } from '@/lib/brand-config'
+import path from 'path'
+import fs from 'fs'
 
-// ─── Types ───────────────────────────────────────────────────────────────
+// ─── Local storage paths (for localhost servers) ─────────────────────────
+
+const STORAGE_ROOT =
+  process.env.STORAGE_ROOT || path.join(process.cwd(), 'storage')
+const LOCAL_CADDY_DIR = path.join(STORAGE_ROOT, 'caddy')
+const LOCAL_CADDYFILE = path.join(LOCAL_CADDY_DIR, 'Caddyfile')
 
 export interface ProxyConfig {
   hostname: string
@@ -39,6 +47,10 @@ export interface ProxyConfig {
   sslCertStatus?: 'none' | 'pending' | 'issued' | 'failed' | 'renewing'
   redirectToWww?: boolean
   basicAuth?: { username: string; passwordHash: string }[]
+  /** Active URL redirects to inject as `redir` directives (BEFORE reverse_proxy). */
+  redirects?: { fromPath: string; toUrl: string; statusCode: number }[]
+  /** Active IP-block rules to inject as `@blocked client_ip ...` matchers (deny rules only). */
+  ipBlocks?: { ipAddress: string; action: string }[]
 }
 
 export interface ProjectProxyResult {
@@ -77,9 +89,33 @@ export async function configureProjectProxy(
 
   log(`Configuring proxy: ${hostname} → ${upstream} (SSL: ${ssl ? 'on' : 'off'})`)
 
-  // Demo mode: pretend we wrote the config
+  // Demo mode: pretend we wrote the config (but still load redirects + ipBlocks
+  // so the returned snippet reflects the full site block).
   if (isServerInDemoMode(project.server)) {
-    const snippet = generateCaddyBlock({ hostname, upstream, ssl })
+    const [redirects, ipBlocks] = await Promise.all([
+      db.redirect.findMany({
+        where: { projectId, enabled: true },
+        select: { fromPath: true, toUrl: true, statusCode: true },
+      }),
+      db.ipBlock.findMany({
+        where: { projectId, enabled: true },
+        select: { ipAddress: true, action: true },
+      }),
+    ])
+    const snippet = generateCaddyBlock({
+      hostname,
+      upstream,
+      ssl,
+      redirects: redirects.map((r) => ({
+        fromPath: r.fromPath,
+        toUrl: r.toUrl,
+        statusCode: r.statusCode,
+      })),
+      ipBlocks: ipBlocks.map((b) => ({
+        ipAddress: b.ipAddress,
+        action: b.action,
+      })),
+    })
     if (ssl) {
       await db.project.update({
         where: { id: projectId },
@@ -93,7 +129,10 @@ export async function configureProjectProxy(
   }
 
   // Real mode: regenerate the FULL Caddyfile from all projects on this server
-  // and atomically swap it in.
+  // and atomically swap it in. Each project's redirects + ipBlocks are loaded
+  // so the generated Caddyfile includes `redir` and `@blocked` directives.
+  const isLocal = isLocalHost(project.server?.sshHost)
+  const caddyfilePath = isLocal ? LOCAL_CADDYFILE : '/etc/caddy/Caddyfile'
   const creds = await getServerCredentials(project.serverId)
   try {
     await withConnection(creds, async (client) => {
@@ -113,42 +152,72 @@ export async function configureProjectProxy(
         },
       })
 
+      // Load redirects + ipBlocks for every project on this server in parallel.
+      const [allRedirects, allIpBlocks] = await Promise.all([
+        db.redirect.findMany({
+          where: { projectId: { in: allProjects.map((p) => p.id) }, enabled: true },
+          select: { projectId: true, fromPath: true, toUrl: true, statusCode: true },
+        }),
+        db.ipBlock.findMany({
+          where: { projectId: { in: allProjects.map((p) => p.id) }, enabled: true },
+          select: { projectId: true, ipAddress: true, action: true },
+        }),
+      ])
+
       const configs: ProxyConfig[] = allProjects.map((p) => ({
         hostname: p.customDomain || p.subdomain,
         upstream: `${p.containerName}:${p.containerPort || 3000}`,
         ssl: p.sslEnabled,
+        redirects: allRedirects
+          .filter((r) => r.projectId === p.id)
+          .map((r) => ({
+            fromPath: r.fromPath,
+            toUrl: r.toUrl,
+            statusCode: r.statusCode,
+          })),
+        ipBlocks: allIpBlocks
+          .filter((b) => b.projectId === p.id)
+          .map((b) => ({ ipAddress: b.ipAddress, action: b.action })),
       }))
 
       const caddyfile = generateFullCaddyfile(configs)
       log(`Writing Caddyfile (${caddyfile.length} bytes, ${configs.length} sites)…`)
 
-      // Write to a temp file then atomically move (avoids partial writes).
-      await putFile(client, '/etc/caddy/Caddyfile.new', caddyfile, { mode: 0o644 })
-      await exec(client, 'mv /etc/caddy/Caddyfile.new /etc/caddy/Caddyfile', {
-        timeoutMs: 5000,
-      })
-
-      // Validate before reload
-      log('Validating Caddyfile…')
-      const validate = await exec(client, 'caddy validate --config /etc/caddy/Caddyfile', {
-        timeoutMs: 15000,
-      })
-      if (validate.exitCode !== 0) {
-        // Restore from backup if validation failed
-        await exec(client, 'mv /etc/caddy/Caddyfile.bak /etc/caddy/Caddyfile 2>/dev/null || true', {
+      if (isLocal) {
+        // Local mode: write to storage/caddy/Caddyfile (no systemctl, no /etc).
+        // Caddy enforcement isn't needed locally — the Next.js proxy handles
+        // redirects + IP blocks. We keep the file for display/debugging.
+        await ensureDir(LOCAL_CADDY_DIR)
+        fs.writeFileSync(LOCAL_CADDYFILE, caddyfile, { mode: 0o644 })
+        log('Caddyfile written to local storage (enforcement via Next.js proxy)')
+      } else {
+        // Remote mode: write to /etc/caddy/Caddyfile + reload via systemctl.
+        await putFile(client, '/etc/caddy/Caddyfile.new', caddyfile, { mode: 0o644 })
+        await exec(client, 'mv /etc/caddy/Caddyfile.new /etc/caddy/Caddyfile', {
           timeoutMs: 5000,
         })
-        throw new Error(`Caddyfile validation failed: ${validate.stderr}`)
-      }
 
-      log('Reloading Caddy…')
-      const reload = await exec(client, 'systemctl reload caddy', {
-        timeoutMs: 15000,
-      })
-      if (reload.exitCode !== 0) {
-        throw new Error(`Caddy reload failed: ${reload.stderr}`)
+        // Validate before reload
+        log('Validating Caddyfile…')
+        const validate = await exec(client, 'caddy validate --config /etc/caddy/Caddyfile', {
+          timeoutMs: 15000,
+        })
+        if (validate.exitCode !== 0) {
+          await exec(client, 'mv /etc/caddy/Caddyfile.bak /etc/caddy/Caddyfile 2>/dev/null || true', {
+            timeoutMs: 5000,
+          })
+          throw new Error(`Caddyfile validation failed: ${validate.stderr}`)
+        }
+
+        log('Reloading Caddy…')
+        const reload = await exec(client, 'systemctl reload caddy', {
+          timeoutMs: 15000,
+        })
+        if (reload.exitCode !== 0) {
+          throw new Error(`Caddy reload failed: ${reload.stderr}`)
+        }
+        log('Caddy reloaded successfully')
       }
-      log('Caddy reloaded successfully')
     })
 
     if (ssl) {
@@ -166,10 +235,34 @@ export async function configureProjectProxy(
       })
     }
 
+    // Re-load this project's redirects + ipBlocks for the returned snippet.
+    const [snippetRedirects, snippetIpBlocks] = await Promise.all([
+      db.redirect.findMany({
+        where: { projectId, enabled: true },
+        select: { fromPath: true, toUrl: true, statusCode: true },
+      }),
+      db.ipBlock.findMany({
+        where: { projectId, enabled: true },
+        select: { ipAddress: true, action: true },
+      }),
+    ])
     return {
       ok: true,
       message: `Proxy configured for ${hostname}`,
-      configSnippet: generateCaddyBlock({ hostname, upstream, ssl }),
+      configSnippet: generateCaddyBlock({
+        hostname,
+        upstream,
+        ssl,
+        redirects: snippetRedirects.map((r) => ({
+          fromPath: r.fromPath,
+          toUrl: r.toUrl,
+          statusCode: r.statusCode,
+        })),
+        ipBlocks: snippetIpBlocks.map((b) => ({
+          ipAddress: b.ipAddress,
+          action: b.action,
+        })),
+      }),
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
@@ -212,6 +305,7 @@ export async function removeProjectProxy(projectId: string): Promise<ProjectProx
           containerName: { not: null },
         },
         select: {
+          id: true,
           customDomain: true,
           subdomain: true,
           containerName: true,
@@ -219,16 +313,44 @@ export async function removeProjectProxy(projectId: string): Promise<ProjectProx
           sslEnabled: true,
         },
       })
+      // Load redirects + ipBlocks for the remaining projects so the regenerated
+      // Caddyfile still has their `redir` + `@blocked` directives.
+      const [allRedirects, allIpBlocks] = await Promise.all([
+        db.redirect.findMany({
+          where: { projectId: { in: allProjects.map((p) => p.id) }, enabled: true },
+          select: { projectId: true, fromPath: true, toUrl: true, statusCode: true },
+        }),
+        db.ipBlock.findMany({
+          where: { projectId: { in: allProjects.map((p) => p.id) }, enabled: true },
+          select: { projectId: true, ipAddress: true, action: true },
+        }),
+      ])
       const configs: ProxyConfig[] = allProjects.map((p) => ({
         hostname: p.customDomain || p.subdomain,
         upstream: `${p.containerName}:${p.containerPort || 3000}`,
         ssl: p.sslEnabled,
+        redirects: allRedirects
+          .filter((r) => r.projectId === p.id)
+          .map((r) => ({
+            fromPath: r.fromPath,
+            toUrl: r.toUrl,
+            statusCode: r.statusCode,
+          })),
+        ipBlocks: allIpBlocks
+          .filter((b) => b.projectId === p.id)
+          .map((b) => ({ ipAddress: b.ipAddress, action: b.action })),
       }))
       const caddyfile = generateFullCaddyfile(configs)
-      await putFile(client, '/etc/caddy/Caddyfile.new', caddyfile, { mode: 0o644 })
-      await exec(client, 'mv /etc/caddy/Caddyfile.new /etc/caddy/Caddyfile && caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy', {
-        timeoutMs: 30000,
-      })
+      const isLocal = isLocalHost(project.server?.sshHost)
+      if (isLocal) {
+        await ensureDir(LOCAL_CADDY_DIR)
+        fs.writeFileSync(LOCAL_CADDYFILE, caddyfile, { mode: 0o644 })
+      } else {
+        await putFile(client, '/etc/caddy/Caddyfile.new', caddyfile, { mode: 0o644 })
+        await exec(client, 'mv /etc/caddy/Caddyfile.new /etc/caddy/Caddyfile && caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy', {
+          timeoutMs: 30000,
+        })
+      }
     })
     return { ok: true, message: 'Proxy entry removed' }
   } catch (err) {
@@ -252,8 +374,6 @@ export async function removeProjectProxy(projectId: string): Promise<ProjectProx
  */
 export function generateCaddyBlock(cfg: ProxyConfig): string {
   const lines: string[] = []
-  const addr = cfg.ssl ? cfg.hostname : `:80 {
-  # ${cfg.hostname} (SSL disabled — serving on port 80)`
 
   if (cfg.ssl) {
     lines.push(`${cfg.hostname} {`)
@@ -263,34 +383,55 @@ export function generateCaddyBlock(cfg: ProxyConfig): string {
     lines.push(`  handle @host {`)
   }
 
-  lines.push(`  reverse_proxy ${cfg.upstream} {
-    header_up Host {host}
-    header_up X-Real-IP {remote_host}
-    header_up X-Forwarded-For {remote_host}
-    header_up X-Forwarded-Proto {scheme}
-  }`)
+  // ── IP blocks (deny rules) — injected BEFORE reverse_proxy so they take ──
+  // precedence. Allow rules are enforced at the middleware layer (Caddy's
+  // `client_ip` matcher is deny-oriented; whitelist semantics are easier in
+  // the panel middleware).
+  const denyIps = (cfg.ipBlocks || [])
+    .filter((b) => b.action === 'deny')
+    .map((b) => b.ipAddress)
+    .filter(Boolean)
+  if (denyIps.length > 0) {
+    lines.push(`    @blocked {`)
+    lines.push(`      client_ip ${denyIps.join(' ')}`)
+    lines.push(`    }`)
+    lines.push(`    respond @blocked 403`)
+  }
+
+  // ── Redirects — injected BEFORE reverse_proxy so they short-circuit. ──
+  // Caddy syntax: `redir <from> <to> [code]` (code defaults to 301).
+  for (const r of cfg.redirects || []) {
+    lines.push(`    redir ${r.fromPath} ${r.toUrl} ${r.statusCode}`)
+  }
+
+  lines.push(`    reverse_proxy ${cfg.upstream} {`)
+  lines.push(`      header_up Host {host}`)
+  lines.push(`      header_up X-Real-IP {remote_host}`)
+  lines.push(`      header_up X-Forwarded-For {remote_host}`)
+  lines.push(`      header_up X-Forwarded-Proto {scheme}`)
+  lines.push(`    }`)
 
   if (cfg.basicAuth && cfg.basicAuth.length > 0) {
-    lines.push(`  basic_auth {`)
+    lines.push(`    basic_auth {`)
     for (const u of cfg.basicAuth) {
-      lines.push(`    ${u.username} ${u.passwordHash}`)
+      lines.push(`      ${u.username} ${u.passwordHash}`)
     }
-    lines.push(`  }`)
+    lines.push(`    }`)
   }
 
   if (cfg.ssl) {
     // Request compression + logging
-    lines.push(`  encode gzip zstd`)
-    lines.push(`  log {
-    output file /opt/deployhub/logs/${cfg.hostname.replace(/\W+/g, '_')}.log
-    format json
-  }`)
+    lines.push(`    encode gzip zstd`)
+    lines.push(`    log {`)
+    lines.push(`      output file /opt/deployhub/logs/${cfg.hostname.replace(/\W+/g, '_')}.log`)
+    lines.push(`      format json`)
+    lines.push(`    }`)
     // Caddy will automatically use Let's Encrypt — no explicit tls directive needed.
     // But we can be explicit about the email for ACME account.
     const email = process.env.LE_EMAIL || ADMIN_EMAIL
-    lines.push(`  tls ${email} {
-    on_demand
-  }`)
+    lines.push(`    tls ${email} {`)
+    lines.push(`      on_demand`)
+    lines.push(`    }`)
   }
 
   if (!cfg.ssl) {
@@ -342,6 +483,7 @@ export async function getServerCaddyfile(serverId: string): Promise<string> {
     const projects = await db.project.findMany({
       where: { serverId, status: 'running', containerName: { not: null } },
       select: {
+        id: true,
         customDomain: true,
         subdomain: true,
         containerName: true,
@@ -349,15 +491,45 @@ export async function getServerCaddyfile(serverId: string): Promise<string> {
         sslEnabled: true,
       },
     })
+    const [allRedirects, allIpBlocks] = await Promise.all([
+      db.redirect.findMany({
+        where: { projectId: { in: projects.map((p) => p.id) }, enabled: true },
+        select: { projectId: true, fromPath: true, toUrl: true, statusCode: true },
+      }),
+      db.ipBlock.findMany({
+        where: { projectId: { in: projects.map((p) => p.id) }, enabled: true },
+        select: { projectId: true, ipAddress: true, action: true },
+      }),
+    ])
     const configs: ProxyConfig[] = projects.map((p) => ({
       hostname: p.customDomain || p.subdomain,
       upstream: `${p.containerName}:${p.containerPort || 3000}`,
       ssl: p.sslEnabled,
+      redirects: allRedirects
+        .filter((r) => r.projectId === p.id)
+        .map((r) => ({
+          fromPath: r.fromPath,
+          toUrl: r.toUrl,
+          statusCode: r.statusCode,
+        })),
+      ipBlocks: allIpBlocks
+        .filter((b) => b.projectId === p.id)
+        .map((b) => ({ ipAddress: b.ipAddress, action: b.action })),
     }))
     return generateFullCaddyfile(configs)
   }
 
   const creds = await getServerCredentials(serverId)
+  // Local mode: read from storage/caddy/Caddyfile
+  if (isLocalHost(server.sshHost)) {
+    try {
+      if (fs.existsSync(LOCAL_CADDYFILE)) {
+        return fs.readFileSync(LOCAL_CADDYFILE, 'utf8')
+      }
+    } catch {
+      /* fall through */
+    }
+  }
   return await withConnection(creds, async (client) => {
     const r = await exec(client, 'cat /etc/caddy/Caddyfile 2>/dev/null', {
       timeoutMs: 10000,
@@ -373,6 +545,14 @@ export async function reloadCaddy(serverId: string): Promise<{ ok: boolean; mess
   if (!server) return { ok: false, message: 'Server not found' }
   if (isServerInDemoMode(server)) {
     return { ok: true, message: 'Demo mode: Caddy reloaded (simulated)' }
+  }
+  // Local mode: no Caddy daemon running locally — enforcement is via the
+  // Next.js proxy. The Caddyfile on disk is for display/debugging only.
+  if (isLocalHost(server.sshHost)) {
+    return {
+      ok: true,
+      message: 'Local mode: Caddyfile is in storage/caddy/Caddyfile (enforcement via Next.js proxy)',
+    }
   }
   try {
     const creds = await getServerCredentials(serverId)

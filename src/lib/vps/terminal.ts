@@ -2,8 +2,24 @@
  * Terminal Module
  * ===============
  *
- * Provides an HTTP-polling-based "web terminal" that runs commands inside a
- * project's deploy container via `docker exec -i <container> sh -c '…'`.
+ * Provides an HTTP-polling-based "web terminal" that runs commands in a
+ * project's execution context.
+ *
+ * Two execution modes:
+ *
+ *   - LOCAL (server.sshHost === 'localhost' / 127.0.0.1 / ::1):
+ *       Commands run directly on the panel host via `bash -lc` (no `docker
+ *       exec` wrap). The default working directory is the project's storage
+ *       root (`<STORAGE_ROOT>/projects/<projectId>/`). `cd ~` resolves to the
+ *       project root. No Docker required — works in the sandbox.
+ *
+ *   - REMOTE (real VPS over SSH):
+ *       Commands run inside the project's deploy container via
+ *       `docker exec -i <container> sh -c '…'`. Default cwd is `/app`.
+ *
+ *   - DEMO (no sshHost + no creds):
+ *       Synthetic responses for common commands so the panel's terminal UI
+ *       is functional in pure-demo mode.
  *
  * Because the panel doesn't run a websocket specifically for terminals, the
  * UI sends commands one at a time via POST `/api/hosting/[id]/terminal` and
@@ -17,20 +33,33 @@
  * Security:
  *   - Every command must include a sessionId that belongs to the projectId
  *     in the URL (validated against the in-memory map).
- *   - We never let the command escape the container — even `docker` itself
- *     runs inside the container's PID namespace, not the host's.
- *   - "Sensitive" commands (`docker`, `sudo`, etc.) are allowed but flagged
- *     in the audit log by the API route.
+ *   - In REMOTE mode we never let the command escape the container — even
+ *     `docker` itself runs inside the container's PID namespace, not the
+ *     host's.
+ *   - In LOCAL mode commands run as the panel process user. Sensitive
+ *     commands (`docker`, `sudo`, etc.) are flagged in the audit log by the
+ *     API route.
  */
 import crypto from 'crypto'
+import path from 'path'
 import { db } from '@/lib/db'
 import {
   withConnection,
   exec,
   isServerInDemoMode,
+  isLocalHost,
   type SshCredentials,
 } from './ssh'
+import { ensureDir } from './local-exec'
 import { getServerCredentials } from './provisioner'
+
+// ─── Per-project storage root (LOCAL mode) ──────────────────────────────
+
+const STORAGE_ROOT = process.env.STORAGE_ROOT || path.join(process.cwd(), 'storage')
+
+function PROJECT_ROOT(projectId: string): string {
+  return path.join(STORAGE_ROOT, 'projects', projectId)
+}
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -40,6 +69,8 @@ export interface TerminalSession {
   createdAt: number
   lastActivity: number
   cwd: string
+  /** In LOCAL mode, the project root used as the "home" directory. */
+  homeDir: string
   history: string[]
 }
 
@@ -102,7 +133,7 @@ function applyCd(session: TerminalSession, cmd: string): string | null {
   if (!m) return null
   let target = m[1].trim().replace(/^['"]|['"]$/g, '')
   if (target === '-') return null // cd - swaps to OLDPWD — we don't track that.
-  if (target === '~') target = '/app'
+  if (target === '~' || target === '') target = session.homeDir
   if (target.startsWith('/')) {
     return target
   }
@@ -129,12 +160,27 @@ export async function createTerminalSession(
   projectId: string
 ): Promise<TerminalSession> {
   gcSessions()
+
+  // Determine the home directory + default cwd based on the project's server.
+  // LOCAL → project storage root; REMOTE → /app (inside container); DEMO → /app.
+  const project = await db.project.findUnique({
+    where: { id: projectId },
+    include: { server: true },
+  })
+  const localMode = isLocalHost(project?.server?.sshHost)
+  const homeDir = localMode && project ? PROJECT_ROOT(projectId) : '/app'
+  if (localMode && project) {
+    // Best-effort: create the project root so `cd ~` works immediately.
+    await ensureDir(homeDir).catch(() => {})
+  }
+
   const session: TerminalSession = {
     id: crypto.randomBytes(12).toString('hex'),
     projectId,
     createdAt: Date.now(),
     lastActivity: Date.now(),
-    cwd: '/app',
+    cwd: homeDir,
+    homeDir,
     history: [],
   }
   sessions.set(session.id, session)
@@ -182,7 +228,12 @@ export async function runTerminalCommand(
     include: { server: true },
   })
   if (!project) throw new Error('Project not found')
-  if (!project.containerName) {
+
+  const localMode = isLocalHost(project.server?.sshHost)
+
+  // LOCAL mode: no container required — we run bash directly on the host.
+  // REMOTE mode: container is required for `docker exec` wrapping.
+  if (!localMode && !project.containerName) {
     throw new Error('Project has no running container')
   }
 
@@ -195,7 +246,7 @@ export async function runTerminalCommand(
   }
 
   // Demo mode: synthetic responses for common commands.
-  if (isServerInDemoMode(project.server)) {
+  if (!localMode && (project.server ? isServerInDemoMode(project.server) : true)) {
     const result = demoRun(session, command)
     return { ...result, durationMs: Date.now() - start }
   }
@@ -204,13 +255,11 @@ export async function runTerminalCommand(
   try {
     return await withConnection(creds, async (client) => {
       // Wrap the command so we can extract the exit code from the trailing
-      // EXIT:N marker. We use `2>&1` only to combine streams for the marker
-      // detection — but we also keep stdout/stderr separated by writing them
-      // to two temp files inside the container, then cat-ing them.
-      //
-      // Simpler approach: capture combined output, then parse the EXIT marker.
+      // EXIT:N marker. We capture combined output (2>&1) for the marker.
       const wrapped = `cd ${shellQuote(session.cwd)} && (${command}) 2>&1; echo "EXIT:$?"`
-      const fullCmd = `docker exec -i ${shellQuote(project.containerName)} sh -c ${shellQuote(wrapped)}`
+      const fullCmd = localMode
+        ? wrapped
+        : `docker exec -i ${shellQuote(project.containerName!)} sh -c ${shellQuote(wrapped)}`
       const r = await exec(client, fullCmd, { timeoutMs: 60000 })
       const combined = r.stdout || ''
       // Find the trailing EXIT:N marker.

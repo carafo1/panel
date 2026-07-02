@@ -9,18 +9,24 @@
  *
  * Operations:
  *   - listIpBlocks(projectId)        — list all rules
- *   - createIpBlock(projectId, opts) — validate + create DB row + reload Caddy
- *   - updateIpBlock(blockId, ...)    — update DB row + reload Caddy if enabled
- *   - deleteIpBlock(blockId)         — delete DB row + reload Caddy
+ *   - createIpBlock(projectId, opts) — validate + create DB row + regenerate Caddyfile
+ *   - updateIpBlock(blockId, ...)    — update DB row + regenerate Caddyfile
+ *   - deleteIpBlock(blockId)         — delete DB row + regenerate Caddyfile
  *
- * In DEMO MODE the Caddy reload is simulated; the DB rows are still
- * created/updated/deleted so the UI works end-to-end.
+ * Enforcement is two-layer:
+ *   1. Next.js middleware (src/middleware.ts) — checks the request IP against
+ *      active IpBlock rows (cached 10s) and returns 403 Forbidden on match.
+ *      Deny rules block matching IPs; allow rules enable whitelist mode (only
+ *      listed IPs are admitted). Works everywhere, including the sandbox.
+ *   2. Caddyfile generation (src/lib/vps/proxy.ts:generateCaddyBlock) —
+ *      injects `@blocked { client_ip ... }` + `respond @blocked 403` directives
+ *      into the project's Caddy site block (deny rules only). Applied on
+ *      real VPS hosts via configureProjectProxy.
  *
  * IP validation: accepts IPv4 (`192.168.1.5`) or IPv4 CIDR (`10.0.0.0/8`).
  */
 import { db } from '@/lib/db'
-import { reloadCaddy } from './proxy'
-import { isServerInDemoMode } from './ssh'
+import { configureProjectProxy } from './proxy'
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -140,7 +146,7 @@ export async function createIpBlock(
 
   const project = await db.project.findUnique({
     where: { id: projectId },
-    include: { server: true },
+    select: { serverId: true },
   })
   if (!project) throw new Error('Project not found')
 
@@ -155,17 +161,16 @@ export async function createIpBlock(
     },
   })
 
-  // Best-effort: reload Caddy so the new rule takes effect.
-  if (project.serverId && !isServerInDemoMode(project.server)) {
+  // Regenerate the project's Caddy site block so the new `@blocked` matcher is
+  // injected (deny rules only; allow rules are middleware-enforced). Best-effort:
+  // failures don't roll back the DB row. The Next.js middleware (Layer 1)
+  // enforces the rule in real-time regardless.
+  if (project.serverId) {
     try {
-      await reloadCaddy(project.serverId)
+      await configureProjectProxy(projectId)
     } catch (err) {
-      console.error('[vps-security] failed to reload Caddy on create:', err)
+      console.error('[vps-security] failed to regenerate Caddyfile on create:', err)
     }
-  } else {
-    console.log(
-      `[demo] ip-block create — would reload Caddy to ${action} ${ipAddress}`
-    )
   }
 
   return toRow(row)
@@ -211,18 +216,18 @@ export async function updateIpBlock(
     data,
   })
 
+  // Regenerate the Caddy site block so the updated rule (or its removal when
+  // disabled) takes effect. Best-effort.
   const project = await db.project.findUnique({
     where: { id: existing.projectId },
-    include: { server: true },
+    select: { serverId: true },
   })
-  if (project?.serverId && !isServerInDemoMode(project.server)) {
+  if (project?.serverId) {
     try {
-      await reloadCaddy(project.serverId)
+      await configureProjectProxy(existing.projectId)
     } catch (err) {
-      console.error('[vps-security] failed to reload Caddy on update:', err)
+      console.error('[vps-security] failed to regenerate Caddyfile on update:', err)
     }
-  } else {
-    console.log(`[demo] ip-block update — would reload Caddy for block ${blockId}`)
   }
 
   return toRow(updated)
@@ -234,21 +239,22 @@ export async function deleteIpBlock(blockId: string): Promise<{ ok: boolean }> {
   const existing = await db.ipBlock.findUnique({ where: { id: blockId } })
   if (!existing) return { ok: false }
 
+  const projectId = existing.projectId
   const project = await db.project.findUnique({
-    where: { id: existing.projectId },
-    include: { server: true },
+    where: { id: projectId },
+    select: { serverId: true },
   })
 
   await db.ipBlock.delete({ where: { id: blockId } })
 
-  if (project?.serverId && !isServerInDemoMode(project.server)) {
+  // Regenerate the Caddy site block so the deleted rule is removed.
+  // Best-effort.
+  if (project?.serverId) {
     try {
-      await reloadCaddy(project.serverId)
+      await configureProjectProxy(projectId)
     } catch (err) {
-      console.error('[vps-security] failed to reload Caddy on delete:', err)
+      console.error('[vps-security] failed to regenerate Caddyfile on delete:', err)
     }
-  } else {
-    console.log(`[demo] ip-block delete — would reload Caddy for block ${blockId}`)
   }
 
   return { ok: true }

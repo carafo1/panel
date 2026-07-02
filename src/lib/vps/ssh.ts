@@ -23,6 +23,10 @@ import { readFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { writeFile, readFile, unlink } from 'fs/promises'
+import { LocalClient, isLocalHost, execLocal, execStreamLocal } from './local-exec'
+
+// Union type so TypeScript accepts either ssh2 Client or LocalClient.
+type AnyClient = Client | LocalClient
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -62,13 +66,33 @@ export interface SshConnectionInfo {
 // ─── Connection helper ───────────────────────────────────────────────────
 
 /**
- * Open a one-shot SSH connection, run a function with it, and always close it.
+ * Open a one-shot connection, run a function with it, and always close it.
+ *
+ * When `creds.host` is `localhost` / `127.0.0.1` / `::1`, a `LocalClient` is
+ * used instead of an SSH connection — commands run on the panel host itself
+ * via `child_process`. This makes every VPS feature (databases, deploys, cron,
+ * ftp, files, terminal, backups) execute REAL operations in dev/sandbox
+ * without needing a remote SSH server. In production, point the Server row at
+ * a real host and the normal SSH path is used.
+ *
  * Throws if the connection fails. Callers MUST handle errors.
  */
 export async function withConnection<T>(
   creds: SshCredentials,
-  fn: (client: Client) => Promise<T>
+  fn: (client: AnyClient) => Promise<T>
 ): Promise<T> {
+  // ── Local execution path ────────────────────────────────────────────
+  if (isLocalHost(creds.host)) {
+    const client = new LocalClient()
+    try {
+      return await fn(client)
+    } finally {
+      client.end()
+      client.destroy()
+    }
+  }
+
+  // ── Remote SSH path ─────────────────────────────────────────────────
   const client = new Client()
   try {
     await connectAsync(client, creds)
@@ -125,7 +149,7 @@ function connectAsync(client: Client, creds: SshCredentials): Promise<void> {
  * The command is wrapped with `bash -lc` so $PATH includes /usr/local/bin etc.
  */
 export async function exec(
-  client: Client,
+  client: AnyClient,
   command: string,
   opts: { cwd?: string; env?: Record<string, string>; timeoutMs?: number } = {}
 ): Promise<ExecResult> {
@@ -196,7 +220,7 @@ export async function exec(
  * The generator returns the final ExecResult when the command completes.
  */
 export async function* execStream(
-  client: Client,
+  client: AnyClient,
   command: string,
   opts: { cwd?: string; timeoutMs?: number } = {}
 ): AsyncGenerator<StreamChunk, ExecResult, void> {
@@ -286,7 +310,7 @@ export async function* execStream(
  * Upload a file to the remote host via SFTP. `content` may be a string or Buffer.
  */
 export async function putFile(
-  client: Client,
+  client: AnyClient,
   remotePath: string,
   content: string | Buffer,
   opts: { mode?: number } = {}
@@ -323,7 +347,7 @@ export async function putFile(
 /**
  * Download a file from the remote host via SFTP.
  */
-export async function getFile(client: Client, remotePath: string): Promise<Buffer> {
+export async function getFile(client: AnyClient, remotePath: string): Promise<Buffer> {
   const sftp = await new Promise<any>((resolve, reject) => {
     client.sftp((err, s) => (err ? reject(err) : resolve(s)))
   })
@@ -447,14 +471,18 @@ export function isVpsDemoMode(): boolean {
 
 /**
  * Check if a server object is "demo-mode eligible" — i.e. we can't actually
- * SSH into it. This is true when:
+ * run real commands against it. This is true when:
  *   - Global demo mode is on (VPS_DEMO_MODE=1), OR
  *   - The server has no sshHost, OR
- *   - The server has neither a private key nor a password configured.
+ *   - The server is NOT local (localhost/127.0.0.1/::1) AND has neither a
+ *     private key nor a password configured.
  *
+ * Local-host servers are ALWAYS considered real (not demo) because the
+ * LocalClient can run commands on the panel host without SSH credentials.
  * Callers should use this instead of `isVpsDemoMode() || !server.sshHost`
  * so that a server with an sshHost but no credentials also falls back to
- * demo behavior (instead of throwing inside getServerCredentials).
+ * demo behavior (instead of throwing inside getServerCredentials) — UNLESS
+ * it's a localhost server, which is always real.
  */
 export function isServerInDemoMode(server: {
   sshHost?: string | null
@@ -463,6 +491,11 @@ export function isServerInDemoMode(server: {
 }): boolean {
   if (isVpsDemoMode()) return true
   if (!server.sshHost) return true
+  // Localhost servers are real — LocalClient needs no SSH credentials.
+  if (isLocalHost(server.sshHost)) return false
   if (!server.sshPrivateKey && !server.sshPassword) return true
   return false
 }
+
+// Re-export local-exec helpers so callers can import them from ssh.ts.
+export { execLocal, execStreamLocal, isLocalHost } from './local-exec'

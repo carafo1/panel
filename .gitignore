@@ -69,3 +69,13 @@ server.log
 
 # Runtime / temp
 /tmp/
+
+# Local storage (real databases, backups, caddyfile, project files — user data)
+/storage/
+
+# Agent internal context notes
+/agent-ctx/
+
+# Verification screenshots
+project-detail-verify.png
+*.verify.png

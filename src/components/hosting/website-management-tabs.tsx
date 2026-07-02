@@ -367,7 +367,7 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
   const [revealing, setRevealing] = useState<Record<string, boolean>>({})
   const [testing, setTesting] = useState<Record<string, boolean>>({})
   const [createOpen, setCreateOpen] = useState(false)
-  const [createType, setCreateType] = useState<'mysql' | 'mariadb' | 'postgres'>('mysql')
+  const [createType, setCreateType] = useState<'mysql' | 'mariadb' | 'postgres' | 'sqlite'>('mysql')
   const [createName, setCreateName] = useState('')
   const [creating, setCreating] = useState(false)
   const [createdDb, setCreatedDb] = useState<WebsiteDatabase | null>(null)
@@ -701,7 +701,7 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
               <Label>Type</Label>
-              <Select value={createType} onValueChange={(v) => setCreateType(v as 'mysql' | 'mariadb' | 'postgres')}>
+              <Select value={createType} onValueChange={(v) => setCreateType(v as 'mysql' | 'mariadb' | 'postgres' | 'sqlite')}>
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Select type" />
                 </SelectTrigger>
@@ -709,6 +709,7 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
                   <SelectItem value="mysql">MySQL</SelectItem>
                   <SelectItem value="mariadb">MariaDB</SelectItem>
                   <SelectItem value="postgres">PostgreSQL</SelectItem>
+                  <SelectItem value="sqlite">SQLite (local file)</SelectItem>
                 </SelectContent>
               </Select>
             </div>

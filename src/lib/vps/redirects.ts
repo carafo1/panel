@@ -8,20 +8,25 @@
  *
  * Operations:
  *   - listRedirects(projectId)        — list all redirects
- *   - createRedirect(projectId, opts) — validate + create DB row + reload Caddy
- *   - updateRedirect(redirectId, ...) — update DB row + reload Caddy if enabled
- *   - deleteRedirect(redirectId)      — delete DB row + reload Caddy
+ *   - createRedirect(projectId, opts) — validate + create DB row + regenerate Caddyfile
+ *   - updateRedirect(redirectId, ...) — update DB row + regenerate Caddyfile
+ *   - deleteRedirect(redirectId)      — delete DB row + regenerate Caddyfile
  *
- * In DEMO MODE the Caddy reload is simulated; the DB rows are still
- * created/updated/deleted so the UI works end-to-end.
+ * Enforcement is two-layer:
+ *   1. Next.js middleware (src/middleware.ts) — matches the request path
+ *      against active Redirect rows (cached 10s) and returns
+ *      NextResponse.redirect(...) on match. Works everywhere, including
+ *      the sandbox (no Caddy required).
+ *   2. Caddyfile generation (src/lib/vps/proxy.ts:generateCaddyBlock) —
+ *      injects `redir <from> <to> <code>` directives into the project's
+ *      Caddy site block. Applied on real VPS hosts via configureProjectProxy.
  *
  * Validation:
  *   - fromPath must start with "/"
  *   - statusCode must be 301 or 302
  */
 import { db } from '@/lib/db'
-import { reloadCaddy } from './proxy'
-import { isServerInDemoMode } from './ssh'
+import { configureProjectProxy } from './proxy'
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -112,7 +117,7 @@ export async function createRedirect(
 
   const project = await db.project.findUnique({
     where: { id: projectId },
-    include: { server: true },
+    select: { serverId: true },
   })
   if (!project) throw new Error('Project not found')
 
@@ -127,17 +132,15 @@ export async function createRedirect(
     },
   })
 
-  // Best-effort: reload Caddy so the new redirect takes effect.
-  if (project.serverId && !isServerInDemoMode(project.server)) {
+  // Regenerate the project's Caddy site block so the new `redir` directive is
+  // injected. Best-effort: failures don't roll back the DB row. The Next.js
+  // middleware (Layer 1) enforces the redirect in real-time regardless.
+  if (project.serverId) {
     try {
-      await reloadCaddy(project.serverId)
+      await configureProjectProxy(projectId)
     } catch (err) {
-      console.error('[vps-redirects] failed to reload Caddy on create:', err)
+      console.error('[vps-redirects] failed to regenerate Caddyfile on create:', err)
     }
-  } else {
-    console.log(
-      `[demo] redirect create — would reload Caddy for ${fromPath} -> ${toUrl} (${statusCode})`
-    )
   }
 
   return toRow(row)
@@ -185,19 +188,18 @@ export async function updateRedirect(
     data,
   })
 
-  // Best-effort: reload Caddy if the redirect is (still) enabled.
+  // Regenerate the Caddy site block so the updated `redir` directive (or its
+  // removal when disabled) takes effect. Best-effort.
   const project = await db.project.findUnique({
     where: { id: existing.projectId },
-    include: { server: true },
+    select: { serverId: true },
   })
-  if (project?.serverId && !isServerInDemoMode(project.server)) {
+  if (project?.serverId) {
     try {
-      await reloadCaddy(project.serverId)
+      await configureProjectProxy(existing.projectId)
     } catch (err) {
-      console.error('[vps-redirects] failed to reload Caddy on update:', err)
+      console.error('[vps-redirects] failed to regenerate Caddyfile on update:', err)
     }
-  } else {
-    console.log(`[demo] redirect update — would reload Caddy for redirect ${redirectId}`)
   }
 
   return toRow(updated)
@@ -209,21 +211,22 @@ export async function deleteRedirect(redirectId: string): Promise<{ ok: boolean 
   const existing = await db.redirect.findUnique({ where: { id: redirectId } })
   if (!existing) return { ok: false }
 
+  const projectId = existing.projectId
   const project = await db.project.findUnique({
-    where: { id: existing.projectId },
-    include: { server: true },
+    where: { id: projectId },
+    select: { serverId: true },
   })
 
   await db.redirect.delete({ where: { id: redirectId } })
 
-  if (project?.serverId && !isServerInDemoMode(project.server)) {
+  // Regenerate the Caddy site block so the deleted `redir` directive is removed.
+  // Best-effort.
+  if (project?.serverId) {
     try {
-      await reloadCaddy(project.serverId)
+      await configureProjectProxy(projectId)
     } catch (err) {
-      console.error('[vps-redirects] failed to reload Caddy on delete:', err)
+      console.error('[vps-redirects] failed to regenerate Caddyfile on delete:', err)
     }
-  } else {
-    console.log(`[demo] redirect delete — would reload Caddy for redirect ${redirectId}`)
   }
 
   return { ok: true }
