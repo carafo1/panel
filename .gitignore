@@ -1,4 +1,4 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+# See https://help.github.com/articles/ignoring-files/ for about ignoring files.
 
 # dependencies
 node_modules
@@ -30,8 +30,16 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
+# env files (NEVER commit real secrets — use .env.example as a template)
+.env
+.env.*
+!.env.example
+
+# database (contains user data, hashed passwords, API keys, encrypted env vars)
+db/*.db
+db/*.db-journal
+db/*.sqlite
+db/*.sqlite-journal
 
 # vercel
 .vercel
@@ -55,3 +63,9 @@ server.log
 
 # User ZIP uploads (Create Website Wizard)
 /.uploads/
+
+# Agent tool persisted outputs (may contain file reads with secrets)
+/tool-results/
+
+# Runtime / temp
+/tmp/
