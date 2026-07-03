@@ -5145,3 +5145,198 @@ Stage Summary:
 - 5 commits pushed to origin/main, including the critical local-exec.ts file that was previously excluded by an over-broad .gitignore rule
 - The repo at https://github.com/carafo1/panel.git now contains the complete, buildable codebase: local-exec.ts (localhost backend), hosting-panel.tsx (sticky sub-tab nav), and all prior cPanel-feature work
 - The .gitignore bug is fixed so future clones won't hit the "Module not found" build error
+
+---
+Task ID: remaining-audit
+Agent: Main Agent (Audit Only — no code changes)
+Task: Thorough audit of 9 specific system areas to identify remaining gaps before final work plan.
+
+Work Log:
+- Read worklog.md (5147 lines, 42 task entries since Task ID 1) to understand the project history. Most recent completed tasks: local-exec-fix, login-fix, project-subtabs-nav, git-push-fix.
+- Verified git status: main in sync with origin/main. bun run lint -> EXIT=0, 0 errors, 0 warnings.
+- Verified DB state via one-off bun script: 2 Server rows (EU-Central-1, US-East-1), BOTH with sshHost="" (empty). 1 Project row ("Test Demo Site") assigned to EU-Central-1.
+- For each of the 9 audit areas, read the relevant files and quote exact lines. Findings below.
+
+Audit Findings:
+
+============================================================================
+1. Caddyfile proxy rewrite bugs (src/lib/vps/proxy.ts)
+============================================================================
+Status: DONE (code is correct) — but real-path is currently dead because seeded servers are in demo mode (see #4).
+
+Evidence (src/lib/vps/proxy.ts:386-405):
+  lines 390-399: IP blocks (deny rules) — injected BEFORE reverse_proxy
+    const denyIps = (cfg.ipBlocks || []).filter((b) => b.action === 'deny').map((b) => b.ipAddress).filter(Boolean)
+    if (denyIps.length > 0) {
+      lines.push(`    @blocked {`)
+      lines.push(`      client_ip ${denyIps.join(' ')}`)
+      lines.push(`    }`)
+      lines.push(`    respond @blocked 403`)
+    }
+  lines 403-405: Redirects — injected BEFORE reverse_proxy so they short-circuit
+    for (const r of cfg.redirects || []) {
+      lines.push(`    redir ${r.fromPath} ${r.toUrl} ${r.statusCode}`)
+    }
+
+- generateCaddyBlock() (line 375) DOES inject @blocked { client_ip ... } + respond @blocked 403 for IpBlock rows with action='deny'.
+- It DOES inject redir <from> <to> <code> directives for every enabled Redirect row.
+- 'allow' IP-block rules are intentionally NOT injected into the Caddyfile (the client_ip matcher is deny-oriented) — enforced in the Next.js proxy layer at src/proxy.ts:197-203 (documented at proxy.ts:387-389).
+- Redirect + IpBlock DB rows are loaded in configureProjectProxy (proxy.ts:95-104 demo branch; 156-165 real branch), removeProjectProxy (318-327), getServerCaddyfile (494-503).
+- Real-mode writes: /etc/caddy/Caddyfile via putFile+mv+validate+systemctl reload (proxy.ts:195-219). Localhost-mode writes: storage/caddy/Caddyfile (proxy.ts:186-192). Demo-mode: in-memory snippet returned, no file written (proxy.ts:94-129).
+
+What remains: nothing in the function itself. To make it actually fire in the sandbox, set sshHost='localhost' on a Server row (currently empty — see #4).
+
+============================================================================
+2. Cron/FTP OS detection for Debian
+============================================================================
+Cron — Status: DONE (portable by design, no OS detection needed).
+  - syncCrontab (src/lib/vps/cron.ts:670-717) uses `docker cp <tmp> <container>:/var/spool/cron/crontabs/root` then `docker exec <container> sh -c 'mkdir -p /var/spool/cron/crontabs && chmod 600 /var/spool/cron/crontabs/root'`. sh -c, mkdir -p, chmod 600 are all portable across Alpine/BusyBox AND Debian. No adduser call.
+
+FTP — Status: NOT DONE (Alpine-only, broken on Debian-based containers).
+  - createFtpAccount (src/lib/vps/ftp.ts:228-230):
+      const adduserCmd = `docker exec ${shellQuoteLocal(project.containerName!)} sh -c ${shellQuoteLocal(
+        `adduser -D -H -s /bin/false ${shellQuoteLocal(fullUsername)} 2>/dev/null; echo ${shellQuoteLocal(`${fullUsername}:${password}`)} | chpasswd 2>/dev/null; true`
+      )}`
+  - Flags -D (don't assign password) and -H (don't create home dir) are BusyBox adduser syntax ONLY. Debian's adduser is a Perl wrapper around useradd and does NOT accept -D or -H — it would error out, but the trailing `2>/dev/null; true` masks the failure.
+  - Net effect on a Debian-based container: adduser fails silently -> user doesn't exist -> chpasswd also fails silently -> `; true` returns 0. NO system user is actually created. The DB row is created, the UI shows success, but FTP login would fail.
+  - updateFtpAccount (line 301-303): same chpasswd pattern, would also fail silently on Debian.
+  - deleteFtpAccount (line 343-344): uses `deluser` — this works on both Alpine and Debian, so delete is portable.
+  - No OS detection anywhere in ftp.ts (no /etc/os-release probe, no `which adduser`, no `command -v useradd`).
+
+What remains: add OS detection in ftp.ts (probe `command -v useradd >/dev/null && echo debian || echo alpine` once per container, cache, or branch on each call). Use `useradd -M -s /bin/false ${user}` on Debian and `adduser -D -H -s /bin/false ${user}` on Alpine.
+
+============================================================================
+3. DKIM auto-fetch from Mailcow
+============================================================================
+Status: PARTIAL — Hosting/EmailTab path is REAL; Domains-panel path is still PLACEHOLDER.
+
+Evidence:
+- mailcow.ts has REAL getDomain(domain) (src/lib/mailcow.ts:216-280) that calls GET /api/v1/get/dkim/{domain} (line 247) and returns { dkim: { length, public, selector } }. Also generateDkim(domain, selector) (line 296-360) that POSTs /add/dkim then re-fetches the public key.
+- The Hosting/EmailTab path is REAL: /api/hosting/[id]/email/dns-records/route.ts calls generateEmailDnsRecords which calls getDomain() and embeds the actual public key in the DKIM TXT record value (v=DKIM1; k=rsa; ...; p=<base64>). The frontend (src/components/hosting/website-management-tabs.tsx:3681) renders dnsRecords.records.dkim from this API.
+- The DOMAINS-panel path is NOT integrated with Mailcow: src/components/domains/domains-panel.tsx:1141-1151 has its own generateEmailDns() function with:
+    line 1146: { type: 'TXT', name: 'mail._domainkey', value: 'v=DKIM1; k=rsa; p=PLACEHOLDER_REPLACE_WITH_DKIM_KEY', ttl: 3600 },
+  And the dialog body still shows:
+    line 1261: <div><strong>DKIM</strong> -> mail._domainkey (placeholder — replace with real key)</div>
+  This UI path does NOT call mailcow.ts — it just inserts a placeholder TXT record and saves it via /api/domains/{id}/dns PUT.
+
+What remains: refactor generateEmailDns in domains-panel.tsx to call a new endpoint (or reuse /api/hosting/[id]/email/dns-records) that fetches the real DKIM key from Mailcow before inserting the TXT record. Also update the dialog text at line 1261 to reflect the real source (or remove the placeholder warning when Mailcow is configured).
+
+============================================================================
+4. Demo mode vs real mode
+============================================================================
+Status: PARTIAL — isServerInDemoMode() is well-implemented, but seed.ts creates Server rows with EMPTY sshHost, so the sandbox DB has NO real-mode server.
+
+Evidence:
+- isVpsDemoMode() (src/lib/vps/ssh.ts:468-470): true iff VPS_DEMO_MODE=1|true.
+- isServerInDemoMode(server) (ssh.ts:487-498): true iff global demo mode, OR !server.sshHost, OR (non-localhost AND no private key AND no password). Localhost servers are ALWAYS real.
+- Modules with demo-mode fallback branches (count: 12):
+    src/lib/vps/ssh.ts:18 (comment only)
+    src/lib/vps/provisioner.ts:164, 437, 503, 518, 574
+    src/lib/vps/proxy.ts:94, 290, 482, 546
+    src/lib/vps/database.ts:233, 236, 265, 405, 419, 492
+    src/lib/vps/ftp.ts:221, 296, 338
+    src/lib/vps/backups.ts:136, 406, 456, 656
+    src/lib/vps/terminal.ts:249
+    src/lib/vps/cron.ts:378, 386, 511, 577, 613
+    src/lib/vps/deployer.ts:307, 754, 1006, 1032, 1058, 1098, 1156
+    src/lib/vps/files.ts:189
+    src/lib/vps/resources.ts:169
+    src/lib/vps/ssl.ts:67, 200
+- seed.ts (read in full, 113 lines): seeds 2 Server rows (EU-Central-1, US-East-1), 3 Plans, 1 admin user. NO Server row with sshHost='localhost'. Both seeded servers have sshHost="" (confirmed by DB query).
+- The worklog make-real-1 entry says "updated both Server rows to sshHost='localhost'" — that was a one-off script that ran against the previous DB. The current DB has been re-seeded since then (the login-fix task ran seedDatabase()), so the localhost setting was lost.
+- There is NO automatic localhost-server seeding. The admin must manually create or update a Server row to set sshHost='localhost' via /api/admin/servers (route.ts:217-249 builds the sshHost from ip if not provided, so creating a server with ip: 'localhost' would work).
+
+What remains: either (a) update seed.ts to add a third server with sshHost='localhost', name='Local-Sandbox' so that the panel has a real-mode server out-of-the-box, OR (b) document in README that the admin must manually add a localhost Server row. Option (a) is strongly preferred for sandbox/dev UX.
+
+============================================================================
+5. Missing env vars
+============================================================================
+Status: NOT DONE — only 3 of ~25 vars are set in .env.
+
+Current .env (3 lines):
+  DATABASE_URL=file:/home/z/my-project/db/custom.db
+  DYNADOT_API_KEY=9N7B8O7q8j6w7fgD6Eq6j7l7M6E7d9Rs8x7HPS16L
+  DYNADOT_SECRET_KEY=97a4d6d09699f88e5d709cf37ad6ed2a9b82fd710fa173f72443abe0abd55a7f
+
+MISSING [REQUIRED] vars (per .env.example):
+  - JWT_SECRET (auth.ts:4 falls back to 'deployhub-secret-key-2024' — insecure)
+  - ENCRYPTION_KEY (encryption.ts:21-52 falls back to deterministic key derived from JWT_SECRET in dev; THROWS in production)
+  - STRIPE_SECRET_KEY (stripe.ts in demo mode)
+  - STRIPE_WEBHOOK_SECRET (stripe.ts constructWebhookEvent skips verification)
+  - SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS (email.ts:36-46 in demo mode — logs to stdout)
+  - MAILCOW_API_URL, MAILCOW_API_KEY (mailcow.ts:30-36 in demo mode — simulated responses)
+  - GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET (github.ts:14-19 in demo mode — fake OAuth token)
+  - WAAFI_MERCHANT_ID, WAAFI_API_KEY, WAAFI_API_USER_ID (waafi.ts:39-43 in demo mode)
+
+Each missing var silently flips its subsystem into DEMO MODE. The platform "works" end-to-end but no real external API calls are made.
+
+What remains: generate strong secrets (openssl rand -base64 32 for JWT/ENCRYPTION, openssl rand -hex 32 for CRON_API_KEY) and populate .env. For STRIPE/SMTP/MAILCOW/GITHUB/WAAFI, real credentials must come from the operator's own accounts — these cannot be auto-generated.
+
+============================================================================
+6. Billing/payments (Stripe + Waafi)
+============================================================================
+Status: DONE (code is real) — but currently in DEMO MODE because env vars are unset (see #5).
+
+Evidence:
+- Stripe (src/lib/stripe.ts, 229 lines): REAL `stripe` SDK client (line 27). createCheckoutSession (line 53) calls stripe.checkout.sessions.create({...}) with real line_items + metadata. retrieveSession, createSubscription, cancelSubscription, createCustomer, retrieveCustomer, constructWebhookEvent (real signature verification via stripe.webhooks.constructEvent) all hit the real Stripe API when STRIPE_SECRET_KEY is set.
+- Waafi (src/lib/waafi.ts, 317 lines): REAL fetch-based client. createPayment (line 129) POSTs a PaymentRequest envelope to ${WAAFI_API_URL}/api with requestType: 'PaymentRequest'. verifyPayment (line 205) POSTs requestType: 'TransactionStatus'. Response parsing handles responseCode: '2001' (Waafi success), multiple status-string normalizations, and timeouts via AbortSignal.timeout(30_000).
+- Unified dispatcher: src/lib/payment-methods.ts processPayment() routes to stripe/waafi/manual based on method param. /api/billing/checkout/route.ts calls resolveActiveMethod(requestedMethod) then processPayment(). The Stripe-demo branch (checkout/route.ts:141-396) drives the inline-success flow used by the existing UI; the unified branch (line 398-452) handles real Stripe Checkout, Waafi, and Manual.
+
+What remains: set STRIPE_SECRET_KEY + STRIPE_WEBHOOK_SECRET + WAAFI_* env vars to flip the system from demo to live. No code changes needed.
+
+============================================================================
+7. Email sending
+============================================================================
+Status: DONE (code is real) — but currently in DEMO MODE because SMTP_* env vars are unset (see #5).
+
+Evidence:
+- src/lib/email.ts (230 lines) imports nodemailer (line 11). getTransporter() (line 34-56) creates a real SMTP transport with host, port, secure (port 465 -> TLS), auth: { user, pass } when ALL of SMTP_HOST/PORT/USER/PASS are set.
+- sendEmail() (line 61-96) calls t.sendMail({ from, to, subject, html, text }) on the real transporter. Catches errors and returns { success: false }.
+- Higher-level wrappers all exist and are real: sendWelcomeEmail, sendPasswordResetEmail, sendTeamInvitationEmail, sendDeploymentEmail.
+- Demo-mode behavior (line 64-80): logs the email to console with a [DEMO EMAIL] banner and returns success: true with demo: true. No real email sent.
+
+What remains: set SMTP_HOST/PORT/USER/PASS (and optionally SMTP_FROM_NAME/FROM_EMAIL) in .env. Code is complete.
+
+============================================================================
+8. GitHub integration
+============================================================================
+Status: DONE (code is real) — but currently in DEMO MODE because GITHUB_CLIENT_ID/SECRET are unset (see #5).
+
+Evidence:
+- src/lib/github.ts (390 lines). getAuthUrl(state, redirectUri) (line 52) builds the real https://github.com/login/oauth/authorize?client_id=...&scope=repo read:user user:email URL using GITHUB_CLIENT_ID.
+- exchangeCodeForToken(code, redirectUri) (line 72-119): when creds are set, POSTs to https://github.com/login/oauth/access_token with { client_id, client_secret, code, redirect_uri } and parses { access_token, token_type, scope }. Real OAuth flow.
+- getUserProfile (line 132) calls GET /user. listRepositories (line 174) calls GET /user/repos?per_page=100&sort=updated. listCommits (line 245) calls GET /repos/{owner}/{repo}/commits?sha={branch}&per_page={n}. getBranches (line 308) calls GET /repos/{owner}/{repo}/branches. createWebhook (line 338) POSTs POST /repos/{owner}/{repo}/hooks with { name: 'web', active: true, events, config: { url, content_type, secret } }. deleteWebhook (line 376) DELETEs /repos/{owner}/{repo}/hooks/{id}. All real GitHub REST API v3 calls with Authorization: Bearer ${token} and X-GitHub-Api-Version: 2022-11-28 headers.
+- All functions have demo-mode fallbacks that return fake data when the token starts with ghp_demo_. These branches ONLY fire when GITHUB_CLIENT_ID/SECRET are unset.
+
+What remains: create a GitHub OAuth app at https://github.com/settings/developers with callback URL ${APP_URL}/api/github/oauth/callback, set GITHUB_CLIENT_ID + GITHUB_CLIENT_SECRET in .env. Code is complete.
+
+============================================================================
+9. Anything else obviously broken or incomplete
+============================================================================
+Status: DONE — nothing critical remaining.
+
+Evidence:
+- Grep for TODO|FIXME|XXX|HACK across src/ -> 0 matches.
+- Grep for not implemented|notImplemented|NOT IMPLEMENTED -> 1 match (src/app/api/auth/2fa/disable/route.ts:11 — a docstring comment, not a code stub). No throw statements.
+- Grep for coming soon|Coming Soon|not available -> all hits are legitimate (domain-availability status text in provisioning-panel.tsx:532 and domains-panel.tsx:482, an empty-table fallback in monitor.ts:97, a runtime guard in orchestration.ts:925 and domain-automation.ts:203-207, demo-mode notices in billing-panel.tsx:856 and billing/portal/route.ts:60, and a Docker-unavailable fallback message in database.ts:208 that's accurate). No "coming soon" placeholders.
+- dev.log (8699 lines) 5xx scan: zero 5xx errors after line 6003 (the login-fix task). All historical 500s (lines 1439-5891) were from the missing ./local-exec module — fixed by Task ID local-exec-fix. /api/site/content 500s at lines 833/1846/5083 also resolved; latest entries at lines 5901+ return 200.
+- 4xx errors post-fix: only GET /api/auth/me 404 (line 5900, expected when not logged in) and POST /api/auth/login 401 (lines 5906-6003, before the admin user was re-seeded by Task ID login-fix). All expected behavior.
+- bun run lint -> EXIT=0, 0 errors, 0 warnings.
+- Git: main in sync with origin/main — 5 commits including the local-exec.ts .gitignore fix.
+
+Stage Summary:
+- Caddyfile proxy redirects + IP blocks: code is correct and injects both redir and @blocked client_ip directives (proxy.ts:386-405). Will fire in real mode once a Server has sshHost set.
+- Cron module is portable across Alpine/Debian (uses sh -c + mkdir/chmod, no adduser).
+- FTP module is BROKEN ON DEBIAN: uses adduser -D -H (Alpine-only). Needs OS detection or a portable useradd/adduser branch.
+- DKIM is REAL on the Hosting/Email-tab path (calls Mailcow via /api/hosting/[id]/email/dns-records) but still PLACEHOLDER on the Domains-panel path (domains-panel.tsx:1141-1151, 1261).
+- Demo mode: 12 VPS modules still have demo-fallback branches. seed.ts does NOT seed a localhost Server — both seeded servers have empty sshHost, so the entire VPS subsystem currently runs in demo mode in the sandbox. Either update seed.ts to seed a localhost server, or document the manual admin step.
+- .env: only 3 of ~25 vars are set. Every "real" integration (Stripe, Waafi, SMTP, Mailcow, GitHub OAuth) is silently in DEMO MODE. Required for production: JWT_SECRET, ENCRYPTION_KEY, STRIPE_SECRET_KEY, SMTP_HOST/PORT/USER/PASS, MAILCOW_API_URL/KEY, GITHUB_CLIENT_ID/SECRET.
+- Stripe, Waafi, SMTP (nodemailer), GitHub OAuth: all four integrations have REAL API call paths in src/lib/{stripe,waafi,email,github}.ts. The code is complete and ready — only env vars are missing.
+- No TODOs, no "not implemented" throws, no "coming soon" placeholders. Lint passes. Git is in sync. No 5xx errors in dev.log since the local-exec fix.
+
+Recommended next-action priority (high -> low):
+1. Update seed.ts to seed a third Server row with sshHost='localhost', name='Local-Sandbox' (unblocks ALL real VPS operations in the sandbox without manual admin step).
+2. Fix ftp.ts adduser/useradd OS detection (FTP account creation is silently broken on Debian-based containers).
+3. Refactor domains-panel.tsx generateEmailDns to call the Mailcow DKIM endpoint (or reuse /api/hosting/[id]/email/dns-records) instead of inserting a hard-coded p=PLACEHOLDER_REPLACE_WITH_DKIM_KEY value.
+4. Generate and set strong secrets in .env (JWT_SECRET, ENCRYPTION_KEY, CRON_API_KEY) — these can be auto-generated.
+5. Document which operator-supplied credentials (STRIPE, SMTP, MAILCOW, GITHUB, WAAFI) need to be added to .env for production.
