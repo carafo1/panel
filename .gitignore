@@ -48,7 +48,8 @@ db/*.sqlite-journal
 # typescript
 *.tsbuildinfo
 next-env.d.ts
-local-*
+# Only ignore root-level local-* scratch files, NOT src/lib/vps/local-exec.ts
+/local-*
 .claude
 .z-ai-config
 *.log
