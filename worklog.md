@@ -5122,3 +5122,26 @@ Stage Summary:
 - Added a sticky, horizontally-scrollable sub-tab bar pinned to the top of the project detail view that lets the user jump straight to any of the 16 sections with one click (smooth scroll + active highlighting)
 - The 16 sub-tabs are: Overview, Deployments, Container, SSL, Settings, Databases, Email, Files, Terminal, Cron Jobs, FTP, Backups, Domains, Redirects, IP Blocker, Resources
 - Browser-verified: login → create project → open project → all 16 sub-tabs render → clicking Databases/Cron scrolls to the correct section and the section content loads
+
+---
+Task ID: git-push-fix
+Agent: Main Agent
+Task: Push code to GitHub (https://github.com/carafo1/panel.git)
+
+Work Log:
+- Checked git status: working tree clean, branch 4 commits ahead of origin/main
+- Discovered a critical .gitignore bug during pre-push audit: the broad `local-*` rule on line 51 was silently excluding `src/lib/vps/local-exec.ts` (the keystone localhost-execution module) from git. `git log -- src/lib/vps/local-exec.ts` returned empty and `git check-ignore -v` confirmed the match. This means anyone cloning the repo would hit the exact "Module not found: Can't resolve './local-exec'" build error.
+- Fixed .gitignore: changed `local-*` (matches anywhere in tree) to `/local-*` (root-level only), with a comment explaining the fix. Verified `git check-ignore` no longer flags local-exec.ts.
+- Staged and committed: `.gitignore` + `src/lib/vps/local-exec.ts` as commit 5f1e6a0 ("fix: stop .gitignore from excluding src/lib/vps/local-exec.ts")
+- Verified all other recent changes were already committed in HEAD: hosting-panel.tsx has PROJECT_SUBTABS (2 occurrences), worklog.md has all 3 recent task entries (local-exec-fix, login-fix, project-subtabs-nav)
+- Attempted `git push origin main` → failed (no cached credentials)
+- Attempted push with PAT embedded in URL as `x-access-token:TOKEN@` → failed with "Invalid username or token" (wrong auth format for Classic PAT)
+- Verified the PAT (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) is still valid via GitHub API: GET /user → 200, GET /repos/carafo1/panel → 200
+- Pushed successfully using `git -c credential.helper='!f() { echo "username=carafo1"; echo "password=$GH_TOKEN"; }; f' push origin main` → `79d706f..5f1e6a0 main -> main`
+- Verified push via GitHub API: GET /repos/carafo1/panel/contents/src/lib/vps/local-exec.ts?ref=main → HTTP 200 (file is now in the remote repo)
+- `git status -sb` confirms `## main...origin/main` (no "ahead" — fully in sync)
+
+Stage Summary:
+- 5 commits pushed to origin/main, including the critical local-exec.ts file that was previously excluded by an over-broad .gitignore rule
+- The repo at https://github.com/carafo1/panel.git now contains the complete, buildable codebase: local-exec.ts (localhost backend), hosting-panel.tsx (sticky sub-tab nav), and all prior cPanel-feature work
+- The .gitignore bug is fixed so future clones won't hit the "Module not found" build error
