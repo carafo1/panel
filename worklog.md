@@ -5066,3 +5066,22 @@ Stage Summary:
 - Root cause: the local-exec module was referenced by the VPS layer but never authored — a previous refactor split localhost execution out of ssh.ts but left the new file unwritten
 - The new module is the keystone that makes localhost servers "real": a Server row with sshHost='localhost' and no SSH credentials is now treated as a real (non-demo) server, and every VPS operation (databases, deploys, cron, ftp, files, terminal, backups, proxy) executes against the local filesystem and local Docker daemon via child_process
 - This unblocks the broader "make all features real" work since the entire VPS subsystem can now load
+
+---
+Task ID: login-fix
+Agent: Main Agent
+Task: Fix "Invalid email or password" login error reported alongside the local-exec build error
+
+Work Log:
+- Verified the local-exec build error was already resolved (dev.log shows POST /api/admin/jobs/process returning 200, not 500; local-exec.ts confirmed present at src/lib/vps/local-exec.ts, 12333 bytes)
+- Diagnosed the login failure: dev.log showed repeated `POST /api/auth/login 401` responses
+- Queried the User table via a one-off bun script: `Total users: 0` — the database had NO users at all, so every login attempt correctly returned 401 "Invalid email or password" (no matching user)
+- Root cause: the seed script src/lib/seed.ts (which creates the admin@deployhub.io / admin123 account, 3 plans, and 2 servers) had never been run, or the DB had been reset since the last seed
+- Re-ran the seed via a one-off script that imports seedDatabase() from @/lib/seed. Output: "✅ Plans seeded / ✅ Servers seeded / ✅ Admin user seeded / 🎉 Database seeding complete"
+- Verified the fix: `POST /api/auth/login` with {email:"admin@deployhub.io", password:"admin123"} now returns 200 with the user object and a valid JWT token
+- Cleaned up the one-off scripts (scripts/list-users.ts, scripts/run-seed.ts)
+
+Stage Summary:
+- Login credentials are now: email=admin@deployhub.io, password=admin123, role=admin
+- The DB now contains: 1 admin user, 3 plans (Starter/Pro/Business), 2 servers (EU-Central-1, US-East-1)
+- Both reported errors are resolved: (1) local-exec build error → fixed by creating src/lib/vps/local-exec.ts; (2) login 401 → fixed by seeding the admin user
