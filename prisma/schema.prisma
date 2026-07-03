@@ -41,6 +41,10 @@ model User {
   domainInvoices     Invoice[]
   domainLogs         DomainLog[]
   domainPriceUpdates DomainPrice[]  @relation("PriceUpdatedBy")
+  // ── Marketplace relations ───────────────────────────────────────────
+  submittedTemplates  Template[]       @relation("SubmittedTemplates")
+  templateRatings     TemplateRating[]
+  templateReviews     TemplateReview[]
 }
 
 model Plan {
@@ -589,7 +593,7 @@ model Template {
   name            String
   slug            String   @unique
   description     String
-  category        String   // "Framework", "Backend", "Static", "CMS", "Fullstack", "Frontend"
+  category        String   // "Framework", "Backend", "Static", "CMS", "Fullstack", "Frontend", "Ecommerce", "Blog", "Portfolio", "SaaS"
   framework       String   // "nextjs", "react", "vue", "nuxt", "astro", "svelte", "express", "fastapi", "node", "static", "gatsby", "go"
   icon            String   // emoji or icon name
   stars           Int      @default(0)
@@ -600,8 +604,69 @@ model Template {
   author          String   @default("DeployHub")
   repoUrl         String?
   isOfficial      Boolean  @default(false)
+
+  // ── Marketplace fields ──────────────────────────────────────────────
+  status          String   @default("approved") // "pending", "approved", "rejected", "featured"
+  submittedById   String?  // user who submitted (null for official/seeded templates)
+  version         String   @default("1.0.0")    // semver
+  readme          String?  // markdown README content
+  demoUrl         String?  // live demo URL
+  license         String   @default("MIT")      // MIT, Apache-2.0, GPL-3.0, etc.
+  installCount    Int      @default(0)           // real install count (incremented on deploy)
+  ratingCount     Int      @default(0)           // number of ratings
+  ratingSum       Int      @default(0)           // sum of all ratings (avg = ratingSum / ratingCount)
+  featuredAt      DateTime?                      // when admin marked as featured
+  rejectedReason  String?                       // why it was rejected (for submitter feedback)
+
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+
+  // ── Relations ───────────────────────────────────────────────────────
+  submittedBy     User?              @relation("SubmittedTemplates", fields: [submittedById], references: [id], onDelete: SetNull)
+  ratings         TemplateRating[]
+  reviews         TemplateReview[]
+
+  @@index([status])
+  @@index([category])
+  @@index([framework])
+  @@index([isOfficial])
+}
+
+// ── Template Rating (1-5 stars, one per user per template) ──────────────
+model TemplateRating {
+  id          String   @id @default(cuid())
+  templateId  String
+  userId      String
+  rating      Int      // 1-5
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  template    Template @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([templateId, userId])  // one rating per user per template
+  @@index([templateId])
+}
+
+// ── Template Review (text comment + optional rating) ────────────────────
+model TemplateReview {
+  id          String   @id @default(cuid())
+  templateId  String
+  userId      String
+  rating      Int      // 1-5 (required with review)
+  title       String   // short title
+  body        String   // review text (markdown)
+  helpfulCount Int     @default(0)  // upvotes from other users
+  status      String   @default("published") // "published", "hidden", "flagged"
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  template    Template @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([templateId])
+  @@index([userId])
+  @@index([status])
 }
 
 model AuditLog {

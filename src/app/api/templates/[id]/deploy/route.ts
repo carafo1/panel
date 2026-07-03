@@ -111,10 +111,13 @@ export async function POST(
       },
     })
 
-    // Increment template deployment count
+    // Increment template deployment count + install count (marketplace metric)
     await db.template.update({
       where: { id: template.id },
-      data: { deployments: { increment: 1 } },
+      data: {
+        deployments: { increment: 1 },
+        installCount: { increment: 1 },
+      },
     })
 
     // Trigger automation for hosting requested
