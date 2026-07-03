@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
+import { maskSecret } from '@/lib/security'
 
 export async function GET(
   request: Request,
@@ -56,7 +57,8 @@ export async function GET(
         id: webhook.id,
         name: webhook.name,
         url: webhook.url,
-        secret: webhook.secret,
+        // SECURITY: mask the signing secret — full secret only shown at creation
+        secret: webhook.secret ? maskSecret(webhook.secret) : null,
         events: JSON.parse(webhook.events),
         active: webhook.active,
         projectId: webhook.projectId,
@@ -202,7 +204,8 @@ export async function PATCH(
         id: updated.id,
         name: updated.name,
         url: updated.url,
-        secret: updated.secret,
+        // SECURITY: mask the signing secret in PATCH response too
+        secret: updated.secret ? maskSecret(updated.secret) : null,
         events: JSON.parse(updated.events),
         active: updated.active,
         projectId: updated.projectId,

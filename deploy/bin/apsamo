@@ -313,6 +313,14 @@ cmd_verify() {
   bash "$INSTALL_DIR/deploy/scripts/post-install-verify.sh" "$@"
 }
 
+cmd_monitor() {
+  bash "$INSTALL_DIR/deploy/scripts/health-monitor.sh" "$@"
+}
+
+cmd_setup_monitoring() {
+  bash "$INSTALL_DIR/deploy/scripts/setup-monitoring.sh" "$@"
+}
+
 cmd_doctor() {
   echo ""
   echo "${BOLD}[OS]${NC}"
@@ -410,6 +418,8 @@ Configuration:
 Diagnostics:
   apsamo doctor             Diagnose common issues (OS, deps, services, network)
   apsamo verify             Full post-install verification (12 checks, exit 0 if all pass)
+  apsamo monitor            Run health check now (8 checks: panel, realtime, worker, DB, disk, memory, SSL, backups)
+  apsamo setup-monitoring   Install cron + alerting (use --webhook <url> or --email <addr>)
   apsamo version            Show installed version + runtime versions
   apsamo help               Show this help
 
@@ -446,6 +456,8 @@ case "${1:-help}" in
   search)         shift; cmd_search "$@" ;;
   doctor)         cmd_doctor ;;
   verify)         shift; cmd_verify "$@" ;;
+  monitor)        cmd_monitor ;;
+  setup-monitoring) shift; cmd_setup_monitoring "$@" ;;
   version)        cmd_version ;;
   help|--help|-h) cmd_help ;;
   *)              err "Unknown command: $1"; echo ""; cmd_help; exit 1 ;;
