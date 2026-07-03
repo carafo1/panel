@@ -321,6 +321,10 @@ cmd_setup_monitoring() {
   bash "$INSTALL_DIR/deploy/scripts/setup-monitoring.sh" "$@"
 }
 
+cmd_setup_email() {
+  bash "$INSTALL_DIR/deploy/scripts/setup-email.sh" "$@"
+}
+
 cmd_doctor() {
   echo ""
   echo "${BOLD}[OS]${NC}"
@@ -414,6 +418,8 @@ Configuration:
   apsamo switch-db <engine> Switch DB engine (sqlite ↔ postgres + pgvector)
   apsamo populate-embeddings  Populate pgvector embeddings for AI semantic search
   apsamo search <query>     Semantic search across your projects/deployments/logs
+  apsamo setup-email        Configure SMTP + install Mailcow (interactive)
+  apsamo setup-monitoring   Install cron + alerting (use --webhook <url> or --email <addr>)
 
 Diagnostics:
   apsamo doctor             Diagnose common issues (OS, deps, services, network)
@@ -458,6 +464,7 @@ case "${1:-help}" in
   verify)         shift; cmd_verify "$@" ;;
   monitor)        cmd_monitor ;;
   setup-monitoring) shift; cmd_setup_monitoring "$@" ;;
+  setup-email)    shift; cmd_setup_email "$@" ;;
   version)        cmd_version ;;
   help|--help|-h) cmd_help ;;
   *)              err "Unknown command: $1"; echo ""; cmd_help; exit 1 ;;
