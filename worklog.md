@@ -5044,3 +5044,25 @@ Stage Summary:
 - Real features verified: SQLite databases, cron execution, Caddyfile generation, redirect/IP-block enforcement, FTP accounts, file management, terminal, backups.
 - Production-ready: with a real VPS (Docker + Caddy), MySQL/MariaDB/PostgreSQL containers + Let's Encrypt SSL + systemctl Caddy reload all work via SSH.
 - GitHub repo: https://github.com/carafo1/panel (commit 79d706f, ~38 commits, ~498 files)
+
+---
+Task ID: local-exec-fix
+Agent: Main Agent
+Task: Fix build error "Module not found: Can't resolve './local-exec'" blocking the entire VPS subsystem and /api/admin/jobs/process route
+
+Work Log:
+- Identified that 7 files in src/lib/vps/ (ssh.ts, backups.ts, cron.ts, database.ts, files.ts, terminal.ts, proxy.ts) import from './local-exec' but the module was never created, causing a hard build failure on every route that transitively imports the VPS layer (automation.ts → worker.ts → /api/admin/jobs/process)
+- Mapped the full required API surface from the import sites: isLocalHost, ensureDir, isDockerAvailable, execLocal, execStreamLocal, and a LocalClient class that is structurally compatible with ssh2's Client (exec / sftp / end / destroy)
+- Created src/lib/vps/local-exec.ts implementing:
+  - isLocalHost(host?) — recognizes localhost / 127.0.0.1 / ::1 / 0.0.0.0
+  - ensureDir(dir) — mkdir -p via fs/promises.mkdir recursive
+  - isDockerAvailable() — checks `docker --version` then `docker info` to confirm the daemon is up
+  - execLocal(cmd, opts) — spawns `bash -lc <cmd>`, buffers stdout/stderr, returns ExecResult; never throws (errors → exitCode -1)
+  - execStreamLocal(cmd, opts) — async generator yielding StreamChunk, returns final ExecResult; used by terminal/deployer live logs
+  - LocalClient — ssh2-compatible shim: exec() spawns bash and returns a LocalStream (EventEmitter with data/stderr/close/error + end()), sftp() returns a LocalSftp (fastPut/fastGet/chmod backed by fs copyFile/chmod), end()/destroy() are no-ops. Callbacks fire on process.nextTick so caller-registered listeners are in place before the first I/O event.
+- Verified: dev server now compiles /api/admin/jobs/process cleanly (200 OK from authenticated worker calls; 401 from unauthenticated curl = auth check working, not a crash). `bun run lint` passes with zero errors.
+
+Stage Summary:
+- Root cause: the local-exec module was referenced by the VPS layer but never authored — a previous refactor split localhost execution out of ssh.ts but left the new file unwritten
+- The new module is the keystone that makes localhost servers "real": a Server row with sshHost='localhost' and no SSH credentials is now treated as a real (non-demo) server, and every VPS operation (databases, deploys, cron, ftp, files, terminal, backups, proxy) executes against the local filesystem and local Docker daemon via child_process
+- This unblocks the broader "make all features real" work since the entire VPS subsystem can now load
