@@ -5085,3 +5085,40 @@ Stage Summary:
 - Login credentials are now: email=admin@deployhub.io, password=admin123, role=admin
 - The DB now contains: 1 admin user, 3 plans (Starter/Pro/Business), 2 servers (EU-Central-1, US-East-1)
 - Both reported errors are resolved: (1) local-exec build error → fixed by creating src/lib/vps/local-exec.ts; (2) login 401 → fixed by seeding the admin user
+
+---
+Task ID: project-subtabs-nav
+Agent: Main Agent
+Task: Fix "where are database tab and others" — Database/Files/Cron/FTP/Backups/etc. were buried and undiscoverable inside the project detail view
+
+Work Log:
+- Diagnosed the issue: the Database, Email, Backups, Files, Terminal, Cron, FTP, Redirects, Security (IP Blocker), Domains, and Resources sections all exist as self-contained Card components (DatabaseTab, EmailTab, BackupsTab, FilesTab, TerminalTab, ResourcesTab, DomainsTab, CronTab, FtpTab, RedirectsTab, SecurityTab in website-management-tabs.tsx + cpanel-management-tabs.tsx) — but they were rendered as 11+ stacked cards inside a ~1200-line ProjectDetailView with no navigation. Users had to click Hosting → click a project → scroll endlessly to find them, so they appeared "missing".
+- Added icon imports to hosting-panel.tsx: Database, Folder, Mail, Archive, Activity, HardDriveUpload, ArrowRightLeft, Ban, LayoutDashboard
+- Added a PROJECT_SUBTABS constant listing all 16 sections with id + label + icon: Overview, Deployments, Container, SSL, Settings, Databases, Email, Files, Terminal, Cron Jobs, FTP, Backups, Domains, Redirects, IP Blocker, Resources
+- Added `activeSection` state + `scrollToSection(id)` helper (uses scrollIntoView with smooth behavior) inside ProjectDetailView
+- Inserted a sticky sub-tab navigation bar right after the header Separator: sticky top-0 z-20, bg-background/95 backdrop-blur border-b, horizontally scrollable pill buttons with active-state highlighting (bg-primary text-primary-foreground), custom thin scrollbar styling
+- Wrapped every section in an id'd container with scroll-mt-32 so smooth-scroll lands below the sticky bar (not under it):
+  - Info Cards grid → id="overview"
+  - Deployment History Card → id="deployments"
+  - Settings Card → id="settings"
+  - Container Status Card → id="container"
+  - SSL Certificate Card → id="ssl"
+  - DatabaseTab → <section id="databases">
+  - EmailTab → <section id="email">
+  - BackupsTab → <section id="backups">
+  - FilesTab → <section id="files">
+  - TerminalTab → <section id="terminal">
+  - ResourcesTab → <section id="resources">
+  - DomainsTab → <section id="domains">
+  - CronTab → <section id="cron">
+  - FtpTab → <section id="ftp">
+  - RedirectsTab → <section id="redirects">
+  - SecurityTab → <section id="security">
+- Verified via agent-browser: logged in as admin@deployhub.io → created a "Test Demo Site" (Static, Start Fresh) via the Create Website wizard → clicked into the project → confirmed the sticky sub-tab bar renders with all 16 tabs visible → clicked "Databases" → scrolled to Databases section (Create Database button visible) → clicked "Cron Jobs" → scrolled to Cron section (Create Your First Job empty state visible). All API calls (/container, /resources) returned 200. Screenshot saved to project-subtabs.png.
+- `bun run lint` passes cleanly. Dev server recompiled without errors.
+
+Stage Summary:
+- The "missing" Database/Files/Cron/FTP/Backups/Redirects/IP-Blocker/Resources/Email/Domains/Terminal tabs were never actually missing — they were buried at the bottom of a very long project detail page with no way to jump to them
+- Added a sticky, horizontally-scrollable sub-tab bar pinned to the top of the project detail view that lets the user jump straight to any of the 16 sections with one click (smooth scroll + active highlighting)
+- The 16 sub-tabs are: Overview, Deployments, Container, SSL, Settings, Databases, Email, Files, Terminal, Cron Jobs, FTP, Backups, Domains, Redirects, IP Blocker, Resources
+- Browser-verified: login → create project → open project → all 16 sub-tabs render → clicking Databases/Cron scrolls to the correct section and the section content loads

@@ -48,6 +48,15 @@ import {
   Calendar,
   Network,
   FileText,
+  Database as DatabaseIcon,
+  Folder,
+  Mail,
+  Archive,
+  Activity,
+  HardDriveUpload,
+  ArrowRightLeft,
+  Ban,
+  LayoutDashboard,
 } from 'lucide-react'
 import {
   Card,
@@ -122,6 +131,30 @@ import {
   RedirectsTab,
   SecurityTab,
 } from '@/components/hosting/cpanel-management-tabs'
+
+// ─── Project sub-tab navigation (sticky bar inside project detail) ───────
+// The project detail view is very long (deployments, container, SSL, settings,
+// databases, files, terminal, cron, ftp, backups, domains, redirects, security,
+// resources, email). This sticky bar lets the user jump straight to any section
+// instead of scrolling through ~1200 lines of stacked cards.
+const PROJECT_SUBTABS: { id: string; label: string; icon: React.ElementType }[] = [
+  { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+  { id: 'deployments', label: 'Deployments', icon: Rocket },
+  { id: 'container', label: 'Container', icon: Container },
+  { id: 'ssl', label: 'SSL', icon: Shield },
+  { id: 'settings', label: 'Settings', icon: Settings },
+  { id: 'databases', label: 'Databases', icon: DatabaseIcon },
+  { id: 'email', label: 'Email', icon: Mail },
+  { id: 'files', label: 'Files', icon: Folder },
+  { id: 'terminal', label: 'Terminal', icon: Terminal },
+  { id: 'cron', label: 'Cron Jobs', icon: Clock },
+  { id: 'ftp', label: 'FTP', icon: HardDriveUpload },
+  { id: 'backups', label: 'Backups', icon: Archive },
+  { id: 'domains', label: 'Domains', icon: Globe },
+  { id: 'redirects', label: 'Redirects', icon: ArrowRightLeft },
+  { id: 'security', label: 'IP Blocker', icon: Ban },
+  { id: 'resources', label: 'Resources', icon: Activity },
+]
 
 // Types
 interface Project {
@@ -1031,6 +1064,17 @@ function ProjectDetailView({
   const [disconnecting, setDisconnecting] = useState(false)
   const [redeploying, setRedeploying] = useState(false)
 
+  // ── Sub-tab navigation state (sticky bar) ─────────────────────────────
+  // Tracks which section the user jumped to so the active pill is highlighted.
+  const [activeSection, setActiveSection] = useState<string>('overview')
+  const scrollToSection = useCallback((id: string) => {
+    setActiveSection(id)
+    const el = document.getElementById(id)
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  }, [])
+
   // ── Container status state (VPS-UI) ──────────────────────────────────
   const [containerInfo, setContainerInfo] = useState<ContainerInfoResponse | null>(null)
   const [containerLoading, setContainerLoading] = useState(true)
@@ -1576,8 +1620,37 @@ function ProjectDetailView({
 
       <Separator />
 
+      {/* ── Sticky project sub-tab navigation ───────────────────────────────
+          The project detail view stacks ~16 sections vertically. This sticky
+          bar stays pinned to the top of the scroll area so the user can jump
+          straight to Databases, Files, Terminal, Cron, FTP, Backups, Domains,
+          Redirects, IP Blocker, Resources, Email, Container, SSL, Settings, or
+          Deployments without scrolling through the whole page. */}
+      <div className="sticky top-0 z-20 -mx-1 px-1 py-2 bg-background/95 backdrop-blur border-b">
+        <div className="flex items-center gap-1 overflow-x-auto pb-1 [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/20">
+          {PROJECT_SUBTABS.map((tab) => {
+            const Icon = tab.icon
+            const isActive = activeSection === tab.id
+            return (
+              <button
+                key={tab.id}
+                onClick={() => scrollToSection(tab.id)}
+                className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                  isActive
+                    ? 'bg-primary text-primary-foreground'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                }`}
+              >
+                <Icon className="size-3.5" />
+                {tab.label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
       {/* Info Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div id="overview" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 scroll-mt-32">
         <Card>
           <CardHeader className="pb-2">
             <CardDescription className="flex items-center gap-1.5">
@@ -1662,7 +1735,7 @@ function ProjectDetailView({
       </div>
 
       {/* Deployment History */}
-      <Card>
+      <Card id="deployments" className="scroll-mt-32">
         <CardHeader>
           <CardTitle className="text-lg flex items-center gap-2">
             <Rocket className="size-5 text-indigo-600" />
@@ -1737,7 +1810,7 @@ function ProjectDetailView({
       </Card>
 
       {/* Settings */}
-      <Card>
+      <Card id="settings" className="scroll-mt-32">
         <CardHeader>
           <CardTitle className="text-lg flex items-center gap-2">
             <Settings className="size-5 text-indigo-600" />
@@ -1825,7 +1898,7 @@ function ProjectDetailView({
       </Card>
 
       {/* Container Status (VPS-UI) */}
-      <Card>
+      <Card id="container" className="scroll-mt-32">
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
@@ -1988,7 +2061,7 @@ function ProjectDetailView({
       </Card>
 
       {/* SSL Certificate (VPS-UI) */}
-      <Card>
+      <Card id="ssl" className="scroll-mt-32">
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
@@ -2691,21 +2764,23 @@ function ProjectDetailView({
 
       {/* ─── Website Management Tabs (Phase 2-c) ────────────────────────── */}
       {/* New management sections added by the Frontend Management Tabs subagent.
-          Each is a self-contained Card component consuming its own REST endpoint. */}
-      <DatabaseTab projectId={project.id} />
-      <EmailTab projectId={project.id} />
-      <BackupsTab projectId={project.id} />
-      <FilesTab projectId={project.id} />
-      <TerminalTab projectId={project.id} />
-      <ResourcesTab projectId={project.id} />
-      <DomainsTab projectId={project.id} onProjectChanged={fetchProject} />
+          Each is a self-contained Card component consuming its own REST endpoint.
+          Each is wrapped in a <section> with an id so the sticky sub-tab bar
+          can scroll the user straight to it. */}
+      <section id="databases" className="scroll-mt-32"><DatabaseTab projectId={project.id} /></section>
+      <section id="email" className="scroll-mt-32"><EmailTab projectId={project.id} /></section>
+      <section id="backups" className="scroll-mt-32"><BackupsTab projectId={project.id} /></section>
+      <section id="files" className="scroll-mt-32"><FilesTab projectId={project.id} /></section>
+      <section id="terminal" className="scroll-mt-32"><TerminalTab projectId={project.id} /></section>
+      <section id="resources" className="scroll-mt-32"><ResourcesTab projectId={project.id} /></section>
+      <section id="domains" className="scroll-mt-32"><DomainsTab projectId={project.id} onProjectChanged={fetchProject} /></section>
 
       {/* ─── cPanel-style features (Phase 2-c upgrade) ─────────────────── */}
       {/* Cron + FTP near Files/Terminal; Redirects + Security near Domains. */}
-      <CronTab projectId={project.id} />
-      <FtpTab projectId={project.id} />
-      <RedirectsTab projectId={project.id} />
-      <SecurityTab projectId={project.id} />
+      <section id="cron" className="scroll-mt-32"><CronTab projectId={project.id} /></section>
+      <section id="ftp" className="scroll-mt-32"><FtpTab projectId={project.id} /></section>
+      <section id="redirects" className="scroll-mt-32"><RedirectsTab projectId={project.id} /></section>
+      <section id="security" className="scroll-mt-32"><SecurityTab projectId={project.id} /></section>
 
       {/* Danger Zone */}
       <Card className="border-red-200 dark:border-red-900/50">
