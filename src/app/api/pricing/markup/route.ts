@@ -1,16 +1,13 @@
 /**
- * GET  /api/pricing/markup       — returns the current global markup (USD).
- * POST /api/pricing/markup       — (admin only) updates the global markup and
- *                                  recalculates every TLD's selling prices.
+ * GET  /api/pricing/markup       — (admin only) returns the current global markup.
+ * POST /api/pricing/markup       — (admin only) updates the global markup.
  *
- * Body for POST: { "markup": 8.50 }
- *   - markup: non-negative number (USD), will be rounded to 2 decimals.
- *
- * The markup is stored in the AppSetting table under the key
- * `domain.markupUsd`. Changing it immediately recalculates the
- * `registration`, `renewal`, and `transfer` columns on every DomainPrice row.
+ * SECURITY: both endpoints are admin-only. The markup value + formula
+ * constitute business intelligence (reseller margin) — must not be exposed
+ * to customers or anonymous users.
  */
 import { authenticateRequest } from '@/lib/auth'
+import { isAdmin } from '@/lib/security'
 import { db } from '@/lib/db'
 import { ok, apiError } from '@/lib/api-response'
 import {
@@ -19,7 +16,13 @@ import {
   DEFAULT_MARKUP_USD,
 } from '@/lib/pricing'
 
-export async function GET() {
+export async function GET(request: Request) {
+  // SECURITY: require admin — was public, leaked reseller margin
+  const user = await authenticateRequest(request)
+  if (!user) return apiError.unauthorized()
+  if (!isAdmin(user.role)) {
+    return apiError.forbidden('Admin access required')
+  }
   try {
     const markup = await getGlobalMarkup()
     return ok(
@@ -40,7 +43,7 @@ export async function GET() {
 export async function POST(request: Request) {
   const user = await authenticateRequest(request)
   if (!user) return apiError.unauthorized()
-  if (user.role !== 'admin' && user.role !== 'super_admin') {
+  if (!isAdmin(user.role)) {
     return apiError.forbidden('Admin access required')
   }
 
@@ -87,8 +90,6 @@ export async function POST(request: Request) {
     )
   } catch (error) {
     console.error('[pricing/markup POST] error:', error)
-    return apiError.serverError(
-      error instanceof Error ? error.message : 'Failed to update markup'
-    )
+    return apiError.serverError()
   }
 }

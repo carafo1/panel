@@ -1,14 +1,33 @@
 /**
  * POST /api/pricing/bulk-search
  * Body: { domains: ["a.com", "b.net", ...] } or { base: "mybrand", tlds: [".com",".io"] }
- * Bulk search availability across many domains, returning selling prices.
+ *
+ * SECURITY:
+ *   - Auth required (was public — anyone could hammer the Dynadot API)
+ *   - Rate-limited via withRateLimit (max 10 requests per minute per IP)
+ *   - Wholesale cost + markup hidden from non-admin customers
  */
 import { ok, apiError } from '@/lib/api-response'
+import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
+import { isAdmin } from '@/lib/security'
+import { withRateLimit } from '@/lib/rate-limit'
 import { dynadotService } from '@/lib/dynadot-service'
 import { getAllPrices, tldFromDomain, getGlobalMarkup } from '@/lib/pricing'
 
-export async function POST(request: Request) {
+async function handler(request: Request) {
   try {
+    // SECURITY: require auth — was public
+    const authHeader = request.headers.get('Authorization')
+    const token = extractTokenFromHeader(authHeader)
+    if (!token) {
+      return apiError.unauthorized('Authentication required')
+    }
+    const decoded = verifyToken(token)
+    if (!decoded) {
+      return apiError.unauthorized('Invalid or expired token')
+    }
+    const userIsAdmin = isAdmin(decoded.role)
+
     const body = await request.json()
     const { domains, base, tlds } = body
 
@@ -24,7 +43,8 @@ export async function POST(request: Request) {
     }
 
     if (queryDomains.length === 0) return apiError.badRequest('No domains to search')
-    if (queryDomains.length > 50) return apiError.badRequest('Maximum 50 domains per bulk search')
+    // SECURITY: reduce cap from 50 to 20 to limit Dynadot API load
+    if (queryDomains.length > 20) return apiError.badRequest('Maximum 20 domains per bulk search')
 
     const results = await dynadotService.bulkSearch(queryDomains)
     const allPrices = await getAllPrices()
@@ -41,8 +61,13 @@ export async function POST(request: Request) {
           : null,
         renewalPrice: r.available ? price?.renewal ?? 19.99 : null,
         transferPrice: r.available ? price?.transfer ?? 19.99 : null,
-        wholesale: price?.wholesale ?? null,
-        markup: price?.markup ?? globalMarkup,
+        // SECURITY: hide wholesale + markup from non-admin customers
+        ...(userIsAdmin
+          ? {
+              wholesale: price?.wholesale ?? null,
+              markup: price?.markup ?? globalMarkup,
+            }
+          : {}),
         currency: 'USD',
       }
     })
@@ -53,7 +78,8 @@ export async function POST(request: Request) {
         total: priced.length,
         available,
         unavailable: priced.length - available,
-        markup: globalMarkup,
+        // SECURITY: hide markup from non-admin customers
+        ...(userIsAdmin ? { markup: globalMarkup } : {}),
         results: priced,
       },
       `Bulk search: ${available} of ${priced.length} domains available`
@@ -63,3 +89,6 @@ export async function POST(request: Request) {
     return apiError.serverError()
   }
 }
+
+// SECURITY: rate limit — 10 requests per minute per IP
+export const POST = withRateLimit(handler, { limit: 10, windowMs: 60_000 })

@@ -27,7 +27,9 @@ export async function POST(request: Request) {
 
     const result = await runTransferPipeline(user.userId, domainLower, String(authCode))
     if (!result.success) {
-      return apiError.badRequest(result.error || 'Transfer failed')
+      // SECURITY: return generic message — never expose the raw Dynadot error
+      console.error('[domains/transfer] pipeline failed:', result.error)
+      return apiError.badRequest('Domain transfer failed. Please verify the auth code and try again.')
     }
 
     return ok(

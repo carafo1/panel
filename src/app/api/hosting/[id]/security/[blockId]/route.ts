@@ -65,7 +65,7 @@ export async function PATCH(
 
     return NextResponse.json({ block })
   } catch (error) {
-    const msg = error instanceof Error ? error.message : 'Internal server error'
+    const msg = 'Internal server error'
     console.error('Update IP block error:', error)
     return NextResponse.json({ error: msg }, { status: 500 })
   }

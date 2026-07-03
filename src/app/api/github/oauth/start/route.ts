@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
 import { isGithubDemoMode, getAuthUrl } from '@/lib/github'
 import jwt from 'jsonwebtoken'
+import { requireSecret } from '@/lib/security'
 
-const JWT_SECRET = process.env.JWT_SECRET || 'deployhub-secret-key-2024'
+// SECURITY: reuse the central secret — never fall back to a hardcoded value.
+const JWT_SECRET = requireSecret('JWT_SECRET')
 const OAUTH_STATE_EXPIRY = '10m'
 
 /**

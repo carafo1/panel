@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
+import { isAdmin } from '@/lib/security'
 
 export async function GET(
   request: Request,
@@ -25,6 +26,7 @@ export async function GET(
         { status: 401 }
       )
     }
+    const userIsAdmin = isAdmin(decoded.role)
 
     const { id } = await params
 
@@ -59,9 +61,10 @@ export async function GET(
         id: domain.id,
         name: domain.name,
         status: domain.status,
-        registrar: domain.registrar,
-        provider: domain.provider,
-        externalId: domain.externalId,
+        // SECURITY: hide Dynadot brand + external ID from non-admin customers
+        registrar: userIsAdmin ? domain.registrar : 'apsamo',
+        provider: userIsAdmin ? domain.provider : 'apsamo',
+        ...(userIsAdmin ? { externalId: domain.externalId } : {}),
         registeredAt: domain.registeredAt,
         expiresAt: domain.expiresAt,
         autoRenew: domain.autoRenew,

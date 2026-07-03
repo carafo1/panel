@@ -1,15 +1,16 @@
 import { NextResponse } from 'next/server'
 import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
 import { processPendingJobs } from '@/lib/worker'
+import { isAdmin, safeCompare } from '@/lib/security'
 
 /**
- * The cron API key used by the standalone worker-service (and any external
- * scheduler) to trigger job processing without a user session. Set
- * CRON_API_KEY in the environment to lock this down in production; in dev we
- * fall back to the same key used by /api/monitors/run so the worker-service
- * works out of the box.
+ * CRON_API_KEY for the worker-service to trigger job processing without a
+ * user session. SECURITY: no hardcoded default — if unset or set to the
+ * placeholder, the cron-key path is disabled entirely (only admin JWTs work).
  */
-const CRON_API_KEY = process.env.CRON_API_KEY || 'deployhub-cron-key'
+const CRON_API_KEY = process.env.CRON_API_KEY && !/^deployhub-cron-key$|^replace-with/.test(process.env.CRON_API_KEY)
+  ? process.env.CRON_API_KEY
+  : null
 
 /**
  * POST /api/admin/jobs/process
@@ -30,14 +31,21 @@ export async function POST(request: Request) {
 
     // Path 1: cron-key auth (used by the standalone worker-service).
     if (cronKey) {
-      if (cronKey !== CRON_API_KEY) {
+      if (!CRON_API_KEY) {
+        return NextResponse.json(
+          { error: 'Cron API key not configured on the server' },
+          { status: 401 }
+        )
+      }
+      // Constant-time comparison to prevent timing attacks
+      if (!safeCompare(cronKey, CRON_API_KEY)) {
         return NextResponse.json(
           { error: 'Invalid cron API key' },
           { status: 401 }
         )
       }
     } else {
-      // Path 2: admin JWT auth.
+      // Path 2: admin JWT auth (admin OR super_admin).
       const authHeader = request.headers.get('Authorization')
       const token = extractTokenFromHeader(authHeader)
       if (!token) {
@@ -53,8 +61,7 @@ export async function POST(request: Request) {
           { status: 401 }
         )
       }
-      // Allow both super_admin and admin (backward compatible).
-      if (decoded.role !== 'admin' && decoded.role !== 'super_admin') {
+      if (!isAdmin(decoded.role)) {
         return NextResponse.json(
           { error: 'Admin privileges required to trigger job processing' },
           { status: 403 }

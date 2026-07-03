@@ -1,0 +1,147 @@
+# ════════════════════════════════════════════════════════════════════════════
+# Apsamo Panel — Production Caddyfile Template
+# ════════════════════════════════════════════════════════════════════════════
+#
+#   Copy this file to /etc/caddy/Caddyfile and replace:
+#     • YOUR_DOMAIN  → your apex domain (e.g. apsamo.com)
+#     • LE_EMAIL     → your admin email (for Let's Encrypt expiry warnings)
+#
+#   After editing, validate + reload:
+#     caddy validate --config /etc/caddy/Caddyfile
+#     systemctl reload caddy
+#
+#   Caddy will automatically:
+#     • Provision Let's Encrypt SSL certs on first HTTPS request
+#     • Renew certs 30 days before expiry
+#     • Redirect HTTP → HTTPS
+#     • Compress responses (gzip + zstd)
+# ════════════════════════════════════════════════════════════════════════════
+
+# ─── Global options ──────────────────────────────────────────────────────
+{
+    # Auto-HTTPS (default, but explicit)
+    auto_https disable_redirects
+
+    # Let's Encrypt account email (for expiry warnings)
+    email LE_EMAIL
+
+    # Default server name (catch-all for direct-IP requests)
+    default_sni YOUR_DOMAIN
+}
+
+# ─── Main panel + dashboard ──────────────────────────────────────────────
+YOUR_DOMAIN, www.YOUR_DOMAIN {
+    encode gzip zstd
+
+    # Security headers
+    header {
+        # HSTS (2 years)
+        Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+        # Don't sniff MIME
+        X-Content-Type-Options "nosniff"
+        # Clickjacking protection
+        X-Frame-Options "SAMEORIGIN"
+        # Referrer policy
+        Referrer-Policy "strict-origin-when-cross-origin"
+        # Permissions policy
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+        # Remove server version
+        -Server
+        # CORS for API (loose; tighten in production if needed)
+        Access-Control-Allow-Origin "*"
+        Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+        Access-Control-Allow-Headers "Authorization, Content-Type, X-Cron-Key"
+    }
+
+    # Realtime (Socket.IO) — routed via XTransformPort query param
+    @realtime {
+        query XTransformPort=*
+        path /socket.io/*
+    }
+    handle @realtime {
+        reverse_proxy localhost:{query.XTransformPort} {
+            header_up Host {host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+            header_up X-Real-IP {remote_host}
+        }
+    }
+
+    # API rate limiting (rough — for real rate limiting, use the in-app limiter)
+    @api path /api/*
+    handle @api {
+        reverse_proxy localhost:3000 {
+            header_up Host {host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+            header_up X-Real-IP {remote_host}
+        }
+    }
+
+    # Static assets caching (immutable)
+    @static path /_next/static/*
+    handle @static {
+        header Cache-Control "public, max-age=31536000, immutable"
+        reverse_proxy localhost:3000
+    }
+
+    # Everything else → Next.js panel
+    handle {
+        reverse_proxy localhost:3000 {
+            header_up Host {host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+            header_up X-Real-IP {remote_host}
+            # Health check — Caddy will retry if panel restarts
+            health_uri /api/health
+            health_interval 30s
+            health_timeout 5s
+        }
+    }
+
+    # Compression for static
+    @static2 path /_next/static/* /public/*
+    encode @static2 gzip zstd
+
+    # Logging
+    log {
+        output file /var/log/caddy/apsamo.log {
+            roll_size 100mb
+            roll_keep 14
+            roll_keep_for 30d
+        }
+        format json
+    }
+}
+
+# ─── Mailcow webmail (optional — uncomment if Mailcow is installed) ──────
+# mail.YOUR_DOMAIN {
+#     reverse_proxy https://localhost {
+#         transport http {
+#             tls
+#             tls_server_name mail.YOUR_DOMAIN
+#         }
+#         header_up Host mail.YOUR_DOMAIN
+#     }
+#     log {
+#         output file /var/log/caddy/mailcow.log
+#     }
+# }
+
+# ─── Wildcard for hosted project subdomains (optional) ─────────────────
+# Uncomment this block to serve *.YOUR_DOMAIN through the panel's reverse proxy.
+# The panel's Next.js middleware (src/proxy.ts) handles routing each subdomain
+# to its project container.
+#
+# *.YOUR_DOMAIN {
+#     encode gzip zstd
+#     reverse_proxy localhost:3000 {
+#         header_up Host {host}
+#         header_up X-Forwarded-For {remote_host}
+#         header_up X-Forwarded-Proto {scheme}
+#         header_up X-Real-IP {remote_host}
+#     }
+#     log {
+#         output file /var/log/caddy/projects.log
+#     }
+# }

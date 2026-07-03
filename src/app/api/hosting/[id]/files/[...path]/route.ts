@@ -45,7 +45,7 @@ export async function GET(
         const result = await getFileContent(projectId, filePath)
         return NextResponse.json(result)
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
+        const msg = 'Invalid request'
         return NextResponse.json({ error: msg }, { status: 400 })
       }
     }
@@ -62,7 +62,7 @@ export async function GET(
         },
       })
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
+      const msg = 'Invalid request'
       return NextResponse.json({ error: msg }, { status: 400 })
     }
   } catch (error) {
@@ -94,7 +94,7 @@ export async function PUT(
       const result = await saveFileContent(projectId, filePath, body.content)
       return NextResponse.json(result)
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
+      const msg = 'Invalid request'
       return NextResponse.json({ error: msg }, { status: 400 })
     }
   } catch (error) {
@@ -122,7 +122,7 @@ export async function DELETE(
       const result = await deleteFile(projectId, filePath)
       return NextResponse.json(result)
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
+      const msg = 'Invalid request'
       return NextResponse.json({ error: msg }, { status: 400 })
     }
   } catch (error) {
@@ -152,7 +152,7 @@ export async function POST(
         const result = await renameFile(projectId, filePath, body.newPath)
         return NextResponse.json(result)
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
+        const msg = 'Invalid request'
         return NextResponse.json({ error: msg }, { status: 400 })
       }
     }
@@ -162,7 +162,7 @@ export async function POST(
         const result = await createDirectory(projectId, body.newPath)
         return NextResponse.json(result, { status: 201 })
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
+        const msg = 'Invalid request'
         return NextResponse.json({ error: msg }, { status: 400 })
       }
     }

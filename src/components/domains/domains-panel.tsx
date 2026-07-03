@@ -82,8 +82,9 @@ interface DnsRecord {
 
 interface TldPrice {
   tld: string
-  wholesale: number
-  markup: number
+  // SECURITY: wholesale + markup are admin-only — optional for non-admin responses
+  wholesale?: number
+  markup?: number
   registration: number
   renewal: number
   transfer: number
@@ -1913,8 +1914,9 @@ function PricingTab({ isAdmin, globalMarkup, onMarkupChanged }: PricingTabProps)
                 <TableHeader className="sticky top-0 bg-background">
                   <TableRow>
                     <TableHead>TLD</TableHead>
-                    <TableHead className="text-right">Wholesale</TableHead>
-                    <TableHead className="text-right">Markup</TableHead>
+                    {/* SECURITY: hide Wholesale + Markup columns from non-admin customers — M7 */}
+                    {isAdmin && <TableHead className="text-right">Wholesale</TableHead>}
+                    {isAdmin && <TableHead className="text-right">Markup</TableHead>}
                     <TableHead className="text-right">Register</TableHead>
                     <TableHead className="text-right">Renew</TableHead>
                     <TableHead className="text-right">Transfer</TableHead>
@@ -1924,8 +1926,16 @@ function PricingTab({ isAdmin, globalMarkup, onMarkupChanged }: PricingTabProps)
                   {prices.map((p) => (
                     <TableRow key={p.tld}>
                       <TableCell className="font-mono font-medium">{p.tld}</TableCell>
-                      <TableCell className="text-right font-mono text-muted-foreground">${p.wholesale.toFixed(2)}</TableCell>
-                      <TableCell className="text-right font-mono text-amber-600">+${p.markup.toFixed(2)}</TableCell>
+                      {isAdmin && (
+                        <TableCell className="text-right font-mono text-muted-foreground">
+                          ${p.wholesale?.toFixed(2) ?? '—'}
+                        </TableCell>
+                      )}
+                      {isAdmin && (
+                        <TableCell className="text-right font-mono text-amber-600">
+                          +${p.markup?.toFixed(2) ?? '—'}
+                        </TableCell>
+                      )}
                       <TableCell className="text-right font-mono font-semibold text-indigo-600">${p.registration.toFixed(2)}</TableCell>
                       <TableCell className="text-right font-mono">${p.renewal.toFixed(2)}</TableCell>
                       <TableCell className="text-right font-mono">${p.transfer.toFixed(2)}</TableCell>

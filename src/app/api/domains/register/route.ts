@@ -3,19 +3,24 @@ import { db } from '@/lib/db'
 import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
 import { processEvent } from '@/lib/automation'
 import { logAudit } from '@/lib/audit'
+import { isAdmin } from '@/lib/security'
 import {
   registerDomain as dynadotRegister,
   isDynadotDemoMode,
 } from '@/lib/dynadot'
+import { getPriceForDomain } from '@/lib/pricing'
 import crypto from 'crypto'
 
 /**
  * Generate a random verification code used for DNS TXT-record verification.
- * Format: deployhub-verify-<32 hex chars>
+ * Format: apsamo-verify-<32 hex chars>
  */
 function generateVerificationCode(): string {
-  return `deployhub-verify-${crypto.randomBytes(16).toString('hex')}`
+  return `apsamo-verify-${crypto.randomBytes(16).toString('hex')}`
 }
+
+// SECURITY: validate domain name format (FQDN) — H5
+const FQDN_REGEX = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/
 
 export async function POST(request: Request) {
   try {
@@ -36,6 +41,7 @@ export async function POST(request: Request) {
         { status: 401 }
       )
     }
+    const userIsAdmin = isAdmin(decoded.role)
 
     const body = await request.json()
     const { name, projectId, provider, duration } = body
@@ -48,8 +54,18 @@ export async function POST(request: Request) {
     }
 
     const domainLower = name.toLowerCase().trim()
+
+    // SECURITY: validate FQDN format — H5
+    if (!FQDN_REGEX.test(domainLower)) {
+      return NextResponse.json(
+        { error: 'Invalid domain name format. Must be a valid FQDN (e.g. example.com).' },
+        { status: 400 }
+      )
+    }
+
     const providerValue = (provider || 'dynadot').toLowerCase() // 'dynadot' | 'custom'
-    const durationYears = Number(duration) > 0 ? Number(duration) : 1
+    // SECURITY: cap duration at 10 years — M10 (was unbounded)
+    const durationYears = Math.min(Math.max(Number(duration) > 0 ? Number(duration) : 1, 1), 10)
 
     // Check if domain is already registered in our DB
     const existingDomain = await db.domain.findUnique({
@@ -174,11 +190,11 @@ export async function POST(request: Request) {
     }
 
     if (!dynadotResult || !dynadotResult.success) {
+      // SECURITY: return generic error — never expose Dynadot brand or raw error
       return NextResponse.json(
         {
-          error: 'Domain registration failed at the registrar',
-          details: dynadotError || 'Registrar did not return success',
-          provider: isDynadotDemoMode() ? 'apsamo-demo' : 'apsamo',
+          error: 'Domain registration failed. Please try again or contact support.',
+          provider: 'apsamo',
         },
         { status: 502 }
       )
@@ -295,9 +311,10 @@ export async function POST(request: Request) {
         id: domain.id,
         name: domain.name,
         status: domain.status,
-        registrar: domain.registrar,
-        provider: domain.provider,
-        externalId: domain.externalId,
+        // SECURITY: hide Dynadot brand + external ID from non-admin customers
+        registrar: userIsAdmin ? domain.registrar : 'apsamo',
+        provider: userIsAdmin ? domain.provider : 'apsamo',
+        ...(userIsAdmin ? { externalId: domain.externalId } : {}),
         registeredAt: domain.registeredAt,
         expiresAt: domain.expiresAt,
         autoRenew: domain.autoRenew,
@@ -307,9 +324,11 @@ export async function POST(request: Request) {
         dnsRecords,
       },
       automation: automationResult,
-      provider: isDynadotDemoMode() ? 'apsamo-demo' : 'apsamo',
-      orderId: dynadotResult.orderId,
-      registrationPrice: dynadotResult.registrationPrice,
+      provider: 'apsamo',
+      // SECURITY: hide the registrar order ID from non-admin customers
+      ...(userIsAdmin ? { orderId: dynadotResult.orderId } : {}),
+      // SECURITY: return selling price (not wholesale) to customer
+      registrationPrice: (await getPriceForDomain(domainLower))?.registration ?? null,
     }, { status: 201 })
   } catch (error) {
     console.error('Register domain error:', error)

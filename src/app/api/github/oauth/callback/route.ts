@@ -6,8 +6,10 @@ import {
   getUserProfile,
 } from '@/lib/github'
 import jwt from 'jsonwebtoken'
+import { requireSecret, sanitizeError } from '@/lib/security'
 
-const JWT_SECRET = process.env.JWT_SECRET || 'deployhub-secret-key-2024'
+// SECURITY: reuse the central secret — never fall back to a hardcoded value.
+const JWT_SECRET = requireSecret('JWT_SECRET')
 
 /** Mirror of resolveAppUrl in /oauth/start — must produce the same redirect URI. */
 function resolveAppUrl(req: NextRequest): string {
@@ -180,12 +182,13 @@ export async function GET(req: NextRequest) {
     )
   } catch (err) {
     console.error('GitHub OAuth callback error:', err)
-    const message =
-      err instanceof Error ? err.message : 'OAuth callback failed unexpectedly.'
+    // SECURITY: never expose the raw error message to the browser — it can
+    // contain internal details (Prisma errors, SSH errors, OAuth secrets in
+    // logs). Show a generic message; the full error is logged server-side.
     return NextResponse.redirect(
       buildRedirectUrl(req, {
         github_error: 'exchange_failed',
-        github_message: message,
+        github_message: 'GitHub authentication failed. Please try again.',
       })
     )
   }

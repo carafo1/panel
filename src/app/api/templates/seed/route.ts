@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
+import { isAdmin } from '@/lib/security'
 
 const SEED_TEMPLATES = [
   {
@@ -280,8 +282,25 @@ const SEED_TEMPLATES = [
   },
 ]
 
-export async function POST() {
+export async function POST(request: Request) {
   try {
+    // SECURITY: require admin auth — previously anyone could re-seed templates
+    const authHeader = request.headers.get('Authorization')
+    const token = extractTokenFromHeader(authHeader)
+    if (!token) {
+      return NextResponse.json(
+        { error: 'Admin authorization required' },
+        { status: 401 }
+      )
+    }
+    const decoded = verifyToken(token)
+    if (!decoded || !isAdmin(decoded.role)) {
+      return NextResponse.json(
+        { error: 'Admin privileges required' },
+        { status: 403 }
+      )
+    }
+
     let created = 0
     let skipped = 0
 

@@ -58,7 +58,10 @@ export async function GET(request: Request) {
       )
     }
 
-    const isAdmin = user.role === 'admin'
+    // SECURITY: include 'super_admin' (was 'admin' only — excluded super_admin,
+    // which is inconsistent with every other admin route).
+    const isAdmin = user.role === 'admin' || user.role === 'super_admin'
+    const isSuperAdmin = user.role === 'super_admin'
 
     // Parse query params
     const url = new URL(request.url)
@@ -135,8 +138,9 @@ export async function GET(request: Request) {
         action: log.action,
         resource: log.resource,
         resourceId: log.resourceId,
-        ip: log.ip,
-        userAgent: log.userAgent,
+        // SECURITY: IP + userAgent are PII — only super_admin can see them.
+        // Regular admins see the action but not the network/client info.
+        ...(isSuperAdmin ? { ip: log.ip, userAgent: log.userAgent } : {}),
         metadata,
         status: log.status,
         createdAt: log.createdAt instanceof Date

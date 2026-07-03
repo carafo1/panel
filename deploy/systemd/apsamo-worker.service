@@ -1,0 +1,18 @@
+[Unit]
+Description=Apsamo Panel — Worker service (cron jobs + uptime monitors, port 3005)
+After=network.target apsamo-panel.service
+Wants=apsamo-panel.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=__INSTALL_DIR__/mini-services/worker-service
+EnvironmentFile=__INSTALL_DIR__/.env
+ExecStart=/usr/local/bin/bun __INSTALL_DIR__/mini-services/worker-service/index.ts
+Restart=always
+RestartSec=5
+StandardOutput=append:__INSTALL_DIR__/logs/worker.log
+StandardError=append:__INSTALL_DIR__/logs/worker.log
+
+[Install]
+WantedBy=multi-user.target

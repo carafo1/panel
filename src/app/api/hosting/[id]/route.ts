@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { removeProjectContainer, dropProjectDatabase, deleteBackup } from '@/lib/vps'
+import { isAdmin } from '@/lib/security'
 
 export async function GET(
   request: Request,
@@ -26,6 +27,8 @@ export async function GET(
         { status: 401 }
       )
     }
+
+    const userIsAdmin = isAdmin(decoded.role)
 
     const { id } = await params
 
@@ -78,12 +81,17 @@ export async function GET(
         repoUrl: project.repoUrl,
         autoDeploy: project.autoDeploy,
         sslEnabled: project.sslEnabled,
-        // Real VPS deployment fields
-        containerId: project.containerId,
-        containerName: project.containerName,
-        containerPort: project.containerPort,
-        externalPort: project.externalPort,
-        deployPath: project.deployPath,
+        // SECURITY: hide Docker container internals + deploy path from non-admin
+        // customers. These fields aid attackers if a customer account is compromised.
+        ...(userIsAdmin
+          ? {
+              containerId: project.containerId,
+              containerName: project.containerName,
+              containerPort: project.containerPort,
+              externalPort: project.externalPort,
+              deployPath: project.deployPath,
+            }
+          : {}),
         sslCertStatus: project.sslCertStatus,
         sslCertExpiry: project.sslCertExpiry?.toISOString() ?? null,
         lastDeployedAt: project.lastDeployedAt?.toISOString() ?? null,
@@ -104,9 +112,15 @@ export async function GET(
         // wpAdminPassword is intentionally NOT exposed here.
         databaseType: project.databaseType,
         databaseName: project.databaseName,
-        databaseUser: project.databaseUser,
-        databaseHost: project.databaseHost,
-        databasePort: project.databasePort,
+        // SECURITY: hide DB connection details from non-admin customers —
+        // they retrieve these via the dedicated /databases?reveal=true endpoint
+        ...(userIsAdmin
+          ? {
+              databaseUser: project.databaseUser,
+              databaseHost: project.databaseHost,
+              databasePort: project.databasePort,
+            }
+          : {}),
         resourceCpuCores: project.resourceCpuCores,
         resourceRamMB: project.resourceRamMB,
         resourceStorageGB: project.resourceStorageGB,
@@ -147,7 +161,8 @@ export async function GET(
         server: project.server ? {
           id: project.server.id,
           name: project.server.name,
-          ip: project.server.ip,
+          // SECURITY: hide server IP from non-admin customers
+          ...(userIsAdmin ? { ip: project.server.ip } : {}),
           region: project.server.region,
           status: project.server.status,
           cpuCores: project.server.cpuCores,

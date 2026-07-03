@@ -1,0 +1,29 @@
+# ─── Required ─────────────────────────────────────────────────────────────
+hcloud_token    = "your-hetzner-api-token-here"
+brand_domain    = "apsamo.com"
+admin_email     = "admin@apsamo.com"
+admin_password  = "ChangeMe!StrongPass123"
+
+# ─── Server config (defaults shown) ───────────────────────────────────────
+# server_name    = "apsamo-panel"
+# server_type    = "cx22"        # 2 vCPU/4GB €4.50 — minimum recommended
+# location       = "nbg1"        # Nuremberg, Germany
+# image          = "ubuntu-24.04"
+# ssh_keys       = ["your-key-name"]
+
+# ─── Optional integrations (leave empty for demo mode) ────────────────────
+# dynadot_api_key       = "9N7B8O7q..."
+# dynadot_secret_key    = "97a4d6d0..."
+# stripe_secret_key     = "sk_live_..."
+# stripe_webhook_secret = "whsec_..."
+# stripe_price_id       = "price_..."
+# smtp_host             = "smtp.mailgun.org"
+# smtp_port             = "587"
+# smtp_user             = "postmaster@apsamo.com"
+# smtp_pass             = "..."
+# mailcow_api_url       = "https://mail.apsamo.com"
+# mailcow_api_key       = "..."
+# github_client_id      = "Iv1.abc..."
+# github_client_secret  = "..."
+# github_token          = "ghp_..."   # only if repo is private
+# install_mailcow       = false

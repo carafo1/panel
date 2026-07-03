@@ -119,7 +119,7 @@ export async function GET(request: Request) {
     return NextResponse.json(
       {
         error: 'Internal server error',
-        details: error instanceof Error ? error.message : String(error),
+        details: 'Internal server error',
       },
       { status: 500 }
     )

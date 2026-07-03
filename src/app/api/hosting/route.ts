@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
+import { isAdmin } from '@/lib/security'
 
 export async function GET(request: Request) {
   try {
@@ -80,6 +81,7 @@ export async function GET(request: Request) {
     })
 
     // ── Optional client-side sort by last deployed date ───────────────
+    const userIsAdmin = isAdmin(decoded.role)
     let result = projects.map((p) => ({
       id: p.id,
       name: p.name,
@@ -92,17 +94,24 @@ export async function GET(request: Request) {
       customDomain: p.customDomain,
       sslEnabled: p.sslEnabled,
       autoDeploy: p.autoDeploy,
-      // Real VPS deployment fields
-      containerId: p.containerId,
-      containerName: p.containerName,
-      externalPort: p.externalPort,
+      // SECURITY: hide Docker container internals from non-admin customers.
+      // These fields aid attackers if a customer account is compromised.
+      ...(userIsAdmin
+        ? {
+            containerId: p.containerId,
+            containerName: p.containerName,
+            externalPort: p.externalPort,
+          }
+        : {}),
       sslCertStatus: p.sslCertStatus,
       lastDeployedAt: p.lastDeployedAt?.toISOString() ?? null,
+      // SECURITY: hide server IP from non-admin customers — only return
+      // the server name + region (cosmetic info shown in the UI).
       server: p.server
         ? {
             id: p.server.id,
             name: p.server.name,
-            ip: p.server.ip,
+            ...(userIsAdmin ? { ip: p.server.ip } : {}),
             region: p.server.region,
           }
         : null,

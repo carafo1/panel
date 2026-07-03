@@ -1,4 +1,4 @@
-import { NextResponse } from 'next.server'
+import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'

@@ -14,9 +14,10 @@ const TAG_LENGTH = 16 // 128-bit auth tag
 const KEY_LENGTH = 32 // 256-bit key
 
 /**
- * Resolve the encryption key. If ENCRYPTION_KEY is unset (typical for local dev),
- * we generate a deterministic key derived from JWT_SECRET or a fixed dev string
- * and log a loud warning so it is never accidentally used in production.
+ * Resolve the encryption key. SECURITY: ENCRYPTION_KEY is mandatory in
+ * production. In dev, we fall back to a deterministic key derived from a
+ * fixed dev string (NOT JWT_SECRET — those should be independent so that
+ * rotating one doesn't break the other).
  */
 function getKey(): Buffer {
   const configured = process.env.ENCRYPTION_KEY
@@ -38,7 +39,6 @@ function getKey(): Buffer {
   }
 
   if (!getKeyWarningLogged) {
-     
     console.warn(
       '\x1b[33m[encryption] WARNING: ENCRYPTION_KEY is not set. ' +
         'Using a deterministic dev-only key. Set ENCRYPTION_KEY to a 32-byte ' +
@@ -47,7 +47,9 @@ function getKey(): Buffer {
     getKeyWarningLogged = true
   }
 
-  const seed = process.env.JWT_SECRET || 'deployhub-dev-encryption-key-not-for-prod'
+  // SECURITY: use a fixed dev-only seed (NOT JWT_SECRET — keep them independent
+  // so rotating one doesn't invalidate encrypted data).
+  const seed = 'apsamo-dev-encryption-key-not-for-production-use'
   return crypto.createHash('sha256').update(seed).digest()
 }
 

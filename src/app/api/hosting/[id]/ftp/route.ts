@@ -94,7 +94,7 @@ export async function POST(
     // Return the row WITH plaintext password ONCE so the UI can show it.
     return NextResponse.json({ account }, { status: 201 })
   } catch (error) {
-    const msg = error instanceof Error ? error.message : 'Internal server error'
+    const msg = 'Internal server error'
     console.error('Create FTP account error:', error)
     return NextResponse.json({ error: msg }, { status: 500 })
   }

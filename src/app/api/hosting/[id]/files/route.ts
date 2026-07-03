@@ -35,7 +35,7 @@ export async function GET(
     try {
       files = await listFiles(projectId, subdir)
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
+      const msg = 'Invalid request'
       return NextResponse.json({ error: msg }, { status: 400 })
     }
     const currentPath = subdir === '.' ? '' : subdir
@@ -105,7 +105,7 @@ export async function POST(
       { status: 400 }
     )
   } catch (error) {
-    const msg = error instanceof Error ? error.message : 'Internal server error'
+    const msg = 'Internal server error'
     console.error('Upload file error:', error)
     return NextResponse.json({ error: msg }, { status: 500 })
   }

@@ -93,7 +93,7 @@ export async function POST(
         const result = await runTerminalCommand(projectId, body.sessionId, body.command)
         return NextResponse.json(result)
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
+        const msg = 'Invalid request'
         return NextResponse.json({ error: msg }, { status: 400 })
       }
     }

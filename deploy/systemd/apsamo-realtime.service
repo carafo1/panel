@@ -1,0 +1,17 @@
+[Unit]
+Description=Apsamo Panel — Realtime service (Socket.IO, ports 3003 + 3004)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=__INSTALL_DIR__/mini-services/realtime-service
+EnvironmentFile=__INSTALL_DIR__/.env
+ExecStart=/usr/local/bin/bun __INSTALL_DIR__/mini-services/realtime-service/index.ts
+Restart=always
+RestartSec=5
+StandardOutput=append:__INSTALL_DIR__/logs/realtime.log
+StandardError=append:__INSTALL_DIR__/logs/realtime.log
+
+[Install]
+WantedBy=multi-user.target

@@ -3,6 +3,7 @@ import { searchDomains, isDynadotDemoMode } from '@/lib/dynadot'
 import { dynadotService } from '@/lib/dynadot-service'
 import { getPriceForDomain, tldFromDomain, getAllPrices } from '@/lib/pricing'
 import { ok, apiError } from '@/lib/api-response'
+import { withRateLimit } from '@/lib/rate-limit'
 
 // Domain TLD pricing (used as a fallback when Dynadot returns nothing useful)
 const TLD_PRICES: Record<string, number> = {
@@ -21,8 +22,12 @@ const TLD_PRICES: Record<string, number> = {
 /**
  * GET /api/domains/search?domain=example.com
  * Instant domain availability search with pricing.
+ *
+ * SECURITY:
+ *   - Rate-limited (20 req/min per IP) to prevent Dynadot API abuse
+ *   - Dynadot errors are logged server-side only — never returned to client
  */
-export async function GET(request: Request) {
+async function getHandler(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
     const domain = searchParams.get('domain')
@@ -33,24 +38,20 @@ export async function GET(request: Request) {
     const domainLower = domain.toLowerCase().trim()
     const tld = tldFromDomain(domainLower)
 
-    // ─── Dynadot availability lookup (REAL — no simulation fallback) ──
-    // In real mode, if Dynadot fails we surface the error honestly rather
-    // than faking availability. In demo mode, dynadotService.search returns
-    // simulated data without throwing.
+    // ─── Dynadot availability lookup ──────────────────────────────────
+    // SECURITY: never leak Dynadot errors to the client. Log server-side.
     let dynadotAvailable: boolean | null = null
-    let dynadotError: string | null = null
     let premium = false
     try {
       const result = await dynadotService.search(domainLower)
       dynadotAvailable = result.available
       premium = result.premium
     } catch (err) {
-      dynadotError = err instanceof Error ? err.message : String(err)
-      console.error('[domains/search GET] Dynadot lookup failed:', dynadotError)
-      // In real mode, surface the error instead of simulating.
+      console.error('[domains/search GET] registrar lookup failed:', err)
+      // SECURITY: return generic error — don't expose Dynadot brand or error details
       if (!isDynadotDemoMode()) {
         return apiError.serverError(
-          `Search failed: ${dynadotError}. Domain availability could not be determined.`
+          'Domain search is temporarily unavailable. Please try again.'
         )
       }
     }
@@ -135,8 +136,13 @@ export async function GET(request: Request) {
 /**
  * POST /api/domains/search
  * Body: { domain: "x.com" } for single, or { domains: ["a.com","b.net"] } for bulk.
+ *
+ * SECURITY:
+ *   - Rate-limited (20 req/min per IP)
+ *   - Bulk search capped at 50 domains
+ *   - Dynadot errors logged server-side only — never returned to client
  */
-export async function POST(request: Request) {
+async function postHandler(request: Request) {
   try {
     const body = await request.json()
     const { domain, domains } = body
@@ -144,6 +150,10 @@ export async function POST(request: Request) {
     // ─── Bulk search mode ───────────────────────────────────────────────
     if (Array.isArray(domains) && domains.length > 0) {
       const cleaned = domains.map((d: string) => d.toLowerCase().trim()).filter(Boolean)
+      // SECURITY: cap bulk search at 50 domains (M9)
+      if (cleaned.length > 50) {
+        return apiError.badRequest('Maximum 50 domains per bulk search')
+      }
       const results = await dynadotService.bulkSearch(cleaned)
       const allPrices = await getAllPrices()
       const priced = results.map((r) => {
@@ -174,7 +184,6 @@ export async function POST(request: Request) {
 
     let dynadotAvailable: boolean | null = null
     let dynadotPrice: number | null = null
-    let dynadotError: string | null = null
     try {
       const results = await searchDomains([domainLower])
       const hit = results.find((r) => r.domain.toLowerCase() === domainLower)
@@ -183,13 +192,12 @@ export async function POST(request: Request) {
         dynadotPrice = typeof hit.price === 'number' ? hit.price : null
       }
     } catch (err) {
-      dynadotError = err instanceof Error ? err.message : String(err)
-      console.error('[domains/search] Dynadot lookup failed:', dynadotError)
-      // In real mode, surface the error instead of simulating.
+      // SECURITY: log server-side, return generic error to client
+      console.error('[domains/search POST] registrar lookup failed:', err)
       if (!isDynadotDemoMode()) {
         return NextResponse.json(
           {
-            error: `Search failed: ${dynadotError}`,
+            error: 'Domain search is temporarily unavailable. Please try again.',
             provider: 'apsamo',
           },
           { status: 502 }
@@ -247,14 +255,13 @@ export async function POST(request: Request) {
       })
     }
 
+    // SECURITY: removed `dynadotUsed` + `dynadotError` fields — leaked registrar brand
     return NextResponse.json({
       domain: domainLower,
       available: true,
       price,
       message: 'Domain is available',
       provider: isDynadotDemoMode() ? 'apsamo-demo' : 'apsamo',
-      dynadotUsed: dynadotAvailable !== null,
-      dynadotError,
       suggestions,
     })
   } catch (error) {
@@ -262,3 +269,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
+
+// SECURITY: rate limit — 20 requests per minute per IP
+export const GET = withRateLimit(getHandler, { limit: 20, windowMs: 60_000 })
+export const POST = withRateLimit(postHandler, { limit: 20, windowMs: 60_000 })

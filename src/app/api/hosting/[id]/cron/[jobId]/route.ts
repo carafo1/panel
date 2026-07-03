@@ -57,7 +57,7 @@ export async function PATCH(
 
     return NextResponse.json({ job })
   } catch (error) {
-    const msg = error instanceof Error ? error.message : 'Internal server error'
+    const msg = 'Internal server error'
     console.error('Update cron job error:', error)
     return NextResponse.json({ error: msg }, { status: 500 })
   }
@@ -149,7 +149,7 @@ export async function POST(
 
     return NextResponse.json(result)
   } catch (error) {
-    const msg = error instanceof Error ? error.message : 'Internal server error'
+    const msg = 'Internal server error'
     console.error('Run cron job error:', error)
     return NextResponse.json({ error: msg }, { status: 500 })
   }

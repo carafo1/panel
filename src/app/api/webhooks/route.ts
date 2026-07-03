@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
+import { maskSecret } from '@/lib/security'
 import crypto from 'crypto'
 
 export async function GET(request: Request) {
@@ -45,7 +46,9 @@ export async function GET(request: Request) {
         id: w.id,
         name: w.name,
         url: w.url,
-        secret: w.secret,
+        // SECURITY: mask the signing secret in list view — full secret is
+        // returned only once at creation time (POST /webhooks).
+        secret: w.secret ? maskSecret(w.secret) : null,
         events: JSON.parse(w.events),
         active: w.active,
         projectId: w.projectId,

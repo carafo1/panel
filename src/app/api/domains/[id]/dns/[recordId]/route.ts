@@ -80,13 +80,11 @@ export async function DELETE(
             : 'Failed to push to the registrar',
         }
       } catch (err) {
-        console.error('[dns] Dynadot sync error (delete):', err)
+        console.error('[dns] registrar sync error (delete):', err)
+        // SECURITY: never expose the raw registrar error to the customer
         dynadotSync = {
           success: false,
-          message:
-            err instanceof Error
-              ? err.message
-              : 'Unknown registrar sync error',
+          message: 'Registrar sync failed. Please try again or contact support.',
         }
       }
 

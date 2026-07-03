@@ -405,8 +405,12 @@ export async function runRegistrationPipeline(
         tax: 0,
         total: totalAmount,
         currency: 'USD',
-        status: 'paid',
-        paidAt: new Date(),
+        // SECURITY: mark invoice as 'pending' until payment is confirmed
+        // via Stripe webhook / WaafiPay callback / admin manual mark.
+        // Was previously 'paid' with paidAt: new Date() — customers could
+        // register domains for free (H9).
+        status: 'pending',
+        paidAt: null,
       },
     })
 
@@ -560,8 +564,9 @@ export async function runRenewalPipeline(
         subtotal: total,
         tax: 0,
         total,
-        status: 'paid',
-        paidAt: new Date(),
+        // SECURITY: mark invoice as 'pending' until payment is confirmed (H9)
+        status: 'pending',
+        paidAt: null,
       },
     })
 
@@ -659,8 +664,9 @@ export async function runTransferPipeline(
         subtotal: total,
         tax: 0,
         total,
-        status: 'paid',
-        paidAt: new Date(),
+        // SECURITY: mark invoice as 'pending' until payment is confirmed (H9)
+        status: 'pending',
+        paidAt: null,
       },
     })
 

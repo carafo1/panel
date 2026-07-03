@@ -1,0 +1,1155 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector] // pgvector — enables AI semantic search
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// pgvector support — adds embedding columns for AI semantic search
+// (only used when DB_ENGINE=postgres; SQLite schema has no such columns)
+// ════════════════════════════════════════════════════════════════════════════
+// The `Unsupported("vector(1536)")` type is Prisma's way of declaring a
+// pgvector column. You can't query it through Prisma directly — use raw SQL
+// via db.$queryRaw for similarity search. See src/lib/embeddings.ts.
+
+model User {
+  id                     String   @id @default(cuid())
+  email                  String   @unique
+  name                   String
+  password               String
+  role                   String   @default("user") // "super_admin", "client", "user", "admin"
+  emailVerified          Boolean  @default(false)
+  emailVerificationToken String?
+  avatar                 String?
+  twoFactorSecret        String?
+  twoFactorEnabled       Boolean  @default(false)
+  twoFactorBackupCodes   String? // JSON string of hashed backup codes
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  subscriptions      Subscription[]
+  payments           Payment[]
+  projects           Project[]
+  domains            Domain[]
+  deployments        Deployment[]
+  automationLogs     AutomationLog[]
+  apiKeys            ApiKey[]
+  notifications      Notification[]
+  ownedTeams         Team[]
+  teamMemberships    TeamMember[]
+  githubIntegrations GithubIntegration[]
+  webhooks           Webhook[]
+  pipelines          Pipeline[]
+  auditLogs          AuditLog[]
+  provisioningJobs   ProvisioningJob[]
+  domainOrders       DomainOrder[]
+  domainInvoices     Invoice[]
+  domainLogs         DomainLog[]
+  domainPriceUpdates DomainPrice[]       @relation("PriceUpdatedBy")
+}
+
+model Plan {
+  id           String   @id @default(cuid())
+  name         String   @unique // Starter, Pro, Business
+  slug         String   @unique
+  description  String
+  price        Float // monthly price in USD
+  ram          String // e.g. "1GB"
+  cpu          String // e.g. "1 vCPU"
+  storage      String // e.g. "10GB"
+  bandwidth    String // e.g. "100GB"
+  projects     Int      @default(1)
+  ssl          Boolean  @default(true)
+  customDomain Boolean  @default(false)
+  priority     Int      @default(0)
+  popular      Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  subscriptions Subscription[]
+}
+
+model Subscription {
+  id                 String   @id @default(cuid())
+  userId             String
+  planId             String
+  status             String   @default("active") // active, cancelled, past_due, trialing
+  stripeSubId        String? // Stripe subscription ID
+  stripeCustomerId   String? // Stripe customer ID
+  currentPeriodStart DateTime
+  currentPeriodEnd   DateTime
+  cancelAtPeriodEnd  Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  user     User      @relation(fields: [userId], references: [id])
+  plan     Plan      @relation(fields: [planId], references: [id])
+  payments Payment[]
+}
+
+model Payment {
+  id              String   @id @default(cuid())
+  userId          String
+  subscriptionId  String?
+  amount          Float
+  currency        String   @default("usd")
+  status          String   @default("pending") // pending, completed, failed, refunded
+  type            String // hosting, domain, both
+  method          String   @default("stripe") // "stripe", "waafi", "manual"
+  transactionId   String? // external transaction ID (Stripe session, Waafi ref, manual ref)
+  stripePaymentId String?
+  stripeInvoiceId String?
+  metadata        String? // JSON string for extra data
+  createdAt       DateTime @default(now())
+
+  user         User          @relation(fields: [userId], references: [id])
+  subscription Subscription? @relation(fields: [subscriptionId], references: [id])
+}
+
+model Project {
+  id             String    @id @default(cuid())
+  userId         String
+  name           String
+  slug           String
+  description    String?
+  framework      String    @default("nextjs") // nextjs, react, node, static, wordpress, laravel, flask, django, fastapi, nuxt, nestjs, express, astro, vue, angular
+  stack          String    @default("nodejs") // "nodejs", "php", "python", "docker", "wordpress", "static", "ruby", "go", "java"
+  status         String    @default("creating") // creating, running, stopped, error, deploying
+  serverId       String?
+  subdomain      String // e.g. myapp.deployhub.io
+  customDomain   String?
+  repoUrl        String? // Git repo URL
+  autoDeploy     Boolean   @default(true)
+  sslEnabled     Boolean   @default(true)
+  // Real VPS deployment fields
+  containerId    String? // Docker container ID on the VPS
+  containerName  String? // Docker container name (e.g. deployhub-<slug>)
+  containerPort  Int? // Internal port the container listens on
+  deployPath     String? // Path on VPS where the project files live (e.g. /opt/deployhub/<slug>)
+  externalPort   Int? // Host port mapped to the container
+  sslCertStatus  String    @default("none") // none, pending, issued, failed, renewing
+  sslCertExpiry  DateTime?
+  lastDeployedAt DateTime?
+
+  // ── NEW: Create-Website-Wizard fields ─────────────────────────────────
+  // Which of the 8 deployment methods the user picked.
+  deploymentMethod  String? // wordpress | laravel | nodejs | php | static | python | docker | custom
+  // Where the source code came from.
+  deploymentSource  String? // git | zip | manual | template
+  sourceProvider    String? // github | gitlab | bitbucket | custom
+  sourceBranch      String? @default("main")
+  sourceCommit      String? // last deployed commit sha
+  // Runtime + build configuration (used by all methods).
+  runtime           String? // nodejs | php | python | ruby | go | java | static | docker | bun
+  runtimeVersion    String? // e.g. "20", "8.2", "3.11"
+  buildCommand      String? // e.g. "npm run build", "composer install --no-dev"
+  startCommand      String? // e.g. "npm start", "php artisan serve"
+  appPort           Int? // port the app listens on inside the container
+  documentRoot      String? // for PHP/static: e.g. /var/www/html, /app/dist
+  // WordPress one-click install settings.
+  wpAdminUser       String?
+  wpAdminEmail      String?
+  wpAdminPassword   String? // encrypted at rest
+  // Auto-provisioned database (for wordpress/laravel/python DB apps).
+  databaseType      String? // mysql | mariadb | postgres | sqlite | none
+  databaseName      String?
+  databaseUser      String?
+  databasePassword  String? // encrypted at rest
+  databaseHost      String?
+  databasePort      Int?
+  // Resource limits snapshot from the user's plan at creation time.
+  resourceCpuCores  Float?
+  resourceRamMB     Int?
+  resourceStorageGB Int?
+  // Free-form JSON blob capturing every option chosen in the wizard
+  // (kept for audit + future re-deploys). Schema is open-ended on purpose.
+  installSettings   String? // JSON string
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // ── pgvector embedding for AI semantic search ──────────────────────────
+  // Populated by src/lib/embeddings.ts whenever the project is created or
+  // updated. Used by the AI assistant to find projects by meaning, not
+  // just keyword. Query via db.$queryRaw`SELECT ... ORDER BY embedding <=> $1`.
+  embedding Unsupported("vector(1536)")?
+
+  user              User                  @relation(fields: [userId], references: [id])
+  server            Server?               @relation(fields: [serverId], references: [id])
+  deployments       Deployment[]
+  domains           Domain[]
+  automationLogs    AutomationLog[]
+  envVars           EnvironmentVariable[]
+  githubIntegration GithubIntegration?
+  analyticsEvents   AnalyticsEvent[]
+  team              Team?                 @relation(fields: [teamId], references: [id])
+  teamId            String?
+  webhooks          Webhook[]
+  pipelines         Pipeline[]
+  monitors          UptimeMonitor[]
+  websiteDatabases  WebsiteDatabase[]
+  websiteBackups    WebsiteBackup[]
+  websiteDomains    WebsiteDomain[]
+  cronJobs          CronJob[]
+  ftpAccounts       FtpAccount[]
+  redirects         Redirect[]
+  ipBlocks          IpBlock[]
+}
+
+model Domain {
+  id             String    @id @default(cuid())
+  userId         String
+  projectId      String?
+  name           String    @unique // e.g. example.com
+  status         String    @default("pending") // pending, active, expired, transferring, suspended, deleted
+  registrar      String    @default("dynadot")
+  registeredAt   DateTime?
+  expiresAt      DateTime?
+  autoRenew      Boolean   @default(true)
+  whoisPrivacy   Boolean   @default(true)
+  locked         Boolean   @default(true) // registrar lock
+  nameservers    String? // JSON array
+  authCode       String? // EPP auth code (encrypted at rest)
+  transferStatus String? // pending, completed, failed
+  premium        Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  user              User                @relation(fields: [userId], references: [id])
+  project           Project?            @relation(fields: [projectId], references: [id])
+  dnsRecords        DnsRecord[]
+  automationLogs    AutomationLog[]
+  provider          String              @default("dynadot") // "deployhub", "dynadot"
+  externalId        String? // Dynadot domain ID
+  emailHosted       Boolean             @default(false)
+  mailcowDomainId   String?
+  verification      DomainVerification?
+  mailboxes         EmailMailbox[]
+  orders            DomainOrder[]
+  invoices          Invoice[]
+  renewals          Renewal[]
+  contacts          DomainContact[]
+  logs              DomainLog[]
+  nameserverEntries NameserverEntry[]
+}
+
+model DnsRecord {
+  id        String   @id @default(cuid())
+  domainId  String
+  type      String // A, CNAME, MX, TXT, AAAA, SRV
+  name      String // subdomain or @
+  value     String // IP, hostname, text
+  ttl       Int      @default(3600)
+  priority  Int?
+  proxied   Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  domain Domain @relation(fields: [domainId], references: [id], onDelete: Cascade)
+}
+
+model Server {
+  id                 String    @id @default(cuid())
+  name               String
+  ip                 String
+  provider           String    @default("netcup")
+  status             String    @default("active") // active, maintenance, offline, provisioning
+  cpuCores           Int
+  ramGB              Int
+  storageGB          Int
+  bandwidthGB        Int
+  usedRamGB          Float     @default(0)
+  usedStorageGB      Float     @default(0)
+  region             String    @default("eu-central")
+  // Real VPS SSH connection fields (all sensitive fields encrypted at rest)
+  sshHost            String    @default("") // usually same as ip, but can differ
+  sshPort            Int       @default(22)
+  sshUser            String    @default("root")
+  sshPrivateKey      String? // encrypted PEM private key
+  sshPassword        String? // encrypted password (fallback when no key)
+  sshFingerprint     String? // known host key fingerprint for verification
+  // Provisioning state
+  dockerInstalled    Boolean   @default(false)
+  caddyInstalled     Boolean   @default(false)
+  firewallConfigured Boolean   @default(false)
+  caddyVersion       String? // e.g. 2.7.6
+  dockerVersion      String? // e.g. 24.0.7
+  osInfo             String? // e.g. Ubuntu 22.04.3 LTS
+  lastProvisionedAt  DateTime?
+  lastHealthCheckAt  DateTime?
+  healthStatus       String    @default("unknown") // unknown, healthy, degraded, down
+  // Public SSH key DeployHub installs on the VPS for itself (when generating keys)
+  deployedPublicKey  String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  projects Project[]
+}
+
+model Deployment {
+  id          String   @id @default(cuid())
+  projectId   String
+  userId      String
+  commit      String?
+  branch      String   @default("main")
+  status      String   @default("queued") // queued, building, deploying, live, failed, rolled_back
+  buildLog    String?
+  deployUrl   String?
+  duration    Int? // seconds
+  triggeredBy String   @default("user") // user, webhook, auto
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // ── pgvector embedding for AI semantic search over build logs ────────
+  // Embedding of (project name + branch + commit + status + first 2KB of buildLog).
+  // Lets the AI assistant answer "what failed yesterday?" semantically.
+  embedding Unsupported("vector(1536)")?
+
+  project Project           @relation(fields: [projectId], references: [id])
+  user    User              @relation(fields: [userId], references: [id])
+  stages  DeploymentStage[]
+}
+
+// Per-stage progress tracking for the live deployment progress UI.
+// Each Deployment is broken into ordered stages (creating_container,
+// downloading_source, installing_dependencies, building_project,
+// starting_services, running_migrations, configuring_ssl, etc.).
+model DeploymentStage {
+  id           String    @id @default(cuid())
+  deploymentId String
+  name         String // machine id: create_container, download_source, ...
+  label        String // human label: "Creating container…"
+  status       String    @default("pending") // pending, running, completed, failed, skipped
+  message      String? // short status line
+  log          String? // detailed chunk output
+  order        Int       @default(0)
+  startedAt    DateTime?
+  completedAt  DateTime?
+  durationMs   Int?
+  createdAt    DateTime  @default(now())
+
+  deployment Deployment @relation(fields: [deploymentId], references: [id], onDelete: Cascade)
+
+  @@index([deploymentId])
+  @@index([deploymentId, order])
+}
+
+// Auto-provisioned databases for a project (WordPress, Laravel, etc.).
+// One project may have multiple databases (a primary app DB + extra DBs
+// the user creates later). The password is encrypted at rest.
+model WebsiteDatabase {
+  id          String   @id @default(cuid())
+  projectId   String
+  name        String // database name
+  type        String // mysql, mariadb, postgres, sqlite
+  host        String // container name or external host
+  port        Int
+  username    String
+  password    String // encrypted at rest
+  externalRef String? // docker container name of the DB service, if any
+  isPrimary   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+// Project-level backups (database dump + files archive).
+// Stored on the VPS under /opt/deployhub/backups/<projectSlug>/.
+model WebsiteBackup {
+  id        String   @id @default(cuid())
+  projectId String
+  filename  String // basename on disk
+  sizeBytes Int      @default(0)
+  status    String   @default("completed") // pending, running, completed, failed
+  type      String   @default("manual") // manual, scheduled, pre-deploy
+  note      String?
+  createdAt DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([createdAt])
+}
+
+// Additional domains attached to a project (the primary customDomain stays
+// on the Project row for back-compat; this table holds the secondary ones).
+// SSL is per-domain because each hostname needs its own cert.
+model WebsiteDomain {
+  id                 String   @id @default(cuid())
+  projectId          String
+  domain             String // e.g. www.example.com, app.example.com
+  isPrimary          Boolean  @default(false)
+  sslEnabled         Boolean  @default(true)
+  sslStatus          String   @default("none") // none, pending, issued, failed, renewing
+  verified           Boolean  @default(false)
+  verificationMethod String? // dns-txt, a-record, cname
+  createdAt          DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, domain])
+  @@index([projectId])
+}
+
+model AutomationLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  projectId  String?
+  domainId   String?
+  eventType  String // payment_success, hosting_requested, domain_requested, etc.
+  action     String // create_project, register_domain, setup_dns, deploy_app
+  status     String   @default("pending") // pending, running, completed, failed
+  input      String? // JSON input data
+  output     String? // JSON output data
+  error      String?
+  retryCount Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user    User?    @relation(fields: [userId], references: [id])
+  project Project? @relation(fields: [projectId], references: [id])
+  domain  Domain?  @relation(fields: [domainId], references: [id])
+}
+
+model JobQueue {
+  id          String    @id @default(cuid())
+  type        String // provision_hosting, register_domain, setup_dns, deploy_app
+  payload     String // JSON payload
+  status      String    @default("queued") // queued, processing, completed, failed
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(3)
+  runAt       DateTime  @default(now())
+  startedAt   DateTime?
+  completedAt DateTime?
+  error       String?
+  result      String? // JSON result
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model EnvironmentVariable {
+  id        String   @id @default(cuid())
+  projectId String
+  key       String
+  value     String
+  encrypted Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, key])
+}
+
+model ApiKey {
+  id        String    @id @default(cuid())
+  userId    String
+  name      String
+  key       String    @unique
+  prefix    String // first 8 chars for display
+  lastUsed  DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String
+  message   String
+  type      String   @default("info") // info, success, warning, error
+  read      Boolean  @default(false)
+  link      String? // optional navigation link
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Team {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  ownerId   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  owner    User         @relation(fields: [ownerId], references: [id])
+  members  TeamMember[]
+  projects Project[]
+}
+
+model TeamMember {
+  id       String   @id @default(cuid())
+  teamId   String
+  userId   String
+  role     String   @default("developer") // owner, admin, developer
+  joinedAt DateTime @default(now())
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, userId])
+}
+
+model GithubIntegration {
+  id           String   @id @default(cuid())
+  userId       String
+  projectId    String?
+  githubId     String
+  accessToken  String
+  refreshToken String?
+  username     String
+  repoFullName String? // e.g. "owner/repo"
+  repoUrl      String?
+  webhookId    String?
+  autoDeploy   Boolean  @default(true)
+  branch       String   @default("main")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project Project? @relation(fields: [projectId], references: [id])
+
+  @@unique([projectId])
+}
+
+model AnalyticsEvent {
+  id        String   @id @default(cuid())
+  projectId String
+  type      String // page_view, api_call, error, deployment, bandwidth
+  path      String?
+  method    String?
+  status    Int?
+  duration  Int? // ms
+  country   String?
+  city      String?
+  userAgent String?
+  ip        String?
+  timestamp DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model Webhook {
+  id              String    @id @default(cuid())
+  userId          String
+  projectId       String?
+  name            String
+  url             String
+  secret          String
+  events          String // JSON array of event types: deployment.success, deployment.failed, domain.registered, etc.
+  active          Boolean   @default(true)
+  lastTriggeredAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  user       User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project    Project?          @relation(fields: [projectId], references: [id])
+  deliveries WebhookDelivery[]
+}
+
+model WebhookDelivery {
+  id         String   @id @default(cuid())
+  webhookId  String
+  event      String
+  payload    String // JSON payload
+  response   String? // HTTP response body
+  statusCode Int?
+  success    Boolean
+  duration   Int? // ms
+  createdAt  DateTime @default(now())
+
+  webhook Webhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+}
+
+model Pipeline {
+  id            String    @id @default(cuid())
+  userId        String
+  projectId     String
+  name          String
+  description   String?
+  stages        String // JSON array of pipeline stages with config
+  status        String    @default("draft") // draft, active, paused
+  triggerBranch String    @default("main")
+  triggerEvents String    @default("push") // JSON array: push, pull_request, schedule
+  lastRunAt     DateTime?
+  lastRunStatus String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  runs    PipelineRun[]
+}
+
+model PipelineRun {
+  id          String    @id @default(cuid())
+  pipelineId  String
+  status      String    @default("running") // running, success, failed, cancelled
+  trigger     String    @default("manual") // manual, push, pull_request, schedule
+  commit      String?
+  branch      String?
+  stages      String // JSON array of stage results
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+  duration    Int? // seconds
+
+  pipeline Pipeline @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+}
+
+model Template {
+  id              String   @id @default(cuid())
+  name            String
+  slug            String   @unique
+  description     String
+  category        String // "Framework", "Backend", "Static", "CMS", "Fullstack", "Frontend"
+  framework       String // "nextjs", "react", "vue", "nuxt", "astro", "svelte", "express", "fastapi", "node", "static", "gatsby", "go"
+  icon            String // emoji or icon name
+  stars           Int      @default(0)
+  deployments     Int      @default(0)
+  features        String // JSON string of feature list
+  tags            String // JSON string of tag list
+  previewGradient String   @default("from-gray-800 to-gray-900") // Tailwind gradient classes
+  author          String   @default("DeployHub")
+  repoUrl         String?
+  isOfficial      Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  action     String // e.g., "user.login", "project.create", "project.delete"
+  resource   String // e.g., "project", "domain", "user"
+  resourceId String?
+  ip         String?
+  userAgent  String?
+  metadata   String // JSON string
+  status     String   @default("success") // "success" or "failed"
+  createdAt  DateTime @default(now())
+
+  // ── pgvector embedding for AI semantic search over audit history ─────
+  // Embedding of (action + resource + status + first 1KB of metadata).
+  // Lets the AI assistant answer "what did the admin do last week?" semantically.
+  embedding Unsupported("vector(1536)")?
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+model UptimeMonitor {
+  id            String    @id @default(cuid())
+  projectId     String
+  url           String
+  intervalSec   Int       @default(60)
+  enabled       Boolean   @default(true)
+  lastStatus    String    @default("unknown") // "up", "down", "unknown"
+  lastCheckedAt DateTime?
+  uptimePct     Float     @default(100.0)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  project Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  checks  UptimeCheck[]
+
+  @@index([projectId])
+}
+
+model UptimeCheck {
+  id           String   @id @default(cuid())
+  monitorId    String
+  status       String // "up" or "down"
+  responseTime Int? // milliseconds
+  statusCode   Int?
+  error        String?
+  checkedAt    DateTime @default(now())
+
+  monitor UptimeMonitor @relation(fields: [monitorId], references: [id], onDelete: Cascade)
+
+  @@index([monitorId])
+  @@index([checkedAt])
+}
+
+model DomainVerification {
+  id               String    @id @default(cuid())
+  domainId         String    @unique
+  verificationCode String // TXT record value to verify
+  verified         Boolean   @default(false)
+  verifiedAt       DateTime?
+  createdAt        DateTime  @default(now())
+
+  domain Domain @relation(fields: [domainId], references: [id], onDelete: Cascade)
+
+  @@index([domainId])
+}
+
+model ProvisioningJob {
+  id             String  @id @default(cuid())
+  userId         String
+  domainName     String // the domain being provisioned
+  stack          String // "nodejs", "php", "python", "docker", "wordpress"
+  includeEmail   Boolean @default(true)
+  includeHosting Boolean @default(true)
+  status         String  @default("pending") // "pending", "running", "success", "failed", "rolled_back"
+  currentStep    String  @default("init") // "init", "domain", "dns", "hosting", "email", "verify", "done"
+
+  // Structured result (JSON string)
+  result String? // { domain_status, hosting_status, email_status, dns_status, credentials, overall_status }
+
+  // Error tracking
+  error     String?
+  errorCode String?
+
+  // Rollback tracking
+  rollbackStartedAt   DateTime?
+  rollbackCompletedAt DateTime?
+  rollbackSteps       String? // JSON array of completed steps for rollback
+
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user  User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  steps ProvisioningStep[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model ProvisioningStep {
+  id        String @id @default(cuid())
+  jobId     String
+  stepName  String // "domain_register", "dns_configure", "hosting_provision", "email_provision", "verify"
+  stepOrder Int // 1, 2, 3, 4, 5
+  status    String @default("pending") // "pending", "running", "success", "failed", "skipped", "rolled_back"
+
+  // Step-specific data
+  input  String? // JSON string of input params
+  output String? // JSON string of step result
+  error  String?
+
+  // Retry tracking
+  attempts      Int       @default(0)
+  maxAttempts   Int       @default(3)
+  lastAttemptAt DateTime?
+
+  // Timing
+  startedAt   DateTime?
+  completedAt DateTime?
+  duration    Int? // milliseconds
+  createdAt   DateTime  @default(now())
+
+  job ProvisioningJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+  @@index([stepOrder])
+}
+
+model EmailMailbox {
+  id        String  @id @default(cuid())
+  domainId  String
+  address   String  @unique // full email address e.g. "admin@example.com"
+  localPart String // "admin", "info", "support"
+  password  String // encrypted (AES-256-GCM)
+  quota     Int     @default(1073741824) // 1GB in bytes
+  active    Boolean @default(true)
+  isDefault Boolean @default(false) // true for admin mailbox
+
+  // Mailcow tracking
+  mailcowId String? // Mailcow mailbox ID
+
+  // DKIM info stored on domain level, but cache here for quick access
+  dkimEnabled Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  domain Domain @relation(fields: [domainId], references: [id], onDelete: Cascade)
+
+  @@index([domainId])
+}
+
+model PaymentMethodSetting {
+  id          String   @id @default(cuid())
+  method      String   @unique // "stripe", "waafi", "manual"
+  displayName String // "Credit Card (Stripe)", "Waafi Pay", "Bank Transfer"
+  active      Boolean  @default(false)
+  config      String? // JSON string of method-specific config (e.g., Waafi merchant ID)
+  icon        String? // icon name or emoji
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Domain Reseller Module (Dynadot)
+// ────────────────────────────────────────────────────────────────────────────
+
+model DomainPrice {
+  id           String    @id @default(cuid())
+  tld          String    @unique // e.g. ".com", ".net" (with leading dot)
+  wholesale    Float // Dynadot wholesale price in USD
+  markup       Float     @default(6.50) // automatic markup in USD
+  registration Float // selling registration price (wholesale + markup)
+  renewal      Float // selling renewal price
+  transfer     Float // selling transfer price
+  currency     String    @default("USD")
+  premium      Boolean   @default(false)
+  active       Boolean   @default(true)
+  lastSyncedAt DateTime?
+  updatedById  String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  updatedBy User? @relation("PriceUpdatedBy", fields: [updatedById], references: [id])
+
+  @@index([active])
+}
+
+model DomainOrder {
+  id              String   @id @default(cuid())
+  userId          String
+  domainId        String?
+  domainName      String // the domain being purchased
+  type            String // "register", "renew", "transfer"
+  duration        Int      @default(1) // years
+  status          String   @default("pending") // pending, completed, failed, refunded
+  unitPrice       Float // selling price per year
+  totalAmount     Float // total amount charged
+  currency        String   @default("USD")
+  provider        String   @default("dynadot")
+  providerOrderId String? // Dynadot order ID
+  metadata        String? // JSON string of extra data
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  domain   Domain?   @relation(fields: [domainId], references: [id])
+  invoices Invoice[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+model Invoice {
+  id        String    @id @default(cuid())
+  number    String    @unique // e.g. INV-2024-0001
+  userId    String
+  orderId   String?
+  domainId  String?
+  items     String // JSON array of line items
+  subtotal  Float
+  tax       Float     @default(0)
+  total     Float
+  currency  String    @default("USD")
+  status    String    @default("unpaid") // unpaid, paid, void, refunded
+  paidAt    DateTime?
+  dueDate   DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  order        DomainOrder?  @relation(fields: [orderId], references: [id])
+  domain       Domain?       @relation(fields: [domainId], references: [id])
+  transactions Transaction[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+model Transaction {
+  id        String   @id @default(cuid())
+  invoiceId String
+  userId    String
+  gateway   String // "stripe", "waafi", "manual", "balance"
+  amount    Float
+  currency  String   @default("USD")
+  status    String   @default("pending") // pending, completed, failed, refunded
+  reference String? // gateway transaction reference
+  metadata  String? // JSON string
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@index([userId])
+}
+
+model Renewal {
+  id              String   @id @default(cuid())
+  domainId        String
+  userId          String
+  years           Int      @default(1)
+  pricePerYear    Float
+  totalAmount     Float
+  status          String   @default("pending") // pending, completed, failed
+  providerRenewId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  domain Domain @relation(fields: [domainId], references: [id], onDelete: Cascade)
+
+  @@index([domainId])
+  @@index([status])
+}
+
+model DomainContact {
+  id           String   @id @default(cuid())
+  domainId     String
+  type         String // "registrant", "admin", "tech", "billing"
+  firstName    String
+  lastName     String
+  email        String
+  phone        String?
+  organization String?
+  address1     String?
+  address2     String?
+  city         String?
+  state        String?
+  postalCode   String?
+  country      String? // ISO country code
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  domain Domain @relation(fields: [domainId], references: [id], onDelete: Cascade)
+
+  @@index([domainId])
+}
+
+model DomainLog {
+  id        String   @id @default(cuid())
+  domainId  String?
+  userId    String?
+  action    String // register, renew, transfer, lock, unlock, privacy, dns, nameservers, etc.
+  status    String   @default("success") // success, failed, error
+  message   String
+  ipAddress String?
+  metadata  String? // JSON string
+  createdAt DateTime @default(now())
+
+  domain Domain? @relation(fields: [domainId], references: [id], onDelete: SetNull)
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([domainId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+model NameserverEntry {
+  id        String   @id @default(cuid())
+  domainId  String
+  hostname  String // e.g. ns1.example.com
+  ip        String? // optional IP
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  domain Domain @relation(fields: [domainId], references: [id], onDelete: Cascade)
+
+  @@index([domainId])
+}
+
+model ContactMessage {
+  id        String   @id @default(cuid())
+  name      String
+  email     String
+  subject   String?
+  message   String
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// CMS — Content Management System
+// Admin-managed website content: services, plans, highlights, FAQs, and
+// global site text (hero, stats, etc.). The public site reads from these
+// tables; if empty, it falls back to the static seed in services-data.ts.
+// ──────────────────────────────────────────────────────────────────────
+
+model Service {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  tagline     String
+  description String
+  iconName    String // lucide icon name, e.g. "Code2"
+  accent      String // tailwind gradient classes, e.g. "from-indigo-500 to-indigo-400"
+  features    String // JSON array of strings
+  order       Int      @default(0)
+  visible     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  plans      ServicePlan[]
+  highlights ServiceHighlight[]
+  faqs       ServiceFaq[]
+
+  @@index([order])
+}
+
+model ServicePlan {
+  id          String  @id @default(cuid())
+  serviceId   String
+  name        String
+  price       Float
+  period      String
+  description String
+  features    String // JSON array of strings
+  popular     Boolean @default(false)
+  order       Int     @default(0)
+  service     Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@index([serviceId])
+  @@index([order])
+}
+
+model ServiceHighlight {
+  id          String  @id @default(cuid())
+  serviceId   String
+  title       String
+  description String
+  iconName    String // lucide icon name
+  order       Int     @default(0)
+  service     Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@index([serviceId])
+}
+
+model ServiceFaq {
+  id        String  @id @default(cuid())
+  serviceId String
+  question  String
+  answer    String
+  order     Int     @default(0)
+  service   Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@index([serviceId])
+}
+
+model SiteContent {
+  id        String   @id @default(cuid())
+  key       String   @unique // e.g. "hero.badge", "hero.title", "stats"
+  value     String // JSON string or plain text
+  updatedAt DateTime @updatedAt
+  updatedBy String?
+
+  @@index([key])
+}
+
+// Global app-wide settings (key/value pairs).
+// Used for things like the global domain markup, default currency, feature
+// flags, etc. Values are stored as strings and parsed by the caller.
+model AppSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique // e.g. "domain.markupUsd", "domain.currency"
+  value     String // stored as string, parsed by caller
+  updatedAt DateTime @updatedAt
+  updatedBy String?
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// cPanel-style feature models (Cron Jobs, FTP Accounts, Redirects, IP Blocks)
+// Added for the cPanel feature parity upgrade.
+// ────────────────────────────────────────────────────────────────────────────
+
+// Scheduled tasks (cron). Runs inside the project's Docker container via
+// `docker exec <container> crond` or a per-container crontab.
+model CronJob {
+  id          String    @id @default(cuid())
+  projectId   String
+  // Cron expression: minute hour day month weekday (e.g. "0 3 * * *" = daily 3am)
+  // Special strings (@daily, @hourly, @weekly, @monthly, @reboot) also supported.
+  expression  String
+  command     String // shell command to run inside the container
+  description String? // human label
+  enabled     Boolean   @default(true)
+  lastRunAt   DateTime?
+  lastStatus  String? // success | failed | running
+  lastOutput  String? // truncated stdout+stderr of last run
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+// FTP / SFTP accounts for file access to the project's deployPath.
+// Backed by a lightweight pure-ftpd sidecar container or system user on the VPS.
+model FtpAccount {
+  id          String    @id @default(cuid())
+  projectId   String
+  username    String // full username e.g. "user@projectslug"
+  password    String // encrypted (AES-256-GCM)
+  // Directory path (relative to deployPath) this account can access. "/" = whole site.
+  directory   String    @default("/")
+  // Whether this is read-only access (download only) or read-write.
+  readOnly    Boolean   @default(false)
+  quotaMB     Int? // optional storage cap in MB; null = unlimited
+  enabled     Boolean   @default(true)
+  lastLoginAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, username])
+  @@index([projectId])
+}
+
+// URL redirects (301/302) configured at the Caddy/reverse-proxy layer.
+model Redirect {
+  id         String   @id @default(cuid())
+  projectId  String
+  // Source path on this project's domain, e.g. "/old-page" or "/blog/*"
+  fromPath   String
+  // Destination URL (absolute or path), e.g. "https://example.com/new" or "/new"
+  toUrl      String
+  // 301 (permanent) or 302 (temporary)
+  statusCode Int      @default(301)
+  // Optional: match query string exactly; null = wildcard
+  matchQuery String?
+  enabled    Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+// IP blocks / firewall rules. Deny or allow specific IPs/subnets from
+// accessing this project's site. Enforced via Caddy layer or iptables.
+model IpBlock {
+  id        String    @id @default(cuid())
+  projectId String
+  // IP address or CIDR, e.g. "192.168.1.5" or "10.0.0.0/8"
+  ipAddress String
+  // "deny" (block) or "allow" (whitelist). Default deny.
+  action    String    @default("deny")
+  // Optional reason note
+  reason    String?
+  enabled   Boolean   @default(true)
+  expiresAt DateTime? // null = permanent
+  createdAt DateTime  @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}

@@ -86,7 +86,7 @@ export async function POST(
 
     return NextResponse.json({ job }, { status: 201 })
   } catch (error) {
-    const msg = error instanceof Error ? error.message : 'Internal server error'
+    const msg = 'Internal server error'
     console.error('Create cron job error:', error)
     return NextResponse.json({ error: msg }, { status: 500 })
   }

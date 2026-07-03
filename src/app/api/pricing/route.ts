@@ -1,9 +1,15 @@
 /**
  * GET /api/pricing
- * Returns all domain pricing with wholesale + markup + selling prices.
- * Optional query: ?tld=.com to fetch a single TLD.
+ * Returns domain pricing for the landing page + customer UI.
+ *
+ * SECURITY:
+ *   - Auth required (any logged-in user can see selling prices)
+ *   - Wholesale cost + markup formula hidden from non-admin customers
+ *     (only admins see the full picture for margin management)
  */
 import { ok, apiError } from '@/lib/api-response'
+import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
+import { isAdmin } from '@/lib/security'
 import {
   getAllPrices,
   getPriceForTld,
@@ -13,13 +19,26 @@ import {
 
 export async function GET(request: Request) {
   try {
+    // SECURITY: require authentication — was public, leaked wholesale prices
+    const authHeader = request.headers.get('Authorization')
+    const token = extractTokenFromHeader(authHeader)
+    if (!token) {
+      return apiError.unauthorized('Authentication required')
+    }
+    const decoded = verifyToken(token)
+    if (!decoded) {
+      return apiError.unauthorized('Invalid or expired token')
+    }
+    const userIsAdmin = isAdmin(decoded.role)
+
     const { searchParams } = new URL(request.url)
     const tld = searchParams.get('tld')
 
     if (tld) {
       const price = await getPriceForTld(tld)
       if (!price) return apiError.notFound(`No pricing found for ${tld}`)
-      return ok(price, `Pricing for ${tld}`)
+      // SECURITY: strip wholesale + markup from non-admin responses
+      return ok(userIsAdmin ? price : stripWholesale(price), `Pricing for ${tld}`)
     }
 
     let prices = await getAllPrices()
@@ -30,13 +49,17 @@ export async function GET(request: Request) {
     }
 
     const markup = await getGlobalMarkup()
+
+    // SECURITY: strip wholesale + markup fields from per-TLD rows for non-admins
+    const safePrices = userIsAdmin ? prices : prices.map(stripWholesale)
+
     return ok(
       {
-        markup,
+        // SECURITY: hide markup + formula from non-admin customers
+        ...(userIsAdmin ? { markup, formula: `Selling Price = Wholesale Price + $${markup.toFixed(2)} USD` } : {}),
         currency: 'USD',
-        formula: `Selling Price = Wholesale Price + $${markup.toFixed(2)} USD`,
         count: prices.length,
-        tlds: prices,
+        tlds: safePrices,
       },
       `Retrieved pricing for ${prices.length} TLDs`
     )
@@ -44,4 +67,10 @@ export async function GET(request: Request) {
     console.error('[pricing GET] error:', error)
     return apiError.serverError()
   }
+}
+
+/** Strip wholesale + markup fields from a single TLD price row. */
+function stripWholesale<T extends Record<string, unknown>>(row: T): Omit<T, 'wholesale' | 'markup'> {
+  const { wholesale: _w, markup: _m, ...rest } = row
+  return rest
 }

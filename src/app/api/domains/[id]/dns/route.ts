@@ -54,14 +54,67 @@ export async function PUT(
 
     const validTypes = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'SRV']
 
+    // SECURITY: validate DNS record values per type — H4
+    const IPV4_REGEX = /^(\d{1,3}\.){3}\d{1,3}$/
+    const IPV6_REGEX = /^[0-9a-f:]+$/i
+    const FQDN_REGEX = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/
+    const DNS_LABEL_REGEX = /^[a-z0-9](?:[a-z0-9-]{0,63}[a-z0-9])?$|^\*$|^@$/
+
+    function validateDnsRecord(rec: { type: string; name: string; value: string; ttl?: number; priority?: number }): string | null {
+      const type = rec.type.toUpperCase()
+      if (!validTypes.includes(type)) return `Invalid record type: ${rec.type}`
+      if (!rec.name || !DNS_LABEL_REGEX.test(String(rec.name).toLowerCase())) {
+        return `Invalid DNS name: ${rec.name}`
+      }
+      if (!rec.value || typeof rec.value !== 'string') return 'Record value is required'
+      // Reject newlines in TXT values (DNS TXT records are single-line)
+      if (rec.value.includes('\n')) return 'TXT record value must not contain newlines'
+      // Type-specific validation
+      switch (type) {
+        case 'A':
+          if (!IPV4_REGEX.test(rec.value)) return `A record value must be an IPv4 address (got: ${rec.value})`
+          // Reject obviously invalid IPs like 999.999.999.999
+          if (rec.value.split('.').some((o) => parseInt(o, 10) > 255)) return `A record IPv4 out of range: ${rec.value}`
+          break
+        case 'AAAA':
+          if (!IPV6_REGEX.test(rec.value)) return `AAAA record value must be an IPv6 address (got: ${rec.value})`
+          break
+        case 'CNAME':
+        case 'NS':
+          if (!FQDN_REGEX.test(rec.value.toLowerCase())) return `CNAME/NS value must be an FQDN (got: ${rec.value})`
+          break
+        case 'MX':
+          if (typeof rec.priority !== 'number' || rec.priority < 0 || rec.priority > 65535) {
+            return `MX record requires a numeric priority (0-65535)`
+          }
+          if (!FQDN_REGEX.test(rec.value.toLowerCase())) return `MX value must be an FQDN (got: ${rec.value})`
+          break
+        case 'SRV':
+          if (typeof rec.priority !== 'number') return `SRV record requires a numeric priority`
+          break
+        case 'TXT':
+          if (rec.value.length > 4096) return `TXT record value too long (max 4096 chars)`
+          break
+      }
+      // TTL validation
+      const ttl = Number(rec.ttl) || 3600
+      if (ttl < 60 || ttl > 86400) return `TTL must be between 60 and 86400 seconds (got: ${ttl})`
+      return null
+    }
+
     const createdRecords = []
     for (const record of records) {
       if (!record.type || !record.name || !record.value) {
         continue
       }
 
-      if (!validTypes.includes(record.type.toUpperCase())) {
-        continue
+      // SECURITY: validate the record before persisting — H4
+      const validationError = validateDnsRecord(record)
+      if (validationError) {
+        return NextResponse.json(
+          { error: validationError },
+          { status: 400 }
+        )
       }
 
       const dnsRecord = await db.dnsRecord.create({
@@ -102,13 +155,11 @@ export async function PUT(
             : 'Failed to push to the registrar',
         }
       } catch (err) {
-        console.error('[dns] Dynadot sync error:', err)
+        console.error('[dns] registrar sync error:', err)
+        // SECURITY: never expose the raw registrar error to the customer
         dynadotSync = {
           success: false,
-          message:
-            err instanceof Error
-              ? err.message
-              : 'Unknown registrar sync error',
+          message: 'Registrar sync failed. Please try again or contact support.',
         }
       }
 

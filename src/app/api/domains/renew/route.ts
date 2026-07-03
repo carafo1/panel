@@ -30,7 +30,9 @@ export async function POST(request: Request) {
 
     const result = await runRenewalPipeline(user.userId, domainId, duration)
     if (!result.success) {
-      return apiError.badRequest(result.error || 'Renewal failed')
+      // SECURITY: return generic message — never expose the raw Dynadot error
+      console.error('[domains/renew] pipeline failed:', result.error)
+      return apiError.badRequest('Domain renewal failed. Please try again or contact support.')
     }
 
     const updated = await db.domain.findUnique({

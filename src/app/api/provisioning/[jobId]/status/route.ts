@@ -45,10 +45,15 @@ export async function GET(
       )
     }
 
-    // Ownership check
+    // SECURITY: ownership check — always reject when userId is missing or
+    // doesn't match (was previously short-circuited when jobUserId was null,
+    // allowing any authenticated user to read jobs with null userId).
     const jobUserId = (data.job as { userId?: string }).userId
-    if (jobUserId && jobUserId !== user.userId) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const isRequesterAdmin = user.role === 'admin' || user.role === 'super_admin'
+    if (!isRequesterAdmin) {
+      if (!jobUserId || jobUserId !== user.userId) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
     }
 
     return NextResponse.json(data)

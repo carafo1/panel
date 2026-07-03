@@ -43,7 +43,8 @@ export async function POST(
     const { id } = await params
 
     // Owner OR admin may sync. Admins can access any domain.
-    const isAdmin = decoded.role === 'admin'
+    // SECURITY: include 'super_admin' (was 'admin' only — excluded super_admin).
+    const isAdmin = decoded.role === 'admin' || decoded.role === 'super_admin'
     const domain = isAdmin
       ? await db.domain.findUnique({ where: { id } })
       : await db.domain.findFirst({ where: { id, userId: decoded.userId } })
@@ -118,14 +119,16 @@ export async function POST(
         id: updated.id,
         name: updated.name,
         status: updated.status,
-        provider: updated.provider,
-        externalId: updated.externalId,
+        // SECURITY: hide Dynadot brand + external ID from non-admin customers
+        provider: isAdmin ? updated.provider : 'apsamo',
+        ...(isAdmin ? { externalId: updated.externalId } : {}),
         expiresAt: updated.expiresAt,
         nameservers: updated.nameservers
           ? JSON.parse(updated.nameservers)
           : [],
       },
-      dynadotInfo: {
+      // SECURITY: renamed dynadotInfo → registrarInfo (was leaking Dynadot brand in JSON key)
+      registrarInfo: {
         status: info.status,
         expiry: info.expiry,
         nameservers: info.nameservers,
@@ -133,21 +136,9 @@ export async function POST(
     })
   } catch (error) {
     console.error('Sync domain error:', error)
-    const msg = error instanceof Error ? error.message : 'Internal server error'
-    // Surface registrar-specific errors (e.g. "could not find domain in your
-    // account") as 400s so the UI can show the real reason instead of a
-    // generic 500. Strip any internal registrar name from the message.
-    if (msg.includes('Dynadot API error:') || msg.includes('Dynadot IP not authorized')) {
-      const cleanMsg = msg
-        .replace('Dynadot API error: ', '')
-        .replace('Dynadot IP not authorized', 'IP not authorized by registrar')
-      return NextResponse.json(
-        { error: cleanMsg },
-        { status: 400 }
-      )
-    }
+    // SECURITY: return generic error — never expose registrar-side error details
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Domain sync failed. Please try again or contact support.' },
       { status: 500 }
     )
   }

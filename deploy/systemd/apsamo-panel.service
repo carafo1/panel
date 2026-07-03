@@ -1,0 +1,25 @@
+[Unit]
+Description=Apsamo Panel — Next.js production server (port 3000)
+After=network.target apsamo-realtime.service
+Wants=apsamo-realtime.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=__INSTALL_DIR__
+EnvironmentFile=__INSTALL_DIR__/.env
+Environment=NODE_ENV=production
+ExecStart=/usr/local/bin/bun __INSTALL_DIR__/.next/standalone/server.js
+Restart=always
+RestartSec=5
+StandardOutput=append:__INSTALL_DIR__/logs/panel.log
+StandardError=append:__INSTALL_DIR__/logs/panel.log
+
+# Hardening
+NoNewPrivileges=no
+ProtectSystem=false
+ProtectHome=false
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

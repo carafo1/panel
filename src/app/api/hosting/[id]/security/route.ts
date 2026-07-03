@@ -97,7 +97,7 @@ export async function POST(
 
     return NextResponse.json({ block }, { status: 201 })
   } catch (error) {
-    const msg = error instanceof Error ? error.message : 'Internal server error'
+    const msg = 'Internal server error'
     console.error('Create IP block error:', error)
     return NextResponse.json({ error: msg }, { status: 500 })
   }

@@ -1,7 +1,11 @@
 import bcryptjs from 'bcryptjs'
 import jwt from 'jsonwebtoken'
+import { requireSecret } from '@/lib/security'
 
-const JWT_SECRET = process.env.JWT_SECRET || 'deployhub-secret-key-2024'
+// SECURITY: requireSecret throws at module load time if JWT_SECRET is missing
+// or still set to its placeholder value. This prevents the panel from booting
+// with an insecure default that an attacker could use to forge any user's token.
+const JWT_SECRET = requireSecret('JWT_SECRET')
 const TOKEN_EXPIRY = '7d'
 const TWO_FACTOR_TEMP_TOKEN_EXPIRY = '5m'
 
