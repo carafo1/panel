@@ -311,7 +311,8 @@ projects on remote VPS hosts via SSH.
    ```bash
    git clone <your-fork> /opt/apsamo
    cd /opt/apsamo
-   bun install --production
+   bun install                                          # NOT --production: the build needs devDependencies
+   ( cd mini-services/realtime-service && bun install ) # realtime service has its own deps (socket.io)
    cp .env.example .env
    # Edit .env: set DATABASE_URL, JWT_SECRET, ENCRYPTION_KEY,
    # BRAND_DOMAIN, MAIL_SERVER_HOSTNAME, MAILCOW_API_URL, MAILCOW_API_KEY,

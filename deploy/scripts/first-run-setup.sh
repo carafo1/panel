@@ -66,14 +66,13 @@ read -rp "${BOLD}Reconfigure? [y/N]:${NC} " confirm
 [[ "$confirm" =~ ^[Yy] ]] || { echo "Aborted."; exit 0; }
 
 # ── Brand domain ──────────────────────────────────────────────────────────
-step "Brand domain"
+# The brand/apex domain drives customer subdomains, nameservers, mail host, and
+# system email mailboxes. It does NOT set APP_URL — that's the panel domain below.
+step "Brand domain (apex)"
 CURRENT=$(env_get BRAND_DOMAIN)
-NEW=$(ask "${BOLD}Brand domain${NC} [current: $CURRENT]:")
+NEW=$(ask "${BOLD}Brand domain${NC} (apex, e.g. apsamo.com) [current: $CURRENT]:")
 if [[ -n "$NEW" ]] && [[ "$NEW" != "$CURRENT" ]]; then
   env_set BRAND_DOMAIN "$NEW"
-  env_set APP_URL "https://$NEW"
-  env_set NEXT_PUBLIC_APP_URL "https://$NEW"
-  env_set NEXTAUTH_URL "https://$NEW"
   env_set APP_SUBDOMAIN_PATTERN "{slug}.$NEW"
   env_set NS1_HOSTNAME "ns1.$NEW"
   env_set NS2_HOSTNAME "ns2.$NEW"
@@ -81,7 +80,20 @@ if [[ -n "$NEW" ]] && [[ "$NEW" != "$CURRENT" ]]; then
   env_set NO_REPLY_EMAIL "no-reply@$NEW"
   env_set SUPPORT_EMAIL "support@$NEW"
   env_set BILLING_EMAIL "billing@$NEW"
-  ok "Brand domain updated → $NEW (all derived hostnames/emails updated too)"
+  ok "Brand domain updated → $NEW (subdomains, nameservers, mail, emails updated)"
+fi
+
+# ── Panel domain ────────────────────────────────────────────────────────────
+# Where the control panel itself is served (drives APP_URL / OAuth callbacks /
+# email links). Often panel.<brand>, but can be the apex itself.
+step "Panel domain"
+CURRENT=$(env_get APP_URL); CURRENT="${CURRENT#https://}"
+NEW=$(ask "${BOLD}Panel domain${NC} (where the dashboard is served, e.g. panel.$(env_get BRAND_DOMAIN)) [current: $CURRENT]:")
+if [[ -n "$NEW" ]] && [[ "$NEW" != "$CURRENT" ]]; then
+  env_set APP_URL "https://$NEW"
+  env_set NEXT_PUBLIC_APP_URL "https://$NEW"
+  env_set NEXTAUTH_URL "https://$NEW"
+  ok "Panel domain updated → https://$NEW (remember to update /etc/caddy/Caddyfile + DNS)"
 fi
 
 # ── Admin user ────────────────────────────────────────────────────────────

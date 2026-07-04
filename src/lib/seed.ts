@@ -56,9 +56,10 @@ export async function seedDatabase() {
     console.log('✅ Plans seeded')
   }
 
-  // Seed Servers
+  // Seed demo Servers — DEV ONLY. In production the installer registers a real
+  // "localhost" server (single-box) or you add real VPS hosts via Admin → Servers.
   const existingServers = await db.server.count()
-  if (existingServers === 0) {
+  if (existingServers === 0 && process.env.NODE_ENV !== 'production') {
     await db.server.createMany({
       data: [
         {
@@ -92,9 +93,11 @@ export async function seedDatabase() {
     console.log('✅ Servers seeded')
   }
 
-  // Seed Admin User
+  // Seed demo Admin User — DEV ONLY (admin@deployhub.io / admin123). In
+  // production the installer creates the real admin from the email/password you
+  // provide (see deploy/install.sh), so we never seed a default admin there.
   const adminExists = await db.user.findFirst({ where: { role: 'admin' } })
-  if (!adminExists) {
+  if (!adminExists && process.env.NODE_ENV !== 'production') {
     const { hashPassword } = await import('@/lib/auth')
     const hashedPassword = await hashPassword('admin123')
     await db.user.create({

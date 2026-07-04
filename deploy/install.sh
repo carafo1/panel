@@ -15,8 +15,13 @@
 #   All values can also be pre-set via environment variables for unattended
 #   installs (e.g. for Terraform / cloud-init):
 #
-#       BRAND_DOMAIN=example.com ADMIN_EMAIL=you@example.com \
-#       ADMIN_PASSWORD=StrongPass123 bash deploy/install.sh
+#       BRAND_DOMAIN=example.com PANEL_DOMAIN=panel.example.com \
+#       ADMIN_EMAIL=you@example.com ADMIN_PASSWORD=StrongPass123 \
+#       bash deploy/install.sh
+#
+#   BRAND_DOMAIN = apex brand (customer subdomains, mail, nameservers, emails).
+#   PANEL_DOMAIN = where the dashboard is served (APP_URL / OAuth / email links);
+#                  defaults to panel.<BRAND_DOMAIN> if not set.
 #
 #   The installer:
 #     1. Verifies OS (Ubuntu 22.04+, Debian 12+) and root
@@ -89,11 +94,19 @@ fi
 # ── Interactive configuration (or use env vars) ──────────────────────────
 step "Configuration"
 
-SERVER_HOSTNAME="${BRAND_DOMAIN:-$(ask "${BOLD}Brand domain${NC} (e.g. apsamo.com):")}"
+SERVER_HOSTNAME="${BRAND_DOMAIN:-$(ask "${BOLD}Brand domain${NC} (apex, e.g. apsamo.com — used for customer subdomains, mail, nameservers, emails):")}"
 if [[ -z "$SERVER_HOSTNAME" ]]; then
   err "Brand domain is required."
   exit 1
 fi
+
+# Panel domain — where the control panel itself is served (drives APP_URL,
+# OAuth callbacks, billing redirects, and email links). Defaults to
+# panel.<brand>. Set PANEL_DOMAIN equal to the brand domain to serve the panel
+# on the apex instead.
+PANEL_DOMAIN="${PANEL_DOMAIN:-$(ask "${BOLD}Panel domain${NC} (where the dashboard is served) [default: panel.$SERVER_HOSTNAME]:")}"
+PANEL_DOMAIN="${PANEL_DOMAIN:-panel.$SERVER_HOSTNAME}"
+log "Panel served at https://$PANEL_DOMAIN  (brand/apex: $SERVER_HOSTNAME)"
 
 ADMIN_EMAIL="${ADMIN_EMAIL:-$(ask "${BOLD}Admin email${NC} (e.g. admin@$SERVER_HOSTNAME):")}"
 if [[ -z "$ADMIN_EMAIL" ]]; then
@@ -265,15 +278,18 @@ DB_ENGINE="sqlite"
 
 # Auth — JWT
 JWT_SECRET="$JWT_SECRET"
-NEXTAUTH_URL="https://$SERVER_HOSTNAME"
+NEXTAUTH_URL="https://$PANEL_DOMAIN"
 NEXTAUTH_SECRET="$NEXTAUTH_SECRET"
 
 # Encryption — AES-256-GCM (64-char hex)
 ENCRYPTION_KEY="$ENCRYPTION_KEY"
 
 # App / Branding
-APP_URL="https://$SERVER_HOSTNAME"
-NEXT_PUBLIC_APP_URL="https://$SERVER_HOSTNAME"
+# APP_URL / NEXT_PUBLIC_APP_URL = where the PANEL is served (OAuth callbacks,
+# billing redirects, email links). BRAND_DOMAIN = the apex brand (customer
+# subdomains, mail, nameservers, system emails).
+APP_URL="https://$PANEL_DOMAIN"
+NEXT_PUBLIC_APP_URL="https://$PANEL_DOMAIN"
 BRAND_DOMAIN="$SERVER_HOSTNAME"
 APP_SUBDOMAIN_PATTERN="{slug}.${SERVER_HOSTNAME}"
 NS1_HOSTNAME="ns1.${SERVER_HOSTNAME}"
@@ -336,20 +352,28 @@ EOF
 chmod 600 "$INSTALL_DIR/.env"
 log ".env generated at $INSTALL_DIR/.env (chmod 600)"
 
-# ── Install dependencies + build ─────────────────────────────────────────
+# ── Install dependencies ─────────────────────────────────────────────────
 step "Installing dependencies"
 
-bun install --production
-log "Dependencies installed"
+# Do NOT use --production here: the production build (`next build`) needs
+# devDependencies (typescript, tailwindcss, @tailwindcss/postcss, eslint-config-next).
+bun install
+log "Panel dependencies installed"
 
-step "Building production bundle"
-bun run build
-log "Production build complete (.next/standalone/)"
+# The realtime mini-service is a SEPARATE package (needs socket.io). Install its
+# own deps so the apsamo-realtime systemd unit can actually start.
+if [[ -f "$INSTALL_DIR/mini-services/realtime-service/package.json" ]]; then
+  ( cd "$INSTALL_DIR/mini-services/realtime-service" && bun install )
+  log "Realtime service dependencies installed"
+fi
 
 # ── Initialize database ──────────────────────────────────────────────────
+# NOTE: this runs BEFORE the build on purpose — `prisma db push` also (re)generates
+# the Prisma client, which `next build` imports. Building first would fail.
 step "Initializing database"
 
-mkdir -p "$INSTALL_DIR/db" "$INSTALL_DIR/storage"
+# logs/ must exist before services start: the systemd units append to logs/*.log.
+mkdir -p "$INSTALL_DIR/db" "$INSTALL_DIR/storage" "$INSTALL_DIR/logs"
 
 # If user chose PostgreSQL, install it now + switch Prisma schema before db:push
 if [[ "$DB_ENGINE" == "postgres" ]]; then
@@ -378,42 +402,83 @@ if [[ "$DB_ENGINE" == "postgres" ]]; then
 fi
 
 bun run db:push
-log "Database schema pushed ($DB_ENGINE)"
+log "Database schema pushed + Prisma client generated ($DB_ENGINE)"
+
+# ── Build production bundle (needs the Prisma client generated just above) ─
+step "Building production bundle"
+bun run build
+log "Production build complete (.next/standalone/)"
 
 # ── Seed database ────────────────────────────────────────────────────────
 step "Seeding database"
 
 bun run scripts/run-seed.ts
 bun run scripts/seed-templates-and-payment.ts
-log "Database seeded (plans, servers, templates, payment methods)"
+log "Database seeded (plans, templates, payment methods)"
 
 # ── Create admin user ────────────────────────────────────────────────────
 step "Creating admin user"
 
-bun -e "
-const { db } = require('./src/lib/db');
-const bcrypt = require('bcryptjs');
+# Credentials are passed via the ENVIRONMENT (not string-interpolated into the
+# script) so passwords containing quotes, $, backticks etc. are handled safely.
+# We upsert by EMAIL and always (re)assign super_admin, and we drop the dev-only
+# default admin (admin@deployhub.io) if it exists — so the operator can always
+# log in with exactly the credentials entered above.
+ADMIN_EMAIL="$ADMIN_EMAIL" ADMIN_PASSWORD="$ADMIN_PASSWORD" bun -e '
+const { db } = require("./src/lib/db");
+const bcrypt = require("bcryptjs");
 (async () => {
-  const existing = await db.user.findFirst({ where: { role: { in: ['admin', 'super_admin'] } } });
+  const email = process.env.ADMIN_EMAIL;
+  const password = process.env.ADMIN_PASSWORD;
+  const hashed = await bcrypt.hash(password, 12);
+  // Remove the dev-only default admin unless it IS the operator account.
+  await db.user.deleteMany({ where: { email: "admin@deployhub.io", NOT: { email } } });
+  const existing = await db.user.findUnique({ where: { email } });
   if (existing) {
-    console.log('Admin already exists:', existing.email);
-    process.exit(0);
+    await db.user.update({
+      where: { email },
+      data: { password: hashed, role: "super_admin", emailVerified: true },
+    });
+    console.log("Admin updated:", email);
+  } else {
+    await db.user.create({
+      data: { email, name: "Administrator", password: hashed, role: "super_admin", emailVerified: true },
+    });
+    console.log("Admin created:", email);
   }
-  const hashed = await bcrypt.hash('${ADMIN_PASSWORD}', 12);
-  const u = await db.user.create({
-    data: {
-      email: '${ADMIN_EMAIL}',
-      name: 'Administrator',
-      password: hashed,
-      role: 'super_admin',
-      emailVerified: true,
-    },
-  });
-  console.log('Admin created:', u.email);
   process.exit(0);
 })();
-"
+'
 log "Admin user ready: $ADMIN_EMAIL"
+
+# ── Register this box as a deployable "localhost" server ─────────────────
+step "Registering localhost server (single-box deployment)"
+
+# So projects can be deployed on this box out of the box (LocalClient — no
+# SSH/Docker needed for the panel itself). Split deployments add real VPS hosts
+# later via Admin → Servers.
+LH_CPU=$(nproc 2>/dev/null || echo 4)
+LH_RAM=$(awk '/MemTotal/ {printf "%d", $2/1024/1024}' /proc/meminfo 2>/dev/null || echo 4)
+LH_DISK=$(df -BG / 2>/dev/null | awk 'NR==2 {gsub(/G/,"",$2); print $2}' || echo 50)
+LH_CPU="$LH_CPU" LH_RAM="$LH_RAM" LH_DISK="$LH_DISK" bun -e '
+const { db } = require("./src/lib/db");
+(async () => {
+  const existing = await db.server.findFirst({ where: { sshHost: "localhost" } });
+  if (existing) { console.log("localhost server already exists:", existing.id); process.exit(0); }
+  const s = await db.server.create({ data: {
+    name: "Localhost (this server)", ip: "127.0.0.1", provider: "local", status: "active",
+    cpuCores: parseInt(process.env.LH_CPU) || 4,
+    ramGB: parseInt(process.env.LH_RAM) || 4,
+    storageGB: parseInt(process.env.LH_DISK) || 50,
+    bandwidthGB: 1000, usedRamGB: 0, usedStorageGB: 0, region: "local",
+    sshHost: "localhost", sshPort: 22, sshUser: "root",
+    dockerInstalled: true, caddyInstalled: true, healthStatus: "healthy",
+  }});
+  console.log("localhost server created:", s.id);
+  process.exit(0);
+})();
+'
+log "Localhost server registered (projects can deploy on this box)"
 
 # ── Install systemd units ────────────────────────────────────────────────
 step "Installing systemd units"
@@ -448,8 +513,13 @@ cat > /etc/caddy/Caddyfile <<EOF
 # Apsamo Panel — Production Caddyfile (auto-generated by install.sh)
 # Generated: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-# ─── Main panel + dashboard ───────────────────────────────────────────
-$SERVER_HOSTNAME, www.$SERVER_HOSTNAME {
+# ─── Panel + brand site ───────────────────────────────────────────────
+# Same Next.js app on all three hostnames (landing page at /, dashboard behind
+# auth). Caddy auto-provisions a Let's Encrypt cert for each.
+#   $PANEL_DOMAIN        → panel/dashboard (APP_URL)
+#   $SERVER_HOSTNAME     → brand apex / public landing
+#   www.$SERVER_HOSTNAME → www of the brand
+$PANEL_DOMAIN, $SERVER_HOSTNAME, www.$SERVER_HOSTNAME {
     encode gzip zstd
 
     # Realtime (Socket.IO) — routed via XTransformPort query param
@@ -585,7 +655,8 @@ echo "════════════════════════�
 echo "  ${GREEN}${BOLD}Apsamo Panel installed successfully!${NC}"
 echo "══════════════════════════════════════════════════════════════════════════"
 echo ""
-echo "  ${BOLD}Admin URL:${NC}      https://$SERVER_HOSTNAME"
+echo "  ${BOLD}Panel URL:${NC}      https://$PANEL_DOMAIN"
+echo "  ${BOLD}Brand site:${NC}     https://$SERVER_HOSTNAME"
 echo "  ${BOLD}Admin email:${NC}    $ADMIN_EMAIL"
 echo "  ${BOLD}Admin password:${NC} (the one you entered above)"
 echo ""
@@ -608,7 +679,8 @@ echo "                apsamo update"
 echo "                apsamo create-admin"
 echo ""
 echo "  ${BOLD}DNS records to set (at your registrar):${NC}"
-echo "    A     $SERVER_HOSTNAME           → $SERVER_IP"
+echo "    A     $PANEL_DOMAIN           → $SERVER_IP   (panel/dashboard)"
+echo "    A     $SERVER_HOSTNAME           → $SERVER_IP   (brand apex / landing)"
 echo "    A     www.$SERVER_HOSTNAME       → $SERVER_IP"
 if [[ "$INSTALL_MAILCOW" == "1" ]]; then
   echo "    A     mail.$SERVER_HOSTNAME       → $SERVER_IP"

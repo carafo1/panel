@@ -160,18 +160,22 @@ STORAGE_ROOT="/opt/apsamo/storage"
 
 Set permissions: `chmod 600 .env`
 
-### Step 9 — Install dependencies + build
+### Step 9 — Install dependencies
 
 ```bash
-bun install --production
-bun run build
+# Do NOT use --production — the build needs devDependencies (typescript,
+# tailwindcss, eslint-config-next, ...). Also install the realtime
+# mini-service's own deps (socket.io) so apsamo-realtime can start.
+bun install
+( cd mini-services/realtime-service && bun install )
 ```
 
-### Step 10 — Initialize the database
+### Step 10 — Initialize the database + build
 
 ```bash
-mkdir -p db storage
-bun run db:push
+mkdir -p db storage logs
+bun run db:push          # creates tables AND generates the Prisma client
+bun run build            # must come AFTER db:push — the build imports the client
 bun run scripts/run-seed.ts
 bun run scripts/seed-templates-and-payment.ts
 ```
