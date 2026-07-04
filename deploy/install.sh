@@ -428,9 +428,18 @@ sed -i "s|__INSTALL_DIR__|$INSTALL_DIR|g" \
   /etc/systemd/system/apsamo-realtime.service \
   /etc/systemd/system/apsamo-worker.service
 
+# SECURITY: verify the replacement actually worked (fails loudly if not)
+for unit in apsamo-panel apsamo-realtime apsamo-worker; do
+  if grep -q "__INSTALL_DIR__" "/etc/systemd/system/${unit}.service"; then
+    err "Failed to replace __INSTALL_DIR__ in ${unit}.service — running repair"
+    sed -i "s|__INSTALL_DIR__|$INSTALL_DIR|g" "/etc/systemd/system/${unit}.service"
+  fi
+done
+
+# Verify the unit files are valid
 systemctl daemon-reload
 systemctl enable apsamo-panel apsamo-realtime apsamo-worker
-log "Systemd units installed"
+log "Systemd units installed + verified"
 
 # ── Configure Caddy ──────────────────────────────────────────────────────
 step "Configuring Caddy reverse proxy (auto-HTTPS)"
