@@ -13,6 +13,7 @@
 import { authenticator } from 'otplib'
 import QRCode from 'qrcode'
 import bcryptjs from 'bcryptjs'
+import { randomInt } from 'crypto'
 
 // Configure TOTP: 6 digits, 30-second window
 authenticator.options = {
@@ -78,7 +79,8 @@ export function generateBackupCodes(count = 10): string[] {
   for (let i = 0; i < count; i++) {
     let code = ''
     for (let j = 0; j < 8; j++) {
-      code += chars[Math.floor(Math.random() * chars.length)]
+      // SECURITY: backup codes are auth credentials — use a CSPRNG, not Math.random.
+      code += chars[randomInt(chars.length)]
       if (j === 3) code += '-'
     }
     codes.push(code)

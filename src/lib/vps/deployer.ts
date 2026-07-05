@@ -43,6 +43,7 @@ import { db } from '@/lib/db'
 import { STACK_DEFINITIONS, getStackDefinition } from '@/lib/stacks'
 import { getDeploymentMethod, type DeploymentMethodId } from '@/lib/deployment-methods'
 import { encrypt } from '@/lib/encryption'
+import { broadcastDeploymentLog, broadcastDeploymentStatus } from '@/lib/realtime'
 import {
   withConnection,
   exec,
@@ -119,6 +120,14 @@ export async function deployProject(req: DeployRequest): Promise<DeployResult> {
   const start = Date.now()
   const { projectId, deploymentId } = req
   const log = (m: string) => req.onLog?.(m)
+  // Bridge real command output (docker build, git clone, …) to the live stream,
+  // in addition to whatever the caller already does with the chunk.
+  const callerOnStreamChunk = req.onStreamChunk
+  req.onStreamChunk = (chunk) => {
+    callerOnStreamChunk?.(chunk)
+    const line = chunk.data.replace(/\n+$/, '')
+    if (line) broadcastDeploymentLog(deploymentId, line)
+  }
 
   const project = await db.project.findUnique({
     where: { id: projectId },
@@ -134,12 +143,14 @@ export async function deployProject(req: DeployRequest): Promise<DeployResult> {
     where: { id: deploymentId },
     data: { status: 'building' },
   }).catch(() => {})
+  broadcastDeploymentStatus(deploymentId, projectId, 'building')
 
   // Stage runner: writes a DeploymentStage row, runs fn, marks completed/failed.
   const buildLog: string[] = []
   const stageLog = (msg: string) => {
     buildLog.push(msg)
     log(msg)
+    broadcastDeploymentLog(deploymentId, msg)
   }
 
   async function runStage<T>(
@@ -232,10 +243,12 @@ export async function deployProject(req: DeployRequest): Promise<DeployResult> {
   // Decide which pipeline to run.
   const method = project.deploymentMethod as DeploymentMethodId | null
   try {
-    if (method && getDeploymentMethod(method)) {
-      return await deployMethodProject(req, project, method, runStage, stageLog, buildLog, start)
-    }
-    return await deployLegacyProject(req, project, runStage, stageLog, buildLog, start)
+    const result =
+      method && getDeploymentMethod(method)
+        ? await deployMethodProject(req, project, method, runStage, stageLog, buildLog, start)
+        : await deployLegacyProject(req, project, runStage, stageLog, buildLog, start)
+    broadcastDeploymentStatus(deploymentId, projectId, result.ok ? 'live' : 'failed')
+    return result
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     log(`DEPLOY FAILED: ${message}`)
@@ -252,6 +265,7 @@ export async function deployProject(req: DeployRequest): Promise<DeployResult> {
         duration: Math.round((Date.now() - start) / 1000),
       },
     })
+    broadcastDeploymentStatus(deploymentId, projectId, 'failed')
     return {
       ok: false,
       projectId,
