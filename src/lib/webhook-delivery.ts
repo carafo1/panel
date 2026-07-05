@@ -1,5 +1,6 @@
 import crypto from 'crypto'
 import { db } from '@/lib/db'
+import { assertPublicUrl } from '@/lib/ssrf'
 
 const WEBHOOK_TIMEOUT_MS = 5000
 const MAX_RESPONSE_LENGTH = 2000
@@ -106,6 +107,8 @@ export async function deliverWebhook(
   let responseBody: string | null = null
 
   try {
+    // SSRF guard: refuse to POST to private/loopback/metadata addresses.
+    await assertPublicUrl(webhook.url)
     const response = await fetch(webhook.url, {
       method: 'POST',
       headers: {

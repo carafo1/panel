@@ -17,6 +17,7 @@
  * `checkUptime` itself is a pure HTTP probe and never touches the DB.
  */
 import { db } from '@/lib/db'
+import { assertPublicUrl } from '@/lib/ssrf'
 
 const DEFAULT_TIMEOUT_MS = 10_000
 
@@ -39,6 +40,8 @@ export async function checkUptime(
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   const start = Date.now()
   try {
+    // SSRF guard: refuse to probe private/loopback/metadata addresses.
+    await assertPublicUrl(url)
     const res = await fetch(url, {
       method: 'GET',
       signal: controller.signal,
