@@ -20,7 +20,7 @@
  */
 
 // DNS infrastructure hostnames
-export const BRAND_DOMAIN = process.env.BRAND_DOMAIN || 'apsamo.io'
+export const BRAND_DOMAIN = process.env.BRAND_DOMAIN || 'apsamo.com'
 export const MAIL_SERVER_HOSTNAME =
   process.env.MAIL_SERVER_HOSTNAME || `mail.${BRAND_DOMAIN}`
 export const NS1_HOSTNAME = process.env.NS1_HOSTNAME || `ns1.${BRAND_DOMAIN}`

@@ -74,7 +74,7 @@ export async function sendEmail(
     )
     return {
       success: true,
-      messageId: `demo-${Date.now()}@${FROM_EMAIL.split('@')[1] || 'apsamo.io'}`,
+      messageId: `demo-${Date.now()}@${FROM_EMAIL.split('@')[1] || 'apsamo.com'}`,
       demo: true,
     }
   }

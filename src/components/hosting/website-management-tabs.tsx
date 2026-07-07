@@ -3071,7 +3071,8 @@ export function DomainsTab({
     )
   }
 
-  const subdomainHint = projectId ? `${projectId.slice(-6)}.apsamo.app` : 'your-subdomain.apsamo.app'
+  const brandDomain = process.env.NEXT_PUBLIC_BRAND_DOMAIN || 'apsamo.com'
+  const subdomainHint = projectId ? `${projectId.slice(-6)}.${brandDomain}` : `your-subdomain.${brandDomain}`
 
   return (
     <Card>

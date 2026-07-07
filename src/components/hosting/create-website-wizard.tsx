@@ -205,7 +205,7 @@ interface CreatedProjectInfo {
 /*  Constants & helpers                                                        */
 /* ────────────────────────────────────────────────────────────────────────── */
 
-const SUBDOMAIN_SUFFIX = 'apsamo.io'
+const SUBDOMAIN_SUFFIX = process.env.NEXT_PUBLIC_BRAND_DOMAIN || 'apsamo.com'
 const MAX_ZIP_SIZE = 500 * 1024 * 1024 // 500 MB
 const POLL_INTERVAL_MS = 1500
 
@@ -1416,7 +1416,7 @@ export default function CreateWebsiteWizard({
                 selected={domainType === 'subdomain'}
                 onSelect={() => setDomainType('subdomain')}
                 title="Temporary subdomain"
-                description="Get online instantly with a free apsamo.app subdomain."
+                description={`Get online instantly with a free ${SUBDOMAIN_SUFFIX} subdomain.`}
                 icon={<Globe className="size-5" />}
               >
                 {domainType === 'subdomain' && slug && (
