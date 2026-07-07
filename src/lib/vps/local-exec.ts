@@ -278,15 +278,19 @@ export async function* execStreamLocal(
  */
 class LocalStream extends EventEmitter {
   private _child: ChildProcess | null = null
-  private readonly _stderrBus: LocalStream
+  // A plain EventEmitter — NOT another LocalStream. Using LocalStream here made
+  // the constructor recurse infinitely (each stderr bus built its own stderr
+  // bus …), which crashed every localhost exec with "Maximum call stack size
+  // exceeded". The stderr bus only ever needs .on('data')/.emit('data').
+  private readonly _stderrBus: EventEmitter
 
   constructor() {
     super()
-    this._stderrBus = new LocalStream()
+    this._stderrBus = new EventEmitter()
   }
 
   /** The stderr bus — `stream.stderr.on('data', cb)`. */
-  get stderr(): LocalStream {
+  get stderr(): EventEmitter {
     return this._stderrBus
   }
 
