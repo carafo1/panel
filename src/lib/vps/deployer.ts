@@ -586,6 +586,14 @@ async function deployMethodProject(
     })
   })
 
+  // Persist container details NOW — BEFORE configure_proxy. configureProjectProxy
+  // requires project.containerName, and its Caddyfile generator only includes
+  // projects with status='running', so this must land before the proxy stage.
+  await db.project.update({
+    where: { id: projectId },
+    data: { status: 'running', containerId, containerName, containerPort, externalPort, deployPath },
+  })
+
   // Post-install steps per method.
   if (methodId === 'wordpress') {
     await runStage('post_install', 'Running WordPress install…', async () => {
