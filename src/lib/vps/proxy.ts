@@ -425,12 +425,9 @@ export function generateCaddyBlock(cfg: ProxyConfig): string {
   }
 
   if (cfg.ssl) {
-    // Request compression + logging
     lines.push(`    encode gzip zstd`)
-    lines.push(`    log {`)
-    lines.push(`      output file /opt/deployhub/logs/${cfg.hostname.replace(/\W+/g, '_')}.log`)
-    lines.push(`      format json`)
-    lines.push(`    }`)
+    // (Access logs go to journald by default — no file-log directive, which
+    // would need a caddy-writable path and can break `caddy reload`.)
     // Caddy will automatically use Let's Encrypt — no explicit tls directive needed.
     // But we can be explicit about the email for ACME account.
     // Hostname is explicit in the site address, so Caddy auto-issues a normal
@@ -463,11 +460,6 @@ export function generateFullCaddyfile(
     ``,
     `{`,
     `  email ${email}`,
-    `  admin off`,
-    `  log {
-    output file /opt/deployhub/logs/caddy-global.log
-    format json
-  }`,
     `}`,
     ``,
   ]
