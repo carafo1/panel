@@ -378,6 +378,39 @@ export default function Home() {
     loadUser()
   }, [loadUser])
 
+  // ── Host split: marketing on the brand apex, login/dashboard on the panel host ──
+  // On the brand apex (apsamo.com) the auth actions send the user to the panel
+  // host (panel.apsamo.com) to sign in; on the panel host (or localhost/dev) the
+  // auth modal opens in place.
+  const openAuthOrRedirect = (mode: 'login' | 'register') => {
+    if (typeof window !== 'undefined') {
+      const brand = process.env.NEXT_PUBLIC_BRAND_DOMAIN || 'apsamo.com'
+      const host = window.location.hostname.toLowerCase()
+      const onBrandApex = host === brand || host === `www.${brand}`
+      if (onBrandApex) {
+        const panelUrl = (process.env.NEXT_PUBLIC_APP_URL || `https://panel.${brand}`)
+          .replace(/^http:/, 'https:')
+          .replace(/\/$/, '')
+        window.location.href = `${panelUrl}/#${mode}`
+        return
+      }
+    }
+    setAuthMode(mode)
+    setShowAuthModal(true)
+  }
+
+  // Arriving on the panel host with #login / #register (redirected from the
+  // brand site) auto-opens the auth modal, then cleans the hash.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const h = window.location.hash.replace('#', '')
+    if ((h === 'login' || h === 'register') && !isAuthenticated) {
+      setAuthMode(h)
+      setShowAuthModal(true)
+      history.replaceState(null, '', window.location.pathname + window.location.search)
+    }
+  }, [isAuthenticated, setAuthMode])
+
   // ── Handle URL params (Stripe Checkout redirect, billing tab) ──────
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -461,14 +494,8 @@ export default function Home() {
   return (
     <div className="min-h-screen flex flex-col">
       <LandingPage
-        onGetStarted={() => {
-          setAuthMode('register')
-          setShowAuthModal(true)
-        }}
-        onLogin={() => {
-          setAuthMode('login')
-          setShowAuthModal(true)
-        }}
+        onGetStarted={() => openAuthOrRedirect('register')}
+        onLogin={() => openAuthOrRedirect('login')}
       />
       {showAuthModal && (
         <AuthModal
