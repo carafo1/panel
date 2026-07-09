@@ -364,6 +364,10 @@ export default function Home() {
   const { view, setView, authMode, setAuthMode, setDashboardTab } = useAppStore()
   const { isAuthenticated, isLoading, loadUser } = useAuthStore()
   const [showAuthModal, setShowAuthModal] = useState(false)
+  // True when the current host is the panel host (e.g. panel.apsamo.com). Set
+  // after mount to avoid SSR/hydration mismatch. On the panel host an
+  // unauthenticated visitor sees the login screen directly (no marketing).
+  const [isPanelHostView, setIsPanelHostView] = useState(false)
   const [showOnboarding, setShowOnboarding] = useState(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('apsamo_onboarding_complete') !== 'true'
@@ -410,6 +414,22 @@ export default function Home() {
       history.replaceState(null, '', window.location.pathname + window.location.search)
     }
   }, [isAuthenticated, setAuthMode])
+
+  // Detect the panel host (the configured APP_URL host, e.g. panel.apsamo.com).
+  // On it, an unauthenticated visitor is shown the login screen directly.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    let panelHost = ''
+    try {
+      panelHost = new URL(process.env.NEXT_PUBLIC_APP_URL || '').hostname.toLowerCase()
+    } catch {
+      /* ignore */
+    }
+    if (panelHost && window.location.hostname.toLowerCase() === panelHost) {
+      setIsPanelHostView(true)
+      setAuthMode('login')
+    }
+  }, [setAuthMode])
 
   // ── Handle URL params (Stripe Checkout redirect, billing tab) ──────
   useEffect(() => {
@@ -490,20 +510,28 @@ export default function Home() {
     return <Dashboard />
   }
 
-  // Not authenticated → Landing page with auth modal
+  // Not authenticated:
+  //   panel host  → login screen only (no marketing)
+  //   brand / dev → landing page; auth modal opens on demand
   return (
     <div className="min-h-screen flex flex-col">
-      <LandingPage
-        onGetStarted={() => openAuthOrRedirect('register')}
-        onLogin={() => openAuthOrRedirect('login')}
-      />
-      {showAuthModal && (
+      {!isPanelHostView && (
+        <LandingPage
+          onGetStarted={() => openAuthOrRedirect('register')}
+          onLogin={() => openAuthOrRedirect('login')}
+        />
+      )}
+      {(showAuthModal || isPanelHostView) && (
         <AuthModal
           mode={authMode}
           onModeChange={(mode) => {
             setAuthMode(mode)
           }}
-          onClose={() => setShowAuthModal(false)}
+          onClose={() => {
+            // On the panel host the login screen IS the page — don't dismiss it
+            // to an empty (marketing-less) view.
+            if (!isPanelHostView) setShowAuthModal(false)
+          }}
         />
       )}
     </div>
