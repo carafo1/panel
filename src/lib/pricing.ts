@@ -16,6 +16,7 @@
  *  - Future price synchronization (via Dynadot API)
  */
 import { db } from './db'
+import { TLD_CATALOG, CATALOG_DEFAULT_WHOLESALE } from './tld-catalog'
 
 // The default markup applied to every supported TLD (USD).
 // This is only used when no global markup has been set in the AppSetting
@@ -224,6 +225,43 @@ export const TLD_WHOLESALE_PRICES: Record<string, WholesalePrice> = {
   '.training': { registration: 8.49, renewal: 27.49, transfer: 27.49 },
 }
 
+/**
+ * Full candidate TLD set = curated (TLD_WHOLESALE_PRICES, precise prices) ∪ the
+ * broad TLD_CATALOG (default fallback price). Deduped + normalized. Curated
+ * prices win; `curated` marks a hand-verified TLD (stays active even if a live
+ * sync can't fetch its price). Catalog-only TLDs are only activated once a live
+ * Dynadot sync confirms the registrar actually sells them.
+ */
+export function buildCandidateTlds(): Array<{
+  tld: string
+  prices: WholesalePrice
+  curated: boolean
+}> {
+  const map = new Map<
+    string,
+    { tld: string; prices: WholesalePrice; curated: boolean }
+  >()
+  for (const raw of TLD_CATALOG) {
+    const tld = raw.toLowerCase().trim()
+    if (!tld.startsWith('.') || tld.length < 2) continue
+    if (!map.has(tld)) {
+      map.set(tld, {
+        tld,
+        prices: {
+          registration: CATALOG_DEFAULT_WHOLESALE,
+          renewal: CATALOG_DEFAULT_WHOLESALE,
+          transfer: CATALOG_DEFAULT_WHOLESALE,
+        },
+        curated: false,
+      })
+    }
+  }
+  for (const [tld, prices] of Object.entries(TLD_WHOLESALE_PRICES)) {
+    map.set(tld, { tld, prices, curated: true })
+  }
+  return [...map.values()]
+}
+
 export interface PricedTld {
   tld: string
   wholesale: number
@@ -263,7 +301,7 @@ export function tldFromDomain(domain: string): string {
 export async function seedPricing(updatedById?: string): Promise<number> {
   const markup = await getGlobalMarkup()
   let count = 0
-  for (const [tld, prices] of Object.entries(TLD_WHOLESALE_PRICES)) {
+  for (const { tld, prices, curated } of buildCandidateTlds()) {
     await db.domainPrice.upsert({
       where: { tld },
       update: {
@@ -282,7 +320,9 @@ export async function seedPricing(updatedById?: string): Promise<number> {
         renewal: applyMarkup(prices.renewal, markup),
         transfer: applyMarkup(prices.transfer, markup),
         currency: 'USD',
-        active: true,
+        // Curated TLDs are active immediately; catalog-only TLDs stay inactive
+        // until a live Dynadot sync confirms the registrar sells them.
+        active: curated,
         lastSyncedAt: new Date(),
         updatedById,
       },
@@ -365,21 +405,24 @@ export async function getPriceForDomain(domain: string): Promise<PricedTld | nul
  */
 export async function syncPrices(
   updatedById?: string
-): Promise<{ synced: number; demo: boolean; fetched: number; fallback: number }> {
-  // DEMO MODE — just re-seed the defaults.
+): Promise<{ synced: number; demo: boolean; fetched: number; fallback: number; active: number }> {
+  const candidates = buildCandidateTlds()
+
+  // DEMO MODE — just re-seed (curated active, catalog inactive).
   if (!process.env.DYNADOT_API_KEY) {
-    await seedPricing(updatedById)
+    const n = await seedPricing(updatedById)
     return {
-      synced: Object.keys(TLD_WHOLESALE_PRICES).length,
+      synced: n,
       demo: true,
       fetched: 0,
-      fallback: Object.keys(TLD_WHOLESALE_PRICES).length,
+      fallback: n,
+      active: candidates.filter((c) => c.curated).length,
     }
   }
 
-  // REAL MODE — fetch live wholesale prices from Dynadot.
+  // REAL MODE — fetch live wholesale prices from Dynadot for the whole catalog.
   const markup = await getGlobalMarkup()
-  const allTlds = Object.keys(TLD_WHOLESALE_PRICES)
+  const allTlds = candidates.map((c) => c.tld)
   const sampleBase = 'deployhubpricecheck99999' // guaranteed-available sample domain
   const CHUNK_SIZE = 10 // Dynadot bulk search limit per request
 
@@ -388,17 +431,20 @@ export async function syncPrices(
     { registration: number; renewal: number; transfer: number }
   >()
 
+  const { dynadotService } = await import('./dynadot-service')
+
   // Process TLDs in chunks of 10 to respect Dynadot's bulk search limit.
   for (let i = 0; i < allTlds.length; i += CHUNK_SIZE) {
     const chunk = allTlds.slice(i, i + CHUNK_SIZE)
     const domains = chunk.map((tld) => `${sampleBase}${tld}`)
     try {
-      // Dynamic import to avoid a circular dependency at module load time
-      // (dynadot-service imports from pricing for tldFromDomain in some paths).
-      const { dynadotService } = await import('./dynadot-service')
       const results = await dynadotService.bulkSearch(domains)
       for (const r of results) {
-        if (r.available && typeof r.registrationPrice === 'number') {
+        if (
+          r.available &&
+          typeof r.registrationPrice === 'number' &&
+          r.registrationPrice > 0
+        ) {
           const tld = tldFromDomain(r.domain)
           livePrices.set(tld, {
             registration: r.registrationPrice,
@@ -414,19 +460,26 @@ export async function syncPrices(
       )
       // Continue to next chunk — partial sync is better than no sync.
     }
+    // Gentle pacing so a 600-TLD catalog doesn't trip registrar rate limits.
+    await new Promise((res) => setTimeout(res, 250))
   }
 
-  // Upsert every TLD: use live price when available, fall back to defaults.
+  // Upsert every candidate. A TLD is active (sellable) only if the registrar
+  // returned a real price OR it's a curated hand-verified TLD — so the client
+  // never sees a TLD Dynadot can't actually register.
   let fetched = 0
   let fallback = 0
   let synced = 0
-  for (const [tld, defaults] of Object.entries(TLD_WHOLESALE_PRICES)) {
+  let active = 0
+  for (const { tld, prices, curated } of candidates) {
     const live = livePrices.get(tld)
-    const wholesale = live?.registration ?? defaults.registration
-    const renewalWholesale = live?.renewal ?? defaults.renewal
-    const transferWholesale = live?.transfer ?? defaults.transfer
+    const wholesale = live?.registration ?? prices.registration
+    const renewalWholesale = live?.renewal ?? prices.renewal
+    const transferWholesale = live?.transfer ?? prices.transfer
+    const isActive = !!live || curated
     if (live) fetched++
     else fallback++
+    if (isActive) active++
 
     await db.domainPrice.upsert({
       where: { tld },
@@ -436,6 +489,7 @@ export async function syncPrices(
         registration: applyMarkup(wholesale, markup),
         renewal: applyMarkup(renewalWholesale, markup),
         transfer: applyMarkup(transferWholesale, markup),
+        active: isActive,
         lastSyncedAt: new Date(),
         ...(updatedById ? { updatedById } : {}),
       },
@@ -447,7 +501,7 @@ export async function syncPrices(
         renewal: applyMarkup(renewalWholesale, markup),
         transfer: applyMarkup(transferWholesale, markup),
         currency: 'USD',
-        active: true,
+        active: isActive,
         lastSyncedAt: new Date(),
         ...(updatedById ? { updatedById } : {}),
       },
@@ -455,7 +509,7 @@ export async function syncPrices(
     synced++
   }
 
-  return { synced, demo: false, fetched, fallback }
+  return { synced, demo: false, fetched, fallback, active }
 }
 
 /**
