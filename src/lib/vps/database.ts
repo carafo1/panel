@@ -294,6 +294,15 @@ export async function provisionProjectDatabase(
         log(`Pulling ${image}…`)
         await exec(client, `docker pull ${image}`, { timeoutMs: 300000 })
 
+        // Ensure the shared `deployhub` network exists before attaching to it.
+        // It is normally created during server provisioning, but a database can
+        // be requested on a host where that step never ran (e.g. a tarball-synced
+        // box), and `docker run --network deployhub` hard-fails when the network
+        // is missing. Idempotent — a no-op when it already exists.
+        await exec(client, 'docker network create deployhub 2>/dev/null || true', {
+          timeoutMs: 15000,
+        })
+
         // Run the container. Env vars differ between MySQL/MariaDB (MYSQL_*)
         // and PostgreSQL (POSTGRES_*).
         log(`Starting container ${containerName}…`)
