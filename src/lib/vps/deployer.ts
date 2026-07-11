@@ -616,20 +616,44 @@ async function deployMethodProject(
           }
         }
         if (!adminPass) adminPass = 'changeme123!'
-        const dbHost = project.databaseHost || 'db'
-        const dbName = project.databaseName || 'wp'
-        const dbUser = project.databaseUser || 'wp'
+        // Re-fetch the DB credentials from the Project row. The in-memory
+        // `project` object was loaded BEFORE provision_database ran, so its
+        // database* fields are still null here — reading them directly used to
+        // write placeholder values ('db'/'wp'/empty password) into wp-config,
+        // which breaks the site with "Error establishing a database connection".
+        const freshDb = await db.project.findUnique({
+          where: { id: projectId },
+          select: {
+            databaseHost: true,
+            databaseName: true,
+            databaseUser: true,
+            databasePassword: true,
+          },
+        })
+        const dbHost = freshDb?.databaseHost || 'db'
+        const dbName = freshDb?.databaseName || 'wp'
+        const dbUser = freshDb?.databaseUser || 'wp'
         let dbPass = ''
-        if (project.databasePassword) {
+        if (freshDb?.databasePassword) {
           try {
             const { decrypt } = await import('@/lib/encryption')
-            dbPass = decrypt(project.databasePassword)
+            dbPass = decrypt(freshDb.databasePassword)
           } catch {
             dbPass = ''
           }
         }
+        if (!freshDb?.databaseHost) {
+          stageLog('WARNING: no provisioned database found on the project row — wp-config will contain placeholder DB values.')
+        }
         // Write wp-config.php constants via docker exec sed.
         const cfg = `<?php
+// Behind the Caddy reverse proxy WordPress must trust X-Forwarded-Proto,
+// otherwise it emits http:// asset URLs on https pages and the browser
+// blocks them (mixed-content / unstyled admin + install pages).
+if (isset(\$_SERVER['HTTP_X_FORWARDED_PROTO']) && \$_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') {
+    \$_SERVER['HTTPS'] = 'on';
+    \$_SERVER['SERVER_PORT'] = 443;
+}
 define('DB_NAME',     ${JSON.stringify(dbName)});
 define('DB_USER',     ${JSON.stringify(dbUser)});
 define('DB_PASSWORD', ${JSON.stringify(dbPass)});
@@ -1668,6 +1692,11 @@ function generatePlaceholderApp(methodId: DeploymentMethodId | string, projectNa
     return {
       'wp-config-docker.php': `<?php
 // APSAMO Panel — minimal WordPress config (managed)
+// Trust X-Forwarded-Proto from the Caddy proxy (prevents mixed-content).
+if (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') {
+    $_SERVER['HTTPS'] = 'on';
+    $_SERVER['SERVER_PORT'] = 443;
+}
 define('DB_NAME',     'wp');
 define('DB_USER',     'wp');
 define('DB_PASSWORD', 'changeme');
