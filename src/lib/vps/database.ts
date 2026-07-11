@@ -122,6 +122,30 @@ function shellQuote(s: string): string {
   return "'" + s.replace(/'/g, "'\\''") + "'"
 }
 
+// ─── MySQL / MariaDB liveness probe ────────────────────────────────────────
+//
+// Two gotchas this handles:
+//   1. mariadb:11 renamed the `mysqladmin` client to `mariadb-admin` and dropped
+//      the old name entirely, so a hard-coded `mysqladmin` fails on MariaDB with
+//      "executable file not found". We try `mariadb-admin` first, then fall back
+//      to `mysqladmin` (which MySQL images still ship).
+//   2. `… ping` exits 0 whenever the daemon answers — even when it replies
+//      "Access denied" because we send no credentials. That access-denied reply
+//      is itself proof the server is up and speaking the protocol, which is all
+//      a readiness/health check needs. So we accept an "is alive" banner, an
+//      "access denied" reply, or a clean exit code as reachable, and treat only
+//      a hard connection failure as down.
+function mysqlPingCmd(container: string): string {
+  return `docker exec ${shellQuote(container)} sh -c 'mariadb-admin ping 2>&1 || mysqladmin ping 2>&1'`
+}
+
+function mysqlPingIsAlive(r: { exitCode: number | null; stdout: string; stderr: string }): boolean {
+  const out = `${r.stdout}\n${r.stderr}`.toLowerCase()
+  if (out.includes('is alive')) return true
+  if (out.includes('access denied')) return true // server responded → it is up
+  return r.exitCode === 0
+}
+
 function toRow(
   row: {
     id: string
@@ -298,17 +322,17 @@ export async function provisionProjectDatabase(
           throw new Error(`docker run failed: ${run.stderr || run.stdout}`)
         }
 
-        // Wait for the DB to be ready. mysqladmin ping for MySQL/MariaDB,
-        // pg_isready for PostgreSQL. Up to 30 retries (60s).
+        // Wait for the DB to be ready. mariadb-admin/mysqladmin ping for
+        // MySQL/MariaDB, pg_isready for PostgreSQL. Up to 30 retries (60s).
         log('Waiting for database to accept connections…')
         const readyCmd = isPostgres
           ? `docker exec ${containerName} pg_isready -U ${shellQuote(dbUser)} -d ${shellQuote(dbName)}`
-          : `docker exec ${containerName} mysqladmin ping -h localhost --silent 2>/dev/null`
+          : mysqlPingCmd(containerName)
         for (let i = 0; i < 30; i++) {
           const ping = await exec(client, readyCmd, { timeoutMs: 10000 })
           const ready = isPostgres
             ? ping.exitCode === 0 && /accepting connections/i.test(ping.stdout)
-            : ping.exitCode === 0 && ping.stdout.trim() === 'mysqld is alive'
+            : mysqlPingIsAlive(ping)
           if (ready) {
             log('Database is ready.')
             break
@@ -520,19 +544,17 @@ export async function testDatabaseConnection(
     return await withConnection(creds, async (client) => {
       const cmd = isPostgres
         ? `docker exec ${shellQuote(container)} pg_isready -U ${shellQuote(row.username)} -d ${shellQuote(row.name)} 2>&1`
-        : `docker exec ${shellQuote(container)} mysqladmin ping -h localhost --silent 2>&1`
+        : mysqlPingCmd(container)
       const r = await exec(client, cmd, { timeoutMs: 15000 })
-      if (
-        r.exitCode === 0 &&
-        (isPostgres
-          ? /accepting connections/i.test(r.stdout)
-          : r.stdout.trim() === 'mysqld is alive')
-      ) {
+      const reachable = isPostgres
+        ? r.exitCode === 0 && /accepting connections/i.test(r.stdout)
+        : mysqlPingIsAlive(r)
+      if (reachable) {
         return { ok: true, message: 'Database is reachable.' }
       }
       return {
         ok: false,
-        message: `${isPostgres ? 'pg_isready' : 'mysqladmin ping'} failed: ${(
+        message: `${isPostgres ? 'pg_isready' : 'mariadb-admin/mysqladmin ping'} failed: ${(
           r.stderr || r.stdout
         )
           .trim()
