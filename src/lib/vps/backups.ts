@@ -190,7 +190,7 @@ export async function createBackup(
         // around the password.
         const dumpFile = `/tmp/${dbRow.name}-${timestamp}.sql.gz`
         const dumpCmd =
-          `docker exec ${shellQuote(container)} sh -c 'mysqldump -u root -p${shellQuote(dbPass)} ${shellQuote(dbRow.name)} 2>/dev/null | gzip > ${shellQuote(dumpFile)}' && ` +
+          `docker exec ${shellQuote(container)} sh -c 'if command -v mariadb-dump >/dev/null 2>&1; then mariadb-dump -u${shellQuote(dbRow.username)} -p${shellQuote(dbPass)} --no-tablespaces --single-transaction ${shellQuote(dbRow.name)}; else mysqldump -u${shellQuote(dbRow.username)} -p${shellQuote(dbPass)} --no-tablespaces --single-transaction ${shellQuote(dbRow.name)}; fi 2>/dev/null | gzip > ${shellQuote(dumpFile)}' && ` +
           `docker cp ${shellQuote(container + ':' + dumpFile)} ${shellQuote(remotePath + '.db-' + dbRow.name + '.sql.gz')} && ` +
           `docker exec ${shellQuote(container)} rm -f ${shellQuote(dumpFile)}`
         const dump = await exec(client, dumpCmd, { timeoutMs: 120000 })
@@ -516,7 +516,7 @@ export async function restoreBackup(
         // Pipe the dump file from the host into the container's mysql client.
         const restoreCmd =
           `gunzip -c ${shellQuote(dumpPath)} | ` +
-          `docker exec -i ${shellQuote(container)} sh -c 'mysql -u root -p${shellQuote(dbPass)} ${shellQuote(dbRow.name)}' 2>&1`
+          `docker exec -i ${shellQuote(container)} sh -c 'if command -v mariadb >/dev/null 2>&1; then mariadb -u${shellQuote(dbRow.username)} -p${shellQuote(dbPass)} ${shellQuote(dbRow.name)}; else mysql -u${shellQuote(dbRow.username)} -p${shellQuote(dbPass)} ${shellQuote(dbRow.name)}; fi' 2>&1`
         const r = await exec(client, restoreCmd, { timeoutMs: 300000 })
         if (r.exitCode !== 0) {
           log(`WARNING: restore for ${dbRow.name} failed: ${(r.stderr || r.stdout).slice(0, 200)}`)
