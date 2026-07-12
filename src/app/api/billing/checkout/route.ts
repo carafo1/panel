@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
 import { processEvent } from '@/lib/automation'
 import { isStripeDemoMode } from '@/lib/stripe'
+import { BRAND_DOMAIN, NS1_HOSTNAME, NS2_HOSTNAME } from '@/lib/brand-config'
 import { createNotification } from '@/lib/notifications'
 import {
   processPayment,
@@ -144,7 +145,7 @@ export async function POST(request: Request) {
       if (type === 'hosting' || type === 'both') {
         const name = projectName || `My ${plan.name} Project`
         const slug = slugify(name) + '-' + Date.now().toString(36)
-        const subdomain = `${slug}.deployhub.io`
+        const subdomain = `${slug}.${BRAND_DOMAIN}`
         const fw = framework || 'nextjs'
 
         const servers = await db.server.findMany({
@@ -203,11 +204,7 @@ export async function POST(request: Request) {
             expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
             autoRenew: true,
             whoisPrivacy: true,
-            nameservers: JSON.stringify([
-              'ns1.deployhub.io',
-              'ns2.deployhub.io',
-              'ns3.deployhub.io',
-            ]),
+            nameservers: JSON.stringify([NS1_HOSTNAME, NS2_HOSTNAME]),
           },
         })
 

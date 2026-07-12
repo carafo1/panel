@@ -1121,7 +1121,7 @@ function DnsSection({ domain, onUpdated }: { domain: Domain; onUpdated: () => vo
   const [records, setRecords] = useState<DnsRecord[]>([])
   const [saving, setSaving] = useState(false)
   const [showEmailGen, setShowEmailGen] = useState(false)
-  const [mxTarget, setMxTarget] = useState('mail.deployhub.io')
+  const [mxTarget, setMxTarget] = useState('mail.apsamo.com')
 
   useEffect(() => {
     setRecords(domain.dnsRecords || [])

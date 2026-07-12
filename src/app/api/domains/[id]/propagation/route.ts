@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
+import { NS1_HOSTNAME, NS2_HOSTNAME } from '@/lib/brand-config'
 
 interface PropagationChecker {
   location: string
@@ -111,7 +112,7 @@ export async function GET(
 
     const nameservers: string[] = domain.nameservers
       ? JSON.parse(domain.nameservers)
-      : ['ns1.deployhub.io', 'ns2.deployhub.io']
+      : [NS1_HOSTNAME, NS2_HOSTNAME]
 
     const records: RecordPropagation[] = domain.dnsRecords.map((record, index) => {
       const propagation = simulatePropagation(

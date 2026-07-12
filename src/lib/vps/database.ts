@@ -331,17 +331,24 @@ export async function provisionProjectDatabase(
           throw new Error(`docker run failed: ${run.stderr || run.stdout}`)
         }
 
-        // Wait for the DB to be ready. mariadb-admin/mysqladmin ping for
-        // MySQL/MariaDB, pg_isready for PostgreSQL. Up to 30 retries (60s).
+        // Wait for the DB to be READY FOR THE APP USER, not merely answering
+        // pings. MySQL/MariaDB entrypoints run a temporary init server first —
+        // it answers `ping` (with "access denied") several seconds BEFORE the
+        // MYSQL_USER account exists, so a ping-based gate can declare victory
+        // while the first real connection would still fail. Authenticating a
+        // `SELECT 1` as the provisioned user is the only probe that proves the
+        // database is actually usable. Up to 30 retries (60s).
+        // (dbUser/dbName/dbPass are generated alphanumeric — safe to inline.)
         log('Waiting for database to accept connections…')
+        const mysqlAuthProbe = `mariadb -u${dbUser} -p${dbPass} -e 'SELECT 1' ${dbName} 2>/dev/null || mysql -u${dbUser} -p${dbPass} -e 'SELECT 1' ${dbName} 2>/dev/null`
         const readyCmd = isPostgres
           ? `docker exec ${containerName} pg_isready -U ${shellQuote(dbUser)} -d ${shellQuote(dbName)}`
-          : mysqlPingCmd(containerName)
+          : `docker exec ${containerName} sh -c ${shellQuote(mysqlAuthProbe)}`
         for (let i = 0; i < 30; i++) {
           const ping = await exec(client, readyCmd, { timeoutMs: 10000 })
           const ready = isPostgres
             ? ping.exitCode === 0 && /accepting connections/i.test(ping.stdout)
-            : mysqlPingIsAlive(ping)
+            : ping.exitCode === 0
           if (ready) {
             log('Database is ready.')
             break

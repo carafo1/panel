@@ -29,6 +29,7 @@
  *  - Rate-limit aware (429 → honours Retry-After).
  */
 import { isDynadotDemoMode } from './dynadot'
+import { NS1_HOSTNAME, NS2_HOSTNAME } from './brand-config'
 
 const API_BASE = 'https://api.dynadot.com/api3.json'
 const MAX_RETRIES = 3
@@ -517,7 +518,7 @@ class DynadotService {
         status: 'active',
         expiry: expiry.toISOString(),
         registeredAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
-        nameservers: ['ns1.deployhub.io', 'ns2.deployhub.io'],
+        nameservers: [NS1_HOSTNAME, NS2_HOSTNAME],
         locked: true,
         whoisPrivacy: true,
         autoRenew: true,

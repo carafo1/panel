@@ -197,7 +197,7 @@ ${ts} ✓ Generating static pages
 ${ts} ✓ Finalizing page optimization
 ${ts} > Deploying to server...
 ${ts} ✓ Deployment successful!
-${ts} > Live at https://${deployment.project?.subdomain || 'myapp'}.deployhub.io`
+${ts} > Live at https://${deployment.project?.subdomain || 'myapp.apsamo.com'}`
 }
 
 function colorizeLogLine(line: string): React.ReactNode {

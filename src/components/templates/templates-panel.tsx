@@ -179,7 +179,7 @@ export function TemplatesPanel() {
 
   const subdomain = useMemo(() => {
     const slug = slugify(projectName)
-    return slug ? `${slug}.deployhub.io` : ''
+    return slug ? `${slug}.apsamo.com` : ''
   }, [projectName])
 
   // ── Handlers ────────────────────────────────────────────────────────────

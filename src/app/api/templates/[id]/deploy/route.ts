@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
 import { processEvent } from '@/lib/automation'
+import { BRAND_DOMAIN } from '@/lib/brand-config'
 
 function slugify(text: string): string {
   return text
@@ -78,7 +79,7 @@ export async function POST(
 
     // Generate slug and subdomain
     const slug = slugify(projectName.trim())
-    const subdomain = `${slug}.deployhub.io`
+    const subdomain = `${slug}.${BRAND_DOMAIN}`
 
     // Check if slug is unique
     const existingProject = await db.project.findFirst({ where: { slug } })

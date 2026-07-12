@@ -642,7 +642,7 @@ function CheckoutDialog({
                     onChange={(e) => setProjectName(e.target.value)}
                   />
                   <p className="text-xs text-muted-foreground">
-                    A subdomain will be auto-generated (e.g., my-awesome-project.deployhub.io)
+                    A subdomain will be auto-generated (e.g., my-awesome-project.apsamo.com)
                   </p>
                 </div>
                 <div className="space-y-2">

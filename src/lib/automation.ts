@@ -1,6 +1,7 @@
 import { db } from '@/lib/db'
 import { createNotification } from '@/lib/notifications'
 import { slugify } from '@/lib/utils'
+import { BRAND_DOMAIN } from '@/lib/brand-config'
 import { getContainerStatus, isVpsDemoMode } from '@/lib/vps'
 
 export type EventType =
@@ -202,7 +203,7 @@ async function executeAction(
           type: 'error',
         })
       }
-      return { deploymentId: `dep-${Date.now()}`, status: deployed ? 'deployed' : 'failed', url: deployed ? `https://${slugify((payload.projectName as string) || 'app')}.deployhub.io` : undefined }
+      return { deploymentId: `dep-${Date.now()}`, status: deployed ? 'deployed' : 'failed', url: deployed ? `https://${slugify((payload.projectName as string) || 'app')}.${BRAND_DOMAIN}` : undefined }
     }
 
     case 'register_domain': {
