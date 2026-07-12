@@ -20,7 +20,8 @@ export const metadata: Metadata = {
   keywords: ["Apsamo Technology", "Web Development", "Hosting", "Domains", "Deployment", "SaaS", "Next.js"],
   authors: [{ name: "Apsamo Technology" }],
   icons: {
-    icon: "/apsamo-favicon.svg",
+    icon: "/apsamo-icon.png",
+    apple: "/apsamo-icon.png",
   },
   openGraph: {
     title: "Apsamo Technology",
