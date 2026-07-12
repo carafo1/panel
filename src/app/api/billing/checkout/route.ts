@@ -4,6 +4,7 @@ import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
 import { processEvent } from '@/lib/automation'
 import { isStripeDemoMode } from '@/lib/stripe'
 import { BRAND_DOMAIN, NS1_HOSTNAME, NS2_HOSTNAME } from '@/lib/brand-config'
+import { getPriceForDomain } from '@/lib/pricing'
 import { createNotification } from '@/lib/notifications'
 import {
   processPayment,
@@ -84,12 +85,23 @@ export async function POST(request: Request) {
       )
     }
 
-    // Calculate amount
+    // Calculate amount. For domain purchases, charge the real per-TLD selling
+    // price (wholesale + markup) from the DomainPrice table — a flat $12.99 fee
+    // gave away margin on expensive TLDs (.ai ≈ $95, .io ≈ $39) and could
+    // overcharge on cheap ones. Falls back to $12.99 only when no priced row
+    // is found for the domain's TLD.
+    let domainFee = 12.99
+    if ((type === 'domain' || type === 'both') && typeof domainName === 'string' && domainName.trim()) {
+      const priceRow = await getPriceForDomain(domainName.trim().toLowerCase())
+      if (priceRow?.registration && priceRow.registration > 0) {
+        domainFee = priceRow.registration
+      }
+    }
     let amount = plan.price
     if (type === 'domain') {
-      amount = 12.99 // Domain registration fee
+      amount = domainFee
     } else if (type === 'both') {
-      amount = plan.price + 12.99
+      amount = plan.price + domainFee
     }
 
     // ── Validate requested method is active ───────────────────────
