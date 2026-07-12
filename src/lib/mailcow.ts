@@ -30,6 +30,10 @@ function getConfig(): MailcowConfig | null {
   const url = process.env.MAILCOW_API_URL
   const key = process.env.MAILCOW_API_KEY
   if (!url || !key) return null
+  // Treat the .env.example placeholders as "not configured". A literal
+  // "replace-with-…" key would otherwise read as real and make every Mailcow
+  // call hit a non-existent server — or be reported to customers as working.
+  if (/^replace-with/i.test(key) || url === 'https://mail.example.com') return null
   // Normalise: callers may include or omit the trailing /api/v1.
   const trimmed = url.replace(/\/+$/, '')
   return { url: trimmed, key }
