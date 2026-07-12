@@ -41,6 +41,7 @@ import {
   deleteMailbox,
   verifyEmailSetup,
   getMailServerInfo,
+  isMailcowConfigured,
 } from '@/lib/mailcow'
 import { encrypt } from '@/lib/encryption'
 import { deployProject, removeProjectContainer } from '@/lib/vps'
@@ -263,7 +264,12 @@ export async function startProvisioning(
   req: ProvisioningRequest
 ): Promise<{ jobId: string; status: 'started' | 'failed'; error?: string }> {
   const includeHosting = req.includeHosting ?? true
-  const includeEmail = req.includeEmail ?? true
+  // Only run the email step when a real Mailcow server is configured. Without
+  // it, the step would either fake mailboxes (falsely telling the customer email
+  // works) or fail against a non-existent server (forcing every job to
+  // "partial"). Skipping keeps the result honest; it auto-enables the moment
+  // MAILCOW_API_URL/KEY are set to real values.
+  const includeEmail = (req.includeEmail ?? true) && isMailcowConfigured()
 
   try {
     // 1. Create the ProvisioningJob record.
@@ -689,9 +695,12 @@ export async function runProvisioningPipeline(
 
   // Send a notification to the user.
   const notifType = overallStatus === 'success' ? 'success' : overallStatus === 'partial' ? 'warning' : 'error'
+  const configuredServices = ['Domain', 'DNS']
+  if (hostingResult) configuredServices.push('hosting')
+  if (emailResult) configuredServices.push('email')
   const notifMsg =
     overallStatus === 'success'
-      ? `Your deployment ${job.domainName} is ready! Domain, DNS, hosting, and email are all configured.`
+      ? `Your deployment ${job.domainName} is ready! ${configuredServices.join(', ')} configured.`
       : overallStatus === 'partial'
         ? `Provisioning of ${job.domainName} is partially complete. Some services may need attention.`
         : `Provisioning of ${job.domainName} failed. Please check the job details.`
