@@ -1,5 +1,6 @@
 import { db } from '@/lib/db'
 import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
+import { BRAND_DOMAIN } from '@/lib/brand-config'
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -134,9 +135,10 @@ export async function GET(
                 const project = await db.project.findUnique({
                   where: { id: current.projectId },
                 })
+                // project.subdomain is already a full hostname (slug.<brand>).
                 const deployUrl = project?.subdomain
-                  ? `https://${project.subdomain}.deployhub.io`
-                  : `https://${current.projectId}.deployhub.io`
+                  ? `https://${project.subdomain}`
+                  : `https://${current.projectId}.${BRAND_DOMAIN}`
 
                 await db.deployment.update({
                   where: { id },

@@ -78,10 +78,13 @@ async function getHandler(request: Request) {
 
     // ─── Suggestions across other TLDs ──────────────────────────────────
     const allPrices = await getAllPrices()
-    const suggestionTlds = allPrices
-      .filter((p) => p.tld !== tld)
-      .slice(0, 8)
-      .map((p) => p.tld)
+    // Suggest popular TLDs first — plain alphabetical order surfaces
+    // .ac/.academy/.accountant, which nobody is shopping for.
+    const POPULAR_TLDS = ['.com', '.net', '.org', '.io', '.co', '.dev', '.app', '.xyz', '.ai', '.store']
+    const activeTldSet = new Set(allPrices.map((p) => p.tld))
+    const popularFirst = POPULAR_TLDS.filter((t) => t !== tld && activeTldSet.has(t))
+    const remaining = allPrices.map((p) => p.tld).filter((t) => t !== tld && !popularFirst.includes(t))
+    const suggestionTlds = [...popularFirst, ...remaining].slice(0, 8)
     const baseName = domainLower.substring(0, domainLower.lastIndexOf('.'))
     const suggestionDomains = suggestionTlds.map((t) => `${baseName}${t}`)
 
@@ -183,13 +186,11 @@ async function postHandler(request: Request) {
     const baseName = lastDot >= 0 ? domainLower.substring(0, lastDot) : domainLower
 
     let dynadotAvailable: boolean | null = null
-    let dynadotPrice: number | null = null
     try {
       const results = await searchDomains([domainLower])
       const hit = results.find((r) => r.domain.toLowerCase() === domainLower)
       if (hit) {
         dynadotAvailable = hit.available
-        dynadotPrice = typeof hit.price === 'number' ? hit.price : null
       }
     } catch (err) {
       // SECURITY: log server-side, return generic error to client
@@ -210,15 +211,25 @@ async function postHandler(request: Request) {
       domainLower.includes('taken') || domainLower.includes('unavailable')
 
     let available: boolean
-    let price: number | null
-
     if (dynadotAvailable !== null) {
       available = dynadotAvailable
-      price = dynadotPrice ?? TLD_PRICES[tld] ?? 19.99
     } else {
       // Demo-mode fallback only
       available = !simulatedTaken
-      price = available ? TLD_PRICES[tld] ?? 19.99 : null
+    }
+
+    // PRICING: always quote from the DomainPrice table (wholesale + markup).
+    // The registrar search result carries the WHOLESALE price — quoting that
+    // to the customer would forfeit the entire markup.
+    const sellingRow = await getPriceForDomain(domainLower)
+    const price: number | null = available
+      ? sellingRow?.registration ?? TLD_PRICES[tld] ?? 19.99
+      : null
+
+    const allSelling = await getAllPrices()
+    const sellingFor = (d: string): number => {
+      const sugTld = d.substring(d.lastIndexOf('.'))
+      return allSelling.find((p) => p.tld === sugTld)?.registration ?? TLD_PRICES[sugTld] ?? 19.99
     }
 
     const suggestionTlds = Object.keys(TLD_PRICES).filter((t) => t !== tld).slice(0, 5)
@@ -228,20 +239,17 @@ async function postHandler(request: Request) {
     try {
       const sugResults = await searchDomains(suggestionDomains)
       const sugByDomain = new Map(sugResults.map((r) => [r.domain.toLowerCase(), r]))
-      suggestions = suggestionDomains.map((d) => {
-        const hit = sugByDomain.get(d)
-        const sugTld = d.substring(d.lastIndexOf('.'))
-        return {
-          domain: d,
-          available: hit ? hit.available : true,
-          price: hit && typeof hit.price === 'number' ? hit.price : TLD_PRICES[sugTld] ?? 19.99,
-        }
-      })
+      suggestions = suggestionDomains.map((d) => ({
+        domain: d,
+        available: sugByDomain.get(d)?.available ?? true,
+        price: sellingFor(d),
+      }))
     } catch {
-      suggestions = suggestionDomains.map((d) => {
-        const sugTld = d.substring(d.lastIndexOf('.'))
-        return { domain: d, available: true, price: TLD_PRICES[sugTld] ?? 19.99 }
-      })
+      suggestions = suggestionDomains.map((d) => ({
+        domain: d,
+        available: true,
+        price: sellingFor(d),
+      }))
     }
 
     if (!available) {

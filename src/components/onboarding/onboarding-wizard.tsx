@@ -193,7 +193,7 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
       })
       const data = await res.json()
       if (res.ok) {
-        const url = data.project?.subdomain || `${slug}.deployhub.io`
+        const url = data.project?.subdomain || `${slug}.apsamo.com`
         setDeployUrl(url)
         setDeploySuccess(true)
         toast.success('Deployment successful!')
@@ -442,7 +442,7 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                   <div className="text-left">
                     <p className="font-semibold text-sm">Use a free subdomain</p>
                     <p className="text-xs text-muted-foreground">
-                      <span className="text-indigo-600 font-mono">{slug}.deployhub.io</span> — Free with any plan
+                      <span className="text-indigo-600 font-mono">{slug}.apsamo.com</span> — Free with any plan
                     </p>
                   </div>
                   <Badge variant="secondary" className="ml-auto bg-indigo-500/10 text-indigo-600 text-[10px]">FREE</Badge>
@@ -567,7 +567,7 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                   <div className="flex items-center justify-between py-2 border-b border-border">
                     <span className="text-sm text-muted-foreground">Domain</span>
                     <span className="font-semibold text-sm font-mono">
-                      {useFreeSubdomain ? `${slug}.deployhub.io` : selectedDomain}
+                      {useFreeSubdomain ? `${slug}.apsamo.com` : selectedDomain}
                     </span>
                   </div>
                   <div className="flex items-center justify-between py-2 border-b border-border">

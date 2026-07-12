@@ -9,6 +9,7 @@ import {
   isDynadotDemoMode,
 } from '@/lib/dynadot'
 import { getPriceForDomain } from '@/lib/pricing'
+import { NS1_HOSTNAME, NS2_HOSTNAME } from '@/lib/brand-config'
 import crypto from 'crypto'
 
 /**
@@ -218,11 +219,7 @@ export async function POST(request: Request) {
         expiresAt: expiryDate,
         autoRenew: true,
         whoisPrivacy: true,
-        nameservers: JSON.stringify([
-          'ns1.deployhub.io',
-          'ns2.deployhub.io',
-          'ns3.deployhub.io',
-        ]),
+        nameservers: JSON.stringify([NS1_HOSTNAME, NS2_HOSTNAME]),
       },
     })
 
