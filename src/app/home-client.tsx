@@ -51,6 +51,7 @@ import UptimePanel from '@/components/monitoring/uptime-panel'
 import ProvisioningPanel from '@/components/provisioning/provisioning-panel'
 import { CommandPalette } from '@/components/command-palette'
 import { Search, Zap } from 'lucide-react'
+import { LogoMark } from '@/components/ui/logo'
 import { migrateStorageKeys } from '@/lib/migrate-storage'
 
 // ── Sidebar nav items ──────────────────────────────────────────────────
@@ -190,9 +191,7 @@ function Dashboard() {
       >
         {/* Logo */}
         <div className="flex items-center gap-2.5 px-4 py-4 border-b">
-          <div className="size-8 rounded-lg bg-indigo-600 flex items-center justify-center">
-            <Rocket className="size-4 text-white" />
-          </div>
+          <LogoMark className="size-8" />
           <span className="font-bold text-lg tracking-tight">Apsamo Panel</span>
           <Button
             variant="ghost"
@@ -322,7 +321,7 @@ function Dashboard() {
 
           {/* Footer */}
           <footer className="border-t px-4 py-4 text-center text-xs text-muted-foreground mt-auto">
-            © 2025 Apsamo Panel. All rights reserved.
+            © {new Date().getFullYear()} Apsamo Panel. All rights reserved.
           </footer>
         </div>
 

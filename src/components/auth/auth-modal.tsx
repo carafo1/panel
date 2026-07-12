@@ -1,7 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { Globe, Loader2, X, KeyRound, Mail, CheckCircle2, Shield, ArrowLeft } from 'lucide-react'
+import { Loader2, X, KeyRound, Mail, CheckCircle2, Shield, ArrowLeft } from 'lucide-react'
+import { LogoMark } from '@/components/ui/logo'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/store/auth-store'
 import type { AuthMode } from '@/store/app-store'
@@ -236,9 +237,7 @@ export function AuthModal({ mode, onModeChange, onClose }: AuthModalProps) {
         {/* Header */}
         <div className="text-center pt-8 pb-4 px-6">
           <div className="mx-auto mb-3 flex items-center justify-center gap-2">
-            <div className="flex size-10 items-center justify-center rounded-lg bg-indigo-500 text-white">
-              <Globe className="size-5" />
-            </div>
+            <LogoMark className="size-11" />
           </div>
           <h2 className="text-xl font-bold tracking-tight">Apsamo Technology</h2>
           <p className="text-sm text-muted-foreground mt-1">
