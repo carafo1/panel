@@ -46,20 +46,16 @@ interface LogoProps {
   subtitleClassName?: string
 }
 
-export function Logo({ className, showSubtitle = true, subtitleClassName }: LogoProps) {
+export function Logo({ className, showSubtitle = false, subtitleClassName }: LogoProps) {
   return (
     <div className={cn('flex items-center gap-2', className)}>
-      <LogoMark className="size-9" />
+      <div className="flex size-9 items-center justify-center rounded-lg bg-white shadow-sm ring-1 ring-black/5">
+        <LogoMark className="size-6" />
+      </div>
       <div className="flex flex-col leading-none">
-        <span className="text-lg font-extrabold tracking-tight text-foreground">Apsamo</span>
+        <span className="text-lg font-extrabold tracking-tight text-foreground">Apsamo Technology</span>
         {showSubtitle && (
-          <span
-            className={cn(
-              'text-[11px] font-semibold tracking-[0.08em]',
-              subtitleClassName
-            )}
-            style={{ color: BRAND_COLORS.indigo }}
-          >
+          <span className={cn('text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground', subtitleClassName)}>
             Technology
           </span>
         )}
