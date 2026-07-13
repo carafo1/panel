@@ -30,10 +30,14 @@ export function useCountUp(target: number, duration = 1800) {
         if (entry.isIntersecting && !started.current) {
           started.current = true
           const startTime = performance.now()
+          // Preserve one decimal for non-integer targets (e.g. 99.9 must not
+          // round up to 100); integers stay whole.
+          const decimals = Number.isInteger(target) ? 0 : 1
+          const factor = decimals ? 10 : 1
           const tick = (now: number) => {
             const progress = Math.min((now - startTime) / duration, 1)
             const eased = 1 - Math.pow(1 - progress, 3)
-            setValue(Math.round(eased * target))
+            setValue(progress >= 1 ? target : Math.round(eased * target * factor) / factor)
             if (progress < 1) requestAnimationFrame(tick)
           }
           requestAnimationFrame(tick)
