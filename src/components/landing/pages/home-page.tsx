@@ -13,6 +13,7 @@ import {
 import { DomainSearchWidget } from '../domain-search-widget'
 import { useAppStore } from '@/store/app-store'
 import { useSiteContent, resolveIcon } from '../site-data-context'
+import { HeroIllustration } from '../hero-illustration'
 
 const STATS = [
   { value: 10000, suffix: '+', label: 'Developers' },
@@ -96,40 +97,50 @@ export function HomePage({ onGetStarted }: HomePageProps) {
         <div className="aurora-blob aurora-blob-1" style={{ bottom: '-20%', left: '30%', width: '600px', height: '400px', background: 'radial-gradient(circle, #5D5CB8 0%, transparent 70%)', animationDelay: '4s' }} />
         <div className="absolute inset-0 dot-grid opacity-30 pointer-events-none" />
 
-        <div className="relative z-10 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-28 sm:py-36 lg:py-44 text-center">
-          <div className="animate-fade-in-up">
-            <span className="inline-flex items-center gap-2 mb-6 rounded-full glass px-4 py-1.5 text-sm text-indigo-200">
-              <Sparkles className="size-3.5 text-indigo-300" />
-              {getContent('home.hero.badge')}
-            </span>
+        <div className="relative z-10 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-20 sm:py-24 lg:py-28">
+          <div className="grid lg:grid-cols-2 gap-12 lg:gap-6 items-center">
+            {/* Vector illustration — left on desktop, below the copy on mobile */}
+            <div className="order-2 lg:order-1 flex justify-center lg:justify-start animate-fade-in-up" style={{ animationDelay: '0.35s' }}>
+              <HeroIllustration className="w-full max-w-[480px] lg:max-w-[560px]" />
+            </div>
+
+            {/* Copy — first on mobile, right on desktop */}
+            <div className="order-1 lg:order-2 text-center lg:text-left">
+              <div className="animate-fade-in-up">
+                <span className="inline-flex items-center gap-2 mb-6 rounded-full glass px-4 py-1.5 text-sm text-indigo-200">
+                  <Sparkles className="size-3.5 text-indigo-300" />
+                  {getContent('home.hero.badge')}
+                </span>
+              </div>
+
+              <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight leading-[1.05] mb-6 animate-fade-in-up" style={{ animationDelay: '0.15s' }}>
+                {getContent('home.hero.title')}
+              </h1>
+
+              <p className="max-w-xl mx-auto lg:mx-0 text-lg sm:text-xl text-zinc-300 mb-10 leading-relaxed animate-fade-in-up" style={{ animationDelay: '0.3s' }}>
+                {getContent('home.hero.subtitle')}
+              </p>
+
+              <div className="flex flex-col sm:flex-row items-center justify-center lg:justify-start gap-4 animate-fade-in-up" style={{ animationDelay: '0.45s' }}>
+                <Button size="lg" className="btn-shimmer relative bg-indigo-500 hover:bg-indigo-600 text-white px-8 h-12 text-base shadow-glow-indigo hover:shadow-glow-indigo-lg transition-all duration-300 hover:scale-105 border-0" onClick={onGetStarted}>
+                  {getContent('home.hero.ctaPrimary')}
+                  <ArrowRight className="size-4 ml-1" />
+                </Button>
+                <button onClick={() => setPublicPage({ page: 'services' })} className="group inline-flex items-center justify-center gap-2 h-12 px-8 text-base rounded-md glass text-white hover:bg-white/10 transition-all duration-300">
+                  <Play className="size-4 text-indigo-300" />
+                  {getContent('home.hero.ctaSecondary')}
+                </button>
+              </div>
+
+              <div className="mt-10 flex flex-wrap items-center justify-center lg:justify-start gap-x-8 gap-y-3 text-sm text-zinc-400 animate-fade-in-up" style={{ animationDelay: '0.6s' }}>
+                <span className="inline-flex items-center gap-2"><Check className="size-4 text-indigo-400" /> {getContent('home.hero.check1')}</span>
+                <span className="inline-flex items-center gap-2"><Check className="size-4 text-indigo-400" /> {getContent('home.hero.check2')}</span>
+                <span className="inline-flex items-center gap-2"><Check className="size-4 text-indigo-400" /> {getContent('home.hero.check3')}</span>
+              </div>
+            </div>
           </div>
 
-          <h1 className="text-5xl sm:text-6xl lg:text-8xl font-extrabold tracking-tight leading-[1.02] mb-6 animate-fade-in-up" style={{ animationDelay: '0.15s' }}>
-            {getContent('home.hero.title')}
-          </h1>
-
-          <p className="mx-auto max-w-2xl text-lg sm:text-xl text-zinc-300 mb-10 leading-relaxed animate-fade-in-up" style={{ animationDelay: '0.3s' }}>
-            {getContent('home.hero.subtitle')}
-          </p>
-
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 animate-fade-in-up" style={{ animationDelay: '0.45s' }}>
-            <Button size="lg" className="btn-shimmer relative bg-indigo-500 hover:bg-indigo-600 text-white px-8 h-12 text-base shadow-glow-indigo hover:shadow-glow-indigo-lg transition-all duration-300 hover:scale-105 border-0" onClick={onGetStarted}>
-              {getContent('home.hero.ctaPrimary')}
-              <ArrowRight className="size-4 ml-1" />
-            </Button>
-            <button onClick={() => setPublicPage({ page: 'services' })} className="group inline-flex items-center justify-center gap-2 h-12 px-8 text-base rounded-md glass text-white hover:bg-white/10 transition-all duration-300">
-              <Play className="size-4 text-indigo-300" />
-              {getContent('home.hero.ctaSecondary')}
-            </button>
-          </div>
-
-          <div className="mt-14 flex flex-wrap items-center justify-center gap-x-8 gap-y-3 text-sm text-zinc-400 animate-fade-in-up" style={{ animationDelay: '0.6s' }}>
-            <span className="inline-flex items-center gap-2"><Check className="size-4 text-indigo-400" /> {getContent('home.hero.check1')}</span>
-            <span className="inline-flex items-center gap-2"><Check className="size-4 text-indigo-400" /> {getContent('home.hero.check2')}</span>
-            <span className="inline-flex items-center gap-2"><Check className="size-4 text-indigo-400" /> {getContent('home.hero.check3')}</span>
-          </div>
-
-          {/* Domain search widget */}
+          {/* Domain search widget — full width beneath the hero */}
           <div className="mt-16 max-w-3xl mx-auto animate-fade-in-up" style={{ animationDelay: '0.75s' }}>
             <DomainSearchWidget
               onGetStarted={onGetStarted}
