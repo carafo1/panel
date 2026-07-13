@@ -100,6 +100,9 @@ export const DEFAULT_CONTENT: Record<string, string> = {
   // ── Home: Testimonials ────────────────────────────────────────────────
   'home.testimonials.badge': 'Loved by Developers',
   'home.testimonials.title': 'Trusted by teams shipping fast',
+  // Editable stats row + testimonials list (Admin → Pages → Home Page).
+  'home.stats.items': '10000|+|Developers\n99.9|%|Uptime SLA\n50000|+|Sites Hosted\n24|/7|Support',
+  'home.testimonials.items': 'Apsamo Technology cut our deployment time from hours to seconds. The domain integration alone saved us a full-time role.|Sarah Chen|CTO, Lumen Labs\nFrom MVP to 100k users without touching infrastructure. The SaaS toolkit is genuinely enterprise-grade.|Marcus Webb|Founder, Pulse\nThe best developer experience I have used in a decade. Real-time logs and instant rollbacks are a game changer.|Aisha Patel|Lead Dev, Nimbus',
 
   // ── Home: Pricing preview ─────────────────────────────────────────────
   'home.pricing.badge': 'Pricing',
@@ -293,6 +296,8 @@ export const CONTENT_GROUPS: ContentGroup[] = [
       { key: 'home.howItWorks.subtitle', label: 'How it works subtitle', type: 'textarea' },
       { key: 'home.testimonials.badge', label: 'Testimonials badge' },
       { key: 'home.testimonials.title', label: 'Testimonials title' },
+      { key: 'home.stats.items', label: 'Stats row', type: 'textarea', hint: 'One stat per line as value|suffix|label — e.g. 10000|+|Developers (up to 4). Clear the box to hide the whole stats section.' },
+      { key: 'home.testimonials.items', label: 'Testimonials', type: 'textarea', hint: 'One testimonial per line as quote|name|role — e.g. Great tool!|Jane Doe|CTO, Acme. Clear the box to hide the testimonials section.' },
       { key: 'home.pricing.badge', label: 'Pricing badge' },
       { key: 'home.pricing.title', label: 'Pricing title' },
       { key: 'home.pricing.subtitle', label: 'Pricing subtitle', type: 'textarea' },
