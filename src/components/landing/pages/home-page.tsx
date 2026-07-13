@@ -15,13 +15,6 @@ import { useAppStore } from '@/store/app-store'
 import { useSiteContent, resolveIcon } from '../site-data-context'
 import { HeroIllustration } from '../hero-illustration'
 
-const STATS = [
-  { value: 10000, suffix: '+', label: 'Developers' },
-  { value: 99.9, suffix: '%', label: 'Uptime SLA' },
-  { value: 50000, suffix: '+', label: 'Sites Hosted' },
-  { value: 24, suffix: '/7', label: 'Support' },
-]
-
 const BENTO_FEATURES = [
   { icon: Zap, title: 'Instant Deploys', desc: 'Push to git, go live in seconds with automatic build pipelines.' },
   { icon: Shield, title: 'Auto SSL & DNS', desc: 'Free SSL certificates and automatic DNS for every domain.' },
@@ -35,12 +28,6 @@ const HOW_IT_WORKS = [
   { step: 1, title: 'Connect', desc: 'Link your GitHub repo or upload your code. We support every framework.' },
   { step: 2, title: 'Deploy', desc: 'Automatic builds, instant rollbacks, and zero-downtime deploys.' },
   { step: 3, title: 'Scale', desc: 'Auto-scaling infrastructure grows with your traffic automatically.' },
-]
-
-const TESTIMONIALS = [
-  { name: 'Sarah Chen', role: 'CTO, Lumen Labs', initials: 'SC', quote: 'Apsamo Technology cut our deployment time from hours to seconds. The domain integration alone saved us a full-time role.' },
-  { name: 'Marcus Webb', role: 'Founder, Pulse', initials: 'MW', quote: 'From MVP to 100k users without touching infrastructure. The SaaS toolkit is genuinely enterprise-grade.' },
-  { name: 'Aisha Patel', role: 'Lead Dev, Nimbus', initials: 'AP', quote: 'The best developer experience I have used in a decade. Real-time logs and instant rollbacks are a game changer.' },
 ]
 
 const PRICING_PREVIEW = [
@@ -76,11 +63,36 @@ export function HomePage({ onGetStarted }: HomePageProps) {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean)
-  const stat0 = useCountUp(STATS[0].value, 2000)
-  const stat1 = useCountUp(STATS[1].value, 2000)
-  const stat2 = useCountUp(STATS[2].value, 2000)
-  const stat3 = useCountUp(STATS[3].value, 2000)
+
+  // Stats + testimonials are admin-editable content (Admin → Pages → Home Page).
+  // Stats: one per line as "value|suffix|label"; up to 4. Fixed 4 count-up hooks
+  // keep hook order stable regardless of how many stats the admin configures.
+  const stats = getContent('home.stats.items')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .slice(0, 4)
+    .map((l) => {
+      const [value = '', suffix = '', label = ''] = l.split('|').map((s) => s.trim())
+      return { value: parseFloat(value) || 0, suffix, label }
+    })
+  const stat0 = useCountUp(stats[0]?.value ?? 0, 2000)
+  const stat1 = useCountUp(stats[1]?.value ?? 0, 2000)
+  const stat2 = useCountUp(stats[2]?.value ?? 0, 2000)
+  const stat3 = useCountUp(stats[3]?.value ?? 0, 2000)
   const statRefs = [stat0, stat1, stat2, stat3]
+
+  // Testimonials: one per line as "quote|name|role"; initials derived from name.
+  const testimonials = getContent('home.testimonials.items')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l) => {
+      const [quote = '', name = '', role = ''] = l.split('|').map((s) => s.trim())
+      const initials = name.split(/\s+/).map((w) => w[0] || '').join('').slice(0, 2).toUpperCase()
+      return { quote, name, role, initials }
+    })
+    .filter((t) => t.quote)
 
   const spotlightRef1 = useSpotlight<HTMLDivElement>()
   const spotlightRef2 = useSpotlight<HTMLDivElement>()
@@ -167,11 +179,12 @@ export function HomePage({ onGetStarted }: HomePageProps) {
       </section>
 
       {/* STATS */}
+      {stats.length > 0 && (
       <section className="py-20 bg-background">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
-            {STATS.map((stat, i) => (
-              <div key={stat.label} className="rounded-2xl glass-light dark:glass p-6 shadow-modern">
+          <div className={`grid grid-cols-2 gap-6 text-center ${stats.length >= 4 ? 'md:grid-cols-4' : stats.length === 3 ? 'md:grid-cols-3' : ''}`}>
+            {stats.map((stat, i) => (
+              <div key={stat.label || i} className="rounded-2xl glass-light dark:glass p-6 shadow-modern">
                 <p ref={statRefs[i].ref} className="text-3xl sm:text-4xl font-extrabold text-gradient-brand">{statRefs[i].value}{stat.suffix}</p>
                 <p className="text-sm text-muted-foreground mt-1">{stat.label}</p>
               </div>
@@ -179,6 +192,7 @@ export function HomePage({ onGetStarted }: HomePageProps) {
           </div>
         </div>
       </section>
+      )}
 
       {/* SERVICES */}
       <section className="py-24 bg-background">
@@ -281,6 +295,7 @@ export function HomePage({ onGetStarted }: HomePageProps) {
       </section>
 
       {/* TESTIMONIALS */}
+      {testimonials.length > 0 && (
       <section className="py-24 bg-muted/30">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <ScrollReveal>
@@ -290,7 +305,7 @@ export function HomePage({ onGetStarted }: HomePageProps) {
             </div>
           </ScrollReveal>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {TESTIMONIALS.map((t, i) => (
+            {testimonials.map((t, i) => (
               <StaggerCard key={t.name} index={i}>
                 <Card className="relative border hover:border-indigo-500/30 hover:shadow-modern-lg transition-all duration-500 h-full bg-card/80 backdrop-blur-sm">
                   <CardContent className="p-6">
@@ -314,6 +329,7 @@ export function HomePage({ onGetStarted }: HomePageProps) {
           </div>
         </div>
       </section>
+      )}
 
       {/* PRICING PREVIEW */}
       <section className="py-24 bg-background">
