@@ -55,6 +55,22 @@ interface HomePageProps {
 export function HomePage({ onGetStarted }: HomePageProps) {
   const { setPublicPage } = useAppStore()
   const { services, getContent } = useSiteContent()
+  // Pricing preview comes from the live "Web Hosting" service (real Plan prices
+  // via the CMS live overlay), falling back to the static preview only until the
+  // service data loads — so the home page can never show a price that differs
+  // from checkout.
+  const hostingService = services.find((s) => /host/i.test(s.slug) || /host/i.test(s.name))
+  const pricingPreview =
+    hostingService && hostingService.plans.length > 0
+      ? hostingService.plans.map((p) => ({
+          name: p.name,
+          price: p.price,
+          period: p.period,
+          desc: p.description,
+          features: p.features,
+          popular: p.popular,
+        }))
+      : PRICING_PREVIEW
   const techStack = getContent('home.techStack.items')
     .split(',')
     .map((s) => s.trim())
@@ -299,7 +315,7 @@ export function HomePage({ onGetStarted }: HomePageProps) {
             </div>
           </ScrollReveal>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
-            {PRICING_PREVIEW.map((plan, i) => (
+            {pricingPreview.map((plan, i) => (
               <StaggerCard key={plan.name} index={i}>
                 <Card className={`relative flex flex-col h-full transition-all duration-500 bg-card/80 backdrop-blur-sm ${plan.popular ? 'border-indigo-500 shadow-glow-indigo scale-[1.03] shimmer-border' : 'hover:border-indigo-500/30 hover:shadow-modern-lg'}`}>
                   {plan.popular && (
