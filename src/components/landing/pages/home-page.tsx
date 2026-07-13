@@ -99,13 +99,8 @@ export function HomePage({ onGetStarted }: HomePageProps) {
 
         <div className="relative z-10 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-20 sm:py-24 lg:py-28">
           <div className="grid lg:grid-cols-2 gap-12 lg:gap-6 items-center">
-            {/* Vector illustration — left on desktop, below the copy on mobile */}
-            <div className="order-2 lg:order-1 flex justify-center lg:justify-start animate-fade-in-up" style={{ animationDelay: '0.35s' }}>
-              <HeroIllustration className="w-full max-w-[480px] lg:max-w-[560px]" />
-            </div>
-
-            {/* Copy — first on mobile, right on desktop */}
-            <div className="order-1 lg:order-2 text-center lg:text-left">
+            {/* Copy — first on mobile, left on desktop */}
+            <div className="order-1 lg:order-1 text-center lg:text-left">
               <div className="animate-fade-in-up">
                 <span className="inline-flex items-center gap-2 mb-6 rounded-full glass px-4 py-1.5 text-sm text-indigo-200">
                   <Sparkles className="size-3.5 text-indigo-300" />
@@ -137,6 +132,11 @@ export function HomePage({ onGetStarted }: HomePageProps) {
                 <span className="inline-flex items-center gap-2"><Check className="size-4 text-indigo-400" /> {getContent('home.hero.check2')}</span>
                 <span className="inline-flex items-center gap-2"><Check className="size-4 text-indigo-400" /> {getContent('home.hero.check3')}</span>
               </div>
+            </div>
+
+            {/* Vector illustration — right on desktop, below the copy on mobile */}
+            <div className="order-2 lg:order-2 flex justify-center lg:justify-end animate-fade-in-up" style={{ animationDelay: '0.35s' }}>
+              <HeroIllustration className="w-full max-w-[480px] lg:max-w-[560px]" />
             </div>
           </div>
 
