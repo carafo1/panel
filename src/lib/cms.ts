@@ -211,8 +211,52 @@ function findIconName(icon: LucideIcon): string | undefined {
 }
 
 /**
+ * Overlay LIVE pricing onto CMS services so the public marketing site can never
+ * drift from what checkout actually charges:
+ *   • Web-hosting plans   ← the Plan table (matched cheapest→cheapest tier).
+ *   • Domain plans (.com…) ← DomainPrice.registration (matched by TLD = name).
+ * Services with no billing counterpart (bespoke web-dev, SaaS) are left exactly
+ * as stored. Applied on PUBLIC reads only — the admin editor keeps showing the
+ * stored values it edits.
+ */
+async function applyLivePricing(services: CmsService[]): Promise<CmsService[]> {
+  const [plans, domainPrices] = await Promise.all([
+    db.plan.findMany({ orderBy: { price: 'asc' } }),
+    db.domainPrice.findMany({ where: { active: true }, select: { tld: true, registration: true } }),
+  ])
+  const domainByTld = new Map(domainPrices.map((d) => [d.tld.toLowerCase(), d.registration]))
+  const hostingTierPrices = plans.map((p) => p.price) // ascending
+
+  return services.map((svc) => {
+    const isDomains = svc.plans.length > 0 && svc.plans.every((p) => p.name.trim().startsWith('.'))
+    const isHosting = /host/i.test(svc.slug) || /host/i.test(svc.name)
+
+    if (isDomains) {
+      return {
+        ...svc,
+        plans: svc.plans.map((p) => {
+          const live = domainByTld.get(p.name.trim().toLowerCase())
+          return typeof live === 'number' && live > 0 ? { ...p, price: live } : p
+        }),
+      }
+    }
+    if (isHosting && hostingTierPrices.length > 0) {
+      // Map cheapest→cheapest tier by rank, preserving the display order.
+      const ranked = svc.plans.map((p, idx) => ({ idx, price: p.price })).sort((a, b) => a.price - b.price)
+      const newPlans = svc.plans.map((p) => ({ ...p }))
+      ranked.forEach(({ idx }, rank) => {
+        if (rank < hostingTierPrices.length) newPlans[idx].price = hostingTierPrices[rank]
+      })
+      return { ...svc, plans: newPlans }
+    }
+    return svc
+  })
+}
+
+/**
  * Get all published (visible) services for the public site, sorted by order.
  * Auto-seeds the DB on first call. Includes plans, highlights, and FAQs.
+ * Hosting + domain prices are overlaid live from the billing tables.
  */
 export async function getPublishedServices(): Promise<CmsService[]> {
   await seedServicesIfEmpty()
@@ -221,7 +265,7 @@ export async function getPublishedServices(): Promise<CmsService[]> {
     include: { plans: true, highlights: true, faqs: true },
     orderBy: { order: 'asc' },
   })
-  return rows.map(serialiseService)
+  return applyLivePricing(rows.map(serialiseService))
 }
 
 /**
@@ -245,7 +289,9 @@ export async function getServiceBySlug(slug: string): Promise<CmsService | null>
     where: { slug, visible: true },
     include: { plans: true, highlights: true, faqs: true },
   })
-  return row ? serialiseService(row) : null
+  if (!row) return null
+  const [withLivePricing] = await applyLivePricing([serialiseService(row)])
+  return withLivePricing
 }
 
 /**
