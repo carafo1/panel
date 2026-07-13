@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { Menu, X, ChevronDown, ArrowRight } from 'lucide-react'
 import { Logo } from '@/components/ui/logo'
 import { Button } from '@/components/ui/button'
+import { ThemeToggle } from '@/components/ui/theme-toggle'
 import { ScrollProgress } from './ui-helpers'
 import { cn } from '@/lib/utils'
 import { useAppStore, type PublicPageState } from '@/store/app-store'
@@ -176,6 +177,7 @@ export function SiteLayout({ children, onGetStarted }: SiteLayoutProps) {
             </nav>
 
             <div className="hidden md:flex items-center gap-2">
+              <ThemeToggle />
               <Button variant="ghost" size="sm" onClick={onGetStarted} className="text-muted-foreground hover:text-foreground">
                 {getContent('nav.signin')}
               </Button>
@@ -188,15 +190,18 @@ export function SiteLayout({ children, onGetStarted }: SiteLayoutProps) {
               </Button>
             </div>
 
-            {/* Mobile toggle */}
-            <button
-              className="md:hidden inline-flex items-center justify-center size-10 rounded-md text-foreground hover:bg-accent"
-              onClick={() => setMobileOpen((v) => !v)}
-              aria-label="Toggle menu"
-              aria-expanded={mobileOpen}
-            >
-              {mobileOpen ? <X className="size-5" /> : <Menu className="size-5" />}
-            </button>
+            {/* Mobile: theme toggle + menu */}
+            <div className="md:hidden flex items-center gap-1">
+              <ThemeToggle />
+              <button
+                className="inline-flex items-center justify-center size-10 rounded-md text-foreground hover:bg-accent"
+                onClick={() => setMobileOpen((v) => !v)}
+                aria-label="Toggle menu"
+                aria-expanded={mobileOpen}
+              >
+                {mobileOpen ? <X className="size-5" /> : <Menu className="size-5" />}
+              </button>
+            </div>
           </div>
         </div>
 

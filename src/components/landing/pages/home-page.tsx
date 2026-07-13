@@ -97,7 +97,7 @@ export function HomePage({ onGetStarted }: HomePageProps) {
         <div className="aurora-blob aurora-blob-1" style={{ bottom: '-20%', left: '30%', width: '600px', height: '400px', background: 'radial-gradient(circle, #5D5CB8 0%, transparent 70%)', animationDelay: '4s' }} />
         <div className="absolute inset-0 dot-grid opacity-30 pointer-events-none" />
 
-        <div className="relative z-10 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-20 sm:py-24 lg:py-28">
+        <div className="relative z-10 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pt-10 sm:pt-12 lg:pt-14 pb-20 sm:pb-24 lg:pb-28">
           <div className="grid lg:grid-cols-2 gap-12 lg:gap-6 items-center">
             {/* Copy — first on mobile, left on desktop */}
             <div className="order-1 lg:order-1 text-center lg:text-left">
@@ -108,7 +108,7 @@ export function HomePage({ onGetStarted }: HomePageProps) {
                 </span>
               </div>
 
-              <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight leading-[1.05] mb-6 animate-fade-in-up" style={{ animationDelay: '0.15s' }}>
+              <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight leading-[1.05] mb-6 animate-fade-in-up bg-gradient-to-br from-white via-white to-indigo-200 bg-clip-text text-transparent" style={{ animationDelay: '0.15s' }}>
                 {getContent('home.hero.title')}
               </h1>
 
@@ -134,9 +134,9 @@ export function HomePage({ onGetStarted }: HomePageProps) {
               </div>
             </div>
 
-            {/* Vector illustration — right on desktop, below the copy on mobile */}
-            <div className="order-2 lg:order-2 flex justify-center lg:justify-end animate-fade-in-up" style={{ animationDelay: '0.35s' }}>
-              <HeroIllustration className="w-full max-w-[480px] lg:max-w-[560px]" />
+            {/* Vector illustration — desktop only (hidden on mobile + tablet) */}
+            <div className="hidden lg:flex order-2 justify-center lg:justify-end animate-fade-in-up" style={{ animationDelay: '0.35s' }}>
+              <HeroIllustration className="w-full max-w-[560px]" />
             </div>
           </div>
 
