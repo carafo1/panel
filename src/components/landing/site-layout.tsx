@@ -366,9 +366,9 @@ export function SiteLayout({ children, onGetStarted }: SiteLayoutProps) {
           <div className="mt-12 pt-8 border-t border-white/10 flex flex-col sm:flex-row items-center justify-between gap-4">
             <p className="text-xs text-zinc-500">{getContent('footer.copyright').replace(/(?:19|20)\d{2}/, String(new Date().getFullYear()))}</p>
             <div className="flex items-center gap-4 text-xs text-zinc-500">
-              <a href="#/" className="hover:text-indigo-300 transition-colors">Privacy</a>
-              <a href="#/" className="hover:text-indigo-300 transition-colors">Terms</a>
-              <a href="#/" className="hover:text-indigo-300 transition-colors">Security</a>
+              <button onClick={() => setPublicPage({ page: 'privacy' })} className="hover:text-indigo-300 transition-colors">Privacy</button>
+              <button onClick={() => setPublicPage({ page: 'terms' })} className="hover:text-indigo-300 transition-colors">Terms</button>
+              <button onClick={() => setPublicPage({ page: 'contact' })} className="hover:text-indigo-300 transition-colors">Security</button>
             </div>
           </div>
         </div>
