@@ -3,6 +3,60 @@ import { db } from '@/lib/db'
 import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { encrypt } from '@/lib/encryption'
+import { withConnection, exec, isServerInDemoMode } from '@/lib/vps/ssh'
+import { getServerCredentials } from '@/lib/vps/provisioner'
+
+/**
+ * Overlay LIVE CPU / RAM / disk (pulled over SSH) onto a server row so the
+ * admin cards show the real machine instead of stale stored values. Demo-mode
+ * servers, or any that error or time out, keep their stored numbers.
+ */
+async function enrichWithLiveStats<
+  T extends {
+    id: string
+    sshHost: string
+    sshPrivateKey: string | null
+    sshPassword: string | null
+    cpuCores: number
+    ramGB: number
+    storageGB: number
+    usedRamGB: number
+    usedStorageGB: number
+  },
+>(server: T): Promise<T> {
+  if (isServerInDemoMode(server)) return server
+  try {
+    const creds = await getServerCredentials(server.id)
+    const live = await withConnection(creds, async (client) => {
+      const [free, df, nproc] = await Promise.all([
+        exec(client, 'free -m', { timeoutMs: 8000 }),
+        exec(client, 'df -BG /', { timeoutMs: 8000 }),
+        exec(client, 'nproc', { timeoutMs: 8000 }),
+      ])
+      return { free: free.stdout, df: df.stdout, nproc: nproc.stdout }
+    })
+    const memParts = (live.free.split('\n').find((l) => /^Mem:/.test(l)) || '')
+      .split(/\s+/)
+      .slice(1)
+      .map(Number)
+    const totalMB = memParts[0] || 0
+    const usedMB = memParts[1] || 0
+    const dfParts = (live.df.trim().split('\n')[1] || '').split(/\s+/)
+    const totalDiskG = parseInt((dfParts[1] || '').replace(/[^0-9]/g, ''), 10) || 0
+    const usedDiskG = parseInt((dfParts[2] || '').replace(/[^0-9]/g, ''), 10) || 0
+    const cores = parseInt(live.nproc.trim(), 10) || 0
+    return {
+      ...server,
+      cpuCores: cores || server.cpuCores,
+      ramGB: totalMB > 0 ? Math.round((totalMB / 1024) * 10) / 10 : server.ramGB,
+      usedRamGB: totalMB > 0 ? Math.round((usedMB / 1024) * 10) / 10 : server.usedRamGB,
+      storageGB: totalDiskG || server.storageGB,
+      usedStorageGB: usedDiskG || server.usedStorageGB,
+    }
+  } catch {
+    return server
+  }
+}
 
 /**
  * Shared shape used by every admin server response. NEVER includes the raw
@@ -121,8 +175,12 @@ export async function GET(request: Request) {
       orderBy: { createdAt: 'asc' },
     })
 
+    // Overlay live CPU/RAM/disk for real servers so the cards reflect the
+    // actual machine rather than stored values (falls back to stored on error).
+    const enriched = await Promise.all(servers.map(enrichWithLiveStats))
+
     return NextResponse.json({
-      servers: servers.map(serializeServer),
+      servers: enriched.map(serializeServer),
     })
   } catch (error) {
     console.error('Admin servers GET error:', error)
