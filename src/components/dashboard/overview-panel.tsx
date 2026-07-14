@@ -108,14 +108,8 @@ export default function OverviewPanel() {
             }
           }
         })
-        // If all zeros, add some mock data for visual appeal
-        const hasData = days.some((d) => d.success > 0 || d.failed > 0)
-        if (!hasData) {
-          days.forEach((d, i) => {
-            d.success = [2, 4, 1, 3, 5, 2, 3][i]
-            d.failed = [0, 1, 0, 0, 1, 0, 0][i]
-          })
-        }
+        // Show real activity only — no fabricated data. An all-zero week
+        // renders an honest empty chart instead of invented deployments.
         setChartData(days)
 
         // Build activity timeline from automation logs + deployments + domains

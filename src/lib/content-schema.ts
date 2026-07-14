@@ -102,6 +102,15 @@ export const DEFAULT_CONTENT: Record<string, string> = {
   'home.testimonials.title': 'Trusted by teams shipping fast',
   // Editable stats row + testimonials list (Admin → Pages → Home Page).
   'home.stats.items': '10000|+|Developers\n99.9|%|Uptime SLA\n50000|+|Sites Hosted\n24|/7|Support',
+  'home.features.items': 'Instant Deploys|Push to git, go live in seconds with automatic build pipelines.\nAuto SSL & DNS|Free SSL certificates and automatic DNS for every domain.\nGlobal CDN|Edge network delivers your content from 300+ locations worldwide.\nReal-time Logs|Stream live build, runtime, and access logs as they happen.\nTeam Collaboration|Invite teammates, manage roles, and deploy together.\nCustom Domains|Connect any domain with automatic HTTPS and DNS config.',
+  'home.howItWorks.items': 'Connect|Link your GitHub repo or upload your code. We support every framework.\nDeploy|Automatic builds, instant rollbacks, and zero-downtime deploys.\nScale|Auto-scaling infrastructure grows with your traffic automatically.',
+  // Legal pages (linked from the footer).
+  'legal.privacy.title': 'Privacy Policy',
+  'legal.privacy.updated': '',
+  'legal.privacy.body': 'Apsamo Technology ("we", "us") operates apsamo.com and the Apsamo hosting platform. This policy explains what personal data we collect and how we use it.\n\n## Information we collect\nWe collect the information you provide when you create an account (name, email, password), the domains and projects you configure, and payment details handled by our payment provider. We also collect basic technical data such as IP address, browser type, and usage logs.\n\n## How we use your information\nWe use your information to provide and maintain the service, process payments, send transactional email (verification, billing, support), keep the platform secure, and meet legal obligations.\n\n## Cookies\nWe use essential cookies to keep you signed in and remember your preferences. We do not sell your personal data.\n\n## Third parties\nWe share data only with the providers needed to deliver the service — such as our domain registrar, payment processor, and email provider — and only to the extent required.\n\n## Data retention and your rights\nWe retain your data while your account is active. You may request access to, correction of, or deletion of your personal data at any time.\n\n## Contact\nFor any privacy question, contact support@apsamo.com.',
+  'legal.terms.title': 'Terms of Service',
+  'legal.terms.updated': '',
+  'legal.terms.body': 'These Terms govern your use of the Apsamo Technology website and hosting platform. By creating an account or using the service, you agree to these Terms.\n\n## Accounts\nYou are responsible for the security of your account and for all activity under it. You must provide accurate information and keep it up to date.\n\n## Payments and renewals\nPaid plans and domain registrations are billed in advance. Domains renew according to their term and you are responsible for renewal fees. Fees are non-refundable except where required by law.\n\n## Acceptable use\nYou may not use the service for unlawful content, spam, malware, or to infringe the rights of others. We may suspend accounts that violate this policy.\n\n## Availability\nWe aim for high availability but do not guarantee uninterrupted service. Scheduled maintenance and factors outside our control may cause downtime.\n\n## Limitation of liability\nThe service is provided "as is". To the maximum extent permitted by law, we are not liable for indirect or consequential damages.\n\n## Termination\nYou may cancel at any time. We may suspend or terminate accounts that breach these Terms.\n\n## Contact\nQuestions about these Terms? Contact support@apsamo.com.',
   'home.testimonials.items': 'Apsamo Technology cut our deployment time from hours to seconds. The domain integration alone saved us a full-time role.|Sarah Chen|CTO, Lumen Labs\nFrom MVP to 100k users without touching infrastructure. The SaaS toolkit is genuinely enterprise-grade.|Marcus Webb|Founder, Pulse\nThe best developer experience I have used in a decade. Real-time logs and instant rollbacks are a game changer.|Aisha Patel|Lead Dev, Nimbus',
 
   // ── Home: Pricing preview ─────────────────────────────────────────────
@@ -298,6 +307,8 @@ export const CONTENT_GROUPS: ContentGroup[] = [
       { key: 'home.testimonials.title', label: 'Testimonials title' },
       { key: 'home.stats.items', label: 'Stats row', type: 'textarea', hint: 'One stat per line as value|suffix|label — e.g. 10000|+|Developers (up to 4). Clear the box to hide the whole stats section.' },
       { key: 'home.testimonials.items', label: 'Testimonials', type: 'textarea', hint: 'One testimonial per line as quote|name|role — e.g. Great tool!|Jane Doe|CTO, Acme. Clear the box to hide the testimonials section.' },
+      { key: 'home.features.items', label: 'Platform features', type: 'textarea', hint: 'One feature per line as title|desc. Icons are assigned automatically by position.' },
+      { key: 'home.howItWorks.items', label: 'How-it-works steps', type: 'textarea', hint: 'One step per line as title|desc. Steps are numbered automatically.' },
       { key: 'home.pricing.badge', label: 'Pricing badge' },
       { key: 'home.pricing.title', label: 'Pricing title' },
       { key: 'home.pricing.subtitle', label: 'Pricing subtitle', type: 'textarea' },
@@ -458,6 +469,18 @@ export const CONTENT_GROUPS: ContentGroup[] = [
       { key: 'svc.saas-system.faq.title', label: 'FAQ title' },
       { key: 'svc.saas-system.cta.title', label: 'CTA title' },
       { key: 'svc.saas-system.cta.button', label: 'CTA button' },
+    ],
+  },
+  {
+    group: 'Legal Pages',
+    description: 'Privacy Policy and Terms of Service, linked from the site footer.',
+    fields: [
+      { key: 'legal.privacy.title', label: 'Privacy: title' },
+      { key: 'legal.privacy.updated', label: 'Privacy: last updated (optional)' },
+      { key: 'legal.privacy.body', label: 'Privacy: body', type: 'textarea', hint: 'Full policy text. A blank line starts a new paragraph; a line beginning with "## " becomes a heading.' },
+      { key: 'legal.terms.title', label: 'Terms: title' },
+      { key: 'legal.terms.updated', label: 'Terms: last updated (optional)' },
+      { key: 'legal.terms.body', label: 'Terms: body', type: 'textarea', hint: 'Full terms text. A blank line starts a new paragraph; a line beginning with "## " becomes a heading.' },
     ],
   },
 ]

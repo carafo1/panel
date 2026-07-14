@@ -15,20 +15,9 @@ import { useAppStore } from '@/store/app-store'
 import { useSiteContent, resolveIcon } from '../site-data-context'
 import { HeroIllustration } from '../hero-illustration'
 
-const BENTO_FEATURES = [
-  { icon: Zap, title: 'Instant Deploys', desc: 'Push to git, go live in seconds with automatic build pipelines.' },
-  { icon: Shield, title: 'Auto SSL & DNS', desc: 'Free SSL certificates and automatic DNS for every domain.' },
-  { icon: Globe2, title: 'Global CDN', desc: 'Edge network delivers your content from 300+ locations worldwide.' },
-  { icon: Activity, title: 'Real-time Logs', desc: 'Stream live build, runtime, and access logs as they happen.' },
-  { icon: Users, title: 'Team Collaboration', desc: 'Invite teammates, manage roles, and deploy together.' },
-  { icon: GitBranch, title: 'Custom Domains', desc: 'Connect any domain with automatic HTTPS and DNS config.' },
-]
-
-const HOW_IT_WORKS = [
-  { step: 1, title: 'Connect', desc: 'Link your GitHub repo or upload your code. We support every framework.' },
-  { step: 2, title: 'Deploy', desc: 'Automatic builds, instant rollbacks, and zero-downtime deploys.' },
-  { step: 3, title: 'Scale', desc: 'Auto-scaling infrastructure grows with your traffic automatically.' },
-]
+// Icons for the feature cards, paired by position with the admin-editable
+// `home.features.items` content (title|desc per line).
+const FEATURE_ICONS = [Zap, Shield, Globe2, Activity, Users, GitBranch]
 
 const PRICING_PREVIEW = [
   { name: 'Starter', price: 9, period: '/mo', desc: 'Perfect for personal projects & hobbies', features: ['1 project', '1 GB storage', 'Custom domain', 'SSL certificate', 'Community support'], popular: false },
@@ -93,6 +82,26 @@ export function HomePage({ onGetStarted }: HomePageProps) {
       return { quote, name, role, initials }
     })
     .filter((t) => t.quote)
+
+  // Platform features + how-it-works steps — admin-editable "title|desc" lines.
+  const features = getContent('home.features.items')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l, i) => {
+      const [title = '', desc = ''] = l.split('|').map((s) => s.trim())
+      return { icon: FEATURE_ICONS[i % FEATURE_ICONS.length], title, desc }
+    })
+    .filter((f) => f.title)
+  const howItWorks = getContent('home.howItWorks.items')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l, i) => {
+      const [title = '', desc = ''] = l.split('|').map((s) => s.trim())
+      return { step: i + 1, title, desc }
+    })
+    .filter((s) => s.title)
 
   const spotlightRef1 = useSpotlight<HTMLDivElement>()
   const spotlightRef2 = useSpotlight<HTMLDivElement>()
@@ -244,7 +253,7 @@ export function HomePage({ onGetStarted }: HomePageProps) {
             </div>
           </ScrollReveal>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-            {BENTO_FEATURES.map((feature, i) => {
+            {features.map((feature, i) => {
               const Icon = feature.icon
               return (
                 <StaggerCard key={feature.title} index={i} className={i === 0 ? 'md:col-span-2 md:row-span-1' : ''}>
@@ -276,7 +285,7 @@ export function HomePage({ onGetStarted }: HomePageProps) {
             </div>
           </ScrollReveal>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            {HOW_IT_WORKS.map((step, i) => (
+            {howItWorks.map((step, i) => (
               <StaggerCard key={step.step} index={i}>
                 <div className="text-center">
                   <div className="relative z-10 mb-6 inline-block">

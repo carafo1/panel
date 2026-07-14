@@ -20,6 +20,8 @@ export type PublicPage =
   | 'pricing'
   | 'about'
   | 'contact'
+  | 'privacy'
+  | 'terms'
   | 'not-found'
 
 export interface PublicPageState {

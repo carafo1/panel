@@ -12,6 +12,7 @@ import { SaasSystemPage } from './pages/saas-system-page'
 import { PricingPage } from './pages/pricing-page'
 import { AboutPage } from './pages/about-page'
 import { ContactPage } from './pages/contact-page'
+import { LegalPage } from './pages/legal-page'
 import { NotFoundPage } from './pages/not-found-page'
 
 interface PublicRouterProps {
@@ -53,6 +54,12 @@ export function PublicRouter({ onGetStarted }: PublicRouterProps) {
       break
     case 'contact':
       content = <ContactPage />
+      break
+    case 'privacy':
+      content = <LegalPage kind="privacy" />
+      break
+    case 'terms':
+      content = <LegalPage kind="terms" />
       break
     case 'not-found':
       content = <NotFoundPage />
