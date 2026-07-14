@@ -30,7 +30,6 @@ import {
   Users,
   BarChart3,
   GitMerge,
-  LayoutGrid,
   Webhook,
   Github,
   Sparkles,
@@ -43,7 +42,6 @@ import OnboardingWizard from '@/components/onboarding/onboarding-wizard'
 import { EmailVerificationBanner } from '@/components/auth/email-verification-banner'
 import { ErrorBoundary } from '@/components/error-boundary'
 import PipelinesPanel from '@/components/pipelines/pipelines-panel'
-import { TemplatesPanel } from '@/components/templates/templates-panel'
 import WebhooksPanel from '@/components/webhooks/webhooks-panel'
 import GithubPanel from '@/components/github/github-panel'
 import AssistantPanel from '@/components/assistant/assistant-panel'
@@ -63,7 +61,6 @@ const NAV_ITEMS: { id: DashboardTab; label: string; icon: React.ElementType; adm
   { id: 'deployments', label: 'Deployments', icon: Rocket },
   { id: 'github', label: 'GitHub', icon: Github },
   { id: 'pipelines', label: 'Pipelines', icon: GitMerge },
-  { id: 'templates', label: 'Templates', icon: LayoutGrid },
   { id: 'billing', label: 'Billing', icon: CreditCard },
   { id: 'webhooks', label: 'Webhooks', icon: Webhook },
   { id: 'admin', label: 'Admin', icon: Shield, adminOnly: true },
@@ -135,8 +132,6 @@ function Dashboard() {
               return <DeploymentsPanel />
             case 'pipelines':
               return <PipelinesPanel />
-            case 'templates':
-              return <TemplatesPanel />
             case 'billing':
               return <BillingPanel />
             case 'webhooks':
