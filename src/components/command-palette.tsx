@@ -14,7 +14,6 @@ import {
   Users,
   BarChart3,
   GitMerge,
-  LayoutGrid,
   Webhook,
   Github,
   Sparkles,
@@ -50,7 +49,6 @@ export const COMMAND_EVENTS = {
   createProject: 'deployhub:command:create-project',
   registerDomain: 'deployhub:command:register-domain',
   deployProject: 'deployhub:command:deploy-project',
-  searchTemplates: 'deployhub:command:search-templates',
 } as const
 
 type NavItem = {
@@ -67,7 +65,6 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'deployments', label: 'Deployments', icon: Rocket, hint: 'CI/CD history' },
   { id: 'github', label: 'GitHub', icon: Github, hint: 'Repositories' },
   { id: 'pipelines', label: 'Pipelines', icon: GitMerge, hint: 'CI/CD pipelines' },
-  { id: 'templates', label: 'Templates', icon: LayoutGrid, hint: 'Starter templates' },
   { id: 'billing', label: 'Billing', icon: CreditCard, hint: 'Plans & invoices' },
   { id: 'webhooks', label: 'Webhooks', icon: Webhook, hint: 'Event delivery' },
   { id: 'monitoring', label: 'Monitoring', icon: Activity, hint: 'Uptime checks' },
@@ -146,11 +143,6 @@ export function CommandPalette() {
     goTo('deployments')
   }, [goTo])
 
-  const handleSearchTemplates = useCallback(() => {
-    setDashboardTab('templates')
-    setTimeout(() => dispatchCommand(COMMAND_EVENTS.searchTemplates), 50)
-  }, [setDashboardTab, dispatchCommand])
-
   const handleToggleTheme = useCallback(() => {
     setTheme(theme === 'dark' ? 'light' : 'dark')
     toast.success(`Switched to ${theme === 'dark' ? 'light' : 'dark'} mode`)
@@ -204,13 +196,6 @@ export function CommandPalette() {
             <div className="flex flex-col">
               <span>Deploy Project</span>
               <span className="text-xs text-muted-foreground">View deployment history</span>
-            </div>
-          </CommandItem>
-          <CommandItem onSelect={handleSearchTemplates} value="search templates starter">
-            <LayoutGrid className="size-4 text-indigo-600" />
-            <div className="flex flex-col">
-              <span>Search Templates</span>
-              <span className="text-xs text-muted-foreground">Browse starter templates</span>
             </div>
           </CommandItem>
           <CommandItem onSelect={handleToggleTheme} value="toggle theme dark light mode">
