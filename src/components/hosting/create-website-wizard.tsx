@@ -1294,6 +1294,11 @@ export default function CreateWebsiteWizard({
 
   /* ── Render ───────────────────────────────────────────────────────────── */
   const isProgressView = submitting || deployDone !== null || !!createdProject
+  // Off-the-shelf apps (WordPress) read better as "installed" than "deployed";
+  // your own code (Node/PHP/Python/Docker/static) is still "deployed".
+  const isWordPress = methodId === 'wordpress'
+  const actVerbing = isWordPress ? 'Installing' : 'Deploying'
+  const actNoun = isWordPress ? 'installation' : 'deployment'
   const liveLog = useMemo(() => {
     const running = stages.find((s) => s.status === 'running')
     if (running?.log) return running.log
@@ -1320,11 +1325,11 @@ export default function CreateWebsiteWizard({
           <div className="flex items-start justify-between gap-4">
             <div>
               <DialogTitle className="text-lg font-semibold">
-                {isProgressView ? 'Deploying your website' : 'Create a new website'}
+                {isProgressView ? `${actVerbing} your website` : 'Create a new website'}
               </DialogTitle>
               <DialogDescription className="mt-0.5 text-xs">
                 {isProgressView
-                  ? 'You can close this dialog — deployment continues in the background.'
+                  ? `You can close this dialog — ${actNoun} continues in the background.`
                   : 'Pick a deployment method, connect your source, and go live in minutes.'}
               </DialogDescription>
             </div>
@@ -1771,7 +1776,7 @@ export default function CreateWebsiteWizard({
               <div className="flex items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-4">
                 <XCircle className="mt-0.5 size-5 shrink-0 text-destructive" />
                 <div>
-                  <p className="text-sm font-medium text-destructive">Failed to start deployment</p>
+                  <p className="text-sm font-medium text-destructive">{`Failed to start ${actNoun}`}</p>
                   <p className="mt-1 text-xs text-muted-foreground">{deployError}</p>
                 </div>
               </div>
@@ -1803,7 +1808,7 @@ export default function CreateWebsiteWizard({
                   className="gap-1.5"
                 >
                   <Rocket className="size-4" />
-                  Deploy Website
+                  {isWordPress ? 'Install WordPress' : 'Deploy Website'}
                 </Button>
               ) : (
                 <Button
@@ -2103,7 +2108,9 @@ function ReviewSummary({
     <div className="space-y-4">
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">Deployment summary</CardTitle>
+          <CardTitle className="text-base">
+            {method?.stack === 'wordpress' ? 'Installation summary' : 'Deployment summary'}
+          </CardTitle>
           <CardDescription className="text-xs">
             Review your settings before deploying. You can change everything later.
           </CardDescription>
@@ -2276,7 +2283,7 @@ function ProgressView({
           </Button>
           <Button variant="outline" onClick={onReset} className="gap-1.5">
             <Plus className="size-4" />
-            Deploy Another
+            {isWordPress ? 'Install Another' : 'Deploy Another'}
           </Button>
         </div>
       </div>
@@ -2292,7 +2299,7 @@ function ProgressView({
           <div className="flex size-14 items-center justify-center rounded-full bg-destructive/10 text-destructive">
             <XCircle className="size-8" />
           </div>
-          <h3 className="mt-3 text-lg font-semibold">Deployment failed</h3>
+          <h3 className="mt-3 text-lg font-semibold">{isWordPress ? 'Installation failed' : 'Deployment failed'}</h3>
           <p className="mt-1 max-w-md text-sm text-muted-foreground">
             {deployError || 'A deployment stage failed. Check the failed stage below for details.'}
           </p>
@@ -2319,7 +2326,7 @@ function ProgressView({
         <div className="flex flex-col gap-2 sm:flex-row">
           <Button onClick={onRetry} className="flex-1 gap-1.5">
             <RefreshCw className="size-4" />
-            Retry Deployment
+            {isWordPress ? 'Retry Installation' : 'Retry Deployment'}
           </Button>
           <Button variant="outline" onClick={onReset} className="gap-1.5">
             <ArrowLeft className="size-4" />
@@ -2335,7 +2342,7 @@ function ProgressView({
     <div className="space-y-4">
       <div className="flex items-center gap-2 text-sm">
         <Loader2 className="size-4 animate-spin text-primary" />
-        <span className="font-medium">Deploying {projectName}…</span>
+        <span className="font-medium">{isWordPress ? 'Installing' : 'Deploying'} {projectName}…</span>
       </div>
 
       {/* Stage timeline */}
