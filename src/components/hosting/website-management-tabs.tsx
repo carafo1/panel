@@ -1327,6 +1327,8 @@ export function FilesTab({ projectId }: { projectId: string }) {
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [dragOver, setDragOver] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const [importing, setImporting] = useState(false)
 
   // Editor dialog
   const [editorFile, setEditorFile] = useState<FileEntry | null>(null)
@@ -1346,6 +1348,7 @@ export function FilesTab({ projectId }: { projectId: string }) {
   const [deleteEntry, setDeleteEntry] = useState<FileEntry | null>(null)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const importInputRef = useRef<HTMLInputElement>(null)
 
   const fetchFiles = useCallback(
     async (path: string) => {
@@ -1463,6 +1466,67 @@ export function FilesTab({ projectId }: { projectId: string }) {
       toast.success('Download started')
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Download failed')
+    }
+  }
+
+  // Export the current folder (or whole site at root) as a downloadable archive.
+  const handleExport = async () => {
+    setExporting(true)
+    try {
+      const qs = currentPath ? `&path=${encodeURIComponent(currentPath)}` : ''
+      const res = await fetch(`/api/hosting/${projectId}/files?action=export${qs}`, {
+        headers: getAuthHeaders(),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => null)
+        throw new Error(data?.error || 'Export failed')
+      }
+      const blob = await res.blob()
+      const cd = res.headers.get('Content-Disposition') || ''
+      const match = cd.match(/filename="?([^"]+)"?/)
+      const fallback = `${currentPath ? currentPath.split('/').pop() : 'website'}-export.zip`
+      const filename = match?.[1] || fallback
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      toast.success('Export ready — download started')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Export failed')
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  // Import a .zip / .tar.gz archive and extract it into the current folder.
+  const handleImport = async (file: File) => {
+    setImporting(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('path', currentPath)
+      formData.append('action', 'import')
+      const token = localStorage.getItem('apsamo_token')
+      const res = await fetch(`/api/hosting/${projectId}/files`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      })
+      const data = await res.json().catch(() => null)
+      if (res.ok) {
+        toast.success(data?.message || `Imported ${file.name}`)
+        fetchFiles(currentPath)
+      } else {
+        toast.error(data?.error || 'Import failed')
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Import failed')
+    } finally {
+      setImporting(false)
     }
   }
 
@@ -1667,6 +1731,18 @@ export function FilesTab({ projectId }: { projectId: string }) {
                   }
                 }}
               />
+              <input
+                ref={importInputRef}
+                type="file"
+                accept=".zip,.tar.gz,.tgz,.tar"
+                className="hidden"
+                onChange={(e) => {
+                  if (e.target.files && e.target.files[0]) {
+                    handleImport(e.target.files[0])
+                    e.target.value = ''
+                  }
+                }}
+              />
               <Button
                 variant="outline"
                 size="sm"
@@ -1698,6 +1774,36 @@ export function FilesTab({ projectId }: { projectId: string }) {
               >
                 <FilePlus className="size-3.5 mr-1" />
                 New File
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs"
+                onClick={handleExport}
+                disabled={exporting}
+                title="Download this folder (or the whole site at the root) as an archive"
+              >
+                {exporting ? (
+                  <Loader2 className="size-3.5 mr-1 animate-spin" />
+                ) : (
+                  <Download className="size-3.5 mr-1" />
+                )}
+                Export
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs"
+                onClick={() => importInputRef.current?.click()}
+                disabled={importing}
+                title="Upload a .zip / .tar.gz archive and extract it into this folder"
+              >
+                {importing ? (
+                  <Loader2 className="size-3.5 mr-1 animate-spin" />
+                ) : (
+                  <Archive className="size-3.5 mr-1" />
+                )}
+                Import
               </Button>
               <Button
                 variant="outline"

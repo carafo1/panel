@@ -1,15 +1,30 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
-import { listFiles, uploadFile, createDirectory, type FileEntry } from '@/lib/vps'
+import { isAdmin } from '@/lib/security'
+import {
+  listFiles,
+  uploadFile,
+  createDirectory,
+  exportArchive,
+  importArchive,
+  type FileEntry,
+} from '@/lib/vps'
+
+// Cap import archive size to avoid buffering an unbounded upload into memory.
+const MAX_IMPORT_BYTES = 512 * 1024 * 1024 // 512 MB
 
 /**
  * Project Files Endpoint (collection)
  * ===================================
  *
  *   GET   /api/hosting/[id]/files?path=<subdir>   — list files under <subdir>
+ *   GET   /api/hosting/[id]/files?action=export&path=<subdir>
+ *            — download <subdir> (or the whole project) as a .zip / .tar.gz
  *   POST  /api/hosting/[id]/files                 — upload a file OR create a dir
  *            multipart form: file=<binary>, path=<relative-path>
+ *            multipart form: file=<archive>, path=<subdir>, action=import
+ *              — extract an uploaded .zip / .tar.gz into <subdir>
  *            OR JSON: { path, content }   — inline text upload
  *            OR JSON: { action: 'mkdir', path }
  */
@@ -24,13 +39,35 @@ export async function GET(
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 })
     }
     const { id: projectId } = await params
-    const project = await db.project.findFirst({ where: { id: projectId, userId: decoded.userId } })
+    const project = await db.project.findFirst({ where: isAdmin(decoded.role) ? { id: projectId } : { id: projectId, userId: decoded.userId } })
     if (!project) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
     }
 
     const url = new URL(request.url)
     const subdir = url.searchParams.get('path') || '.'
+
+    // Export: bundle the current folder (or whole project) into a downloadable
+    // archive (zip, or tar.gz fallback).
+    if (url.searchParams.get('action') === 'export') {
+      try {
+        const { content, filename } = await exportArchive(projectId, subdir)
+        const type = filename.endsWith('.zip') ? 'application/zip' : 'application/gzip'
+        return new NextResponse(content, {
+          status: 200,
+          headers: {
+            'Content-Type': type,
+            'Content-Disposition': `attachment; filename="${filename.replace(/"/g, '_')}"`,
+            'Content-Length': String(content.length),
+            'Cache-Control': 'no-store',
+          },
+        })
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Export failed'
+        return NextResponse.json({ error: msg }, { status: 400 })
+      }
+    }
+
     let files: FileEntry[]
     try {
       files = await listFiles(projectId, subdir)
@@ -62,7 +99,7 @@ export async function POST(
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 })
     }
     const { id: projectId } = await params
-    const project = await db.project.findFirst({ where: { id: projectId, userId: decoded.userId } })
+    const project = await db.project.findFirst({ where: isAdmin(decoded.role) ? { id: projectId } : { id: projectId, userId: decoded.userId } })
     if (!project) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
     }
@@ -76,14 +113,34 @@ export async function POST(
       }
       const file = formData.get('file')
       const pathField = formData.get('path')
+      const action = formData.get('action')
       if (!file || !(file instanceof File)) {
         return NextResponse.json({ error: 'No "file" field in form data' }, { status: 400 })
       }
-      if (!pathField || typeof pathField !== 'string') {
+      if (typeof pathField !== 'string') {
         return NextResponse.json({ error: 'path is required' }, { status: 400 })
       }
+      if (file.size > MAX_IMPORT_BYTES) {
+        return NextResponse.json(
+          { error: `File too large (max ${Math.round(MAX_IMPORT_BYTES / 1024 / 1024)} MB)` },
+          { status: 413 }
+        )
+      }
       const buf = Buffer.from(await file.arrayBuffer())
-      const result = await uploadFile(projectId, `${pathField}/${file.name}`, buf)
+
+      // Import: extract an uploaded archive into the target folder.
+      if (action === 'import') {
+        try {
+          const result = await importArchive(projectId, pathField || '.', buf, file.name)
+          return NextResponse.json(result, { status: 201 })
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'Import failed'
+          return NextResponse.json({ error: msg }, { status: 400 })
+        }
+      }
+
+      const uploadPath = pathField ? `${pathField}/${file.name}` : file.name
+      const result = await uploadFile(projectId, uploadPath, buf)
       return NextResponse.json(result, { status: 201 })
     }
 

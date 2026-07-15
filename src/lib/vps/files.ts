@@ -176,7 +176,13 @@ async function resolveProjectPath(
 ): Promise<ResolvedPath> {
   const localMode = isLocalHost(project.server?.sshHost)
   if (localMode) {
-    const base = PROJECT_ROOT(project.id)
+    // Prefer the project's real deployed directory (e.g. the WordPress site at
+    // deployPath, which is bind-mounted into the container) so the File Manager
+    // operates on the ACTUAL website files — that's what "manage / export /
+    // import website files" means. Fall back to the panel-managed per-project
+    // storage root only for projects that haven't been deployed yet.
+    const deployed = (project.deployPath || '').trim().replace(/\/+$/, '')
+    const base = deployed || PROJECT_ROOT(project.id)
     await ensureDir(base)
     return {
       abs: pathTraversalSafe(base, relative || '.'),
@@ -499,6 +505,131 @@ export async function saveFileContent(
     await putFile(client, abs, content, { mode: 0o644 })
   })
   return { ok: true, message: 'Saved' }
+}
+
+// ─── Export (archive a folder for download) ──────────────────────────────
+
+/**
+ * Bundle a directory (the whole project or a subfolder) into a single archive
+ * and return its bytes so the caller can stream a download. Produces a `.zip`
+ * when the `zip` binary is available (friendliest for end users on any OS) and
+ * transparently falls back to `.tar.gz` when it isn't — the returned
+ * `filename` always carries the matching extension. `.git` metadata is
+ * excluded so exports stay lean and portable.
+ */
+export async function exportArchive(
+  projectId: string,
+  subdir: string
+): Promise<{ content: Buffer; filename: string; size: number }> {
+  const project = await db.project.findUnique({
+    where: { id: projectId },
+    include: { server: true },
+  })
+  if (!project) throw new Error('Project not found')
+
+  const { abs, isDemo } = await resolveProjectPath(project, subdir || '.')
+  const label = (
+    path.posix.basename(abs.replace(/\/+$/, '')) || project.slug || 'files'
+  ).replace(/[^A-Za-z0-9._-]/g, '_')
+  const stamp = new Date().toISOString().slice(0, 10)
+
+  if (isDemo) {
+    const body = Buffer.from(
+      `[demo] Archive of ${project.slug || project.id}/${subdir || ''}\n` +
+        `Generated ${new Date().toISOString()}\n`
+    )
+    return { content: body, filename: `${label}-${stamp}.zip`, size: body.length }
+  }
+
+  const creds = await getServerCredentials(project.serverId!)
+  return await withConnection(creds, async (client) => {
+    const rand = Math.random().toString(36).slice(2, 8)
+
+    // Prefer zip — most end users can open a .zip natively.
+    const zipTmp = `/tmp/apsamo-export-${Date.now()}-${rand}.zip`
+    const zipCmd =
+      `cd ${shellQuote(abs)} && ` +
+      `zip -r -q ${shellQuote(zipTmp)} . -x '.git/*' '*/.git/*' && echo __APSAMO_OK__`
+    const zr = await exec(client, zipCmd, { timeoutMs: 300000 })
+    if (zr.exitCode === 0 && /__APSAMO_OK__/.test(zr.stdout)) {
+      const content = await getFile(client, zipTmp)
+      await exec(client, `rm -f ${shellQuote(zipTmp)}`, { timeoutMs: 10000 })
+      return { content, filename: `${label}-${stamp}.zip`, size: content.length }
+    }
+
+    // Fallback: tar.gz (tar is always present on Linux).
+    await exec(client, `rm -f ${shellQuote(zipTmp)}`, { timeoutMs: 10000 })
+    const tarTmp = `/tmp/apsamo-export-${Date.now()}-${rand}.tar.gz`
+    const tarCmd =
+      `tar -czf ${shellQuote(tarTmp)} --exclude='.git' -C ${shellQuote(abs)} . && echo __APSAMO_OK__`
+    const tr = await exec(client, tarCmd, { timeoutMs: 300000 })
+    if (tr.exitCode !== 0 || !/__APSAMO_OK__/.test(tr.stdout)) {
+      await exec(client, `rm -f ${shellQuote(tarTmp)}`, { timeoutMs: 10000 })
+      const detail = (tr.stderr || tr.stdout || zr.stderr || zr.stdout || '').trim().slice(0, 300)
+      throw new Error(`Archive failed: ${detail || 'unknown error'}`)
+    }
+    const content = await getFile(client, tarTmp)
+    await exec(client, `rm -f ${shellQuote(tarTmp)}`, { timeoutMs: 10000 })
+    return { content, filename: `${label}-${stamp}.tar.gz`, size: content.length }
+  })
+}
+
+// ─── Import (upload + extract an archive) ────────────────────────────────
+
+/**
+ * Extract an uploaded archive into a directory (the project root or a
+ * subfolder). Supports `.zip` (via `unzip`) and `.tar.gz` / `.tgz` / `.tar`
+ * (via `tar`), auto-detected from `originalName`. Existing files are
+ * overwritten (`unzip -o`). Extraction is confined to the resolved target by
+ * `resolveProjectPath` plus the extractor's own path-sanitisation.
+ */
+export async function importArchive(
+  projectId: string,
+  subdir: string,
+  content: Buffer,
+  originalName: string
+): Promise<{ ok: boolean; message: string }> {
+  const project = await db.project.findUnique({
+    where: { id: projectId },
+    include: { server: true },
+  })
+  if (!project) throw new Error('Project not found')
+
+  const { abs, isDemo } = await resolveProjectPath(project, subdir || '.')
+  const lower = (originalName || '').toLowerCase()
+  const isTarGz = /\.(tar\.gz|tgz)$/.test(lower)
+  const isTar = /\.tar$/.test(lower)
+  const useTar = isTarGz || isTar
+
+  if (isDemo) {
+    return {
+      ok: true,
+      message: `[demo] Imported ${originalName || 'archive'} into ${subdir || '/'}`,
+    }
+  }
+
+  const creds = await getServerCredentials(project.serverId!)
+  await withConnection(creds, async (client) => {
+    const rand = Math.random().toString(36).slice(2, 8)
+    const ext = isTarGz ? 'tar.gz' : isTar ? 'tar' : 'zip'
+    const tmp = `/tmp/apsamo-import-${Date.now()}-${rand}.${ext}`
+    await putFile(client, tmp, content, { mode: 0o644 })
+    await exec(client, `mkdir -p ${shellQuote(abs)}`, { timeoutMs: 15000 })
+
+    const extractCmd = useTar
+      ? `tar -x${isTarGz ? 'z' : ''}f ${shellQuote(tmp)} -C ${shellQuote(abs)} && echo __APSAMO_OK__`
+      : `unzip -o -q ${shellQuote(tmp)} -d ${shellQuote(abs)} && echo __APSAMO_OK__`
+    const r = await exec(client, extractCmd, { timeoutMs: 300000 })
+    await exec(client, `rm -f ${shellQuote(tmp)}`, { timeoutMs: 10000 })
+    if (r.exitCode !== 0 || !/__APSAMO_OK__/.test(r.stdout)) {
+      const detail = (r.stderr || r.stdout || '').trim().slice(0, 300)
+      throw new Error(
+        `Extract failed: ${detail || 'unknown error'}` +
+          (!useTar ? ' (is `unzip` installed on the server?)' : '')
+      )
+    }
+  })
+  return { ok: true, message: `Imported ${originalName || 'archive'}` }
 }
 
 // ─── Demo-mode synthetic listing ─────────────────────────────────────────
