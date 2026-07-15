@@ -216,8 +216,13 @@ function shellQuote(s: string): string {
  * Parse a single line of `ls -la --time-style=full-iso` into a FileEntry.
  * Example line:
  *   `-rw-r--r-- 1 root root  1024 2024-01-15 12:34:56.000000000 +0000 filename`
+ *
+ * @param dirAbs  absolute path of the directory being listed (for absolutePath)
+ * @param rootAbs absolute path of the project root — `path` is made relative to
+ *                THIS so nested entries carry their full path (e.g.
+ *                `wp-content/themes`), which is what navigation/download need.
  */
-function parseLsLine(line: string, deployPath: string): FileEntry | null {
+function parseLsLine(line: string, dirAbs: string, rootAbs: string): FileEntry | null {
   if (!line) return null
   const trimmed = line.trim()
   if (!trimmed || trimmed.startsWith('total ')) return null
@@ -245,8 +250,11 @@ function parseLsLine(line: string, deployPath: string): FileEntry | null {
   const size = parseInt(sizeStr, 10) || 0
   const isoMatch = mtimeStr.match(/(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})/)
   const modifiedAt = isoMatch ? new Date(isoMatch[1] + 'Z').toISOString() : new Date().toISOString()
-  const abs = path.posix.normalize(`${deployPath}/${name}`)
-  const rel = abs.replace(deployPath.replace(/\/$/, '') + '/', '')
+  const abs = path.posix.normalize(`${dirAbs}/${name}`)
+  const root = rootAbs.replace(/\/+$/, '')
+  // Path relative to the PROJECT ROOT (not the current dir), so nested entries
+  // carry their full path and navigation/download resolve correctly.
+  const rel = abs.startsWith(root + '/') ? abs.slice(root.length + 1) : name
 
   return {
     name,
@@ -290,7 +298,7 @@ export async function listFiles(
     }
     const entries: FileEntry[] = []
     for (const line of r.stdout.split('\n')) {
-      const e = parseLsLine(line, resolved)
+      const e = parseLsLine(line, resolved, base)
       if (e && e.name !== '.' && e.name !== '..') {
         entries.push(e)
       }

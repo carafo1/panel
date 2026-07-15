@@ -1350,6 +1350,12 @@ export function FilesTab({ projectId }: { projectId: string }) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const importInputRef = useRef<HTMLInputElement>(null)
 
+  // Encode a project-relative path for use as URL path segments in the
+  // /files/[...path] routes: encode each segment but keep the "/" separators
+  // so nested paths (e.g. wp-content/themes/style.css) route correctly.
+  // For a single segment (root files) this is identical to encodeURIComponent.
+  const encodePath = (p: string) => p.split('/').map(encodeURIComponent).join('/')
+
   const fetchFiles = useCallback(
     async (path: string) => {
       setLoading(true)
@@ -1447,7 +1453,7 @@ export function FilesTab({ projectId }: { projectId: string }) {
   const handleDownload = async (entry: FileEntry) => {
     try {
       const res = await fetch(
-        `/api/hosting/${projectId}/files/${encodeURIComponent(entry.path)}?action=download`,
+        `/api/hosting/${projectId}/files/${encodePath(entry.path)}?action=download`,
         { headers: getAuthHeaders() }
       )
       if (!res.ok) {
@@ -1538,7 +1544,7 @@ export function FilesTab({ projectId }: { projectId: string }) {
     setEditorLoading(true)
     try {
       const res = await fetch(
-        `/api/hosting/${projectId}/files/${encodeURIComponent(entry.path)}?action=content`,
+        `/api/hosting/${projectId}/files/${encodePath(entry.path)}?action=content`,
         { headers: getAuthHeaders() }
       )
       const data = await res.json()
@@ -1563,7 +1569,7 @@ export function FilesTab({ projectId }: { projectId: string }) {
     setEditorSaving(true)
     try {
       const res = await fetch(
-        `/api/hosting/${projectId}/files/${encodeURIComponent(editorFile.path)}`,
+        `/api/hosting/${projectId}/files/${encodePath(editorFile.path)}`,
         {
           method: 'PUT',
           headers: getAuthHeaders(),
@@ -1593,7 +1599,7 @@ export function FilesTab({ projectId }: { projectId: string }) {
     }
     try {
       const res = await fetch(
-        `/api/hosting/${projectId}/files/${encodeURIComponent(currentPath)}`,
+        `/api/hosting/${projectId}/files/${encodePath(currentPath)}`,
         {
           method: 'POST',
           headers: getAuthHeaders(),
@@ -1623,7 +1629,7 @@ export function FilesTab({ projectId }: { projectId: string }) {
     const fullPath = currentPath ? `${currentPath}/${name}` : name
     try {
       const res = await fetch(
-        `/api/hosting/${projectId}/files/${encodeURIComponent(fullPath)}`,
+        `/api/hosting/${projectId}/files/${encodePath(fullPath)}`,
         {
           method: 'PUT',
           headers: getAuthHeaders(),
@@ -1653,7 +1659,7 @@ export function FilesTab({ projectId }: { projectId: string }) {
     }
     try {
       const res = await fetch(
-        `/api/hosting/${projectId}/files/${encodeURIComponent(renameEntry.path)}`,
+        `/api/hosting/${projectId}/files/${encodePath(renameEntry.path)}`,
         {
           method: 'POST',
           headers: getAuthHeaders(),
@@ -1678,7 +1684,7 @@ export function FilesTab({ projectId }: { projectId: string }) {
     if (!deleteEntry) return
     try {
       const res = await fetch(
-        `/api/hosting/${projectId}/files/${encodeURIComponent(deleteEntry.path)}`,
+        `/api/hosting/${projectId}/files/${encodePath(deleteEntry.path)}`,
         { method: 'DELETE', headers: getAuthHeaders() }
       )
       const data = await res.json()

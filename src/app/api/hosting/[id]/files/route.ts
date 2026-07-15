@@ -82,7 +82,17 @@ export async function GET(
         : currentPath.includes('/')
           ? currentPath.replace(/\/[^/]+$/, '') || '.'
           : '.'
-    return NextResponse.json({ files, currentPath, parentPath })
+    // Normalize the directory type to what the UI expects ('directory'), and
+    // never let the browser cache a listing (it would show a stale/empty view
+    // after files change).
+    const normalized = files.map((f) => ({
+      ...f,
+      type: f.type === 'dir' ? 'directory' : f.type,
+    }))
+    return NextResponse.json(
+      { files: normalized, currentPath, parentPath },
+      { headers: { 'Cache-Control': 'no-store, max-age=0' } }
+    )
   } catch (error) {
     console.error('List files error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
