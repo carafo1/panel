@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
+import { isAdmin } from '@/lib/security'
 import {
   downloadFile,
   getFileContent,
@@ -32,7 +33,7 @@ export async function GET(
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 })
     }
     const { id: projectId, path: pathSegments } = await params
-    const project = await db.project.findFirst({ where: { id: projectId, userId: decoded.userId } })
+    const project = await db.project.findFirst({ where: isAdmin(decoded.role) ? { id: projectId } : { id: projectId, userId: decoded.userId } })
     if (!project) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
     }
@@ -81,7 +82,7 @@ export async function PUT(
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 })
     }
     const { id: projectId, path: pathSegments } = await params
-    const project = await db.project.findFirst({ where: { id: projectId, userId: decoded.userId } })
+    const project = await db.project.findFirst({ where: isAdmin(decoded.role) ? { id: projectId } : { id: projectId, userId: decoded.userId } })
     if (!project) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
     }
@@ -113,7 +114,7 @@ export async function DELETE(
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 })
     }
     const { id: projectId, path: pathSegments } = await params
-    const project = await db.project.findFirst({ where: { id: projectId, userId: decoded.userId } })
+    const project = await db.project.findFirst({ where: isAdmin(decoded.role) ? { id: projectId } : { id: projectId, userId: decoded.userId } })
     if (!project) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
     }
@@ -141,7 +142,7 @@ export async function POST(
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 })
     }
     const { id: projectId, path: pathSegments } = await params
-    const project = await db.project.findFirst({ where: { id: projectId, userId: decoded.userId } })
+    const project = await db.project.findFirst({ where: isAdmin(decoded.role) ? { id: projectId } : { id: projectId, userId: decoded.userId } })
     if (!project) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
     }

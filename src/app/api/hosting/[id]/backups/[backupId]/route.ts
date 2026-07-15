@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
+import { isAdmin } from '@/lib/security'
 import { logAudit } from '@/lib/audit'
 import { downloadBackup, deleteBackup, restoreBackup } from '@/lib/vps'
 
@@ -24,7 +25,7 @@ export async function GET(
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 })
     }
     const { id: projectId, backupId } = await params
-    const project = await db.project.findFirst({ where: { id: projectId, userId: decoded.userId } })
+    const project = await db.project.findFirst({ where: isAdmin(decoded.role) ? { id: projectId } : { id: projectId, userId: decoded.userId } })
     if (!project) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
     }
@@ -55,7 +56,7 @@ export async function DELETE(
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 })
     }
     const { id: projectId, backupId } = await params
-    const project = await db.project.findFirst({ where: { id: projectId, userId: decoded.userId } })
+    const project = await db.project.findFirst({ where: isAdmin(decoded.role) ? { id: projectId } : { id: projectId, userId: decoded.userId } })
     if (!project) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
     }
@@ -88,7 +89,7 @@ export async function POST(
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 })
     }
     const { id: projectId, backupId } = await params
-    const project = await db.project.findFirst({ where: { id: projectId, userId: decoded.userId } })
+    const project = await db.project.findFirst({ where: isAdmin(decoded.role) ? { id: projectId } : { id: projectId, userId: decoded.userId } })
     if (!project) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
     }
