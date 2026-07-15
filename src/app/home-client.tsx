@@ -526,9 +526,18 @@ export default function HomeClient({
             setAuthMode(mode)
           }}
           onClose={() => {
-            // On the panel host the login screen IS the page — don't dismiss it
-            // to an empty (marketing-less) view.
-            if (!isPanelHostView) setShowAuthModal(false)
+            if (isPanelHostView) {
+              // The panel host (panel.<brand>) has no marketing content behind
+              // the login, so closing must take the user to the brand site
+              // rather than leave them on a blank screen.
+              const host = window.location.hostname
+              const marketingHost = host.replace(/^(panel|www|app|dashboard)\./i, '')
+              if (marketingHost && marketingHost !== host) {
+                window.location.href = `${window.location.protocol}//${marketingHost}/`
+                return
+              }
+            }
+            setShowAuthModal(false)
           }}
         />
       )}
