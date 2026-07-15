@@ -56,11 +56,103 @@ function getTransporter(): nodemailer.Transporter | null {
 }
 
 /**
- * Send an email. Returns success in demo mode (no real email sent).
+ * Send mail over HTTPS (port 443) via a provider's REST API. This is the only
+ * path that works on hosts where outbound SMTP (25/465/587) is blocked — which
+ * is the case on the Apsamo production VPS. Configure with:
+ *   EMAIL_PROVIDER = resend | brevo | sendgrid
+ *   EMAIL_API_KEY  = <the provider's API key>
+ * Returns a result, or `null` for an unknown provider so the caller can fall
+ * back to SMTP / demo mode.
+ */
+async function sendViaApi(
+  provider: string,
+  apiKey: string,
+  opts: SendEmailOptions
+): Promise<SendEmailResult | null> {
+  const text = opts.text ?? opts.html.replace(/<[^>]*>/g, '')
+  try {
+    if (provider === 'resend') {
+      const res = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: `${FROM_NAME} <${FROM_EMAIL}>`,
+          to: [opts.to],
+          subject: opts.subject,
+          html: opts.html,
+          text,
+        }),
+      })
+      if (res.ok) {
+        const d = (await res.json().catch(() => ({}))) as { id?: string }
+        return { success: true, messageId: d.id }
+      }
+      console.error('[email] Resend API error', res.status, (await res.text().catch(() => '')).slice(0, 300))
+      return { success: false }
+    }
+    if (provider === 'brevo' || provider === 'sendinblue') {
+      const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: { 'api-key': apiKey, 'Content-Type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify({
+          sender: { email: FROM_EMAIL, name: FROM_NAME },
+          to: [{ email: opts.to }],
+          subject: opts.subject,
+          htmlContent: opts.html,
+          textContent: text,
+        }),
+      })
+      if (res.ok) {
+        const d = (await res.json().catch(() => ({}))) as { messageId?: string }
+        return { success: true, messageId: d.messageId }
+      }
+      console.error('[email] Brevo API error', res.status, (await res.text().catch(() => '')).slice(0, 300))
+      return { success: false }
+    }
+    if (provider === 'sendgrid') {
+      const res = await fetch('https://api.sendgrid.com/v3/mail/send', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          personalizations: [{ to: [{ email: opts.to }] }],
+          from: { email: FROM_EMAIL, name: FROM_NAME },
+          subject: opts.subject,
+          content: [
+            { type: 'text/plain', value: text || ' ' },
+            { type: 'text/html', value: opts.html },
+          ],
+        }),
+      })
+      if (res.ok) {
+        return { success: true, messageId: res.headers.get('x-message-id') || undefined }
+      }
+      console.error('[email] SendGrid API error', res.status, (await res.text().catch(() => '')).slice(0, 300))
+      return { success: false }
+    }
+  } catch (err) {
+    console.error(`[email] ${provider} API request failed:`, err)
+    return { success: false }
+  }
+  return null // unknown provider → let the caller fall back
+}
+
+/**
+ * Send an email. Prefers an HTTP-API provider (works where SMTP is blocked),
+ * then SMTP, then demo-mode console logging.
  */
 export async function sendEmail(
   opts: SendEmailOptions
 ): Promise<SendEmailResult> {
+  // 1) HTTP-API provider (Resend/Brevo/SendGrid) over 443 — the only path that
+  //    works on this VPS, where outbound SMTP ports are blocked.
+  const provider = (process.env.EMAIL_PROVIDER || '').toLowerCase().trim()
+  const apiKey = process.env.EMAIL_API_KEY || process.env.RESEND_API_KEY || ''
+  if (provider && apiKey) {
+    const apiResult = await sendViaApi(provider, apiKey, opts)
+    if (apiResult) return apiResult
+  }
+
+  // 2) SMTP (nodemailer) — kept for hosts that allow outbound SMTP.
   const t = getTransporter()
   if (!t) {
     // Demo mode - log to console
