@@ -1,6 +1,12 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
+import {
+  executePipelineRun,
+  queuedStageResults,
+  reconcileStaleRuns,
+  type PipelineStageDef,
+} from '@/lib/pipeline-runner'
 
 export async function GET(
   request: Request,
@@ -38,6 +44,9 @@ export async function GET(
         { status: 404 }
       )
     }
+
+    // Rescue any runs orphaned by a restart before returning current status.
+    await reconcileStaleRuns(id)
 
     const runs = await db.pipelineRun.findMany({
       where: { pipelineId: id },
@@ -126,48 +135,38 @@ export async function POST(
       ]
     }
 
-    // NOTE: there is no real pipeline runner yet — nothing actually executes the
-    // build/test/deploy commands. Rather than fabricate success/failure (which
-    // would mislead the user), we record the run HONESTLY as `skipped` with each
-    // stage marked not-run. A future runner can drive these stages through the
-    // deployer's exec pipeline and set real statuses.
-    const NOT_IMPLEMENTED =
-      'Pipeline execution is not yet implemented — no command was run.'
-    const stageResults = pipelineStages.map((stage) => ({
-      name: stage.name,
-      type: stage.type,
-      status: 'skipped' as const,
-      duration: 0,
-      output: NOT_IMPLEMENTED,
-    }))
-
+    // Create the run as `running`, then execute the stages in the background so
+    // the request returns immediately. The client polls GET /runs for status.
     const now = new Date()
     const run = await db.pipelineRun.create({
       data: {
         pipelineId: id,
-        status: 'skipped',
+        status: 'running',
         trigger: trigger || 'manual',
         commit: commit || null,
         branch: branch || pipeline.triggerBranch,
-        stages: JSON.stringify(stageResults),
+        stages: JSON.stringify(queuedStageResults(pipelineStages as PipelineStageDef[])),
         startedAt: now,
-        completedAt: now,
-        duration: 0,
       },
     })
 
     await db.pipeline.update({
       where: { id },
-      data: {
-        lastRunAt: now,
-        lastRunStatus: 'skipped',
-      },
+      data: { lastRunAt: now, lastRunStatus: 'running' },
     })
+
+    // Fire-and-forget: runs to completion on the (long-lived) panel process and
+    // updates the run row when done. Never rejects (errors captured into status).
+    void executePipelineRun(
+      run.id,
+      id,
+      pipeline.projectId,
+      pipelineStages as PipelineStageDef[]
+    ).catch((e) => console.error('[pipeline] run execution error', e))
 
     return NextResponse.json(
       {
-        message:
-          'Pipeline execution is not yet implemented on this instance; the run was recorded as skipped.',
+        message: 'Pipeline run started.',
         run: {
           id: run.id,
           pipelineId: run.pipelineId,
