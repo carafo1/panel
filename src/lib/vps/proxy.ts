@@ -472,6 +472,12 @@ export function generateFullCaddyfile(
       out.push(panel)
       out.push('')
     }
+    // Mail server (Mailcow) web UI / webmail, when configured on this box.
+    const mail = generateMailBlock()
+    if (mail) {
+      out.push(mail)
+      out.push('')
+    }
   }
   for (const cfg of configs) {
     out.push(generateCaddyBlock(cfg))
@@ -521,6 +527,31 @@ function generatePanelBlock(): string {
     `            header_up X-Forwarded-Proto {scheme}`,
     `        }`,
     `    }`,
+    `}`,
+  ].join('\n')
+}
+
+/**
+ * Caddy block for the mail server (Mailcow) web UI + webmail, emitted only on
+ * single-box installs where `MAIL_SERVER_HOSTNAME` is set. Mailcow runs on
+ * internal ports (HTTPS 8443, snake-oil cert); Caddy terminates the public
+ * Let's Encrypt cert and proxies to it. Its SMTP/IMAP ports bind directly and
+ * do not go through Caddy.
+ */
+function generateMailBlock(): string {
+  const host = (process.env.MAIL_SERVER_HOSTNAME || '').trim()
+  if (!host) return ''
+  const email = process.env.LE_EMAIL || ADMIN_EMAIL
+  return [
+    `# ── Mail server (Mailcow) — auto-managed ──`,
+    `${host} {`,
+    `    encode gzip zstd`,
+    `    reverse_proxy https://localhost:8443 {`,
+    `        transport http {`,
+    `            tls_insecure_skip_verify`,
+    `        }`,
+    `    }`,
+    `    tls ${email}`,
     `}`,
   ].join('\n')
 }
