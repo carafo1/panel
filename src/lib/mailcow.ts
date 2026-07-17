@@ -165,6 +165,9 @@ export async function addDomain(
       description: opts.description || '',
       aliases: opts.aliases ?? 20,
       mailboxes: opts.mailboxes ?? 10,
+      // Mailcow requires defquota <= maxquota <= (domain) quota. Match defquota
+      // to maxquota so adding a domain never trips defquota_exceeds_maxquota.
+      defquota: opts.quota ?? 1024,
       maxquota: opts.quota ?? 1024,
       quota: (opts.quota ?? 1024) * (opts.mailboxes ?? 10),
       active: '1',
@@ -478,7 +481,9 @@ export async function listMailboxes(
     const arr = await mailcowFetch<
       Array<Record<string, unknown>>
     >(`/get/mailbox/${encodeURIComponent(domain)}`)
-    const mailboxes: MailboxInfo[] = (arr || []).map((m) => ({
+    // Mailcow returns {} (not []) for a domain with no mailboxes — guard so we
+    // never call .map on a non-array.
+    const mailboxes: MailboxInfo[] = (Array.isArray(arr) ? arr : []).map((m) => ({
       address: String(m.username || m.address || ''),
       name: String(m.name || ''),
       active: String(m.active) === '1' || m.active === true,
