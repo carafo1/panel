@@ -472,10 +472,16 @@ export function generateFullCaddyfile(
       out.push(panel)
       out.push('')
     }
-    // Mail server (Mailcow) web UI / webmail, when configured on this box.
+    // Mail server (Mailcow) admin UI, when configured on this box.
     const mail = generateMailBlock()
     if (mail) {
       out.push(mail)
+      out.push('')
+    }
+    // Customer webmail (SOGo) on its own host, root redirected to /SOGo/.
+    const webmail = generateWebmailBlock()
+    if (webmail) {
+      out.push(webmail)
       out.push('')
     }
   }
@@ -546,6 +552,30 @@ function generateMailBlock(): string {
     `# ── Mail server (Mailcow) — auto-managed ──`,
     `${host} {`,
     `    encode gzip zstd`,
+    `    reverse_proxy https://localhost:8443 {`,
+    `        transport http {`,
+    `            tls_insecure_skip_verify`,
+    `        }`,
+    `    }`,
+    `    tls ${email}`,
+    `}`,
+  ].join('\n')
+}
+
+/**
+ * Caddy block for customer webmail (SOGo), emitted when `WEBMAIL_HOSTNAME` is
+ * set. The bare root redirects to `/SOGo/` so mailbox users land straight on the
+ * clean webmail login (no admin / domain-admin screen); everything proxies to
+ * Mailcow. Keep the admin UI on the separate `MAIL_SERVER_HOSTNAME` host.
+ */
+function generateWebmailBlock(): string {
+  const host = (process.env.WEBMAIL_HOSTNAME || '').trim()
+  if (!host) return ''
+  const email = process.env.LE_EMAIL || ADMIN_EMAIL
+  return [
+    `# ── Webmail (SOGo) for mailbox users — auto-managed ──`,
+    `${host} {`,
+    `    redir / /SOGo/ 302`,
     `    reverse_proxy https://localhost:8443 {`,
     `        transport http {`,
     `            tls_insecure_skip_verify`,
