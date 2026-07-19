@@ -52,6 +52,7 @@ import {
 import { toast } from 'sonner'
 import { useAuthStore } from '@/store/auth-store'
 import { PaymentMethodsPanel } from '@/components/admin/payment-methods-panel'
+import { BillingAdminPanel } from '@/components/admin/billing-admin-panel'
 import { ServersPanel } from '@/components/admin/servers-panel'
 import { CmsPanel } from '@/components/admin/cms-panel'
 
@@ -370,6 +371,10 @@ export function AdminPanel() {
           <TabsTrigger value="users">Users</TabsTrigger>
           <TabsTrigger value="jobs">Job Queue</TabsTrigger>
           <TabsTrigger value="servers">Servers</TabsTrigger>
+          <TabsTrigger value="billing">
+            <CreditCard className="size-4 mr-1.5" />
+            Billing
+          </TabsTrigger>
           {isSuperAdmin && (
             <TabsTrigger value="payment-methods">
               <CreditCard className="size-4 mr-1.5" />
@@ -605,6 +610,13 @@ export function AdminPanel() {
         {/* ── Servers Tab ────────────────────────────────────────────── */}
         <TabsContent value="servers">
           <ServersPanel />
+        </TabsContent>
+
+        {/* ── Billing Tab (admin + super_admin) ──────────────────────────
+            Confirming offline payments is day-to-day operational work, so
+            it is not restricted to super_admin. The API allows both roles. */}
+        <TabsContent value="billing">
+          <BillingAdminPanel />
         </TabsContent>
 
         {/* ── Payment Methods Tab (super_admin only) ─────────────────── */}

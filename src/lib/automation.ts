@@ -226,7 +226,7 @@ async function executeAction(
           : 'Domain registration processed.',
         type: 'success',
       })
-      return { domainId: domainId || `dom-${Date.now()}`, status: 'registered', registrar: 'openprovider' }
+      return { domainId: domainId || `dom-${Date.now()}`, status: 'registered', registrar: 'dynadot' }
     }
 
     case 'setup_dns': {

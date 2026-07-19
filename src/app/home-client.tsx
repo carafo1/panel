@@ -55,7 +55,7 @@ import { migrateStorageKeys } from '@/lib/migrate-storage'
 // ── Sidebar nav items ──────────────────────────────────────────────────
 const NAV_ITEMS: { id: DashboardTab; label: string; icon: React.ElementType; adminOnly?: boolean }[] = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
-  { id: 'provisioning', label: 'Provisioning', icon: Zap },
+  { id: 'provisioning', label: 'Provisioning', icon: Zap, adminOnly: true },
   { id: 'hosting', label: 'Hosting', icon: Server },
   { id: 'domains', label: 'Domains', icon: Globe },
   { id: 'deployments', label: 'Deployments', icon: Rocket },
@@ -123,7 +123,13 @@ function Dashboard() {
             case 'overview':
               return <OverviewPanel />
             case 'provisioning':
-              return <ProvisioningPanel />
+              // Operator-only infra wizard (registers real domains / deploys).
+              // Customers get provisioned by paying, not by driving this.
+              return user?.role === 'admin' || user?.role === 'super_admin' ? (
+                <ProvisioningPanel />
+              ) : (
+                <OverviewPanel />
+              )
             case 'hosting':
               return <HostingPanel />
             case 'domains':

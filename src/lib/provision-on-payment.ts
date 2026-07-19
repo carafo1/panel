@@ -1,0 +1,206 @@
+/**
+ * Real provisioning on confirmed payment.
+ *
+ * Replaces the old simulated `processEvent('payment_success')` path (which
+ * only flipped DB flags and sent "success" notifications without creating
+ * anything). This dispatches to the REAL infrastructure:
+ *
+ *   - hosting        → create a Project + Deployment, run deployProject()
+ *                      (real Docker container on a {slug}.BRAND_DOMAIN subdomain)
+ *   - domain / both  → startProvisioning() (registers the real domain via
+ *                      Dynadot, configures DNS, and — for "both" — hosting+email)
+ *
+ * IMPORTANT: domain registration spends real registrar balance and is
+ * irreversible. This runs only AFTER a payment is confirmed (for offline
+ * payments, that means a human already verified the money arrived).
+ *
+ * Idempotent: a `provisionStarted` flag on the payment metadata guarantees a
+ * retried webhook or double-click can't double-provision.
+ */
+import { db } from '@/lib/db'
+import { deployProject } from '@/lib/vps'
+import { startProvisioning } from '@/lib/orchestration'
+import { slugify } from '@/lib/utils'
+import { BRAND_DOMAIN } from '@/lib/brand-config'
+
+export interface ProvisionResult {
+  provisioned: boolean
+  detail: string
+  projectId?: string
+  jobId?: string
+}
+
+/** Map a checkout "framework" hint onto a provisioning stack. */
+function frameworkToStack(framework: unknown): string {
+  const f = String(framework || '').toLowerCase()
+  if (f.includes('word')) return 'wordpress'
+  if (f.includes('php') || f.includes('laravel')) return 'php'
+  if (f.includes('python') || f.includes('django') || f.includes('flask'))
+    return 'python'
+  if (f.includes('docker')) return 'docker'
+  return 'nodejs'
+}
+
+export async function provisionForPayment(
+  paymentId: string
+): Promise<ProvisionResult> {
+  const payment = await db.payment.findUnique({ where: { id: paymentId } })
+  if (!payment) return { provisioned: false, detail: 'payment not found' }
+
+  let meta: Record<string, unknown> = {}
+  try {
+    meta = payment.metadata ? JSON.parse(payment.metadata) : {}
+  } catch {
+    meta = {}
+  }
+
+  // Idempotency guard — never provision the same payment twice.
+  if (meta.provisionStarted) {
+    return { provisioned: false, detail: 'provisioning already started' }
+  }
+
+  const purchaseType = String(meta.purchaseType || payment.type || 'hosting')
+  const domainName =
+    typeof meta.domainName === 'string' && meta.domainName.trim()
+      ? meta.domainName.toLowerCase().trim()
+      : null
+
+  // Mark started up-front so a concurrent call bails at the guard above.
+  await db.payment.update({
+    where: { id: payment.id },
+    data: {
+      metadata: JSON.stringify({
+        ...meta,
+        provisionStarted: true,
+        provisionStartedAt: new Date().toISOString(),
+      }),
+    },
+  })
+
+  try {
+    // ── DOMAIN or BOTH → real domain registration pipeline ──────────
+    if ((purchaseType === 'domain' || purchaseType === 'both') && domainName) {
+      const result = await startProvisioning({
+        userId: payment.userId,
+        domainName,
+        stack: frameworkToStack(meta.framework),
+        includeHosting: purchaseType === 'both',
+        includeEmail: purchaseType === 'both',
+        planId: typeof meta.planId === 'string' ? meta.planId : undefined,
+      })
+      return {
+        provisioned: result.status === 'started',
+        detail:
+          result.status === 'started'
+            ? `provisioning job ${result.jobId}`
+            : `provisioning failed: ${result.error || 'unknown'}`,
+        jobId: result.jobId || undefined,
+      }
+    }
+
+    // ── HOSTING → real container on a subdomain ─────────────────────
+    if (purchaseType === 'hosting') {
+      // Reuse a Project created at checkout if present, else create one
+      // (mirrors the minimal shape the checkout flow uses).
+      let projectId =
+        typeof meta.projectId === 'string' && meta.projectId ? meta.projectId : null
+
+      if (!projectId) {
+        const baseName =
+          (typeof meta.projectName === 'string' && meta.projectName.trim()) ||
+          (typeof meta.planName === 'string' && `${meta.planName} Project`) ||
+          'My Project'
+        const slug = slugify(baseName) + '-' + Date.now().toString(36)
+        const server = await db.server.findFirst({
+          where: { status: 'active' },
+          orderBy: { usedRamGB: 'asc' },
+        })
+        const project = await db.project.create({
+          data: {
+            userId: payment.userId,
+            name: baseName,
+            slug,
+            framework:
+              typeof meta.framework === 'string' ? meta.framework : 'nextjs',
+            stack: frameworkToStack(meta.framework),
+            status: 'creating',
+            subdomain: `${slug}.${BRAND_DOMAIN}`,
+            serverId: server?.id || null,
+            sslEnabled: true,
+            autoDeploy: true,
+          },
+        })
+        projectId = project.id
+      }
+
+      const deployment = await db.deployment.create({
+        data: {
+          projectId,
+          userId: payment.userId,
+          commit: `paid-${Date.now()}`,
+          branch: 'main',
+          status: 'queued',
+          triggeredBy: 'payment',
+          buildLog: '🚀 Provisioning your paid hosting order…',
+        },
+      })
+
+      // Fire-and-forget: the deploy takes minutes; the caller shouldn't wait.
+      void deployProject({
+        projectId,
+        deploymentId: deployment.id,
+        onLog: (m) =>
+          console.log(
+            `[provision-on-payment ${deployment.id.slice(0, 8)}] ${m}`
+          ),
+      }).catch(async (err) => {
+        const msg = err instanceof Error ? err.message : String(err)
+        console.error(
+          `[provision-on-payment] deploy failed for ${deployment.id}:`,
+          msg
+        )
+        await db.deployment
+          .update({
+            where: { id: deployment.id },
+            data: { status: 'failed', buildLog: `❌ Deploy threw: ${msg}` },
+          })
+          .catch(() => {})
+        await db.project
+          .update({ where: { id: projectId! }, data: { status: 'error' } })
+          .catch(() => {})
+      })
+
+      return {
+        provisioned: true,
+        detail: `deploying project ${projectId}`,
+        projectId,
+      }
+    }
+
+    return {
+      provisioned: false,
+      detail: `no provisioning defined for purchase type "${purchaseType}"`,
+    }
+  } catch (err) {
+    // Roll back the started flag so this can be retried (e.g. from the admin
+    // payments view) rather than being stuck forever.
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('[provision-on-payment] failed:', msg)
+    try {
+      await db.payment.update({
+        where: { id: payment.id },
+        data: {
+          metadata: JSON.stringify({
+            ...meta,
+            provisionStarted: false,
+            provisionError: msg,
+            provisionErrorAt: new Date().toISOString(),
+          }),
+        },
+      })
+    } catch {
+      /* ignore */
+    }
+    return { provisioned: false, detail: msg }
+  }
+}

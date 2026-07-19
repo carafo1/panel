@@ -48,6 +48,15 @@ export async function POST(request: Request) {
         { status: 401 }
       )
     }
+    // Operator-only: this wizard registers real domains and deploys hosting
+    // (spends registrar balance). Customers are provisioned via the paid
+    // checkout flow, not by calling this directly.
+    if (user.role !== 'admin' && user.role !== 'super_admin') {
+      return NextResponse.json(
+        { error: 'Admin access required' },
+        { status: 403 }
+      )
+    }
 
     // ── Parse body ─────────────────────────────────────────────────
     let body: Record<string, unknown>

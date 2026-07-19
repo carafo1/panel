@@ -2,8 +2,12 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { verifyPassword, generateToken, generateTwoFactorTempToken } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
+import { withRateLimit } from '@/lib/rate-limit'
 
-export async function POST(request: Request) {
+// Brute-force protection: 10 login attempts per IP per minute.
+export const POST = withRateLimit(loginHandler, { limit: 10, windowMs: 60_000 })
+
+async function loginHandler(request: Request) {
   try {
     const body = await request.json()
     const { email, password } = body

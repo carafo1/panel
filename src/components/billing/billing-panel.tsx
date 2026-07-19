@@ -123,6 +123,22 @@ interface CheckoutResult {
   status?: string // "redirect_required" | "pending" | "completed"
   redirectUrl?: string | null
   transactionId?: string
+  // Offline / bank-transfer details the admin configured, so the customer
+  // knows where to send the money and which reference to quote.
+  paymentDetails?: {
+    reference?: string | null
+    instructions?: string | null
+    accounts?: Array<{
+      label?: string | null
+      type?: string | null
+      accountName?: string | null
+      accountNumber?: string | null
+      iban?: string | null
+      swift?: string | null
+      phone?: string | null
+      note?: string | null
+    }> | null
+  } | null
 }
 
 interface PortalResult {
@@ -445,6 +461,69 @@ function CheckoutDialog({
                     </div>
                   </div>
                 </div>
+
+                {/* Where to send the money — configured by the admin under
+                    Admin → Payment Methods → Manual. */}
+                {(() => {
+                  const d = success.paymentDetails
+                  if (!d) return null
+                  const accounts = (d.accounts || []).filter((a) => a && a.label)
+                  if (!accounts.length && !d.instructions) return null
+                  return (
+                    <div className="space-y-3 rounded-lg border p-4">
+                      {accounts.length > 0 && (
+                        <div className="space-y-3">
+                          <p className="font-medium text-sm">
+                            {accounts.length > 1
+                              ? 'Pay to any one of these accounts'
+                              : 'Where to send your payment'}
+                          </p>
+                          {accounts.map((acc, i) => {
+                            const rows: Array<[string, string | null | undefined]> = [
+                              ['Account holder', acc.accountName],
+                              ['Account number', acc.accountNumber],
+                              ['IBAN', acc.iban],
+                              ['SWIFT / BIC', acc.swift],
+                              ['Number', acc.phone],
+                              ['Details', acc.note],
+                            ]
+                            const shown = rows.filter(([, v]) => v && String(v).trim())
+                            return (
+                              <div
+                                key={i}
+                                className="rounded-md border bg-muted/30 p-3"
+                              >
+                                <p className="text-sm font-medium mb-1.5">
+                                  {acc.label}
+                                </p>
+                                <dl className="space-y-1">
+                                  {shown.map(([label, value]) => (
+                                    <div
+                                      key={label}
+                                      className="flex justify-between gap-4 text-sm"
+                                    >
+                                      <dt className="text-muted-foreground shrink-0">
+                                        {label}
+                                      </dt>
+                                      <dd className="font-mono text-right break-all">
+                                        {value}
+                                      </dd>
+                                    </div>
+                                  ))}
+                                </dl>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                      {d.instructions && (
+                        <div className="text-sm whitespace-pre-line border-t pt-3">
+                          {d.instructions}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })()}
 
                 <p className="text-xs text-muted-foreground">
                   You will receive an email notification once the payment is

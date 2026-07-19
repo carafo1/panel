@@ -211,7 +211,7 @@ export async function POST(request: Request) {
             projectId: project?.id || null,
             name: domainLower,
             status: 'pending',
-            registrar: 'openprovider',
+            registrar: 'dynadot',
             registeredAt: new Date(),
             expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
             autoRenew: true,
@@ -450,6 +450,64 @@ export async function POST(request: Request) {
         transactionId: result.transactionId,
         paymentId: result.paymentId,
         demo: false,
+        // Offline / bank-transfer: send the admin-configured details so the
+        // customer is actually told where to pay and what reference to quote.
+        paymentDetails:
+          requestedMethod === 'manual'
+            ? (() => {
+                const c = (activeMethod.config || {}) as Record<string, unknown>
+                const str = (k: string) =>
+                  typeof c[k] === 'string' && (c[k] as string).trim()
+                    ? (c[k] as string)
+                    : null
+
+                // Admin can configure several accounts (banks, mobile money,
+                // cash). Fall back to the legacy single-account shape so an
+                // un-migrated config still shows something.
+                const rawAccounts = Array.isArray(c.accounts) ? c.accounts : []
+                let accounts = rawAccounts
+                  .filter((a) => a && typeof a === 'object')
+                  .map((a) => {
+                    const o = a as Record<string, unknown>
+                    const f = (k: string) =>
+                      typeof o[k] === 'string' && (o[k] as string).trim()
+                        ? (o[k] as string)
+                        : null
+                    return {
+                      label: f('label'),
+                      type: f('type') || 'bank',
+                      accountName: f('accountName'),
+                      accountNumber: f('accountNumber'),
+                      iban: f('iban'),
+                      swift: f('swift'),
+                      phone: f('phone'),
+                      note: f('note'),
+                    }
+                  })
+                  .filter((a) => a.label)
+
+                if (!accounts.length && (str('bankName') || str('accountNumber'))) {
+                  accounts = [
+                    {
+                      label: str('bankName') || 'Bank transfer',
+                      type: 'bank',
+                      accountName: str('accountName'),
+                      accountNumber: str('accountNumber'),
+                      iban: str('iban'),
+                      swift: str('swift'),
+                      phone: str('mobileMoney'),
+                      note: null,
+                    },
+                  ]
+                }
+
+                return {
+                  reference: result.transactionId || null,
+                  instructions: str('instructions'),
+                  accounts,
+                }
+              })()
+            : undefined,
         message:
           result.status === 'redirect_required'
             ? `Redirecting to ${activeMethod.displayName}…`

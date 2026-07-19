@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { withRateLimit } from '@/lib/rate-limit'
 
-export async function POST(request: Request) {
+// Anti-spam: 5 contact submissions per IP per minute.
+export const POST = withRateLimit(contactHandler, { limit: 5, windowMs: 60_000 })
+
+async function contactHandler(request: Request) {
   try {
     const body = await request.json()
     const { name, email, subject, message } = body

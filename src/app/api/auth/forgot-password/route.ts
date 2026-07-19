@@ -1,9 +1,13 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { sendPasswordResetEmail } from '@/lib/email'
+import { withRateLimit } from '@/lib/rate-limit'
 import crypto from 'crypto'
 
-export async function POST(request: Request) {
+// Anti-abuse: 5 reset requests per IP per minute (stops enumeration + email spam).
+export const POST = withRateLimit(forgotPasswordHandler, { limit: 5, windowMs: 60_000 })
+
+async function forgotPasswordHandler(request: Request) {
   try {
     const body = await request.json()
     const { email } = body
