@@ -36,6 +36,9 @@ const CRON_API_KEY = process.env.CRON_API_KEY || 'deployhub-cron-key'
 
 const JOBS_INTERVAL_MS = 10_000 // 10s
 const MONITORS_INTERVAL_MS = 60_000 // 60s
+// Subscription lifecycle: remind before expiry, mark past_due, suspend after
+// grace. Hourly is plenty — these are day-scale transitions.
+const BILLING_INTERVAL_MS = 60 * 60_000 // 1h
 
 // ── State ─────────────────────────────────────────────────────────────
 interface RunStats {
@@ -79,6 +82,7 @@ const stats: RunStats = {
 const startedAt = Date.now()
 let jobsTimer: ReturnType<typeof setInterval> | null = null
 let monitorsTimer: ReturnType<typeof setInterval> | null = null
+let billingTimer: ReturnType<typeof setInterval> | null = null
 
 // ── HTTP helper ───────────────────────────────────────────────────────
 async function callNextApi(
@@ -163,6 +167,43 @@ async function processJobsTick() {
     stats.jobs.failures++
     stats.jobs.lastError = err instanceof Error ? err.message : String(err)
     console.error('[worker] jobs tick error:', stats.jobs.lastError)
+  }
+}
+
+// ── Billing sweep tick ────────────────────────────────────────────────
+// Enforces the subscription lifecycle for non-Stripe (offline / Waafi)
+// subscriptions. Stripe drives its own via webhooks.
+async function billingTick(): Promise<void> {
+  try {
+    const res = await callNextApi('/api/billing/sweep', { timeoutMs: 60_000 })
+    if (!res.ok) {
+      const errMsg = `HTTP ${res.status}: ${
+        typeof res.body === 'object' && res.body
+          ? JSON.stringify(res.body)
+          : String(res.body)
+      }`
+      console.error(`[worker] /api/billing/sweep failed: ${errMsg}`)
+      return
+    }
+    const body = res.body as {
+      scanned?: number
+      reminded?: number
+      pastDue?: number
+      suspended?: number
+    } | null
+    const reminded = body?.reminded ?? 0
+    const pastDue = body?.pastDue ?? 0
+    const suspended = body?.suspended ?? 0
+    if (reminded || pastDue || suspended) {
+      console.log(
+        `[worker] billing: scanned=${body?.scanned ?? 0} reminded=${reminded} pastDue=${pastDue} suspended=${suspended}`
+      )
+    }
+  } catch (err) {
+    console.error(
+      '[worker] billing tick error:',
+      err instanceof Error ? err.message : String(err)
+    )
   }
 }
 
@@ -272,7 +313,7 @@ httpServer.listen(PORT, () => {
     })`
   )
   console.log(
-    `[worker] Schedules: jobs every ${JOBS_INTERVAL_MS}ms, monitors every ${MONITORS_INTERVAL_MS}ms`
+    `[worker] Schedules: jobs every ${JOBS_INTERVAL_MS}ms, monitors every ${MONITORS_INTERVAL_MS}ms, billing every ${BILLING_INTERVAL_MS}ms`
   )
 
   // Kick off an immediate tick on startup so we don't wait a full interval
@@ -282,6 +323,9 @@ httpServer.listen(PORT, () => {
   )
   runMonitorsTick().catch((err) =>
     console.error('[worker] initial monitors tick failed:', err)
+  )
+  billingTick().catch((err) =>
+    console.error('[worker] initial billing tick failed:', err)
   )
 
   // Schedule recurring ticks.
@@ -296,6 +340,12 @@ httpServer.listen(PORT, () => {
       console.error('[worker] scheduled monitors tick failed:', err)
     )
   }, MONITORS_INTERVAL_MS)
+
+  billingTimer = setInterval(() => {
+    billingTick().catch((err) =>
+      console.error('[worker] scheduled billing tick failed:', err)
+    )
+  }, BILLING_INTERVAL_MS)
 })
 
 // ── Graceful shutdown ─────────────────────────────────────────────────
@@ -303,6 +353,7 @@ function shutdown(signal: string) {
   console.log(`[worker] Received ${signal}, shutting down...`)
   if (jobsTimer) clearInterval(jobsTimer)
   if (monitorsTimer) clearInterval(monitorsTimer)
+  if (billingTimer) clearInterval(billingTimer)
   httpServer.close(() => {
     console.log('[worker] HTTP server closed')
     process.exit(0)

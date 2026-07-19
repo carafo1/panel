@@ -359,7 +359,27 @@ export async function getAllPrices(): Promise<PricedTld[]> {
 export async function getPriceForTld(tld: string): Promise<PricedTld | null> {
   const normalized = tld.startsWith('.') ? tld : '.' + tld
   const row = await db.domainPrice.findUnique({ where: { tld: normalized } })
-  if (!row) return null
+  if (!row) {
+    // No synced row for this TLD. Rather than return null (which forced callers
+    // like domain search onto a hardcoded, INCONSISTENT price table), derive a
+    // price from the curated wholesale catalog + the live global markup. This
+    // guarantees search and checkout always quote the same number.
+    const wholesale =
+      TLD_WHOLESALE_PRICES[normalized]?.registration ?? CATALOG_DEFAULT_WHOLESALE
+    const markup = await getGlobalMarkup()
+    const registration = applyMarkup(wholesale, markup)
+    return {
+      tld: normalized,
+      wholesale,
+      markup,
+      registration,
+      renewal: registration,
+      transfer: registration,
+      currency: 'USD',
+      active: true,
+      lastSyncedAt: null,
+    }
+  }
   return {
     tld: row.tld,
     wholesale: row.wholesale,

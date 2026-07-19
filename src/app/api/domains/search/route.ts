@@ -5,20 +5,6 @@ import { getPriceForDomain, tldFromDomain, getAllPrices } from '@/lib/pricing'
 import { ok, apiError } from '@/lib/api-response'
 import { withRateLimit } from '@/lib/rate-limit'
 
-// Domain TLD pricing (used as a fallback when Dynadot returns nothing useful)
-const TLD_PRICES: Record<string, number> = {
-  '.com': 12.99,
-  '.net': 11.99,
-  '.org': 10.99,
-  '.io': 39.99,
-  '.dev': 14.99,
-  '.app': 14.99,
-  '.co': 29.99,
-  '.xyz': 3.99,
-  '.tech': 9.99,
-  '.ai': 69.99,
-}
-
 /**
  * GET /api/domains/search?domain=example.com
  * Instant domain availability search with pricing.
@@ -57,8 +43,10 @@ async function getHandler(request: Request) {
     }
 
     // ─── Pricing ────────────────────────────────────────────────────────
+    // getPriceForDomain now always resolves (catalog + live markup fallback),
+    // so search quotes exactly what checkout will charge.
     const priceRow = await getPriceForDomain(domainLower)
-    const registrationPrice = priceRow?.registration ?? TLD_PRICES[tld] ?? 19.99
+    const registrationPrice = priceRow?.registration ?? 0
     const renewalPrice = priceRow?.renewal ?? registrationPrice
     const transferPrice = priceRow?.transfer ?? registrationPrice
 
@@ -221,18 +209,24 @@ async function postHandler(request: Request) {
     // PRICING: always quote from the DomainPrice table (wholesale + markup).
     // The registrar search result carries the WHOLESALE price — quoting that
     // to the customer would forfeit the entire markup.
+    // getPriceForDomain always resolves now (catalog + live markup fallback),
+    // so the quote here always matches what checkout charges.
     const sellingRow = await getPriceForDomain(domainLower)
     const price: number | null = available
-      ? sellingRow?.registration ?? TLD_PRICES[tld] ?? 19.99
+      ? sellingRow?.registration ?? 0
       : null
 
     const allSelling = await getAllPrices()
     const sellingFor = (d: string): number => {
       const sugTld = d.substring(d.lastIndexOf('.'))
-      return allSelling.find((p) => p.tld === sugTld)?.registration ?? TLD_PRICES[sugTld] ?? 19.99
+      return allSelling.find((p) => p.tld === sugTld)?.registration ?? 0
     }
 
-    const suggestionTlds = Object.keys(TLD_PRICES).filter((t) => t !== tld).slice(0, 5)
+    const POPULAR_TLDS = ['.com', '.net', '.org', '.io', '.co', '.dev', '.app', '.xyz']
+    const activeTldSet = new Set(allSelling.map((p) => p.tld))
+    const suggestionTlds = POPULAR_TLDS.filter(
+      (t) => t !== tld && activeTldSet.has(t)
+    ).slice(0, 5)
     const suggestionDomains = suggestionTlds.map((t) => `${baseName}${t}`)
 
     let suggestions: { domain: string; available: boolean; price: number }[] = []

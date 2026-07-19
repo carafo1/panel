@@ -3,9 +3,13 @@ import { db } from '@/lib/db'
 import { hashPassword } from '@/lib/auth'
 import { sendWelcomeEmail } from '@/lib/email'
 import { logAudit } from '@/lib/audit'
+import { withRateLimit } from '@/lib/rate-limit'
 import crypto from 'crypto'
 
-export async function POST(request: Request) {
+// Anti-spam: 5 registrations per IP per minute.
+export const POST = withRateLimit(registerHandler, { limit: 5, windowMs: 60_000 })
+
+async function registerHandler(request: Request) {
   try {
     const body = await request.json()
     const { name, email, password } = body
@@ -17,9 +21,22 @@ export async function POST(request: Request) {
       )
     }
 
-    if (password.length < 6) {
+    // Password policy: at least 8 chars with letters and numbers.
+    if (typeof password !== 'string' || password.length < 8) {
       return NextResponse.json(
-        { error: 'Password must be at least 6 characters' },
+        { error: 'Password must be at least 8 characters' },
+        { status: 400 }
+      )
+    }
+    if (!/[a-zA-Z]/.test(password) || !/[0-9]/.test(password)) {
+      return NextResponse.json(
+        { error: 'Password must contain both letters and numbers' },
+        { status: 400 }
+      )
+    }
+    if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return NextResponse.json(
+        { error: 'Please enter a valid email address' },
         { status: 400 }
       )
     }
