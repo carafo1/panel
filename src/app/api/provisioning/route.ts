@@ -13,7 +13,7 @@
  */
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
+import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 
 const VALID_STATUSES = new Set([
   'pending',
@@ -31,7 +31,7 @@ export async function GET(request: Request) {
     if (!token) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
-    const user = verifyToken(token)
+    const user = await verifyTokenFresh(token)
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }

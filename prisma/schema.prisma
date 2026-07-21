@@ -13,6 +13,13 @@ model User {
   name         String
   password     String
   role         String        @default("user") // "super_admin", "client", "user", "admin"
+  // Account standing, independent of role. Anything other than "active"
+  // blocks sign-in — this is how a non-paying or fraudulent account is
+  // actually stopped, rather than only being marked in a report.
+  /// active | suspended | fraud | closed
+  status                  String   @default("active")
+  statusReason            String?
+  statusChangedAt         DateTime?
   emailVerified           Boolean  @default(false)
   emailVerificationToken  String?
   avatar                  String?
@@ -131,6 +138,9 @@ model Subscription {
   // When true the billing sweep raises the next period's invoice
   // automatically (and charges it if a gateway supports auto-charge).
   autoRenew        Boolean   @default(true)
+  // Accumulating counters (bandwidth) are measured from this point, so an
+  // admin can reset usage without touching the billing period.
+  usageResetAt     DateTime?
   lastRenewedAt    DateTime?
   renewalAttempts  Int       @default(0)
   lastRenewalError String?
@@ -881,6 +891,64 @@ model EmailMailbox {
 
 // ─── Billing: coupons, tax, wallet credit ────────────────────────────────
 
+/// Point-in-time usage snapshot, written periodically by the worker.
+/// The series gives usage history; the newest row is "current usage".
+/// Measured values come from `docker stats` / disk inspection; counted values
+/// are queried from the database.
+model UsageRecord {
+  id             String   @id @default(cuid())
+  userId         String
+  subscriptionId String?
+  projectId      String?
+
+  // Measured
+  diskMB      Float @default(0)
+  ramMB       Float @default(0)
+  cpuPercent  Float @default(0)
+  bandwidthMB Float @default(0)
+
+  // Counted
+  websites      Int @default(0)
+  databases     Int @default(0)
+  emailAccounts Int @default(0)
+  ftpAccounts   Int @default(0)
+  cronJobs      Int @default(0)
+  domains       Int @default(0)
+  subdomains    Int @default(0)
+  backups       Int @default(0)
+
+  capturedAt DateTime @default(now())
+
+  @@index([userId, capturedAt])
+  @@index([subscriptionId])
+  @@index([projectId])
+}
+
+/// A refund issued against an invoice. Money can go back to the customer's
+/// wallet (instant, always available) or be recorded as returned via the
+/// original gateway (the admin performs that in the gateway's own dashboard —
+/// we never move money at a PSP we don't hold credentials for).
+model Refund {
+  id          String   @id @default(cuid())
+  invoiceId   String
+  userId      String
+  amount      Float
+  currency    String   @default("USD")
+  /// wallet | gateway | manual
+  destination String   @default("wallet")
+  reason      String?
+  /// pending | completed | failed
+  status      String   @default("completed")
+  gatewayRef  String?
+  adminUserId String?
+  createdAt   DateTime @default(now())
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@index([userId])
+}
+
 model Coupon {
   id          String   @id @default(cuid())
   code        String   @unique // customer-facing, e.g. "LAUNCH20"
@@ -1049,6 +1117,14 @@ model Invoice {
   taxName         String?  // e.g. "VAT 20%"
   creditApplied   Float    @default(0) // paid from wallet balance
   total           Float    // subtotal - discount + tax - creditApplied
+  // Running total of money actually received (supports partial payments).
+  // status becomes 'partially_paid' when 0 < amountPaid < total.
+  amountPaid      Float    @default(0)
+  amountRefunded  Float    @default(0)
+  refundedAt      DateTime?
+  // Credit note / refund document pointing back at the invoice it corrects.
+  type            String   @default("standard") // standard | credit_note | manual
+  parentInvoiceId String?
   currency        String   @default("USD")
   status          String   @default("unpaid") // unpaid, paid, void, refunded
   paidAt          DateTime?
@@ -1061,6 +1137,7 @@ model Invoice {
   domain          Domain?  @relation(fields: [domainId], references: [id])
   subscription    Subscription? @relation(fields: [subscriptionId], references: [id])
   transactions    Transaction[]
+  refunds         Refund[]
 
   @@index([userId])
   @@index([status])

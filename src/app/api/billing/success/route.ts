@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { retrieveSession, isStripeDemoMode } from '@/lib/stripe'
-import { processEvent } from '@/lib/automation'
+import { provisionForPayment } from '@/lib/provision-on-payment'
 import { createNotification } from '@/lib/notifications'
 
 /**
@@ -114,19 +114,22 @@ export async function GET(request: Request) {
       })
     }
 
-    // Drive the automation pipeline (creates project / domain / deployment)
-    await processEvent({
-      type: 'payment_success',
-      userId,
-      payload: {
-        paymentId: payment.id,
-        planId,
-        purchaseType,
-        domainName,
-        subscriptionId: subscription?.id || null,
-        projectName,
-      },
-    })
+    // REAL provisioning — same switch as the Stripe webhook.
+    //
+    // This is the browser-return path, so it races the webhook; whichever
+    // arrives first wins and the other is a no-op thanks to the
+    // `provisionStarted` guard inside provisionForPayment. It used to call
+    // the simulated processEvent('payment_success'), which told the customer
+    // their resources were being provisioned while creating nothing.
+    const provision = await provisionForPayment(payment.id).catch(
+      (err: unknown) => {
+        console.error('[billing/success] provisioning failed:', err)
+        return { provisioned: false, detail: 'provisioning error' }
+      }
+    )
+    console.log(
+      `[billing/success] provisioning for ${payment.id}: ${provision.detail}`
+    )
 
     // Notify the user
     await createNotification({

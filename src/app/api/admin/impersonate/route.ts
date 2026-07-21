@@ -1,9 +1,5 @@
 import { NextResponse } from 'next/server'
-import {
-  verifyToken,
-  extractTokenFromHeader,
-  generateImpersonationToken,
-} from '@/lib/auth'
+import { verifyTokenFresh, extractTokenFromHeader, generateImpersonationToken } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { db } from '@/lib/db'
 
@@ -21,7 +17,7 @@ import { db } from '@/lib/db'
 export async function POST(request: Request) {
   try {
     const token = extractTokenFromHeader(request.headers.get('Authorization'))
-    const decoded = token ? verifyToken(token) : null
+    const decoded = token ? await verifyTokenFresh(token) : null
     if (!decoded) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }

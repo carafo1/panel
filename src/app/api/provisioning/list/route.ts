@@ -16,7 +16,7 @@
  * Response: { jobs: [...], total, page, limit, totalPages }
  */
 import { NextResponse } from 'next/server'
-import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
+import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { db } from '@/lib/db'
 
 function isAdmin(role: string): boolean {
@@ -40,7 +40,7 @@ export async function GET(request: Request) {
     if (!token) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
-    const user = verifyToken(token)
+    const user = await verifyTokenFresh(token)
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }

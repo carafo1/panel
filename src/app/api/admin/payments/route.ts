@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
+import { verifyToken, extractTokenFromHeader, requireAdminRole } from '@/lib/auth'
 import { db } from '@/lib/db'
 
 /**
@@ -8,15 +8,13 @@ import { db } from '@/lib/db'
  * Needed because offline/bank-transfer payments require a human to verify
  * the money arrived. Without this the admin has no view of who has paid.
  */
-function requireAdmin(request: Request): {
+async function requireAdmin(request: Request): Promise<{
   decoded: { userId: string; email: string; role: string }
-} | null {
-  const token = extractTokenFromHeader(request.headers.get('Authorization'))
-  if (!token) return null
-  const decoded = verifyToken(token)
-  if (!decoded) return null
-  if (decoded.role !== 'super_admin' && decoded.role !== 'admin') return null
-  return { decoded }
+} | null> {
+  // SECURITY: role comes from the database, not the 7-day token — see
+  // verifyTokenFresh. Also rejects suspended/closed accounts.
+  const decoded = await requireAdminRole(request)
+  return decoded ? { decoded } : null
 }
 
 function parseMeta(raw: string | null): Record<string, unknown> {
@@ -36,7 +34,7 @@ function parseMeta(raw: string | null): Record<string, unknown> {
  */
 export async function GET(request: Request) {
   try {
-    const auth = requireAdmin(request)
+    const auth = await requireAdmin(request)
     if (!auth) {
       return NextResponse.json(
         { error: 'Admin access required' },

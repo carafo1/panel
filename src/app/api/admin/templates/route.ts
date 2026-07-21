@@ -11,7 +11,7 @@
  */
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
+import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { isAdmin, sanitizeError } from '@/lib/security'
 import { logAudit } from '@/lib/audit'
 
@@ -23,7 +23,7 @@ export async function GET(request: Request) {
     const authHeader = request.headers.get('Authorization')
     const token = extractTokenFromHeader(authHeader)
     if (!token) return NextResponse.json({ error: 'Authorization required' }, { status: 401 })
-    const decoded = verifyToken(token)
+    const decoded = await verifyTokenFresh(token)
     if (!decoded || !isAdmin(decoded.role)) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 })
     }

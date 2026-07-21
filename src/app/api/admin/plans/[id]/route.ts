@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
+import { verifyToken, extractTokenFromHeader, requireAdminRole } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { db } from '@/lib/db'
 
@@ -10,15 +10,13 @@ import { db } from '@/lib/db'
  * in use is ARCHIVED instead (existing subscriptions keep running, but it
  * can no longer be bought).
  */
-function requireAdmin(request: Request): {
+async function requireAdmin(request: Request): Promise<{
   decoded: { userId: string; email: string; role: string }
-} | null {
-  const token = extractTokenFromHeader(request.headers.get('Authorization'))
-  if (!token) return null
-  const decoded = verifyToken(token)
-  if (!decoded) return null
-  if (decoded.role !== 'super_admin' && decoded.role !== 'admin') return null
-  return { decoded }
+} | null> {
+  // SECURITY: role comes from the database, not the 7-day token — see
+  // verifyTokenFresh. Also rejects suspended/closed accounts.
+  const decoded = await requireAdminRole(request)
+  return decoded ? { decoded } : null
 }
 
 const BILLING_CYCLES = ['monthly', 'quarterly', 'annual', 'biennial', 'lifetime']
@@ -42,7 +40,7 @@ export async function PATCH(
   context: { params: Promise<{ id: string }> }
 ) {
   try {
-    const auth = requireAdmin(request)
+    const auth = await requireAdmin(request)
     if (!auth) {
       return NextResponse.json(
         { error: 'Admin access required' },
@@ -179,7 +177,7 @@ export async function DELETE(
   context: { params: Promise<{ id: string }> }
 ) {
   try {
-    const auth = requireAdmin(request)
+    const auth = await requireAdmin(request)
     if (!auth) {
       return NextResponse.json(
         { error: 'Admin access required' },

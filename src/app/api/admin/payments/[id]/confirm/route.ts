@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
+import { verifyToken, extractTokenFromHeader, requireAdminRole } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { db } from '@/lib/db'
 import { activatePayment, rejectPayment } from '@/lib/payment-activation'
@@ -11,15 +11,13 @@ import { activatePayment, rejectPayment } from '@/lib/payment-activation'
  * the exact same activation path as the Stripe webhook and the Waafi
  * callback (complete payment → activate subscription → provision).
  */
-function requireAdmin(request: Request): {
+async function requireAdmin(request: Request): Promise<{
   decoded: { userId: string; email: string; role: string }
-} | null {
-  const token = extractTokenFromHeader(request.headers.get('Authorization'))
-  if (!token) return null
-  const decoded = verifyToken(token)
-  if (!decoded) return null
-  if (decoded.role !== 'super_admin' && decoded.role !== 'admin') return null
-  return { decoded }
+} | null> {
+  // SECURITY: role comes from the database, not the 7-day token — see
+  // verifyTokenFresh. Also rejects suspended/closed accounts.
+  const decoded = await requireAdminRole(request)
+  return decoded ? { decoded } : null
 }
 
 /**
@@ -33,7 +31,7 @@ export async function POST(
   context: { params: Promise<{ id: string }> }
 ) {
   try {
-    const auth = requireAdmin(request)
+    const auth = await requireAdmin(request)
     if (!auth) {
       return NextResponse.json(
         { error: 'Admin access required' },

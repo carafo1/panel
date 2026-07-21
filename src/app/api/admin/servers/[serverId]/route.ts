@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
+import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { encrypt } from '@/lib/encryption'
 
@@ -23,7 +23,7 @@ async function requireAdmin(request: Request) {
       ),
     }
   }
-  const decoded = verifyToken(token)
+  const decoded = await verifyTokenFresh(token)
   if (!decoded) {
     return {
       error: NextResponse.json(

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { seedDatabase } from '@/lib/seed'
-import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
+import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { isAdmin } from '@/lib/security'
 
 /**
@@ -19,7 +19,7 @@ export async function POST(request: Request) {
         { status: 401 }
       )
     }
-    const decoded = verifyToken(token)
+    const decoded = await verifyTokenFresh(token)
     if (!decoded || !isAdmin(decoded.role)) {
       return NextResponse.json(
         { error: 'Admin privileges required' },

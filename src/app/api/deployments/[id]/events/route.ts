@@ -1,5 +1,5 @@
 import { db } from '@/lib/db'
-import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
+import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { BRAND_DOMAIN } from '@/lib/brand-config'
 
 function sleep(ms: number): Promise<void> {
@@ -20,7 +20,7 @@ export async function GET(
     })
   }
 
-  const decoded = verifyToken(token)
+  const decoded = await verifyTokenFresh(token)
   if (!decoded) {
     return new Response(JSON.stringify({ error: 'Invalid or expired token' }), {
       status: 401,

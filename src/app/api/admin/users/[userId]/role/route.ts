@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
+import {
+  verifyTokenFresh,
+  extractTokenFromHeader,
+  invalidateUserAuthCache,
+} from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 
 /**
@@ -11,13 +15,13 @@ import { logAudit } from '@/lib/audit'
  * Returns the decoded user payload on success, or null when unauthenticated
  * / unauthorised.
  */
-function requireSuperAdmin(request: Request): {
+async function requireSuperAdmin(request: Request): Promise<{
   decoded: { userId: string; email: string; role: string }
-} | null {
+} | null> {
   const authHeader = request.headers.get('Authorization')
   const token = extractTokenFromHeader(authHeader)
   if (!token) return null
-  const decoded = verifyToken(token)
+  const decoded = await verifyTokenFresh(token)
   if (!decoded) return null
   if (decoded.role !== 'super_admin') return null
   return { decoded }
@@ -44,7 +48,7 @@ interface RouteContext {
  */
 export async function PATCH(request: Request, context: RouteContext) {
   try {
-    const auth = requireSuperAdmin(request)
+    const auth = await requireSuperAdmin(request)
     if (!auth) {
       return NextResponse.json(
         { error: 'Super admin access required' },
@@ -115,6 +119,11 @@ export async function PATCH(request: Request, context: RouteContext) {
       data: { role: role as ValidRole },
       select: { id: true, name: true, email: true, role: true },
     })
+
+    // AFTER the write, never before: invalidating first would let a
+    // concurrent request re-cache the OLD role and keep it alive for the
+    // full TTL. Doing it here means the new role applies to the next request.
+    invalidateUserAuthCache(userId)
 
     await logAudit({
       userId: auth.decoded.userId,

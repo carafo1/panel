@@ -1,24 +1,22 @@
 import { NextResponse } from 'next/server'
-import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
+import { verifyToken, extractTokenFromHeader, requireAdminRole } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { db } from '@/lib/db'
 
 /** Admin tax-rate management (VAT / GST / sales tax, regional + compound). */
-function requireAdmin(request: Request): {
+async function requireAdmin(request: Request): Promise<{
   decoded: { userId: string; email: string; role: string }
-} | null {
-  const token = extractTokenFromHeader(request.headers.get('Authorization'))
-  if (!token) return null
-  const decoded = verifyToken(token)
-  if (!decoded) return null
-  if (decoded.role !== 'super_admin' && decoded.role !== 'admin') return null
-  return { decoded }
+} | null> {
+  // SECURITY: role comes from the database, not the 7-day token — see
+  // verifyTokenFresh. Also rejects suspended/closed accounts.
+  const decoded = await requireAdminRole(request)
+  return decoded ? { decoded } : null
 }
 
 /** GET /api/admin/tax-rates */
 export async function GET(request: Request) {
   try {
-    const auth = requireAdmin(request)
+    const auth = await requireAdmin(request)
     if (!auth) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 })
     }
@@ -35,7 +33,7 @@ export async function GET(request: Request) {
 /** POST /api/admin/tax-rates */
 export async function POST(request: Request) {
   try {
-    const auth = requireAdmin(request)
+    const auth = await requireAdmin(request)
     if (!auth) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 })
     }
@@ -86,7 +84,7 @@ export async function POST(request: Request) {
 /** PATCH /api/admin/tax-rates — { id, ...fields } or { id, delete: true } */
 export async function PATCH(request: Request) {
   try {
-    const auth = requireAdmin(request)
+    const auth = await requireAdmin(request)
     if (!auth) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 })
     }

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
+import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 
 /**
  * GET /api/audit-logs
@@ -37,7 +37,7 @@ export async function GET(request: Request) {
       )
     }
 
-    const decoded = verifyToken(token)
+    const decoded = await verifyTokenFresh(token)
     if (!decoded) {
       return NextResponse.json(
         { error: 'Invalid or expired token' },

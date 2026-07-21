@@ -17,8 +17,10 @@
 import { db } from '@/lib/db'
 import { createSubscriptionInvoice, cycleDays } from '@/lib/invoices'
 import { applyCreditToInvoice } from '@/lib/credit'
-import { createNotification } from '@/lib/notifications'
-import { sendEmail } from '@/lib/email'
+import {
+  notifySubscriptionRenewed,
+  notifyRenewalFailed,
+} from '@/lib/billing-notifications'
 
 /**
  * Prisma filter for "we own the billing for this subscription".
@@ -140,26 +142,15 @@ export async function renewSubscription(opts: {
       }
     }
 
-    await createNotification({
+    await notifySubscriptionRenewed({
       userId: sub.userId,
-      title: 'Subscription renewed',
-      message: paidFromCredit
-        ? `Your ${sub.plan?.name || 'plan'} renewed until ${newEnd.toDateString()} and was paid from your account credit.`
-        : `Your ${sub.plan?.name || 'plan'} renewed until ${newEnd.toDateString()}. Invoice ${invoice?.number} is due.`,
-      type: paidFromCredit ? 'success' : 'info',
-      link: '/?tab=billing',
+      planName: sub.plan?.name || 'hosting',
+      periodEnd: newEnd,
+      invoiceNumber: invoice?.number ?? null,
+      amount: invoice?.total,
+      currency,
+      paidFromCredit,
     }).catch(() => {})
-
-    if (sub.user?.email && !paidFromCredit && invoice) {
-      await sendEmail({
-        to: sub.user.email,
-        subject: `Invoice ${invoice.number} — ${sub.plan?.name || 'hosting'} renewal`,
-        html: `<p>Hi ${sub.user.name || 'there'},</p>
-<p>Your <strong>${sub.plan?.name || 'hosting'}</strong> plan has been renewed until <strong>${newEnd.toDateString()}</strong>.</p>
-<p>Invoice <strong>${invoice.number}</strong> for <strong>${currency} ${invoice.total.toFixed(2)}</strong> is now due.</p>
-<p>— Apsamo Technology</p>`,
-      }).catch(() => {})
-    }
 
     return {
       success: true,
@@ -181,6 +172,13 @@ export async function renewSubscription(opts: {
       })
       .catch(() => {})
     console.error('[renewals] renew failed for', sub.id, msg)
+    // Tell the customer too — a silent renewal failure ends in a suspension
+    // they never saw coming.
+    await notifyRenewalFailed({
+      userId: sub.userId,
+      planName: sub.plan?.name || 'hosting',
+      reason: null, // internal error text isn't useful or safe to surface
+    }).catch(() => {})
     return { success: false, error: msg }
   }
 }

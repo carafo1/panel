@@ -8,7 +8,7 @@
  *     (only admins see the full picture for margin management)
  */
 import { ok, apiError } from '@/lib/api-response'
-import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
+import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { isAdmin } from '@/lib/security'
 import {
   getAllPrices,
@@ -25,7 +25,7 @@ export async function GET(request: Request) {
     if (!token) {
       return apiError.unauthorized('Authentication required')
     }
-    const decoded = verifyToken(token)
+    const decoded = await verifyTokenFresh(token)
     if (!decoded) {
       return apiError.unauthorized('Invalid or expired token')
     }

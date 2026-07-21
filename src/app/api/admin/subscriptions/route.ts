@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
+import { verifyToken, extractTokenFromHeader, requireAdminRole } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { db } from '@/lib/db'
 import { createNotification } from '@/lib/notifications'
@@ -10,6 +10,7 @@ import {
   forceCancelSubscription,
 } from '@/lib/subscription-changes'
 import { renewSubscription } from '@/lib/renewals'
+import { resetUsage } from '@/lib/usage'
 
 /**
  * Admin subscription management.
@@ -18,15 +19,13 @@ import { renewSubscription } from '@/lib/renewals'
  * who is active/expiring/suspended and be able to extend a period when
  * someone pays late.
  */
-function requireAdmin(request: Request): {
+async function requireAdmin(request: Request): Promise<{
   decoded: { userId: string; email: string; role: string }
-} | null {
-  const token = extractTokenFromHeader(request.headers.get('Authorization'))
-  if (!token) return null
-  const decoded = verifyToken(token)
-  if (!decoded) return null
-  if (decoded.role !== 'super_admin' && decoded.role !== 'admin') return null
-  return { decoded }
+} | null> {
+  // SECURITY: role comes from the database, not the 7-day token — see
+  // verifyTokenFresh. Also rejects suspended/closed accounts.
+  const decoded = await requireAdminRole(request)
+  return decoded ? { decoded } : null
 }
 
 /**
@@ -41,7 +40,7 @@ function isStripeManaged(stripeSubId: string | null): boolean {
 /** GET /api/admin/subscriptions?status=active|past_due|suspended|all */
 export async function GET(request: Request) {
   try {
-    const auth = requireAdmin(request)
+    const auth = await requireAdmin(request)
     if (!auth) {
       return NextResponse.json(
         { error: 'Admin access required' },
@@ -119,7 +118,7 @@ export async function GET(request: Request) {
  */
 export async function PATCH(request: Request) {
   try {
-    const auth = requireAdmin(request)
+    const auth = await requireAdmin(request)
     if (!auth) {
       return NextResponse.json(
         { error: 'Admin access required' },
@@ -197,6 +196,26 @@ export async function PATCH(request: Request) {
         message: result.paidFromCredit
           ? `Renewed — invoice ${result.invoiceNumber} paid from account credit.`
           : `Renewed — invoice ${result.invoiceNumber} raised.`,
+      })
+    }
+
+    // ── Reset usage counters ─────────────────────────────────────────
+    if (action === 'reset_usage') {
+      const result = await resetUsage({
+        userId: sub.userId,
+        subscriptionId: id,
+      })
+      await logAudit({
+        userId: auth.decoded.userId,
+        action: 'subscription.reset_usage',
+        resource: 'subscription',
+        resourceId: id,
+        req: request,
+        metadata: { deletedSnapshots: result.deleted },
+      }).catch(() => {})
+      return NextResponse.json({
+        success: true,
+        message: `Usage reset — ${result.deleted} snapshot(s) cleared.`,
       })
     }
 
@@ -288,6 +307,14 @@ export async function PATCH(request: Request) {
           newUserId: body.newUserId ?? null,
           proration: result.proration ?? null,
           invoiceNumber: result.invoiceNumber ?? null,
+          // The audit log is the only record of plan MOVEMENT — the
+          // subscription row only ever holds the current plan — so the
+          // upgrade/downgrade report reads these fields.
+          direction: result.direction ?? null,
+          fromPlan: sub.plan?.name ?? null,
+          toPlan: result.toPlanName ?? null,
+          creditIssued: result.creditIssued ?? null,
+          subscriptionUserId: sub.userId,
         },
       }).catch(() => {})
 

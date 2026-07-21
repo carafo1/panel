@@ -13,7 +13,7 @@
  * Audit: action='provisioning.start', resource='provisioning'.
  */
 import { NextResponse } from 'next/server'
-import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
+import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { startProvisioning } from '@/lib/orchestration'
 
@@ -41,7 +41,7 @@ export async function POST(request: Request) {
         { status: 401 }
       )
     }
-    const user = verifyToken(token)
+    const user = await verifyTokenFresh(token)
     if (!user) {
       return NextResponse.json(
         { error: 'Unauthorized' },

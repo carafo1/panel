@@ -14,6 +14,8 @@
 import { db } from '@/lib/db'
 import { createSubscriptionInvoice, cycleDays } from '@/lib/invoices'
 import { createNotification } from '@/lib/notifications'
+import { adjustCredit } from '@/lib/credit'
+import { notifyPlanChanged } from '@/lib/billing-notifications'
 
 export interface ProrationResult {
   daysRemaining: number
@@ -77,7 +79,11 @@ export interface ChangePlanResult {
   invoiceId?: string
   invoiceNumber?: string
   creditNote?: string
+  /** Wallet credit actually issued for a downgrade's unused days. */
+  creditIssued?: number
   direction?: 'upgrade' | 'downgrade' | 'same'
+  /** Name of the plan moved to, for audit/reporting. */
+  toPlanName?: string
 }
 
 /**
@@ -132,6 +138,7 @@ export async function changeSubscriptionPlan(opts: {
   let invoiceId: string | undefined
   let invoiceNumber: string | undefined
   let creditNote: string | undefined
+  let creditIssued: number | undefined
 
   if (shouldProrate && proration.netCharge > 0) {
     const inv = await createSubscriptionInvoice({
@@ -151,20 +158,40 @@ export async function changeSubscriptionPlan(opts: {
     invoiceId = inv?.id
     invoiceNumber = inv?.number
   } else if (shouldProrate && proration.netCharge < 0) {
-    creditNote = `Customer is in credit ${Math.abs(proration.netCharge).toFixed(2)} for ${proration.daysRemaining} remaining day(s). No wallet exists yet, so this is recorded but not auto-refunded.`
+    // Downgrade: the customer has already paid for a more expensive plan they
+    // are no longer using. A wallet now exists, so credit them for real rather
+    // than only noting it — money owed that is merely "recorded" is money kept.
+    const owed = Math.round(Math.abs(proration.netCharge) * 100) / 100
+    const credited = await adjustCredit({
+      userId: sub.userId,
+      amount: owed,
+      type: 'adjustment',
+      description: `Unused portion of ${sub.plan?.name || 'previous plan'} after downgrade to ${newPlan.name} (${proration.daysRemaining} day(s) remaining)`,
+      adminUserId: opts.adminUserId,
+      // The plan-change notification below covers this.
+      notify: false,
+    }).catch(() => null)
+
+    creditNote = credited?.success
+      ? `${owed.toFixed(2)} credited to the customer's account balance for ${proration.daysRemaining} unused day(s). New balance: ${credited.balance?.toFixed(2)}.`
+      : `Customer is owed ${owed.toFixed(2)} for ${proration.daysRemaining} unused day(s), but the credit could not be applied automatically${credited?.error ? ` (${credited.error})` : ''} — apply it manually.`
+    if (credited?.success) creditIssued = owed
   }
 
-  await createNotification({
+  await notifyPlanChanged({
     userId: sub.userId,
-    title:
-      direction === 'upgrade' ? 'Plan upgraded' : direction === 'downgrade' ? 'Plan changed' : 'Plan updated',
-    message:
-      `Your plan is now ${newPlan.name}.` +
-      (invoiceNumber
-        ? ` Invoice ${invoiceNumber} for ${proration.netCharge.toFixed(2)} covers the rest of this period.`
-        : ''),
-    type: 'success',
-    link: '/?tab=billing',
+    fromPlan: sub.plan?.name || 'your previous plan',
+    toPlan: newPlan.name,
+    direction: direction === 'same' ? 'change' : direction,
+    prorationAmount: shouldProrate
+      ? creditIssued
+        ? -creditIssued
+        : proration.netCharge > 0
+          ? proration.netCharge
+          : undefined
+      : undefined,
+    currency: (newPlan as { currency?: string }).currency || 'USD',
+    invoiceNumber: invoiceNumber ?? null,
   }).catch(() => {})
 
   return {
@@ -173,7 +200,9 @@ export async function changeSubscriptionPlan(opts: {
     invoiceId,
     invoiceNumber,
     creditNote,
+    creditIssued,
     direction,
+    toPlanName: newPlan.name,
   }
 }
 

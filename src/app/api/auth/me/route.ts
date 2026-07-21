@@ -29,12 +29,34 @@ export async function GET(request: Request) {
       )
     }
 
+    // Account standing is re-checked here, not just at login. Tokens live for
+    // 7 days, so without this a user suspended mid-session would keep full
+    // access until their token happened to expire. Every page load calls this
+    // endpoint, so a 401 here ends the session promptly.
+    const accountStatus = (user as { status?: string }).status || 'active'
+    if (accountStatus !== 'active') {
+      return NextResponse.json(
+        {
+          error:
+            accountStatus === 'closed'
+              ? 'This account has been closed.'
+              : 'Your account is not active. Please contact support.',
+          accountStatus,
+        },
+        { status: 401 }
+      )
+    }
+
     return NextResponse.json({
       user: {
         id: user.id,
         name: user.name,
         email: user.email,
+        // Deliberately the DB role, not the role baked into the token: a
+        // promotion or demotion must take effect on the next page load
+        // rather than whenever the 7-day token expires.
         role: user.role,
+        accountStatus,
         avatar: user.avatar,
         emailVerified: user.emailVerified,
         twoFactorEnabled: user.twoFactorEnabled,

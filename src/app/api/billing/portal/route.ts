@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
+import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { isStripeDemoMode } from '@/lib/stripe'
 import Stripe from 'stripe'
 
@@ -26,7 +26,7 @@ export async function POST(request: Request) {
       )
     }
 
-    const decoded = verifyToken(token)
+    const decoded = await verifyTokenFresh(token)
     if (!decoded) {
       return NextResponse.json(
         { error: 'Invalid or expired token' },

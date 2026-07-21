@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
+import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { isGithubDemoMode, getAuthUrl } from '@/lib/github'
 import jwt from 'jsonwebtoken'
 import { requireSecret } from '@/lib/security'
@@ -58,7 +58,7 @@ export async function GET(req: NextRequest) {
     if (!token) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
-    const payload = verifyToken(token)
+    const payload = await verifyTokenFresh(token)
     if (!payload) {
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 })
     }

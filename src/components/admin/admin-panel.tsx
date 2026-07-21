@@ -48,6 +48,8 @@ import {
   User as UserIcon,
   Building2,
   LayoutGrid,
+  Ban,
+  ShieldAlert,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/store/auth-store'
@@ -56,6 +58,7 @@ import { BillingAdminPanel } from '@/components/admin/billing-admin-panel'
 import { PlansAdminPanel } from '@/components/admin/plans-admin-panel'
 import { PromotionsAdminPanel } from '@/components/admin/promotions-admin-panel'
 import { ReportsAdminPanel } from '@/components/admin/reports-admin-panel'
+import { GatewaysAdminPanel } from '@/components/admin/gateways-admin-panel'
 import { ServersPanel } from '@/components/admin/servers-panel'
 import { CmsPanel } from '@/components/admin/cms-panel'
 
@@ -79,6 +82,9 @@ interface AdminUser {
   email: string
   role: string
   emailVerified: boolean
+  /** Account standing — anything but "active" blocks sign-in. */
+  status?: string
+  statusReason?: string | null
   createdAt: string
   activeSubscription: {
     id: string
@@ -175,6 +181,43 @@ function RoleBadge({ role }: { role: string }) {
   )
 }
 
+/**
+ * Account standing. Distinct from role and from subscription status: this is
+ * the flag that decides whether the person can sign in at all.
+ */
+function StatusBadge({ status }: { status?: string }) {
+  const map: Record<string, { className: string; icon: React.ElementType; label: string }> = {
+    active: {
+      className: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+      icon: CheckCircle2,
+      label: 'Active',
+    },
+    suspended: {
+      className: 'bg-amber-100 text-amber-700 border-amber-200',
+      icon: Ban,
+      label: 'Suspended',
+    },
+    fraud: {
+      className: 'bg-red-100 text-red-700 border-red-200',
+      icon: ShieldAlert,
+      label: 'Fraud',
+    },
+    closed: {
+      className: 'bg-muted text-muted-foreground border-border',
+      icon: XCircle,
+      label: 'Closed',
+    },
+  }
+  const cfg = map[status || 'active'] || map.active
+  const Icon = cfg.icon
+  return (
+    <Badge variant="outline" className={cfg.className}>
+      <Icon className="size-3 mr-1" />
+      {cfg.label}
+    </Badge>
+  )
+}
+
 function JobStatusBadge({ status }: { status: string }) {
   const map: Record<string, { className: string; icon: React.ElementType }> = {
     queued: { className: 'bg-yellow-100 text-yellow-700 border-yellow-200', icon: Clock },
@@ -202,6 +245,7 @@ export function AdminPanel() {
   const [jobFilter, setJobFilter] = useState('all')
   const [retryLoading, setRetryLoading] = useState<string | null>(null)
   const [roleLoading, setRoleLoading] = useState<string | null>(null)
+  const [statusLoading, setStatusLoading] = useState<string | null>(null)
 
   // Current viewer role — used to gate the super_admin-only Payment
   // Methods tab and the inline role-change dropdown.
@@ -272,6 +316,49 @@ export function AdminPanel() {
       toast.error(err instanceof Error ? err.message : 'Failed to update role')
     } finally {
       setRoleLoading(null)
+    }
+  }
+
+  /**
+   * Change account standing. Unlike a role change this actually blocks
+   * sign-in, so a suspension/closure asks for a reason first — the customer
+   * is emailed and deserves to know why.
+   */
+  const handleChangeStatus = async (userId: string, newStatus: string) => {
+    if (userId === currentUserId) {
+      toast.error('You cannot change your own account status')
+      return
+    }
+    let reason: string | null = null
+    if (newStatus !== 'active') {
+      reason = window.prompt(
+        `Why is this account being marked "${newStatus}"?\n\nThis is recorded in the audit log and shown to the customer.`,
+        ''
+      )
+      // A null return means the admin cancelled the dialog — don't proceed.
+      if (reason === null) return
+    }
+    setStatusLoading(userId)
+    try {
+      const res = await apiFetch<{ success: boolean; status: string; message: string }>(
+        '/admin/users',
+        {
+          method: 'PATCH',
+          body: JSON.stringify({ userId, status: newStatus, reason }),
+        }
+      )
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.id === userId
+            ? { ...u, status: res.status, statusReason: reason }
+            : u
+        )
+      )
+      toast.success(res.message)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update status')
+    } finally {
+      setStatusLoading(null)
     }
   }
 
@@ -387,6 +474,12 @@ export function AdminPanel() {
               Payment Methods
             </TabsTrigger>
           )}
+          {isSuperAdmin && (
+            <TabsTrigger value="gateways">
+              <CreditCard className="size-4 mr-1.5" />
+              Gateways
+            </TabsTrigger>
+          )}
         </TabsList>
 
         {/* ── Content (CMS) Tab ─────────────────────────────────────── */}
@@ -424,6 +517,7 @@ export function AdminPanel() {
                       <TableHead>Name</TableHead>
                       <TableHead>Email</TableHead>
                       <TableHead>Role</TableHead>
+                      <TableHead>Status</TableHead>
                       <TableHead>Plan</TableHead>
                       <TableHead>Projects</TableHead>
                       <TableHead>Joined</TableHead>
@@ -433,7 +527,7 @@ export function AdminPanel() {
                   <TableBody>
                     {filteredUsers.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={isSuperAdmin ? 7 : 6} className="text-center py-8 text-muted-foreground">
+                        <TableCell colSpan={isSuperAdmin ? 8 : 7} className="text-center py-8 text-muted-foreground">
                           No users found
                         </TableCell>
                       </TableRow>
@@ -481,6 +575,52 @@ export function AdminPanel() {
                               </DropdownMenu>
                             ) : (
                               <RoleBadge role={u.role} />
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {isSuperAdmin && u.id !== currentUserId ? (
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <button
+                                    className="inline-flex items-center gap-1 rounded-md border bg-background px-2 py-1 text-xs font-medium hover:bg-muted transition-colors disabled:opacity-50"
+                                    disabled={statusLoading === u.id}
+                                    title={u.statusReason || undefined}
+                                  >
+                                    {statusLoading === u.id ? (
+                                      <Loader2 className="size-3 animate-spin" />
+                                    ) : (
+                                      <StatusBadge status={u.status} />
+                                    )}
+                                    <ChevronDown className="size-3 ml-0.5 text-muted-foreground" />
+                                  </button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="start">
+                                  <DropdownMenuLabel>
+                                    Account standing
+                                  </DropdownMenuLabel>
+                                  <DropdownMenuSeparator />
+                                  {(
+                                    ['active', 'suspended', 'fraud', 'closed'] as const
+                                  ).map((s) => (
+                                    <DropdownMenuItem
+                                      key={s}
+                                      onClick={() => handleChangeStatus(u.id, s)}
+                                      className={
+                                        (u.status || 'active') === s
+                                          ? 'bg-muted/60'
+                                          : ''
+                                      }
+                                    >
+                                      <StatusBadge status={s} />
+                                      {(u.status || 'active') === s && (
+                                        <CheckCircle2 className="size-3.5 ml-auto text-indigo-600" />
+                                      )}
+                                    </DropdownMenuItem>
+                                  ))}
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            ) : (
+                              <StatusBadge status={u.status} />
                             )}
                           </TableCell>
                           <TableCell>
@@ -641,6 +781,13 @@ export function AdminPanel() {
         {isSuperAdmin && (
           <TabsContent value="payment-methods">
             <PaymentMethodsPanel />
+          </TabsContent>
+        )}
+
+        {/* ── Gateway readiness (super_admin only) ───────────────────── */}
+        {isSuperAdmin && (
+          <TabsContent value="gateways">
+            <GatewaysAdminPanel />
           </TabsContent>
         )}
       </Tabs>
