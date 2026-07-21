@@ -25,6 +25,38 @@ import {
   ChevronRight,
 } from 'lucide-react'
 
+/** One plan quota vs what the customer actually consumes. */
+interface QuotaCheck {
+  key: string
+  label: string
+  used: number
+  /** null means unlimited — must never render as a full bar. */
+  limit: number | null
+  percent: number | null
+  over: boolean
+}
+
+/** Live container metrics for one of the customer's sites. */
+interface HostingResource {
+  projectId: string
+  name: string
+  slug: string
+  status: string
+  /** False when the container could not be inspected — show "—", not 0. */
+  measured: boolean
+  cpuPercent: number | null
+  ramUsedMB: number | null
+  ramLimitMB: number | null
+  storageUsedGB: number | null
+}
+
+interface UsageResponse {
+  subscription: { planName: string | null; status: string } | null
+  quota: { planName: string | null; checks: QuotaCheck[]; overCount: number }
+  consumed: { diskMB: number; bandwidthMB: number; capturedAt: string } | null
+  hosting: HostingResource[]
+}
+
 // ── Overview Dashboard ─────────────────────────────────────────────────
 export default function OverviewPanel() {
   const { user } = useAuthStore()
@@ -43,6 +75,16 @@ export default function OverviewPanel() {
   // Chart data: deployments per day for last 7 days
   const [chartData, setChartData] = useState<Array<{ day: string; success: number; failed: number }>>([])
 
+  /**
+   * Measured usage + plan quotas from /api/usage.
+   *
+   * This replaces the previous "Resource Usage" panel, whose storage and
+   * bandwidth figures were invented (`projectCount * 1.8 + 0.5`) and shown to
+   * customers as if measured. Anything not actually measured now renders as
+   * "—", never as a number.
+   */
+  const [usage, setUsage] = useState<UsageResponse | null>(null)
+
   useEffect(() => {
     setMounted(true)
   }, [])
@@ -53,12 +95,14 @@ export default function OverviewPanel() {
       if (!token) return
       try {
         const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
-        const [projRes, domRes, depRes, logRes, subRes] = await Promise.all([
+        const [projRes, domRes, depRes, logRes, subRes, usageRes] = await Promise.all([
           fetch('/api/hosting', { headers }).catch(() => null),
           fetch('/api/domains', { headers }).catch(() => null),
           fetch('/api/deployments', { headers }).catch(() => null),
           fetch('/api/automation/logs?limit=20', { headers }).catch(() => null),
           fetch('/api/billing/subscription', { headers }).catch(() => null),
+          // Measured usage + plan quotas — the only source for the resource UI.
+          fetch('/api/usage', { headers }).catch(() => null),
         ])
 
         const projData = projRes ? await projRes.json().catch(() => ({ projects: [] })) : { projects: [] }
@@ -66,6 +110,9 @@ export default function OverviewPanel() {
         const depData = depRes ? await depRes.json().catch(() => ({ deployments: [] })) : { deployments: [] }
         const logData = logRes ? await logRes.json().catch(() => ({ logs: [] })) : { logs: [] }
         const subData = subRes ? await subRes.json().catch(() => ({ subscription: null })) : { subscription: null }
+        if (usageRes?.ok) {
+          setUsage(await usageRes.json().catch(() => null))
+        }
 
         const projCount = Array.isArray(projData.projects) ? projData.projects.length : 0
         const domCount = Array.isArray(domData.domains) ? domData.domains.length : 0
@@ -190,21 +237,6 @@ export default function OverviewPanel() {
     if (days < 7) return `${days}d ago`
     return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
   }
-
-  const parseGB = (s: string) => {
-    const num = parseFloat(s)
-    return isNaN(num) ? 10 : num
-  }
-
-  // Resource usage calculations
-  const storageLimit = parseGB(planInfo?.storage || '10GB')
-  const bandwidthLimit = parseGB(planInfo?.bandwidth || '100GB')
-  const projectsLimit = planInfo?.projects || 3
-  const storageUsed = Math.min(projectsCount * 1.8 + 0.5, storageLimit)
-  const bandwidthUsed = Math.min(deploymentsCount * 2.5 + 1.2, bandwidthLimit)
-  const storagePct = Math.round((storageUsed / storageLimit) * 100)
-  const bandwidthPct = Math.round((bandwidthUsed / bandwidthLimit) * 100)
-  const projectsPct = Math.round((projectsCount / projectsLimit) * 100)
 
   const barColor = (pct: number) =>
     pct > 80 ? 'bg-red-500' : pct > 60 ? 'bg-amber-500' : 'bg-indigo-500'
@@ -413,66 +445,123 @@ export default function OverviewPanel() {
         </div>
       </div>
 
-      {/* Section 4: Resource Usage */}
+      {/* ── Section 4a: Subscription Usage (plan quotas) ─────────────────
+          These are BILLING limits from the purchased plan, compared against
+          measured consumption. They are not server capacity: a 10 GB plan
+          quota says nothing about the host's disk. */}
       <div className={`bg-card border rounded-xl p-5 ${mounted ? 'animate-fade-in-up' : 'opacity-0'}`} style={{ animationDelay: '0.6s' }}>
-        <h2 className="text-lg font-semibold mb-4">Resource Usage</h2>
-        <div className="space-y-4">
-          {/* Storage */}
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <div className="flex items-center gap-2">
-                <HardDrive className="size-4 text-muted-foreground" />
-                <span className="text-sm font-medium">Server Storage</span>
-              </div>
-              <span className="text-sm text-muted-foreground">
-                {storageUsed.toFixed(1)} / {storageLimit} GB
-              </span>
-            </div>
-            <div className={`h-2.5 rounded-full ${barBgColor(storagePct)} overflow-hidden`}>
-              <div
-                className={`h-full rounded-full ${barColor(storagePct)} transition-all duration-700`}
-                style={{ width: `${Math.min(storagePct, 100)}%` }}
-              />
-            </div>
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="text-lg font-semibold">Subscription Usage</h2>
+          {usage?.quota?.planName && (
+            <Badge variant="outline" className="text-xs">{usage.quota.planName} plan</Badge>
+          )}
+        </div>
+        <p className="text-xs text-muted-foreground mb-4">
+          What your plan includes, against what you&apos;re actually using.
+        </p>
+
+        {!usage ? (
+          <p className="text-sm text-muted-foreground py-6 text-center">Loading usage…</p>
+        ) : usage.quota.checks.length === 0 ? (
+          <div className="py-6 text-center">
+            <CreditCard className="size-8 text-muted-foreground mx-auto mb-2" />
+            <p className="text-sm text-muted-foreground">No active plan</p>
+            <button onClick={() => setDashboardTab('billing')} className="text-xs text-indigo-600 hover:text-indigo-700 font-medium mt-1">
+              View plans
+            </button>
           </div>
-          {/* Bandwidth */}
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <div className="flex items-center gap-2">
-                <Wifi className="size-4 text-muted-foreground" />
-                <span className="text-sm font-medium">Bandwidth</span>
-              </div>
-              <span className="text-sm text-muted-foreground">
-                {bandwidthUsed.toFixed(1)} / {bandwidthLimit} GB
-              </span>
-            </div>
-            <div className={`h-2.5 rounded-full ${barBgColor(bandwidthPct)} overflow-hidden`}>
-              <div
-                className={`h-full rounded-full ${barColor(bandwidthPct)} transition-all duration-700`}
-                style={{ width: `${Math.min(bandwidthPct, 100)}%` }}
-              />
-            </div>
+        ) : (
+          <div className="space-y-3.5">
+            {usage.quota.checks.map((c) => {
+              const unlimited = c.limit === null || c.limit === 0
+              const pct = unlimited ? 0 : Math.min(c.percent ?? 0, 100)
+              const label = c.key === 'disk' ? 'Hosting Storage' : c.label
+              return (
+                <div key={c.key}>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center gap-2">
+                      {c.key === 'disk' ? <HardDrive className="size-4 text-muted-foreground" />
+                        : c.key === 'bandwidth' ? <Wifi className="size-4 text-muted-foreground" />
+                        : <Layers className="size-4 text-muted-foreground" />}
+                      <span className="text-sm font-medium">{label}</span>
+                      {c.over && <Badge variant="outline" className="text-[10px] border-red-500/50 text-red-600">over limit</Badge>}
+                    </div>
+                    <span className="text-sm text-muted-foreground tabular-nums">
+                      {/* Unlimited renders as "—", never a full bar. */}
+                      {unlimited ? `${c.used} / unlimited` : `${c.used} / ${c.limit}`}
+                    </span>
+                  </div>
+                  {unlimited ? (
+                    <div className="h-2.5 rounded-full bg-muted overflow-hidden">
+                      <div className="h-full w-full bg-gradient-to-r from-indigo-500/20 to-transparent" />
+                    </div>
+                  ) : (
+                    <div className={`h-2.5 rounded-full ${barBgColor(pct)} overflow-hidden`}>
+                      <div className={`h-full rounded-full ${barColor(pct)} transition-all duration-700`} style={{ width: `${pct}%` }} />
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+            {usage.consumed?.capturedAt && (
+              <p className="text-[11px] text-muted-foreground pt-1">
+                Measured {relativeTime(usage.consumed.capturedAt)}.
+              </p>
+            )}
           </div>
-          {/* Projects */}
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <div className="flex items-center gap-2">
-                <Layers className="size-4 text-muted-foreground" />
-                <span className="text-sm font-medium">Projects</span>
+        )}
+      </div>
+
+      {/* ── Section 4b: Hosting Resources (live container metrics) ────────
+          Real CPU/RAM/disk for the customer's own sites, measured now. This
+          is NOT host capacity — customers never see the VPS's totals. */}
+      {usage && usage.hosting.length > 0 && (
+        <div className={`bg-card border rounded-xl p-5 ${mounted ? 'animate-fade-in-up' : 'opacity-0'}`} style={{ animationDelay: '0.65s' }}>
+          <h2 className="text-lg font-semibold mb-1">Hosting Resources</h2>
+          <p className="text-xs text-muted-foreground mb-4">
+            Live resource use of your websites, measured from their containers.
+          </p>
+          <div className="space-y-3">
+            {usage.hosting.map((h) => (
+              <div key={h.projectId} className="rounded-lg border p-3">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Server className="size-4 text-muted-foreground shrink-0" />
+                    <span className="text-sm font-medium truncate">{h.name}</span>
+                  </div>
+                  <Badge variant={h.status === 'running' ? 'default' : 'secondary'} className="text-[10px] shrink-0">
+                    {h.status}
+                  </Badge>
+                </div>
+                {h.measured ? (
+                  <div className="grid grid-cols-3 gap-3 text-xs">
+                    <div>
+                      <p className="text-muted-foreground">CPU</p>
+                      <p className="font-semibold tabular-nums">{(h.cpuPercent ?? 0).toFixed(1)}%</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Memory</p>
+                      <p className="font-semibold tabular-nums">
+                        {(h.ramUsedMB ?? 0).toFixed(0)} MB
+                        {h.ramLimitMB ? <span className="text-muted-foreground font-normal"> / {h.ramLimitMB}</span> : null}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Disk</p>
+                      <p className="font-semibold tabular-nums">{(h.storageUsedGB ?? 0).toFixed(2)} GB</p>
+                    </div>
+                  </div>
+                ) : (
+                  /* Not measurable right now — say so rather than showing 0. */
+                  <p className="text-xs text-muted-foreground">
+                    Metrics unavailable{h.status !== 'running' ? ' (site is not running)' : ''}.
+                  </p>
+                )}
               </div>
-              <span className="text-sm text-muted-foreground">
-                {projectsCount} / {projectsLimit} limit
-              </span>
-            </div>
-            <div className={`h-2.5 rounded-full ${barBgColor(projectsPct)} overflow-hidden`}>
-              <div
-                className={`h-full rounded-full ${barColor(projectsPct)} transition-all duration-700`}
-                style={{ width: `${Math.min(projectsPct, 100)}%` }}
-              />
-            </div>
+            ))}
           </div>
         </div>
-      </div>
+      )}
 
       {/* Section 5: Recent Activity Timeline */}
       <div className={`bg-card border rounded-xl p-5 ${mounted ? 'animate-fade-in-up' : 'opacity-0'}`} style={{ animationDelay: '0.7s' }}>

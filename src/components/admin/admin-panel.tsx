@@ -59,6 +59,7 @@ import { PlansAdminPanel } from '@/components/admin/plans-admin-panel'
 import { PromotionsAdminPanel } from '@/components/admin/promotions-admin-panel'
 import { ReportsAdminPanel } from '@/components/admin/reports-admin-panel'
 import { GatewaysAdminPanel } from '@/components/admin/gateways-admin-panel'
+import { InfrastructurePanel } from '@/components/admin/infrastructure-panel'
 import { ServersPanel } from '@/components/admin/servers-panel'
 import { CmsPanel } from '@/components/admin/cms-panel'
 
@@ -454,6 +455,10 @@ export function AdminPanel() {
       {/* ── Tabbed sections ────────────────────────────────────────── */}
       <Tabs defaultValue="content" className="space-y-4">
         <TabsList className="flex flex-wrap">
+          <TabsTrigger value="infrastructure">
+            <Server className="size-4 mr-1.5" />
+            Infrastructure
+          </TabsTrigger>
           <TabsTrigger value="content">
             <LayoutGrid className="size-4 mr-1.5" />
             Content
@@ -481,6 +486,11 @@ export function AdminPanel() {
             </TabsTrigger>
           )}
         </TabsList>
+
+        {/* ── Infrastructure: live host metrics + platform totals ────── */}
+        <TabsContent value="infrastructure">
+          <InfrastructurePanel />
+        </TabsContent>
 
         {/* ── Content (CMS) Tab ─────────────────────────────────────── */}
         <TabsContent value="content">
