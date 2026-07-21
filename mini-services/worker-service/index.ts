@@ -30,8 +30,13 @@ import { createServer, IncomingMessage, ServerResponse } from 'http'
 
 // ── Configuration ─────────────────────────────────────────────────────
 const PORT = 3005
+// 127.0.0.1, NOT localhost. On a dual-stack host `localhost` resolves to ::1
+// first, while the Next.js server binds 0.0.0.0 (IPv4 only). curl hides this
+// by falling back to IPv4, but Bun's fetch does not — it just fails with
+// "HTTP 0", which silently killed every job tick, uptime check and billing
+// sweep on production until this was pinned.
 const NEXT_API_BASE =
-  process.env.NEXT_API_BASE || 'http://localhost:3000'
+  process.env.NEXT_API_BASE || 'http://127.0.0.1:3000'
 const CRON_API_KEY = process.env.CRON_API_KEY || 'deployhub-cron-key'
 
 const JOBS_INTERVAL_MS = 10_000 // 10s
