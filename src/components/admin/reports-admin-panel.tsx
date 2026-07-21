@@ -32,6 +32,41 @@ interface ReportData {
     outstandingCount: number
     overdueCount: number
     lifetimeSubsExcludedFromMrr: number
+    refundedAllTime: number
+    refundedPeriod: number
+    netRevenueAllTime: number
+    netRevenuePeriod: number
+  }
+  refunds: {
+    countAllTime: number
+    countInPeriod: number
+    amountAllTime: number
+    amountInPeriod: number
+    byDestination: Array<{ destination: string; count: number; amount: number }>
+  }
+  failedPayments: {
+    countAllTime: number
+    countInPeriod: number
+    valueInPeriod: number
+    attemptsInPeriod: number
+    failureRatePercent: number
+    reasons: Array<{ reason: string; count: number }>
+  }
+  planMovement: {
+    upgrades: number
+    downgrades: number
+    cycleChanges: number
+    upgradeRevenue: number
+    downgradeCredit: number
+    netMoves: number
+    recent: Array<{
+      at: string
+      direction: string
+      fromPlan: string | null
+      toPlan: string | null
+      prorationNet: number
+      invoiceNumber: string | null
+    }>
   }
   subscriptions: {
     total: number
@@ -235,6 +270,165 @@ export function ReportsAdminPanel() {
                     {s}: {n}
                   </Badge>
                 ))}
+              </div>
+            )}
+          </div>
+
+          {/* Refunds — gross revenue alone overstates what was kept. */}
+          <div>
+            <p className="mb-2 text-sm font-medium">Refunds &amp; net revenue</p>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <Stat
+                label={`Refunded (${data.periodDays}d)`}
+                value={money(data.refunds.amountInPeriod)}
+                hint={`${data.refunds.countInPeriod} refund(s)`}
+                tone={data.refunds.amountInPeriod > 0 ? 'warn' : undefined}
+              />
+              <Stat
+                label="Refunded (all time)"
+                value={money(data.refunds.amountAllTime)}
+                hint={`${data.refunds.countAllTime} refund(s)`}
+              />
+              <Stat
+                label={`Net revenue (${data.periodDays}d)`}
+                value={money(data.financial.netRevenuePeriod)}
+                hint="Paid less refunded"
+                tone="good"
+              />
+              <Stat
+                label="Net revenue (all time)"
+                value={money(data.financial.netRevenueAllTime)}
+                tone="good"
+              />
+            </div>
+            {data.refunds.byDestination.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {data.refunds.byDestination.map((d) => (
+                  <Badge key={d.destination} variant="secondary">
+                    {d.destination}: {money(d.amount)} ({d.count})
+                  </Badge>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Failed payments — the leading indicator of involuntary churn. */}
+          <div>
+            <p className="mb-2 text-sm font-medium">Failed payments</p>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <Stat
+                label={`Failures (${data.periodDays}d)`}
+                value={String(data.failedPayments.countInPeriod)}
+                hint={`of ${data.failedPayments.attemptsInPeriod} attempt(s)`}
+                tone={data.failedPayments.countInPeriod > 0 ? 'bad' : 'good'}
+              />
+              <Stat
+                label="Failure rate"
+                value={`${data.failedPayments.failureRatePercent}%`}
+                hint="Attempts that failed"
+                tone={
+                  data.failedPayments.failureRatePercent > 10 ? 'bad' : undefined
+                }
+              />
+              <Stat
+                label="Value at risk"
+                value={money(data.failedPayments.valueInPeriod)}
+                hint="Money that didn't land"
+                tone={data.failedPayments.valueInPeriod > 0 ? 'warn' : undefined}
+              />
+              <Stat
+                label="Failures (all time)"
+                value={String(data.failedPayments.countAllTime)}
+              />
+            </div>
+            {data.failedPayments.reasons.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {data.failedPayments.reasons.map((r) => (
+                  <Badge key={r.reason} variant="outline">
+                    {r.reason} × {r.count}
+                  </Badge>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Plan movement — reconstructed from the audit log, since the
+              subscription row only ever holds the CURRENT plan. */}
+          <div>
+            <p className="mb-2 text-sm font-medium">
+              Plan movement ({data.periodDays}d)
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <Stat
+                label="Upgrades"
+                value={String(data.planMovement.upgrades)}
+                hint={`${money(data.planMovement.upgradeRevenue)} pro-rated`}
+                tone={data.planMovement.upgrades > 0 ? 'good' : undefined}
+              />
+              <Stat
+                label="Downgrades"
+                value={String(data.planMovement.downgrades)}
+                hint={`${money(data.planMovement.downgradeCredit)} credited back`}
+                tone={data.planMovement.downgrades > 0 ? 'warn' : undefined}
+              />
+              <Stat
+                label="Net movement"
+                value={
+                  data.planMovement.netMoves > 0
+                    ? `+${data.planMovement.netMoves}`
+                    : String(data.planMovement.netMoves)
+                }
+                hint="Upgrades less downgrades"
+                tone={
+                  data.planMovement.netMoves > 0
+                    ? 'good'
+                    : data.planMovement.netMoves < 0
+                      ? 'bad'
+                      : undefined
+                }
+              />
+              <Stat
+                label="Cycle changes"
+                value={String(data.planMovement.cycleChanges)}
+                hint="e.g. monthly → annual"
+              />
+            </div>
+            {data.planMovement.recent.length > 0 && (
+              <div className="mt-2 overflow-x-auto rounded-md border">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/50 text-xs">
+                    <tr>
+                      <th className="p-2 text-left">When</th>
+                      <th className="p-2 text-left">Change</th>
+                      <th className="p-2 text-left">Move</th>
+                      <th className="p-2 text-right">Pro-rated</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.planMovement.recent.map((m, i) => (
+                      <tr key={i} className="border-t">
+                        <td className="p-2 text-xs text-muted-foreground">
+                          {new Date(m.at).toLocaleDateString()}
+                        </td>
+                        <td className="p-2">
+                          <Badge
+                            variant={
+                              m.direction === 'upgrade' ? 'default' : 'secondary'
+                            }
+                          >
+                            {m.direction}
+                          </Badge>
+                        </td>
+                        <td className="p-2 text-xs">
+                          {m.fromPlan || '—'} → {m.toPlan || '—'}
+                        </td>
+                        <td className="p-2 text-right tabular-nums">
+                          {money(m.prorationNet)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>

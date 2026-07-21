@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
+import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { deleteMonitor, setMonitorEnabled } from '@/lib/monitor'
 
 /**
@@ -28,7 +28,7 @@ async function resolveOwnedMonitor(
       ),
     }
   }
-  const decoded = verifyToken(token)
+  const decoded = await verifyTokenFresh(token)
   if (!decoded) {
     return {
       ok: false,

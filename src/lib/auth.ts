@@ -62,6 +62,160 @@ export function verifyToken(token: string): {
   }
 }
 
+/* ────────────────────────────────────────────────────────────────────
+ * Fresh authorization — role and account standing from the DATABASE
+ * ────────────────────────────────────────────────────────────────────
+ *
+ * SECURITY: the JWT bakes in the role at login and lives for 7 days. Trusting
+ * `decoded.role` therefore means a demoted admin keeps admin powers, and a
+ * suspended account keeps working, for up to a week. That is the dangerous
+ * direction of the failure, so authorization must read the CURRENT role and
+ * status rather than what was true when the token was minted.
+ *
+ * A naive per-request DB read is fine for correctness but noisy against
+ * SQLite, so results are cached briefly. The cache bounds the staleness window
+ * to AUTH_CACHE_TTL_MS (seconds) instead of 7 days, and role/status changes
+ * invalidate it explicitly for an immediate effect.
+ */
+const AUTH_CACHE_TTL_MS = 10_000
+
+interface CachedIdentity {
+  role: string
+  status: string
+  email: string
+  expiresAt: number
+}
+
+const identityCache = new Map<string, CachedIdentity>()
+
+/**
+ * Drop a user's cached role/status so the next request re-reads the DB.
+ * Called whenever a role or account status changes — without it a demotion
+ * would take up to AUTH_CACHE_TTL_MS to bite instead of being immediate.
+ */
+export function invalidateUserAuthCache(userId?: string): void {
+  if (userId) identityCache.delete(userId)
+  else identityCache.clear()
+}
+
+async function loadIdentity(userId: string): Promise<CachedIdentity | null> {
+  const cached = identityCache.get(userId)
+  if (cached && cached.expiresAt > Date.now()) return cached
+
+  try {
+    // Lazy import to break the db -> ... -> auth -> db require cycle.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { db } = require('@/lib/db') as typeof import('@/lib/db')
+    const user = await db.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, role: true, status: true },
+    })
+    if (!user) {
+      // Deleted user: forget any cached identity so a stale entry can't
+      // keep the account alive.
+      identityCache.delete(userId)
+      return null
+    }
+    const fresh: CachedIdentity = {
+      role: user.role,
+      status: (user as { status?: string }).status || 'active',
+      email: user.email,
+      expiresAt: Date.now() + AUTH_CACHE_TTL_MS,
+    }
+    identityCache.set(userId, fresh)
+    return fresh
+  } catch (error) {
+    console.error('[auth] loadIdentity failed:', error)
+    // FAIL CLOSED. Returning the token's claims here would reintroduce the
+    // exact hole this function exists to close.
+    return null
+  }
+}
+
+export interface FreshAuth {
+  userId: string
+  email: string
+  /** Current role from the database, NOT the role baked into the token. */
+  role: string
+  status: string
+  impersonatedBy?: string
+}
+
+/**
+ * Verify a token AND confirm the account is still active with its current
+ * role. Returns null for an invalid token, a deleted user, or any account
+ * whose status is not "active".
+ *
+ * Prefer this over `verifyToken` anywhere an authorization decision is made.
+ */
+export async function verifyTokenFresh(
+  token: string
+): Promise<FreshAuth | null> {
+  const decoded = verifyToken(token)
+  if (!decoded) return null
+
+  const identity = await loadIdentity(decoded.userId)
+  if (!identity) return null
+  if (identity.status !== 'active') return null
+
+  return {
+    userId: decoded.userId,
+    email: identity.email,
+    role: identity.role,
+    status: identity.status,
+    impersonatedBy: decoded.impersonatedBy,
+  }
+}
+
+/**
+ * Authorization helper for API routes: resolves the caller and checks they
+ * currently hold one of `roles`. Accepts a JWT or an API key.
+ */
+export async function requireRole(
+  request: Request,
+  roles: string[]
+): Promise<FreshAuth | null> {
+  const auth = await authenticateRequestFresh(request)
+  if (!auth) return null
+  return roles.includes(auth.role) ? auth : null
+}
+
+/** Admin-or-super-admin shorthand — by far the most common check. */
+export async function requireAdminRole(
+  request: Request
+): Promise<FreshAuth | null> {
+  return requireRole(request, ['admin', 'super_admin'])
+}
+
+/**
+ * Like `authenticateRequest` (JWT or API key) but with the role and account
+ * status re-read from the database.
+ */
+export async function authenticateRequestFresh(
+  request: Request
+): Promise<FreshAuth | null> {
+  const token =
+    extractTokenFromHeader(request.headers.get('Authorization')) ||
+    request.headers.get('x-api-key')
+  if (!token) return null
+
+  const fresh = await verifyTokenFresh(token)
+  if (fresh) return fresh
+
+  // API keys carry no role claim of their own — resolve the owner, then
+  // apply the same freshness rules.
+  const viaKey = await verifyApiKey(token)
+  if (!viaKey) return null
+  const identity = await loadIdentity(viaKey.userId)
+  if (!identity || identity.status !== 'active') return null
+  return {
+    userId: viaKey.userId,
+    email: identity.email,
+    role: identity.role,
+    status: identity.status,
+  }
+}
+
 export function extractTokenFromHeader(authHeader: string | null): string | null {
   if (!authHeader) return null
   const parts = authHeader.split(' ')

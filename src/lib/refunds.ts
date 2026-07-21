@@ -16,7 +16,10 @@
  */
 import { db } from '@/lib/db'
 import { adjustCredit } from '@/lib/credit'
-import { createNotification } from '@/lib/notifications'
+import {
+  notifyPaymentReceived,
+  notifyRefundIssued,
+} from '@/lib/billing-notifications'
 import { nextInvoiceNumber } from '@/lib/invoices'
 
 function round2(n: number) {
@@ -99,14 +102,13 @@ export async function recordInvoicePayment(opts: {
       /* invoice is updated either way — don't fail on the ledger row */
     })
 
-  await createNotification({
+  await notifyPaymentReceived({
     userId: invoice.userId,
-    title: fullySettled ? 'Payment received' : 'Partial payment received',
-    message: fullySettled
-      ? `We've received ${invoice.currency} ${amount.toFixed(2)} — invoice ${invoice.number} is now paid in full.`
-      : `We've received ${invoice.currency} ${amount.toFixed(2)} toward invoice ${invoice.number}. ${invoice.currency} ${remaining.toFixed(2)} remains due.`,
-    type: 'success',
-    link: '/?tab=billing',
+    invoiceNumber: invoice.number,
+    amount,
+    currency: invoice.currency,
+    balanceDue: Math.max(0, remaining),
+    method: opts.gateway,
   }).catch(() => {})
 
   return {
@@ -252,15 +254,16 @@ export async function refundInvoice(opts: {
     console.error('[refunds] credit note creation failed:', err)
   }
 
-  await createNotification({
+  await notifyRefundIssued({
     userId: invoice.userId,
-    title: 'Refund issued',
-    message:
-      destination === 'wallet'
-        ? `${invoice.currency} ${amount.toFixed(2)} has been refunded to your account credit (invoice ${invoice.number}).`
-        : `${invoice.currency} ${amount.toFixed(2)} has been refunded to your original payment method (invoice ${invoice.number}).`,
-    type: 'info',
-    link: '/?tab=billing',
+    invoiceNumber: invoice.number,
+    amount,
+    currency: invoice.currency,
+    destination,
+    // Only a wallet refund has actually moved money at this point — a
+    // gateway refund is recorded here and settled in the provider's portal.
+    settled: destination === 'wallet',
+    reason: opts.reason || null,
   }).catch(() => {})
 
   return {

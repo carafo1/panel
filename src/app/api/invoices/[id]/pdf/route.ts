@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
+import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { db } from '@/lib/db'
 import { renderInvoicePdf } from '@/lib/pdf'
 import { FROM_NAME, BRAND_DOMAIN, BILLING_EMAIL } from '@/lib/brand-config'
@@ -22,7 +22,7 @@ export async function GET(
       request.headers.get('Authorization')
     )
     const token = headerToken || searchParams.get('token')
-    const decoded = token ? verifyToken(token) : null
+    const decoded = token ? await verifyTokenFresh(token) : null
     if (!decoded) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }

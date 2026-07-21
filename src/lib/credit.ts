@@ -6,7 +6,7 @@
  * mutation goes through here so the two can never drift.
  */
 import { db } from '@/lib/db'
-import { createNotification } from '@/lib/notifications'
+import { notifyCreditAdjusted } from '@/lib/billing-notifications'
 
 function round2(n: number) {
   return Math.round(n * 100) / 100
@@ -71,13 +71,15 @@ export async function adjustCredit(opts: {
     }),
   ])
 
-  if (opts.notify !== false && amount > 0) {
-    await createNotification({
+  // 'applied' means we just spent the customer's own credit against an
+  // invoice — the invoice-paid notification already covers that, so telling
+  // them their balance dropped as well is noise.
+  if (opts.notify !== false && opts.type !== 'applied') {
+    await notifyCreditAdjusted({
       userId: opts.userId,
-      title: 'Account credit added',
-      message: `${amount.toFixed(2)} credit was added to your account. New balance: ${next.toFixed(2)}.`,
-      type: 'success',
-      link: '/?tab=billing',
+      amount,
+      balance: next,
+      reason: opts.description || null,
     }).catch(() => {})
   }
 

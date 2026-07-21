@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
+import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { semanticSearch, isPgvectorEnabled } from '@/lib/embeddings'
 
 /**
@@ -18,7 +18,7 @@ export async function GET(request: Request) {
     if (!token) {
       return NextResponse.json({ error: 'Authorization token required' }, { status: 401 })
     }
-    const decoded = verifyToken(token)
+    const decoded = await verifyTokenFresh(token)
     if (!decoded) {
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 })
     }

@@ -20,20 +20,37 @@
  * with Node.js 18+ and Bun.
  */
 
+/**
+ * Read a Waafi env var, treating the shipped placeholders as unset.
+ *
+ * The default .env ships `replace-with-...` values. Without this check they
+ * count as "configured", which flips `isWaafiDemoMode()` to false and makes
+ * the integration fire real API calls with a merchant ID of
+ * "replace-with-your-merchant-id" instead of safely staying in demo mode.
+ */
+function waafiEnv(name: string): string | null {
+  const v = process.env[name]
+  if (!v) return null
+  const t = v.trim()
+  if (!t) return null
+  if (/^(replace[-_ ]?with|your[-_ ]|changeme|xxx+|todo)/i.test(t)) return null
+  return t
+}
+
 function getApiUrl(): string | null {
-  return process.env.WAAFI_API_URL || null
+  return waafiEnv('WAAFI_API_URL')
 }
 
 function getMerchantId(): string | null {
-  return process.env.WAAFI_MERCHANT_ID || null
+  return waafiEnv('WAAFI_MERCHANT_ID')
 }
 
 function getApiKey(): string | null {
-  return process.env.WAAFI_API_KEY || null
+  return waafiEnv('WAAFI_API_KEY')
 }
 
 function getApiUserId(): string | null {
-  return process.env.WAAFI_API_USER_ID || null
+  return waafiEnv('WAAFI_API_USER_ID')
 }
 
 export function isWaafiConfigured(): boolean {

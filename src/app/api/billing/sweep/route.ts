@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
+import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { createNotification } from '@/lib/notifications'
 import { sendEmail } from '@/lib/email'
 import { runAutoRenewals, NOT_STRIPE_MANAGED } from '@/lib/renewals'
+import { collectAllUsage } from '@/lib/usage'
 
 /**
  * Billing sweep — subscription lifecycle enforcement.
@@ -33,13 +34,13 @@ const CRON_API_KEY =
     : null
 
 /** Cron key, or an authenticated admin (so it can be run manually). */
-function authorise(request: Request): boolean {
+async function authorise(request: Request): Promise<boolean> {
   const cronKey = request.headers.get('x-cron-key')
   if (CRON_API_KEY && cronKey && cronKey === CRON_API_KEY) return true
 
   const token = extractTokenFromHeader(request.headers.get('Authorization'))
   if (!token) return false
-  const decoded = verifyToken(token)
+  const decoded = await verifyTokenFresh(token)
   if (!decoded) return false
   return decoded.role === 'super_admin' || decoded.role === 'admin'
 }
@@ -55,7 +56,7 @@ function parseMeta(raw: string | null): Record<string, unknown> {
 
 export async function POST(request: Request) {
   try {
-    if (!authorise(request)) {
+    if (!await authorise(request)) {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 403 })
     }
 
@@ -73,6 +74,13 @@ export async function POST(request: Request) {
     const renewals = await runAutoRenewals().catch((err) => {
       console.error('[billing-sweep] auto-renewals failed:', err)
       return { renewed: 0, failed: 0, skipped: 0 }
+    })
+
+    // Capture a usage snapshot for every active customer. Piggy-backing on
+    // the hourly sweep avoids adding another scheduler.
+    const usage = await collectAllUsage().catch((err) => {
+      console.error('[billing-sweep] usage collection failed:', err)
+      return { captured: 0, failed: 0, alerted: 0 }
     })
 
     const reminded: string[] = []
@@ -186,6 +194,8 @@ export async function POST(request: Request) {
       scanned: subs.length,
       renewed: renewals.renewed,
       renewalFailures: renewals.failed,
+      usageCaptured: usage.captured,
+      overLimitAlerts: usage.alerted,
       reminded: reminded.length,
       pastDue: pastDue.length,
       suspended: suspended.length,
@@ -208,7 +218,7 @@ export async function POST(request: Request) {
 /** GET → dry-run summary of what the next sweep would do. */
 export async function GET(request: Request) {
   try {
-    if (!authorise(request)) {
+    if (!await authorise(request)) {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 403 })
     }
     const now = new Date()

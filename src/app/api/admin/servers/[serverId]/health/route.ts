@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
+import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { checkServerHealth } from '@/lib/vps/provisioner'
 
 /**
@@ -26,7 +26,7 @@ export async function GET(
         { status: 401 }
       )
     }
-    const decoded = verifyToken(token)
+    const decoded = await verifyTokenFresh(token)
     if (!decoded) {
       return NextResponse.json(
         { error: 'Invalid or expired token' },

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
+import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 
 /**
@@ -16,7 +16,7 @@ export async function POST(request: Request) {
 
     let userId: string | undefined
     if (token) {
-      const decoded = verifyToken(token)
+      const decoded = await verifyTokenFresh(token)
       if (decoded) {
         userId = decoded.userId
       }

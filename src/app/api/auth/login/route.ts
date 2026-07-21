@@ -55,6 +55,34 @@ async function loginHandler(request: Request) {
       )
     }
 
+    // ── Account standing gate ───────────────────────────────────────────
+    // Checked AFTER the password so we never reveal an account's status to
+    // someone who can't authenticate as them. A suspended/fraud/closed
+    // account gets a clear message rather than a confusing "invalid password".
+    const accountStatus = (user as { status?: string }).status || 'active'
+    if (accountStatus !== 'active') {
+      await logAudit({
+        userId: user.id,
+        action: 'user.login_blocked',
+        resource: 'user',
+        resourceId: user.id,
+        req: request,
+        status: 'failure',
+        metadata: { email, reason: `account_${accountStatus}` },
+      })
+      const messages: Record<string, string> = {
+        suspended:
+          'Your account is suspended. Please contact support to restore access.',
+        fraud:
+          'Your account is under review and access is temporarily disabled. Please contact support.',
+        closed: 'This account has been closed.',
+      }
+      return NextResponse.json(
+        { error: messages[accountStatus] || 'This account is not active.' },
+        { status: 403 }
+      )
+    }
+
     // ── 2FA gate ────────────────────────────────────────────────────────
     // If the user has 2FA enabled, we do NOT issue the full auth token
     // yet. Instead we return a short-lived tempToken (5m) that the client

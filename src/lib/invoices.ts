@@ -9,6 +9,10 @@
 import { db } from '@/lib/db'
 import { validateCoupon, redeemCoupon } from '@/lib/coupons'
 import { calculateTax } from '@/lib/tax'
+import {
+  notifyInvoiceCreated,
+  notifyPaymentReceived,
+} from '@/lib/billing-notifications'
 
 function round2(n: number) {
   return Math.round(n * 100) / 100
@@ -82,6 +86,12 @@ export interface CreateSubscriptionInvoiceOptions {
   couponCode?: string | null
   /** Skip tax (e.g. internal adjustments). */
   skipTax?: boolean
+  /**
+   * Suppress the "new invoice" notification. Used by callers that send their
+   * own message about the same event (e.g. a plan change) so the customer
+   * doesn't get two notifications for one action.
+   */
+  notify?: boolean
 }
 
 /**
@@ -187,6 +197,20 @@ export async function createSubscriptionInvoice(
         })
       }
 
+      // Tell the customer an invoice is waiting. Already-paid invoices (e.g.
+      // raised and settled in the same checkout) don't need a "please pay"
+      // message — the payment-received notification covers those.
+      if (!opts.paid && opts.notify !== false) {
+        await notifyInvoiceCreated({
+          userId: opts.userId,
+          invoiceNumber: created.number,
+          total: created.total,
+          currency: created.currency,
+          dueDate: created.dueDate,
+          description: items[0]?.description,
+        }).catch(() => {})
+      }
+
       return created
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -244,6 +268,15 @@ export async function markInvoicePaid(
     .catch(() => {
       /* the invoice is settled either way — don't fail on the ledger row */
     })
+
+  await notifyPaymentReceived({
+    userId: invoice.userId,
+    invoiceNumber: invoice.number,
+    amount: opts.amount ?? Math.max(0, settled),
+    currency: invoice.currency,
+    balanceDue: 0,
+    method: opts.gateway,
+  }).catch(() => {})
 
   return updated
 }

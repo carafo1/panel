@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
+import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { createNotification } from '@/lib/notifications'
 import { sendTeamInvitationEmail } from '@/lib/email'
 import crypto from 'crypto'
@@ -17,7 +17,7 @@ export async function POST(
       return NextResponse.json({ error: 'Authorization token required' }, { status: 401 })
     }
 
-    const decoded = verifyToken(token)
+    const decoded = await verifyTokenFresh(token)
     if (!decoded) {
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 })
     }

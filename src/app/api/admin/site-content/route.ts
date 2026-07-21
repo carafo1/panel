@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
+import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { getSiteContent } from '@/lib/cms'
 
@@ -12,7 +12,7 @@ async function requireAdmin(request: Request) {
   if (!token) {
     return { error: NextResponse.json({ error: 'Authorization token required' }, { status: 401 }) }
   }
-  const decoded = verifyToken(token)
+  const decoded = await verifyTokenFresh(token)
   if (!decoded) {
     return { error: NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 }) }
   }

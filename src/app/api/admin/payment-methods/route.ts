@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
+import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import {
   getAllPaymentMethods,
@@ -13,13 +13,13 @@ import {
  *
  * Returns a NextResponse on failure, or null when the caller is allowed.
  */
-function requireSuperAdmin(request: Request): {
+async function requireSuperAdmin(request: Request): Promise<{
   decoded: { userId: string; email: string; role: string }
-} | null {
+} | null> {
   const authHeader = request.headers.get('Authorization')
   const token = extractTokenFromHeader(authHeader)
   if (!token) return null
-  const decoded = verifyToken(token)
+  const decoded = await verifyTokenFresh(token)
   if (!decoded) return null
   // Allow `super_admin` always; allow `admin` during the transition.
   if (decoded.role !== 'super_admin' && decoded.role !== 'admin') return null
@@ -34,7 +34,7 @@ function requireSuperAdmin(request: Request): {
  */
 export async function GET(request: Request) {
   try {
-    const auth = requireSuperAdmin(request)
+    const auth = await requireSuperAdmin(request)
     if (!auth) {
       return NextResponse.json(
         { error: 'Super admin access required' },
@@ -80,7 +80,7 @@ export async function GET(request: Request) {
  */
 export async function PATCH(request: Request) {
   try {
-    const auth = requireSuperAdmin(request)
+    const auth = await requireSuperAdmin(request)
     if (!auth) {
       return NextResponse.json(
         { error: 'Super admin access required' },

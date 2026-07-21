@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
+import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { runUptimeChecks } from '@/lib/monitor'
 import { requireSecret, isAdmin, safeCompare } from '@/lib/security'
 
@@ -49,7 +49,7 @@ export async function POST(request: Request) {
           { status: 401 }
         )
       }
-      const decoded = verifyToken(token)
+      const decoded = await verifyTokenFresh(token)
       if (!decoded) {
         return NextResponse.json(
           { error: 'Invalid or expired token' },

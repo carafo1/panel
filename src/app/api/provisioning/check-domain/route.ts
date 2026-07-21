@@ -19,7 +19,7 @@
  *   }
  */
 import { NextResponse } from 'next/server'
-import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
+import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { searchDomains } from '@/lib/dynadot'
 
 const DOMAIN_REGEX =
@@ -38,7 +38,7 @@ export async function GET(request: Request) {
     if (!token) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
-    const user = verifyToken(token)
+    const user = await verifyTokenFresh(token)
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }

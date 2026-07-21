@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { verifyPayment as verifyWaafiPayment } from '@/lib/waafi'
-import { processEvent } from '@/lib/automation'
+import { provisionForPayment } from '@/lib/provision-on-payment'
 import { createNotification } from '@/lib/notifications'
 
 /**
@@ -197,22 +197,22 @@ export async function POST(request: Request) {
       }
     }
 
-    // Drive the automation pipeline (creates project / domain / deployment)
-    const automationResult = await processEvent({
-      type: 'payment_success',
-      userId: payment.userId,
-      payload: {
-        paymentId: updatedPayment.id,
-        planId: (metadata.planId as string) || null,
-        purchaseType:
-          (metadata.purchaseType as string) || payment.type || 'hosting',
-        domainName: (metadata.domainName as string) || null,
-        projectName: (metadata.projectName as string) || null,
-        framework: (metadata.framework as string) || null,
-        subscriptionId,
-        method: 'waafi',
-      },
-    })
+    // REAL provisioning — creates the container / registers the domain.
+    //
+    // Previously this called processEvent('payment_success'), whose actions
+    // are simulated (create_user_workspace only sends a notification and
+    // returns an invented id). A Waafi customer would be told their resources
+    // were provisioned while nothing existed. provisionForPayment is
+    // idempotent, so a replayed callback can't double-provision.
+    const provisionResult = await provisionForPayment(updatedPayment.id).catch(
+      (err: unknown) => {
+        console.error('[waafi-callback] provisioning failed:', err)
+        return { provisioned: false, detail: 'provisioning error' }
+      }
+    )
+    console.log(
+      `[waafi-callback] provisioning for ${updatedPayment.id}: ${provisionResult.detail}`
+    )
 
     await createNotification({
       userId: payment.userId,
@@ -226,7 +226,7 @@ export async function POST(request: Request) {
       success: true,
       status: 'completed',
       paymentId: updatedPayment.id,
-      automation: automationResult,
+      provisioning: provisionResult,
     })
   } catch (error) {
     console.error('Waafi callback error:', error)

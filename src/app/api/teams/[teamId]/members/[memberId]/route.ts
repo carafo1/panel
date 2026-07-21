@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { verifyToken } from '@/lib/auth'
+import { verifyTokenFresh } from '@/lib/auth'
 
 export async function PATCH(
   req: NextRequest,
@@ -14,7 +14,7 @@ export async function PATCH(
     }
 
     const token = authHeader.split(' ')[1]
-    const payload = verifyToken(token)
+    const payload = await verifyTokenFresh(token)
     if (!payload) {
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 })
     }
@@ -70,7 +70,7 @@ export async function DELETE(
     }
 
     const token = authHeader.split(' ')[1]
-    const payload = verifyToken(token)
+    const payload = await verifyTokenFresh(token)
     if (!payload) {
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 })
     }

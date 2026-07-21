@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
+import { verifyToken, extractTokenFromHeader, requireAdminRole } from '@/lib/auth'
 import { db } from '@/lib/db'
 
 /**
@@ -9,15 +9,13 @@ import { db } from '@/lib/db'
  * recorded payments) — nothing here is estimated or fabricated. Where a metric
  * genuinely can't be computed yet it is returned as 0 rather than invented.
  */
-function requireAdmin(request: Request): {
+async function requireAdmin(request: Request): Promise<{
   decoded: { userId: string; email: string; role: string }
-} | null {
-  const token = extractTokenFromHeader(request.headers.get('Authorization'))
-  if (!token) return null
-  const decoded = verifyToken(token)
-  if (!decoded) return null
-  if (decoded.role !== 'super_admin' && decoded.role !== 'admin') return null
-  return { decoded }
+} | null> {
+  // SECURITY: role comes from the database, not the 7-day token — see
+  // verifyTokenFresh. Also rejects suspended/closed accounts.
+  const decoded = await requireAdminRole(request)
+  return decoded ? { decoded } : null
 }
 
 function round2(n: number) {
@@ -45,7 +43,7 @@ function cycleMonths(billingCycle: string): number | null {
 /** GET /api/admin/reports?days=30 */
 export async function GET(request: Request) {
   try {
-    const auth = requireAdmin(request)
+    const auth = await requireAdmin(request)
     if (!auth) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 })
     }
@@ -55,7 +53,7 @@ export async function GET(request: Request) {
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
     const now = new Date()
 
-    const [subs, invoices, payments] = await Promise.all([
+    const [subs, invoices, payments, refunds, planChangeLogs] = await Promise.all([
       db.subscription.findMany({
         include: { plan: { select: { price: true, billingCycle: true, name: true } } },
       }),
@@ -73,11 +71,46 @@ export async function GET(request: Request) {
       }),
       db.payment.findMany({
         select: {
+          id: true,
           amount: true,
+          currency: true,
           status: true,
           method: true,
+          metadata: true,
           createdAt: true,
           userId: true,
+        },
+      }),
+      db.refund.findMany({
+        orderBy: { createdAt: 'desc' },
+        take: 500,
+        select: {
+          id: true,
+          invoiceId: true,
+          userId: true,
+          amount: true,
+          currency: true,
+          destination: true,
+          reason: true,
+          status: true,
+          createdAt: true,
+        },
+      }),
+      // Plan movement isn't stored on the subscription (it only holds the
+      // CURRENT plan), so upgrade/downgrade history comes from the audit log.
+      db.auditLog.findMany({
+        where: {
+          action: { in: ['subscription.change_plan', 'subscription.change_cycle'] },
+          createdAt: { gte: since },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 500,
+        select: {
+          id: true,
+          userId: true,
+          resourceId: true,
+          metadata: true,
+          createdAt: true,
         },
       }),
     ])
@@ -166,6 +199,99 @@ export async function GET(request: Request) {
       successRate: g.total > 0 ? round2((g.completed / g.total) * 100) : 0,
     }))
 
+    // ── Refunds ──────────────────────────────────────────────────────
+    // Refunds reduce net revenue, so reporting gross revenue alone overstates
+    // what the business actually kept.
+    const refundsInPeriod = refunds.filter(
+      (r) => new Date(r.createdAt) >= since
+    )
+    const refundedAllTime = round2(
+      refunds.reduce((s, r) => s + (r.amount || 0), 0)
+    )
+    const refundedPeriod = round2(
+      refundsInPeriod.reduce((s, r) => s + (r.amount || 0), 0)
+    )
+    const refundsByDestination: Record<string, { count: number; amount: number }> = {}
+    for (const r of refunds) {
+      const d = r.destination || 'unknown'
+      refundsByDestination[d] ||= { count: 0, amount: 0 }
+      refundsByDestination[d].count++
+      refundsByDestination[d].amount = round2(
+        refundsByDestination[d].amount + (r.amount || 0)
+      )
+    }
+
+    // ── Failed payments ──────────────────────────────────────────────
+    const failedPayments = payments.filter((p) => p.status === 'failed')
+    const failedInPeriod = failedPayments.filter(
+      (p) => new Date(p.createdAt) >= since
+    )
+    const failedValuePeriod = round2(
+      failedInPeriod.reduce((s, p) => s + (p.amount || 0), 0)
+    )
+    const attemptedInPeriod = payments.filter(
+      (p) => new Date(p.createdAt) >= since
+    )
+    const failureRate =
+      attemptedInPeriod.length > 0
+        ? round2((failedInPeriod.length / attemptedInPeriod.length) * 100)
+        : 0
+    // Rejection reasons, where an admin recorded one.
+    const failureReasons: Record<string, number> = {}
+    for (const p of failedInPeriod) {
+      let reason = 'Not specified'
+      try {
+        const m = p.metadata ? JSON.parse(p.metadata) : {}
+        if (typeof m?.rejectionReason === 'string' && m.rejectionReason.trim()) {
+          reason = m.rejectionReason.trim().slice(0, 120)
+        }
+      } catch {
+        /* unparseable metadata just counts as unspecified */
+      }
+      failureReasons[reason] = (failureReasons[reason] || 0) + 1
+    }
+
+    // ── Plan movement (upgrades / downgrades) ────────────────────────
+    let upgrades = 0
+    let downgrades = 0
+    let cycleChanges = 0
+    let upgradeRevenue = 0
+    let downgradeCredit = 0
+    const planMovements: Array<Record<string, unknown>> = []
+    for (const log of planChangeLogs) {
+      let m: Record<string, unknown> = {}
+      try {
+        m = log.metadata ? JSON.parse(log.metadata) : {}
+      } catch {
+        m = {}
+      }
+      if (m.billingCycle) {
+        cycleChanges++
+        continue
+      }
+      const direction = String(m.direction || 'same')
+      const proration = (m.proration || {}) as { netCharge?: number }
+      const net = Number(proration.netCharge || 0)
+      if (direction === 'upgrade') {
+        upgrades++
+        if (net > 0) upgradeRevenue = round2(upgradeRevenue + net)
+      } else if (direction === 'downgrade') {
+        downgrades++
+        const credited = Number(m.creditIssued || 0)
+        if (credited > 0) downgradeCredit = round2(downgradeCredit + credited)
+      }
+      planMovements.push({
+        at: log.createdAt,
+        subscriptionId: log.resourceId,
+        direction,
+        fromPlan: m.fromPlan ?? null,
+        toPlan: m.toPlan ?? null,
+        prorationNet: round2(net),
+        creditIssued: m.creditIssued ?? null,
+        invoiceNumber: m.invoiceNumber ?? null,
+      })
+    }
+
     // ── Top customers by lifetime value ──────────────────────────────
     const ltvByUser: Record<string, number> = {}
     for (const i of paidInvoices) {
@@ -198,6 +324,40 @@ export async function GET(request: Request) {
         outstandingCount: unpaid.length,
         overdueCount: overdue,
         lifetimeSubsExcludedFromMrr: lifetimeExcluded,
+        // Gross revenue less refunds — what the business actually kept.
+        refundedAllTime,
+        refundedPeriod,
+        netRevenueAllTime: round2(revenueAllTime - refundedAllTime),
+        netRevenuePeriod: round2(revenuePeriod - refundedPeriod),
+      },
+      refunds: {
+        countAllTime: refunds.length,
+        countInPeriod: refundsInPeriod.length,
+        amountAllTime: refundedAllTime,
+        amountInPeriod: refundedPeriod,
+        byDestination: Object.entries(refundsByDestination).map(
+          ([destination, v]) => ({ destination, ...v })
+        ),
+        recent: refunds.slice(0, 20),
+      },
+      failedPayments: {
+        countAllTime: failedPayments.length,
+        countInPeriod: failedInPeriod.length,
+        valueInPeriod: failedValuePeriod,
+        attemptsInPeriod: attemptedInPeriod.length,
+        failureRatePercent: failureRate,
+        reasons: Object.entries(failureReasons)
+          .map(([reason, count]) => ({ reason, count }))
+          .sort((a, b) => b.count - a.count),
+      },
+      planMovement: {
+        upgrades,
+        downgrades,
+        cycleChanges,
+        upgradeRevenue,
+        downgradeCredit,
+        netMoves: upgrades - downgrades,
+        recent: planMovements.slice(0, 20),
       },
       subscriptions: {
         total: subs.length,

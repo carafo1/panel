@@ -1,11 +1,12 @@
 import { NextResponse } from 'next/server'
-import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
+import { verifyToken, extractTokenFromHeader, requireAdminRole } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { db } from '@/lib/db'
 import { markInvoicePaid, nextInvoiceNumber } from '@/lib/invoices'
 import { refundInvoice, recordInvoicePayment } from '@/lib/refunds'
 import { calculateTax } from '@/lib/tax'
 import { createNotification } from '@/lib/notifications'
+import { notifyInvoiceCreated } from '@/lib/billing-notifications'
 import { sendEmail } from '@/lib/email'
 
 /**
@@ -14,21 +15,19 @@ import { sendEmail } from '@/lib/email'
  * With offline payments the admin settles invoices by hand, so they need to
  * see who owes what and be able to mark an invoice paid, void it, or add a note.
  */
-function requireAdmin(request: Request): {
+async function requireAdmin(request: Request): Promise<{
   decoded: { userId: string; email: string; role: string }
-} | null {
-  const token = extractTokenFromHeader(request.headers.get('Authorization'))
-  if (!token) return null
-  const decoded = verifyToken(token)
-  if (!decoded) return null
-  if (decoded.role !== 'super_admin' && decoded.role !== 'admin') return null
-  return { decoded }
+} | null> {
+  // SECURITY: role comes from the database, not the 7-day token — see
+  // verifyTokenFresh. Also rejects suspended/closed accounts.
+  const decoded = await requireAdminRole(request)
+  return decoded ? { decoded } : null
 }
 
 /** GET /api/admin/invoices?status=unpaid */
 export async function GET(request: Request) {
   try {
-    const auth = requireAdmin(request)
+    const auth = await requireAdmin(request)
     if (!auth) {
       return NextResponse.json(
         { error: 'Admin access required' },
@@ -128,7 +127,7 @@ export async function GET(request: Request) {
  */
 export async function POST(request: Request) {
   try {
-    const auth = requireAdmin(request)
+    const auth = await requireAdmin(request)
     if (!auth) {
       return NextResponse.json(
         { error: 'Admin access required' },
@@ -199,13 +198,15 @@ export async function POST(request: Request) {
       },
     })
 
+    // Drafts aren't owed yet, so they stay silent until issued.
     if (!body.draft) {
-      await createNotification({
+      await notifyInvoiceCreated({
         userId: user.id,
-        title: 'New invoice',
-        message: `Invoice ${invoice.number} for ${invoice.currency} ${invoice.total.toFixed(2)} has been issued.`,
-        type: 'info',
-        link: '/?tab=billing',
+        invoiceNumber: invoice.number,
+        total: invoice.total,
+        currency: invoice.currency,
+        dueDate: invoice.dueDate,
+        description: items[0]?.description,
       }).catch(() => {})
     }
 
@@ -235,7 +236,7 @@ export async function POST(request: Request) {
  */
 export async function PATCH(request: Request) {
   try {
-    const auth = requireAdmin(request)
+    const auth = await requireAdmin(request)
     if (!auth) {
       return NextResponse.json(
         { error: 'Admin access required' },
@@ -404,12 +405,13 @@ ${body.note ? `<p>${body.note}</p>` : ''}
         )
       }
       await db.invoice.update({ where: { id }, data: { status: 'unpaid' } })
-      await createNotification({
+      // Issuing a draft is the moment the customer actually owes it.
+      await notifyInvoiceCreated({
         userId: invoice.userId,
-        title: 'New invoice',
-        message: `Invoice ${invoice.number} for ${invoice.currency} ${invoice.total.toFixed(2)} has been issued.`,
-        type: 'info',
-        link: '/?tab=billing',
+        invoiceNumber: invoice.number,
+        total: invoice.total,
+        currency: invoice.currency,
+        dueDate: invoice.dueDate,
       }).catch(() => {})
       await logAudit({
         userId: auth.decoded.userId,

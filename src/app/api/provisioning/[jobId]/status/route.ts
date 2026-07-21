@@ -9,7 +9,7 @@
  * Auth: only the job's owner may view it.
  */
 import { NextResponse } from 'next/server'
-import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
+import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { getProvisioningStatus } from '@/lib/orchestration'
 
 export async function GET(
@@ -23,7 +23,7 @@ export async function GET(
     if (!token) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
-    const user = verifyToken(token)
+    const user = await verifyTokenFresh(token)
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }

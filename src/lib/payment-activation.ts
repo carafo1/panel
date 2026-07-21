@@ -17,6 +17,7 @@
 import { db } from '@/lib/db'
 import { provisionForPayment } from '@/lib/provision-on-payment'
 import { createNotification } from '@/lib/notifications'
+import { notifyPaymentFailed } from '@/lib/billing-notifications'
 import { findInvoiceForPayment, markInvoicePaid } from '@/lib/invoices'
 
 export interface ActivatePaymentOptions {
@@ -241,21 +242,15 @@ export async function rejectPayment(opts: {
     },
   })
 
-  try {
-    await createNotification({
-      userId: payment.userId,
-      title: 'Payment Not Confirmed',
-      message:
-        opts.reason ||
-        `We could not confirm your payment of ${payment.currency.toUpperCase()} ${payment.amount.toFixed(
-          2
-        )}. Please contact support or try again.`,
-      type: 'error',
-      link: '/?tab=billing',
-    })
-  } catch {
-    /* ignore */
-  }
+  // Emails as well as an in-app note: a rejected payment means services are
+  // heading for suspension, and the customer may never open the dashboard.
+  await notifyPaymentFailed({
+    userId: payment.userId,
+    amount: payment.amount,
+    currency: payment.currency,
+    method: payment.method,
+    reason: opts.reason || null,
+  }).catch(() => {})
 
   return { success: true }
 }

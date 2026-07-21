@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { processEvent } from '@/lib/automation'
+import { provisionForPayment } from '@/lib/provision-on-payment'
 import { constructWebhookEvent, isStripeDemoMode } from '@/lib/stripe'
 import { createNotification } from '@/lib/notifications'
 import type Stripe from 'stripe'
@@ -121,19 +122,24 @@ export async function POST(request: Request) {
         })
       }
 
-      // Drive the automation pipeline (creates project/domain/etc.)
-      await processEvent({
-        type: 'payment_success',
-        userId,
-        payload: {
-          paymentId: payment.id,
-          planId: planId,
-          purchaseType,
-          domainName,
-          subscriptionId: subscription?.id || null,
-          projectName,
-        },
-      })
+      // REAL provisioning — creates the container / registers the domain.
+      //
+      // This used to call processEvent('payment_success'), whose actions are
+      // simulated: `create_user_workspace` just sends a "workspace created"
+      // notification and returns a made-up id without building anything. A
+      // customer who paid via Stripe therefore got a success email and no
+      // service. provisionForPayment does the real work and is idempotent, so
+      // a retried webhook cannot double-provision (or double-register a
+      // domain, which costs real registrar balance).
+      const provision = await provisionForPayment(payment.id).catch(
+        (err: unknown) => {
+          console.error('[stripe-webhook] provisioning failed:', err)
+          return { provisioned: false, detail: 'provisioning error' }
+        }
+      )
+      console.log(
+        `[stripe-webhook] provisioning for ${payment.id}: ${provision.detail}`
+      )
 
       await createNotification({
         userId,
@@ -371,11 +377,26 @@ export async function POST(request: Request) {
           }
         }
 
-        await processEvent({
-          type: eventType as 'payment_success' | 'subscription_cancelled' | 'payment_failed',
-          userId,
-          payload: { paymentId, planId, purchaseType, domainName },
-        })
+        if (eventType === 'payment_success' && paymentId) {
+          // Same switch as the live path above: real provisioning, not the
+          // simulated automation actions.
+          const provision = await provisionForPayment(paymentId).catch(
+            (err: unknown) => {
+              console.error('[stripe-webhook/legacy] provisioning failed:', err)
+              return { provisioned: false, detail: 'provisioning error' }
+            }
+          )
+          console.log(
+            `[stripe-webhook/legacy] provisioning for ${paymentId}: ${provision.detail}`
+          )
+        } else {
+          // Cancellation / failure events carry no provisioning work.
+          await processEvent({
+            type: eventType as 'subscription_cancelled' | 'payment_failed',
+            userId,
+            payload: { paymentId, planId, purchaseType, domainName },
+          })
+        }
       }
     }
 
