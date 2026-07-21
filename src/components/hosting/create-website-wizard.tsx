@@ -132,7 +132,19 @@ interface CreateWebsiteWizardProps {
 
 type Step = 1 | 2 | 3 | 4
 
-type DomainType = 'subdomain' | 'existing' | 'new'
+/**
+ * How the site will be reached.
+ *
+ *   subdomain — free instant address on the platform domain
+ *   existing  — a domain already registered THROUGH this platform
+ *   external  — registered at any other registrar (GoDaddy, Namecheap,
+ *               Cloudflare, Porkbun…). No transfer required.
+ *   register  — buy a new domain here
+ *   transfer  — move an existing registration to us
+ *
+ * `new` is the legacy name for `external` and is still accepted by the API.
+ */
+type DomainType = 'subdomain' | 'existing' | 'external' | 'register' | 'transfer'
 
 type Source = 'git' | 'zip' | 'manual'
 
@@ -1037,7 +1049,7 @@ export default function CreateWebsiteWizard({
     // Resolve domain.
     let domain: string | undefined
     if (domainType === 'existing') domain = existingDomain
-    else if (domainType === 'new') domain = newDomain.trim()
+    else if (domainType === 'external') domain = newDomain.trim()
     // subdomain leaves domain undefined.
 
     return {
@@ -1241,7 +1253,11 @@ export default function CreateWebsiteWizard({
   const step2Valid =
     domainType === 'subdomain' ||
     (domainType === 'existing' && !!existingDomain) ||
-    (domainType === 'new' && isValidDomain(newDomain))
+    (domainType === 'external' && isValidDomain(newDomain)) ||
+    // Register / transfer are handled in the Domains tab; the site is created
+    // on its subdomain and the domain attached afterwards.
+    domainType === 'register' ||
+    domainType === 'transfer'
   const step3Valid = useMemo(() => {
     if (!selectedMethod) return false
     // Required method fields must be filled (when shown for the current source).
@@ -1311,7 +1327,7 @@ export default function CreateWebsiteWizard({
     createdProject?.customDomain ||
     (domainType === 'existing'
       ? existingDomain
-      : domainType === 'new'
+      : domainType === 'external'
         ? newDomain
         : createdProject?.subdomain) ||
     createdProject?.subdomain ||
@@ -1483,14 +1499,15 @@ export default function CreateWebsiteWizard({
                   ))}
               </DomainOptionCard>
 
+              {/* Use a domain registered at ANY other registrar. No transfer. */}
               <DomainOptionCard
-                selected={domainType === 'new'}
-                onSelect={() => setDomainType('new')}
-                title="New domain"
-                description="Point a domain you own (registered elsewhere) to your Apsamo server."
+                selected={domainType === 'external'}
+                onSelect={() => setDomainType('external')}
+                title="Use a domain registered elsewhere"
+                description="Connect a domain from GoDaddy, Namecheap, Cloudflare, Porkbun, Dynadot or any other registrar. No transfer needed — it stays where it is."
                 icon={<Hash className="size-5" />}
               >
-                {domainType === 'new' && (
+                {domainType === 'external' && (
                   <div className="space-y-1.5">
                     <Input
                       placeholder="example.com"
@@ -1499,8 +1516,76 @@ export default function CreateWebsiteWizard({
                     />
                     <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
                       <Info className="mt-0.5 size-3.5 shrink-0" />
-                      Make sure the domain&apos;s A record points to your server IP. We&apos;ll verify DNS
-                      before issuing SSL.
+                      Your hosting is set up straight away on the free subdomain.
+                      After creation we&apos;ll show the exact DNS record to add,
+                      then connect the domain and issue SSL automatically once it
+                      propagates.
+                    </p>
+                  </div>
+                )}
+              </DomainOptionCard>
+
+              {/* Buy a new registration through the platform. */}
+              <DomainOptionCard
+                selected={domainType === 'register'}
+                onSelect={() => setDomainType('register')}
+                title="Register a new domain"
+                description="Search for and buy a brand-new domain through Apsamo."
+                icon={<Globe className="size-5" />}
+              >
+                {domainType === 'register' && (
+                  <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+                    <p>
+                      Registration is handled in the Domains tab so you can check
+                      availability and pricing first.
+                    </p>
+                    <Button
+                      size="sm"
+                      variant="link"
+                      className="h-auto p-0 text-primary"
+                      onClick={() => {
+                        window.location.href = '/?tab=domains'
+                      }}
+                    >
+                      Search for a domain →
+                    </Button>
+                    <p className="mt-1.5 text-xs">
+                      You can create this site on its free subdomain now and attach
+                      the domain the moment it&apos;s registered.
+                    </p>
+                  </div>
+                )}
+              </DomainOptionCard>
+
+              {/* Move an existing registration to us (optional — not required
+                  in order to host here). */}
+              <DomainOptionCard
+                selected={domainType === 'transfer'}
+                onSelect={() => setDomainType('transfer')}
+                title="Transfer a domain to Apsamo"
+                description="Move an existing registration here so billing and DNS live in one place."
+                icon={<Server className="size-5" />}
+              >
+                {domainType === 'transfer' && (
+                  <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+                    <p>
+                      A transfer needs the EPP/auth code from your current
+                      registrar and can take up to 7 days.
+                    </p>
+                    <Button
+                      size="sm"
+                      variant="link"
+                      className="h-auto p-0 text-primary"
+                      onClick={() => {
+                        window.location.href = '/?tab=domains'
+                      }}
+                    >
+                      Start a transfer →
+                    </Button>
+                    <p className="mt-1.5 text-xs">
+                      You don&apos;t need to transfer to host here — pick
+                      &ldquo;Use a domain registered elsewhere&rdquo; to connect it
+                      today and keep it where it is.
                     </p>
                   </div>
                 )}

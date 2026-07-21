@@ -156,3 +156,150 @@ export async function getServerIps(): Promise<string[]> {
   }
   return [...ips]
 }
+
+/* ────────────────────────────────────────────────────────────────────
+ * Continuous verification
+ * ──────────────────────────────────────────────────────────────────── */
+
+export interface DomainSweepResult {
+  checked: number
+  connected: number
+  stillPending: number
+  failed: number
+}
+
+/**
+ * Re-check every pending custom domain and connect the ones that now resolve.
+ *
+ * Without this, a customer who adds the DNS record has to come back and press
+ * "Verify" — and if they don't, their site never goes live even though the
+ * DNS is correct. This runs on the worker tick so a domain connects on its own
+ * within minutes of propagating.
+ *
+ * Only touches domains that are already attached and unverified. Verified
+ * domains are left alone: re-checking them would risk pulling a live site out
+ * of the proxy over a transient DNS blip.
+ */
+export async function sweepPendingDomains(): Promise<DomainSweepResult> {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { configureProjectProxy } = require('@/lib/vps/proxy') as typeof import('@/lib/vps/proxy')
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { createNotification } = require('@/lib/notifications') as typeof import('@/lib/notifications')
+
+  const pending = await db.websiteDomain
+    .findMany({
+      where: { verified: false },
+      select: {
+        id: true,
+        domain: true,
+        projectId: true,
+        isPrimary: true,
+        verificationToken: true,
+        sslEnabled: true,
+        createdAt: true,
+        project: { select: { userId: true, name: true } },
+      },
+      take: 200,
+    })
+    .catch(() => [])
+
+  if (pending.length === 0) {
+    return { checked: 0, connected: 0, stillPending: 0, failed: 0 }
+  }
+
+  const serverIps = await getServerIps()
+  let connected = 0
+  let failed = 0
+  const touchedProjects = new Set<string>()
+
+  for (const row of pending) {
+    try {
+      // A row with no token predates this feature; mint one so the TXT proof
+      // is available rather than skipping the domain forever.
+      let token = row.verificationToken
+      if (!token) {
+        token = generateVerificationToken()
+        await db.websiteDomain.update({
+          where: { id: row.id },
+          data: { verificationToken: token },
+        })
+      }
+
+      const result = await checkOwnership({ domain: row.domain, token, serverIps })
+
+      if (!result.verified) {
+        await db.websiteDomain.update({
+          where: { id: row.id },
+          data: {
+            lastCheckedAt: new Date(),
+            lastCheckError: result.detail.slice(0, 300),
+          },
+        })
+        continue
+      }
+
+      // Re-check the conflict at connect time: another project could have
+      // claimed and verified this hostname while this row sat pending.
+      const conflict = await findConflict(row.domain, row.projectId)
+      if (conflict.conflict) {
+        await db.websiteDomain.update({
+          where: { id: row.id },
+          data: {
+            lastCheckedAt: new Date(),
+            lastCheckError: 'Domain is now in use by another site on this platform.',
+          },
+        })
+        failed++
+        continue
+      }
+
+      await db.websiteDomain.update({
+        where: { id: row.id },
+        data: {
+          verified: true,
+          verifiedAt: new Date(),
+          verificationMethod: result.method,
+          lastCheckedAt: new Date(),
+          lastCheckError: null,
+          // Caddy issues the certificate on first request once the hostname
+          // is in its config; 'pending' until we observe it succeed.
+          sslStatus: row.sslEnabled ? 'pending' : 'none',
+        },
+      })
+
+      if (row.isPrimary) {
+        await db.project
+          .update({ where: { id: row.projectId }, data: { customDomain: row.domain } })
+          .catch(() => {})
+      }
+
+      touchedProjects.add(row.projectId)
+      connected++
+
+      await createNotification({
+        userId: row.project.userId,
+        title: 'Domain Connected',
+        message: `${row.domain} is verified and now serving ${row.project.name} over HTTPS.`,
+        type: 'success',
+        link: '/?tab=hosting',
+      }).catch(() => {})
+    } catch (err) {
+      failed++
+      console.error('[domain-sweep] failed for', row.domain, err)
+    }
+  }
+
+  // Reload the proxy once per project, not once per domain.
+  for (const projectId of touchedProjects) {
+    await configureProjectProxy(projectId).catch((err: unknown) =>
+      console.error('[domain-sweep] proxy reload failed for', projectId, err)
+    )
+  }
+
+  return {
+    checked: pending.length,
+    connected,
+    stillPending: pending.length - connected - failed,
+    failed,
+  }
+}
