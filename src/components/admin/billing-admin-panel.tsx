@@ -22,25 +22,15 @@ import {
 } from '@/components/ui/dialog'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { toast } from 'sonner'
+import { apiFetch as baseApiFetch } from '@/store/auth-store'
 import { Loader2, RefreshCw, Check, X, CalendarPlus } from 'lucide-react'
 
 // ── API helper ─────────────────────────────────────────────────────────
+// Delegate to the shared client so auth (token key, base path, error shape)
+// lives in exactly one place. A local copy previously read the wrong
+// localStorage key and silently sent no Authorization header.
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const token =
-    typeof window !== 'undefined' ? localStorage.getItem('token') : null
-  const res = await fetch(`/api${path}`, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(init?.headers || {}),
-    },
-  })
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({ error: 'Request failed' }))
-    throw new Error(data.error || `Request failed (${res.status})`)
-  }
-  return res.json()
+  return (await baseApiFetch(path, init)) as T
 }
 
 interface AdminPayment {
@@ -61,12 +51,31 @@ interface AdminPayment {
   user: { id: string; name: string | null; email: string } | null
 }
 
+interface AdminInvoice {
+  id: string
+  number: string
+  status: string
+  rawStatus: string
+  total: number
+  currency: string
+  createdAt: string
+  dueDate: string | null
+  paidAt: string | null
+  planName: string | null
+  domainName: string | null
+  type: string
+  user: { id: string; name: string | null; email: string } | null
+}
+
 interface AdminSubscription {
   id: string
   status: string
   currentPeriodEnd: string
   cancelAtPeriodEnd: boolean
   managedByStripe: boolean
+  autoRenew: boolean
+  renewalAttempts: number
+  lastRenewalError: string | null
   daysLeft: number
   expired: boolean
   user: { id: string; name: string | null; email: string } | null
@@ -74,9 +83,14 @@ interface AdminSubscription {
 }
 
 function statusVariant(status: string): 'default' | 'secondary' | 'destructive' | 'outline' {
-  if (status === 'completed' || status === 'active') return 'default'
-  if (status === 'pending') return 'secondary'
-  if (status === 'failed' || status === 'suspended') return 'destructive'
+  if (status === 'completed' || status === 'active' || status === 'paid') return 'default'
+  if (status === 'pending' || status === 'unpaid') return 'secondary'
+  if (
+    status === 'failed' ||
+    status === 'suspended' ||
+    status === 'overdue'
+  )
+    return 'destructive'
   return 'outline'
 }
 
@@ -200,6 +214,147 @@ function ConfirmDialog({
   )
 }
 
+// ── Change plan (upgrade / downgrade with proration) ───────────────────
+function ChangePlanDialog({
+  sub,
+  open,
+  onOpenChange,
+  onDone,
+}: {
+  sub: AdminSubscription | null
+  open: boolean
+  onOpenChange: (v: boolean) => void
+  onDone: () => void
+}) {
+  const [plans, setPlans] = useState<
+    Array<{ id: string; name: string; price: number; currency: string; billingCycle: string }>
+  >([])
+  const [planId, setPlanId] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    setPlanId('')
+    apiFetch<{ plans: typeof plans }>('/admin/plans')
+      .then((d) => setPlans(d.plans || []))
+      .catch(() => setPlans([]))
+  }, [open])
+
+  if (!sub) return null
+
+  const target = plans.find((p) => p.id === planId)
+  const current = sub.plan
+  // Mirror of the server-side proration so the admin sees the charge first.
+  const preview = (() => {
+    if (!target || !current) return null
+    const end = new Date(sub.currentPeriodEnd).getTime()
+    const now = Date.now()
+    const daysLeft = Math.max(0, Math.ceil((end - now) / 86400000))
+    if (daysLeft > 365 * 50) return null // lifetime
+    const totalDays = 30 // display estimate only; server is authoritative
+    const ratio = Math.min(1, daysLeft / totalDays)
+    const credit = current.price * ratio
+    const cost = target.price * ratio
+    return { daysLeft, credit, cost, net: cost - credit }
+  })()
+
+  const run = async () => {
+    if (!planId) {
+      toast.error('Pick a plan')
+      return
+    }
+    setBusy(true)
+    try {
+      const res = await apiFetch<{
+        invoiceNumber?: string
+        creditNote?: string
+        proration?: { netCharge: number }
+      }>('/admin/subscriptions', {
+        method: 'PATCH',
+        body: JSON.stringify({ id: sub.id, action: 'change_plan', planId }),
+      })
+      toast.success(
+        res.invoiceNumber
+          ? `Plan changed — invoice ${res.invoiceNumber} raised`
+          : res.creditNote
+            ? 'Plan changed — customer is in credit (see note)'
+            : 'Plan changed'
+      )
+      onDone()
+      onOpenChange(false)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Change failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="w-[95vw] sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Change plan</DialogTitle>
+          <DialogDescription>
+            {sub.user?.email} — currently {current?.name || '—'}. The renewal
+            date doesn&apos;t move; only the price is prorated.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="cp-plan">New plan</Label>
+          <select
+            id="cp-plan"
+            className="h-9 w-full rounded-md border bg-background px-2 text-sm"
+            value={planId}
+            onChange={(e) => setPlanId(e.target.value)}
+          >
+            <option value="">Select…</option>
+            {plans
+              .filter((p) => p.id !== current?.id)
+              .map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} — {p.currency} {p.price.toFixed(2)} / {p.billingCycle}
+                </option>
+              ))}
+          </select>
+        </div>
+
+        {preview && (
+          <div className="rounded-md border bg-muted/40 p-3 text-sm space-y-1">
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">
+                Unused credit ({preview.daysLeft}d left)
+              </span>
+              <span>-{preview.credit.toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">New plan (prorated)</span>
+              <span>{preview.cost.toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between border-t pt-1 font-medium">
+              <span>{preview.net >= 0 ? 'Customer owes' : 'Customer credit'}</span>
+              <span>{Math.abs(preview.net).toFixed(2)}</span>
+            </div>
+            <p className="text-[11px] text-muted-foreground pt-1">
+              Estimate — the server recalculates from the real period length.
+            </p>
+          </div>
+        )}
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
+            Cancel
+          </Button>
+          <Button onClick={run} disabled={busy || !planId}>
+            {busy && <Loader2 className="size-4 animate-spin mr-1.5" />}
+            Change plan
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 // ── Extend subscription dialog ─────────────────────────────────────────
 function ExtendDialog({
   sub,
@@ -284,26 +439,36 @@ function ExtendDialog({
 export function BillingAdminPanel() {
   const [payments, setPayments] = useState<AdminPayment[]>([])
   const [subs, setSubs] = useState<AdminSubscription[]>([])
+  const [invoices, setInvoices] = useState<AdminInvoice[]>([])
+  const [outstanding, setOutstanding] = useState(0)
   const [loading, setLoading] = useState(false)
   const [payFilter, setPayFilter] = useState('pending')
   const [target, setTarget] = useState<AdminPayment | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [extendTarget, setExtendTarget] = useState<AdminSubscription | null>(null)
   const [extendOpen, setExtendOpen] = useState(false)
+  const [planTarget, setPlanTarget] = useState<AdminSubscription | null>(null)
+  const [planOpen, setPlanOpen] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [p, s] = await Promise.all([
+      const [p, s, inv] = await Promise.all([
         apiFetch<{ payments: AdminPayment[] }>(
           `/admin/payments?status=${encodeURIComponent(payFilter)}`
         ),
         apiFetch<{ subscriptions: AdminSubscription[] }>(
           '/admin/subscriptions?status=all'
         ),
+        apiFetch<{
+          invoices: AdminInvoice[]
+          counts: { outstandingTotal: number }
+        }>('/admin/invoices?status=all'),
       ])
       setPayments(p.payments || [])
       setSubs(s.subscriptions || [])
+      setInvoices(inv.invoices || [])
+      setOutstanding(inv.counts?.outstandingTotal ?? 0)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to load billing data')
     } finally {
@@ -342,6 +507,14 @@ export function BillingAdminPanel() {
             {pendingCount > 0 && (
               <Badge variant="secondary" className="ml-1.5">
                 {pendingCount}
+              </Badge>
+            )}
+          </TabsTrigger>
+          <TabsTrigger value="invoices">
+            Invoices
+            {outstanding > 0 && (
+              <Badge variant="secondary" className="ml-1.5">
+                ${outstanding.toFixed(2)} due
               </Badge>
             )}
           </TabsTrigger>
@@ -430,6 +603,94 @@ export function BillingAdminPanel() {
           )}
         </TabsContent>
 
+        {/* ── Invoices ─────────────────────────────────────────────── */}
+        <TabsContent value="invoices">
+          {invoices.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-6 text-center">
+              {loading
+                ? 'Loading…'
+                : 'No invoices yet — one is raised automatically when a customer checks out.'}
+            </p>
+          ) : (
+            <div className="overflow-x-auto rounded-md border">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/50">
+                  <tr className="text-left">
+                    <th className="p-2 font-medium">Invoice</th>
+                    <th className="p-2 font-medium">Customer</th>
+                    <th className="p-2 font-medium">For</th>
+                    <th className="p-2 font-medium">Total</th>
+                    <th className="p-2 font-medium">Status</th>
+                    <th className="p-2 font-medium">Due</th>
+                    <th className="p-2" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {invoices.map((inv) => (
+                    <tr key={inv.id} className="border-t align-middle">
+                      <td className="p-2 font-mono text-xs">{inv.number}</td>
+                      <td className="p-2">
+                        <div className="font-medium">{inv.user?.name || '—'}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {inv.user?.email}
+                        </div>
+                      </td>
+                      <td className="p-2 text-xs">
+                        {inv.planName || inv.domainName || inv.type}
+                      </td>
+                      <td className="p-2 whitespace-nowrap">
+                        {inv.currency} {Number(inv.total).toFixed(2)}
+                      </td>
+                      <td className="p-2">
+                        <Badge variant={statusVariant(inv.status)}>
+                          {inv.status}
+                        </Badge>
+                      </td>
+                      <td className="p-2 whitespace-nowrap text-xs text-muted-foreground">
+                        {inv.dueDate
+                          ? new Date(inv.dueDate).toLocaleDateString()
+                          : '—'}
+                      </td>
+                      <td className="p-2 text-right">
+                        {inv.rawStatus === 'unpaid' && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={async () => {
+                              try {
+                                const r = await apiFetch<{ message?: string }>(
+                                  '/admin/invoices',
+                                  {
+                                    method: 'PATCH',
+                                    body: JSON.stringify({
+                                      id: inv.id,
+                                      action: 'mark_paid',
+                                    }),
+                                  }
+                                )
+                                toast.success(r.message || 'Marked paid')
+                                load()
+                              } catch (err) {
+                                toast.error(
+                                  err instanceof Error
+                                    ? err.message
+                                    : 'Failed'
+                                )
+                              }
+                            }}
+                          >
+                            Mark paid
+                          </Button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </TabsContent>
+
         {/* ── Subscriptions ────────────────────────────────────────── */}
         <TabsContent value="subscriptions">
           {subs.length === 0 ? (
@@ -465,6 +726,19 @@ export function BillingAdminPanel() {
                             via Stripe
                           </div>
                         )}
+                        {!s.managedByStripe && !s.autoRenew && (
+                          <div className="text-xs text-amber-600 mt-0.5">
+                            auto-renew off
+                          </div>
+                        )}
+                        {s.renewalAttempts > 0 && (
+                          <div
+                            className="text-xs text-red-600 mt-0.5"
+                            title={s.lastRenewalError || ''}
+                          >
+                            {s.renewalAttempts} failed renewal(s)
+                          </div>
+                        )}
                       </td>
                       <td className="p-2 whitespace-nowrap">
                         <div>
@@ -486,17 +760,126 @@ export function BillingAdminPanel() {
                       </td>
                       <td className="p-2 text-right">
                         {!s.managedByStripe && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              setExtendTarget(s)
-                              setExtendOpen(true)
-                            }}
-                          >
-                            <CalendarPlus className="size-4 mr-1.5" />
-                            Extend
-                          </Button>
+                          <div className="flex justify-end gap-1">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                setExtendTarget(s)
+                                setExtendOpen(true)
+                              }}
+                            >
+                              <CalendarPlus className="size-4 mr-1.5" />
+                              Extend
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              title="Bill the next period now"
+                              onClick={async () => {
+                                if (
+                                  !confirm(
+                                    `Renew ${s.user?.email}'s ${s.plan?.name || 'plan'} now? This raises the next period's invoice.`
+                                  )
+                                )
+                                  return
+                                try {
+                                  const r = await apiFetch<{ message?: string }>(
+                                    '/admin/subscriptions',
+                                    {
+                                      method: 'PATCH',
+                                      body: JSON.stringify({
+                                        id: s.id,
+                                        action: 'renew',
+                                      }),
+                                    }
+                                  )
+                                  toast.success(r.message || 'Renewed')
+                                  load()
+                                } catch (err) {
+                                  toast.error(
+                                    err instanceof Error ? err.message : 'Failed'
+                                  )
+                                }
+                              }}
+                            >
+                              Renew
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              title={
+                                s.autoRenew
+                                  ? 'Turn auto-renew off'
+                                  : 'Turn auto-renew on'
+                              }
+                              onClick={async () => {
+                                try {
+                                  const r = await apiFetch<{ message?: string }>(
+                                    '/admin/subscriptions',
+                                    {
+                                      method: 'PATCH',
+                                      body: JSON.stringify({
+                                        id: s.id,
+                                        action: 'auto_renew',
+                                        autoRenew: !s.autoRenew,
+                                      }),
+                                    }
+                                  )
+                                  toast.success(r.message || 'Updated')
+                                  load()
+                                } catch (err) {
+                                  toast.error(
+                                    err instanceof Error ? err.message : 'Failed'
+                                  )
+                                }
+                              }}
+                            >
+                              {s.autoRenew ? 'Auto: on' : 'Auto: off'}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                setPlanTarget(s)
+                                setPlanOpen(true)
+                              }}
+                            >
+                              Change plan
+                            </Button>
+                            {s.status !== 'cancelled' && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="text-red-600 hover:text-red-700"
+                                onClick={async () => {
+                                  if (
+                                    !confirm(
+                                      `Cancel ${s.user?.email}'s subscription immediately? Access ends now, not at period end.`
+                                    )
+                                  )
+                                    return
+                                  try {
+                                    await apiFetch('/admin/subscriptions', {
+                                      method: 'PATCH',
+                                      body: JSON.stringify({
+                                        id: s.id,
+                                        action: 'force_cancel',
+                                      }),
+                                    })
+                                    toast.success('Subscription cancelled')
+                                    load()
+                                  } catch (err) {
+                                    toast.error(
+                                      err instanceof Error ? err.message : 'Failed'
+                                    )
+                                  }
+                                }}
+                              >
+                                Cancel now
+                              </Button>
+                            )}
+                          </div>
                         )}
                       </td>
                     </tr>
@@ -518,6 +901,12 @@ export function BillingAdminPanel() {
         sub={extendTarget}
         open={extendOpen}
         onOpenChange={setExtendOpen}
+        onDone={load}
+      />
+      <ChangePlanDialog
+        sub={planTarget}
+        open={planOpen}
+        onOpenChange={setPlanOpen}
         onDone={load}
       />
     </div>

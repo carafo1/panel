@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
 import { createNotification } from '@/lib/notifications'
 import { sendEmail } from '@/lib/email'
+import { runAutoRenewals, NOT_STRIPE_MANAGED } from '@/lib/renewals'
 
 /**
  * Billing sweep — subscription lifecycle enforcement.
@@ -66,6 +67,14 @@ export async function POST(request: Request) {
       now.getTime() - GRACE_DAYS * 24 * 60 * 60 * 1000
     )
 
+    // ── 0. Auto-renew FIRST ──────────────────────────────────────────
+    // Must run before the expiry pass, otherwise a subscription that is due
+    // to renew would be marked past_due in the same sweep.
+    const renewals = await runAutoRenewals().catch((err) => {
+      console.error('[billing-sweep] auto-renewals failed:', err)
+      return { renewed: 0, failed: 0, skipped: 0 }
+    })
+
     const reminded: string[] = []
     const pastDue: string[] = []
     const suspended: string[] = []
@@ -74,7 +83,7 @@ export async function POST(request: Request) {
     const subs = await db.subscription.findMany({
       where: {
         status: { in: ['active', 'past_due', 'trialing'] },
-        stripeSubId: null,
+        ...NOT_STRIPE_MANAGED,
       },
       include: {
         user: { select: { id: true, name: true, email: true } },
@@ -175,12 +184,14 @@ export async function POST(request: Request) {
 
     const summary = {
       scanned: subs.length,
+      renewed: renewals.renewed,
+      renewalFailures: renewals.failed,
       reminded: reminded.length,
       pastDue: pastDue.length,
       suspended: suspended.length,
       at: now.toISOString(),
     }
-    if (reminded.length || pastDue.length || suspended.length) {
+    if (renewals.renewed || renewals.failed || reminded.length || pastDue.length || suspended.length) {
       console.log('[billing-sweep]', JSON.stringify(summary))
     }
 
@@ -210,7 +221,7 @@ export async function GET(request: Request) {
     const subs = await db.subscription.findMany({
       where: {
         status: { in: ['active', 'past_due', 'trialing'] },
-        stripeSubId: null,
+        ...NOT_STRIPE_MANAGED,
       },
       select: { id: true, status: true, currentPeriodEnd: true },
     })

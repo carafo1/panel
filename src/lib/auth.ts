@@ -8,6 +8,9 @@ import { requireSecret } from '@/lib/security'
 const JWT_SECRET = requireSecret('JWT_SECRET')
 const TOKEN_EXPIRY = '7d'
 const TWO_FACTOR_TEMP_TOKEN_EXPIRY = '5m'
+// Deliberately short: an impersonation session should not outlive the support
+// interaction that justified it.
+const IMPERSONATION_TOKEN_EXPIRY = '1h'
 
 export async function hashPassword(password: string): Promise<string> {
   const salt = await bcryptjs.genSalt(12)
@@ -22,9 +25,37 @@ export function generateToken(payload: { userId: string; email: string; role: st
   return jwt.sign(payload, JWT_SECRET, { expiresIn: TOKEN_EXPIRY })
 }
 
-export function verifyToken(token: string): { userId: string; email: string; role: string } | null {
+/**
+ * Short-lived token that lets a super admin act as a customer for support.
+ *
+ * SECURITY: carries an `impersonatedBy` claim so every action taken while
+ * impersonating is attributable to the real admin, and expires in 1 hour
+ * rather than the normal 7 days.
+ */
+export function generateImpersonationToken(payload: {
+  userId: string
+  email: string
+  role: string
+  impersonatedBy: string
+}): string {
+  return jwt.sign(payload, JWT_SECRET, {
+    expiresIn: IMPERSONATION_TOKEN_EXPIRY,
+  })
+}
+
+export function verifyToken(token: string): {
+  userId: string
+  email: string
+  role: string
+  impersonatedBy?: string
+} | null {
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as { userId: string; email: string; role: string }
+    const decoded = jwt.verify(token, JWT_SECRET) as {
+      userId: string
+      email: string
+      role: string
+      impersonatedBy?: string
+    }
     return decoded
   } catch {
     return null

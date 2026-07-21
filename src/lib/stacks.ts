@@ -28,10 +28,15 @@
 export const STACK_DEFINITIONS = {
   nodejs: {
     name: 'Node.js',
+    // `npm ci` REQUIRES a package-lock.json and hard-fails without one — which
+    // is exactly the case for a freshly provisioned site (the generated
+    // placeholder app has a package.json but no lockfile). Fall back to
+    // `npm install`. Also `--production` is deprecated in npm 9+; use
+    // `--omit=dev`. Matches the newer method-aware deployer pipeline.
     dockerfile: `FROM node:20-alpine
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci --production
+RUN npm ci --omit=dev || npm install --omit=dev
 COPY . .
 EXPOSE 3000
 CMD ["npm", "start"]`,

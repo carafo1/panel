@@ -41,6 +41,14 @@ model User {
   domainInvoices     Invoice[]
   domainLogs         DomainLog[]
   domainPriceUpdates DomainPrice[]  @relation("PriceUpdatedBy")
+  // ── Billing: wallet + tax profile ───────────────────────────────────
+  // Balance is denormalised for fast reads; CreditTransaction is the
+  // authoritative append-only history.
+  creditBalance      Float    @default(0)
+  taxExempt          Boolean  @default(false)
+  taxCountry         String?
+  creditTransactions CreditTransaction[]
+
   // ── Marketplace relations ───────────────────────────────────────────
   submittedTemplates  Template[]       @relation("SubmittedTemplates")
   templateRatings     TemplateRating[]
@@ -52,8 +60,8 @@ model Plan {
   name        String   @unique // Starter, Pro, Business
   slug        String   @unique
   description String
-  price       Float    // monthly price in USD
-  ram         String   // e.g. "1GB"
+  price       Float    // price for ONE billing period, in `currency`
+  ram         String   // e.g. "1GB"  (display string, kept for back-compat)
   cpu         String   // e.g. "1 vCPU"
   storage     String   // e.g. "10GB"
   bandwidth   String   // e.g. "100GB"
@@ -64,6 +72,44 @@ model Plan {
   popular     Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  // ── Billing ────────────────────────────────────────────────────────
+  // How long one `price` buys. "lifetime" never renews.
+  billingCycle String  @default("monthly") // monthly|quarterly|annual|biennial|lifetime
+  currency     String  @default("USD")
+  trialDays    Int     @default(0)         // 0 = no free trial
+  setupFee     Float   @default(0)
+
+  // ── Availability ───────────────────────────────────────────────────
+  active     Boolean @default(true)  // disabled plans can't be subscribed to
+  hidden     Boolean @default(false) // not shown publicly; direct/admin assign only
+  archived   Boolean @default(false) // retired; existing subs keep running
+  promotional Boolean @default(false)
+
+  // ── Numeric resource limits (0 or null = unlimited) ────────────────
+  diskMB        Int?
+  bandwidthMB   Int?
+  cpuCores      Float?
+  ramMB         Int?
+  ioMBps        Int?
+  processes     Int?
+  inodes        Int?
+  maxDatabases  Int?
+  maxEmailAccounts Int?
+  maxFtpAccounts   Int?
+  maxCronJobs      Int?
+  maxBackups       Int?
+  maxDnsZones      Int?
+  maxDomains       Int?
+  maxSubdomains    Int?
+  maxParkedDomains Int?
+  maxAddonDomains  Int?
+  maxSslCerts      Int?
+
+  // JSON array of enabled application slugs, e.g.
+  // ["wordpress","laravel","nodejs","python","php","docker","nextjs"]
+  // null/empty = allow all.
+  allowedApps String?
 
   subscriptions Subscription[]
 }
@@ -81,9 +127,20 @@ model Subscription {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  // ── Renewal ────────────────────────────────────────────────────────
+  // When true the billing sweep raises the next period's invoice
+  // automatically (and charges it if a gateway supports auto-charge).
+  autoRenew        Boolean   @default(true)
+  lastRenewedAt    DateTime?
+  renewalAttempts  Int       @default(0)
+  lastRenewalError String?
+  // Coupon that keeps applying on each renewal (recurring discounts).
+  couponCode       String?
+
   user User  @relation(fields: [userId], references: [id])
   plan Plan  @relation(fields: [planId], references: [id])
   payments Payment[]
+  invoices Invoice[]
 }
 
 model Payment {
@@ -822,6 +879,92 @@ model EmailMailbox {
   @@index([domainId])
 }
 
+// ─── Billing: coupons, tax, wallet credit ────────────────────────────────
+
+model Coupon {
+  id          String   @id @default(cuid())
+  code        String   @unique // customer-facing, e.g. "LAUNCH20"
+  description String?
+  type        String   @default("percent") // percent | fixed
+  value       Float    // 20 = 20% (percent) or 20.00 off (fixed)
+  currency    String   @default("USD") // only meaningful for `fixed`
+
+  // Scope — null means "applies to everything"
+  planId            String?
+  userId            String? // customer-specific coupon
+  firstPurchaseOnly Boolean @default(false)
+  // true  = discount repeats on every renewal
+  // false = one-time (first invoice only)
+  recurring         Boolean @default(false)
+  minSubtotal       Float?
+
+  // Limits
+  maxRedemptions Int? // total across all customers
+  maxPerCustomer Int?
+  redemptions    Int  @default(0)
+
+  startsAt  DateTime?
+  expiresAt DateTime?
+  active    Boolean   @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  redemptionRecords CouponRedemption[]
+
+  @@index([active])
+}
+
+model CouponRedemption {
+  id        String   @id @default(cuid())
+  couponId  String
+  userId    String
+  invoiceId String?
+  amount    Float // discount actually given
+  createdAt DateTime @default(now())
+
+  coupon Coupon @relation(fields: [couponId], references: [id], onDelete: Cascade)
+
+  @@index([couponId])
+  @@index([userId])
+}
+
+model TaxRate {
+  id       String  @id @default(cuid())
+  name     String // "VAT", "GST", "Sales Tax"
+  rate     Float // 20 = 20%
+  country  String? // ISO-2, null = applies everywhere (default rate)
+  region   String? // state/province, optional
+  active   Boolean @default(true)
+  priority Int     @default(0)
+  // Compound taxes are charged on (subtotal + previously applied taxes)
+  compound Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([active])
+}
+
+/// Append-only wallet ledger. `amount` is positive when credit is added and
+/// negative when it is consumed; `balanceAfter` snapshots the running total so
+/// history stays readable even if a row is later corrected.
+model CreditTransaction {
+  id           String   @id @default(cuid())
+  userId       String
+  amount       Float
+  balanceAfter Float
+  type         String // topup | refund | applied | adjustment
+  description  String?
+  invoiceId    String?
+  adminUserId  String?
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
 model PaymentMethodSetting {
   id          String   @id @default(cuid())
   method      String   @unique // "stripe", "waafi", "manual"
@@ -890,10 +1033,22 @@ model Invoice {
   userId          String
   orderId         String?
   domainId        String?
+  // Subscription billing (hosting plans). Until now invoices were only ever
+  // raised for domain orders, so hosting customers had nothing to pay against.
+  subscriptionId  String?
+  planId          String?
+  periodStart     DateTime?
+  periodEnd       DateTime?
+  notes           String?
   items           String   // JSON array of line items
   subtotal        Float
+  discount        Float    @default(0) // coupon discount applied
+  couponId        String?
+  couponCode      String?
   tax             Float    @default(0)
-  total           Float
+  taxName         String?  // e.g. "VAT 20%"
+  creditApplied   Float    @default(0) // paid from wallet balance
+  total           Float    // subtotal - discount + tax - creditApplied
   currency        String   @default("USD")
   status          String   @default("unpaid") // unpaid, paid, void, refunded
   paidAt          DateTime?
@@ -904,10 +1059,12 @@ model Invoice {
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   order           DomainOrder? @relation(fields: [orderId], references: [id])
   domain          Domain?  @relation(fields: [domainId], references: [id])
+  subscription    Subscription? @relation(fields: [subscriptionId], references: [id])
   transactions    Transaction[]
 
   @@index([userId])
   @@index([status])
+  @@index([subscriptionId])
 }
 
 model Transaction {

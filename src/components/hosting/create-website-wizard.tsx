@@ -1319,7 +1319,7 @@ export default function CreateWebsiteWizard({
 
   return (
     <Dialog open={open} onOpenChange={handleDialogChange}>
-      <DialogContent className="max-w-4xl max-h-[90vh] gap-0 overflow-hidden p-0 sm:rounded-xl">
+      <DialogContent className="w-[95vw] sm:max-w-3xl lg:max-w-5xl max-h-[90vh] gap-0 overflow-hidden p-0 sm:rounded-xl">
         {/* Header */}
         <DialogHeader className="border-b px-4 py-4 sm:px-6">
           <div className="flex items-start justify-between gap-4">
@@ -1342,8 +1342,10 @@ export default function CreateWebsiteWizard({
         {/* Body — scrollable */}
         <div className="custom-scrollbar max-h-[calc(90vh-180px)] overflow-y-auto px-4 py-5 sm:px-6">
           {/* ─── STEP 1 — NAME ──────────────────────────────────────────── */}
+          {/* Side panel only sits beside the form once there's real room —
+              below lg it stacks, so neither column gets clipped. */}
           {step === 1 && !isProgressView && (
-            <div className="grid gap-6 sm:grid-cols-[1fr_280px]">
+            <div className="grid gap-6 lg:grid-cols-[1fr_280px]">
               <div className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="website-name" className="text-sm font-medium">
@@ -1371,13 +1373,15 @@ export default function CreateWebsiteWizard({
                   <div className="rounded-lg border bg-muted/40 p-3">
                     <p className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
                       <Globe className="size-3.5" />
-                      Live preview
+                      Temporary address
                     </p>
                     <p className="font-mono text-sm text-foreground">
                       https://{subdomainPreview}
                     </p>
                     <p className="mt-1 text-[11px] text-muted-foreground/80">
-                      A short unique suffix is added at deploy time to guarantee the subdomain is available.
+                      This free address gets you online straight away. In the
+                      next step you can use your own domain instead — you&apos;re
+                      not locked to {SUBDOMAIN_SUFFIX}.
                     </p>
                   </div>
                 )}
@@ -1417,6 +1421,11 @@ export default function CreateWebsiteWizard({
           {/* ─── STEP 2 — DOMAIN ────────────────────────────────────────── */}
           {step === 2 && !isProgressView && (
             <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                How should visitors reach your site? Pick the free {SUBDOMAIN_SUFFIX}{' '}
+                address to go live now, or use your own domain. You can always
+                connect a custom domain later.
+              </p>
               <DomainOptionCard
                 selected={domainType === 'subdomain'}
                 onSelect={() => setDomainType('subdomain')}

@@ -17,6 +17,7 @@
 import { db } from '@/lib/db'
 import { provisionForPayment } from '@/lib/provision-on-payment'
 import { createNotification } from '@/lib/notifications'
+import { findInvoiceForPayment, markInvoicePaid } from '@/lib/invoices'
 
 export interface ActivatePaymentOptions {
   paymentId: string
@@ -137,6 +138,30 @@ export async function activatePayment(
   }
 
   // ── Drive provisioning ───────────────────────────────────────────
+  // ── Settle the matching invoice ──────────────────────────────────
+  // The customer paid against an invoice; mark it paid and record the
+  // money in the ledger. Never let this break the confirmation.
+  try {
+    const invoice = await findInvoiceForPayment({
+      userId: payment.userId,
+      subscriptionId: subscriptionId ?? payment.subscriptionId,
+    })
+    if (invoice) {
+      await markInvoicePaid(invoice.id, {
+        gateway: method,
+        reference: payment.transactionId,
+        amount: updatedPayment.amount,
+        userId: payment.userId,
+      })
+    }
+  } catch (error) {
+    console.error(
+      '[payment-activation] could not settle invoice for payment',
+      updatedPayment.id,
+      error instanceof Error ? error.message : error
+    )
+  }
+
   let automation: unknown = null
   try {
     // REAL provisioning (Docker container / Dynadot domain / Mailcow email),
