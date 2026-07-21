@@ -258,16 +258,30 @@ export async function runHealthChecks(): Promise<HealthReport> {
   {
     const host = process.env.SMTP_HOST || ''
     const pass = process.env.SMTP_PASS || ''
-    const resend = process.env.RESEND_API_KEY || ''
     const isPlaceholder = (v: string) =>
       /^(replace[-_ ]?with|your[-_ ]|changeme|xxx+)/i.test(v.trim())
 
-    if (resend && !isPlaceholder(resend)) {
+    // Mirror sendEmail's ACTUAL precedence: an HTTP API provider wins and SMTP
+    // is never consulted. Checking SMTP first reported "no email is being
+    // delivered" on a box that sends fine over the Resend API — a check that
+    // describes a code path the app doesn't take is worse than no check.
+    const provider = (process.env.EMAIL_PROVIDER || '').toLowerCase().trim()
+    const apiKey = process.env.EMAIL_API_KEY || process.env.RESEND_API_KEY || ''
+
+    if (provider && apiKey && !isPlaceholder(apiKey)) {
       checks.push({
         key: 'email',
         label: 'Email delivery',
         status: 'ok',
-        detail: 'Resend API key configured.',
+        detail: `Sending via the ${provider} HTTP API (SMTP settings are unused on this path).`,
+      })
+    } else if (provider && (!apiKey || isPlaceholder(apiKey))) {
+      checks.push({
+        key: 'email',
+        label: 'Email delivery',
+        status: 'fail',
+        detail: `EMAIL_PROVIDER=${provider} but EMAIL_API_KEY is missing or a placeholder, and sendEmail prefers this path over SMTP.`,
+        remedy: 'Set a real EMAIL_API_KEY, or clear EMAIL_PROVIDER to fall back to SMTP.',
       })
     } else if (!host) {
       checks.push({
