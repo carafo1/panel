@@ -213,9 +213,20 @@ export async function markInvoicePaid(
   if (!invoice) return null
   if (invoice.status === 'paid') return invoice
 
+  // Record the money against the invoice too, not just the status — refunds
+  // and partial-payment tracking read `amountPaid`, so leaving it at 0 would
+  // make a paid invoice look like nothing was ever received.
+  const settled = Math.round(
+    (invoice.total - (invoice.creditApplied || 0)) * 100
+  ) / 100
+
   const updated = await db.invoice.update({
     where: { id: invoiceId },
-    data: { status: 'paid', paidAt: new Date() },
+    data: {
+      status: 'paid',
+      paidAt: new Date(),
+      amountPaid: Math.max(0, settled),
+    },
   })
 
   await db.transaction

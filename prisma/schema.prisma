@@ -881,6 +881,31 @@ model EmailMailbox {
 
 // ─── Billing: coupons, tax, wallet credit ────────────────────────────────
 
+/// A refund issued against an invoice. Money can go back to the customer's
+/// wallet (instant, always available) or be recorded as returned via the
+/// original gateway (the admin performs that in the gateway's own dashboard —
+/// we never move money at a PSP we don't hold credentials for).
+model Refund {
+  id          String   @id @default(cuid())
+  invoiceId   String
+  userId      String
+  amount      Float
+  currency    String   @default("USD")
+  /// wallet | gateway | manual
+  destination String   @default("wallet")
+  reason      String?
+  /// pending | completed | failed
+  status      String   @default("completed")
+  gatewayRef  String?
+  adminUserId String?
+  createdAt   DateTime @default(now())
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@index([userId])
+}
+
 model Coupon {
   id          String   @id @default(cuid())
   code        String   @unique // customer-facing, e.g. "LAUNCH20"
@@ -1049,6 +1074,14 @@ model Invoice {
   taxName         String?  // e.g. "VAT 20%"
   creditApplied   Float    @default(0) // paid from wallet balance
   total           Float    // subtotal - discount + tax - creditApplied
+  // Running total of money actually received (supports partial payments).
+  // status becomes 'partially_paid' when 0 < amountPaid < total.
+  amountPaid      Float    @default(0)
+  amountRefunded  Float    @default(0)
+  refundedAt      DateTime?
+  // Credit note / refund document pointing back at the invoice it corrects.
+  type            String   @default("standard") // standard | credit_note | manual
+  parentInvoiceId String?
   currency        String   @default("USD")
   status          String   @default("unpaid") // unpaid, paid, void, refunded
   paidAt          DateTime?
@@ -1061,6 +1094,7 @@ model Invoice {
   domain          Domain?  @relation(fields: [domainId], references: [id])
   subscription    Subscription? @relation(fields: [subscriptionId], references: [id])
   transactions    Transaction[]
+  refunds         Refund[]
 
   @@index([userId])
   @@index([status])

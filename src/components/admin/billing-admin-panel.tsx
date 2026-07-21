@@ -57,6 +57,10 @@ interface AdminInvoice {
   status: string
   rawStatus: string
   total: number
+  amountPaid: number
+  amountRefunded: number
+  balanceDue: number
+  invoiceType: string
   currency: string
   createdAt: string
   dueDate: string | null
@@ -207,6 +211,158 @@ function ConfirmDialog({
               <Check className="size-4 mr-1.5" />
             )}
             Confirm payment
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ── Invoice actions: record a payment / issue a refund ─────────────────
+function InvoiceActionDialog({
+  invoice,
+  mode,
+  open,
+  onOpenChange,
+  onDone,
+}: {
+  invoice: AdminInvoice | null
+  mode: 'payment' | 'refund'
+  open: boolean
+  onOpenChange: (v: boolean) => void
+  onDone: () => void
+}) {
+  const [amount, setAmount] = useState('')
+  const [note, setNote] = useState('')
+  const [destination, setDestination] = useState<'wallet' | 'gateway'>('wallet')
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    if (!open || !invoice) return
+    setNote('')
+    setDestination('wallet')
+    // Default to the whole remaining amount — the common case.
+    setAmount(
+      mode === 'payment'
+        ? invoice.balanceDue.toFixed(2)
+        : Math.max(0, invoice.amountPaid - invoice.amountRefunded).toFixed(2)
+    )
+  }, [open, invoice, mode])
+
+  if (!invoice) return null
+
+  const max =
+    mode === 'payment'
+      ? invoice.balanceDue
+      : Math.max(0, invoice.amountPaid - invoice.amountRefunded)
+
+  const run = async () => {
+    const amt = Number(amount)
+    if (!Number.isFinite(amt) || amt <= 0) {
+      toast.error('Enter an amount greater than 0')
+      return
+    }
+    setBusy(true)
+    try {
+      const res = await apiFetch<{ message?: string }>('/admin/invoices', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          id: invoice.id,
+          action: mode === 'payment' ? 'add_payment' : 'refund',
+          amount: amt,
+          note: note || undefined,
+          ...(mode === 'refund' ? { destination } : { gateway: 'manual' }),
+        }),
+      })
+      toast.success(res.message || 'Done')
+      onDone()
+      onOpenChange(false)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="w-[95vw] sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>
+            {mode === 'payment' ? 'Record a payment' : 'Issue a refund'}
+          </DialogTitle>
+          <DialogDescription>
+            {invoice.number} — {invoice.user?.email}. {mode === 'payment'
+              ? `Partial payments are allowed; ${invoice.currency} ${max.toFixed(2)} is still due.`
+              : `Up to ${invoice.currency} ${max.toFixed(2)} can be refunded.`}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="inv-amount">Amount</Label>
+            <Input
+              id="inv-amount"
+              type="number"
+              step="0.01"
+              min={0}
+              max={max}
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+            />
+          </div>
+
+          {mode === 'refund' && (
+            <div className="space-y-1.5">
+              <Label htmlFor="inv-dest">Refund to</Label>
+              <select
+                id="inv-dest"
+                className="h-9 w-full rounded-md border bg-background px-2 text-sm"
+                value={destination}
+                onChange={(e) =>
+                  setDestination(e.target.value as 'wallet' | 'gateway')
+                }
+              >
+                <option value="wallet">Account credit (instant)</option>
+                <option value="gateway">Original payment method (record only)</option>
+              </select>
+              {destination === 'gateway' && (
+                <p className="text-xs text-amber-600">
+                  This only records the refund for your books — you still need
+                  to issue it in your payment provider&apos;s dashboard.
+                </p>
+              )}
+            </div>
+          )}
+
+          <div className="space-y-1.5">
+            <Label htmlFor="inv-note">
+              {mode === 'payment' ? 'Reference / note' : 'Reason'}
+            </Label>
+            <Input
+              id="inv-note"
+              placeholder={
+                mode === 'payment' ? 'e.g. Salaam Bank ref #4821' : 'e.g. service not delivered'
+              }
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+            />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
+            Cancel
+          </Button>
+          <Button
+            onClick={run}
+            disabled={busy}
+            className={
+              mode === 'refund' ? 'bg-red-600 hover:bg-red-700 text-white' : ''
+            }
+          >
+            {busy && <Loader2 className="size-4 animate-spin mr-1.5" />}
+            {mode === 'payment' ? 'Record payment' : 'Refund'}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -449,6 +605,9 @@ export function BillingAdminPanel() {
   const [extendOpen, setExtendOpen] = useState(false)
   const [planTarget, setPlanTarget] = useState<AdminSubscription | null>(null)
   const [planOpen, setPlanOpen] = useState(false)
+  const [invTarget, setInvTarget] = useState<AdminInvoice | null>(null)
+  const [invMode, setInvMode] = useState<'payment' | 'refund'>('payment')
+  const [invOpen, setInvOpen] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -640,11 +799,26 @@ export function BillingAdminPanel() {
                       </td>
                       <td className="p-2 whitespace-nowrap">
                         {inv.currency} {Number(inv.total).toFixed(2)}
+                        {inv.balanceDue > 0 && inv.amountPaid > 0 && (
+                          <div className="text-xs text-amber-600">
+                            {inv.balanceDue.toFixed(2)} due
+                          </div>
+                        )}
+                        {inv.amountRefunded > 0 && (
+                          <div className="text-xs text-muted-foreground">
+                            −{inv.amountRefunded.toFixed(2)} refunded
+                          </div>
+                        )}
                       </td>
                       <td className="p-2">
                         <Badge variant={statusVariant(inv.status)}>
-                          {inv.status}
+                          {inv.status === 'partially_paid' ? 'partial' : inv.status}
                         </Badge>
+                        {inv.invoiceType === 'credit_note' && (
+                          <div className="text-xs text-muted-foreground mt-0.5">
+                            credit note
+                          </div>
+                        )}
                       </td>
                       <td className="p-2 whitespace-nowrap text-xs text-muted-foreground">
                         {inv.dueDate
@@ -682,6 +856,85 @@ export function BillingAdminPanel() {
                             Mark paid
                           </Button>
                         )}
+                        {(inv.rawStatus === 'unpaid' ||
+                          inv.rawStatus === 'partially_paid') && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            title="Record a payment (supports partial)"
+                            onClick={() => {
+                              setInvTarget(inv)
+                              setInvMode('payment')
+                              setInvOpen(true)
+                            }}
+                          >
+                            Add payment
+                          </Button>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          title="Open the PDF (print or save from there)"
+                          onClick={() => {
+                            const t =
+                              typeof window !== 'undefined'
+                                ? localStorage.getItem('apsamo_token')
+                                : null
+                            window.open(
+                              `/api/invoices/${inv.id}/pdf?token=${encodeURIComponent(t || '')}`,
+                              '_blank'
+                            )
+                          }}
+                        >
+                          PDF
+                        </Button>
+                        {inv.rawStatus !== 'paid' &&
+                          inv.rawStatus !== 'void' &&
+                          inv.invoiceType !== 'credit_note' && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              title="Email the customer a reminder"
+                              onClick={async () => {
+                                try {
+                                  const r = await apiFetch<{ message?: string }>(
+                                    '/admin/invoices',
+                                    {
+                                      method: 'PATCH',
+                                      body: JSON.stringify({
+                                        id: inv.id,
+                                        action: 'send_reminder',
+                                      }),
+                                    }
+                                  )
+                                  toast.success(r.message || 'Reminder sent')
+                                  load()
+                                } catch (err) {
+                                  toast.error(
+                                    err instanceof Error ? err.message : 'Failed'
+                                  )
+                                }
+                              }}
+                            >
+                              Remind
+                            </Button>
+                          )}
+                        {inv.amountPaid > inv.amountRefunded &&
+                          inv.invoiceType !== 'credit_note' && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="text-red-600 hover:text-red-700"
+                              title="Refund this invoice"
+                              onClick={() => {
+                                setInvTarget(inv)
+                                setInvMode('refund')
+                                setInvOpen(true)
+                              }}
+                            >
+                              Refund
+                            </Button>
+                          )}
                       </td>
                     </tr>
                   ))}
@@ -907,6 +1160,13 @@ export function BillingAdminPanel() {
         sub={planTarget}
         open={planOpen}
         onOpenChange={setPlanOpen}
+        onDone={load}
+      />
+      <InvoiceActionDialog
+        invoice={invTarget}
+        mode={invMode}
+        open={invOpen}
+        onOpenChange={setInvOpen}
         onDone={load}
       />
     </div>
