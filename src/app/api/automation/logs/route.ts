@@ -29,9 +29,13 @@ export async function GET(request: Request) {
     const limit = parseInt(searchParams.get('limit') || '50')
     const offset = parseInt(searchParams.get('offset') || '0')
 
-    // Non-admin users can only see their own logs
+    // Non-admin users can only see their own logs.
+    // NOTE: must accept super_admin too — checking only for 'admin' silently
+    // restricted super admins to their own rows.
+    const isAdminRole =
+      decoded.role === 'admin' || decoded.role === 'super_admin'
     const where: Record<string, unknown> = {}
-    if (decoded.role !== 'admin') {
+    if (!isAdminRole) {
       where.userId = decoded.userId
     } else if (userId) {
       where.userId = userId

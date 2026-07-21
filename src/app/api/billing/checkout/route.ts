@@ -6,6 +6,7 @@ import { isStripeDemoMode } from '@/lib/stripe'
 import { BRAND_DOMAIN, NS1_HOSTNAME, NS2_HOSTNAME } from '@/lib/brand-config'
 import { getPriceForDomain } from '@/lib/pricing'
 import { createNotification } from '@/lib/notifications'
+import { createSubscriptionInvoice, cycleDays } from '@/lib/invoices'
 import {
   processPayment,
   resolveActiveMethod,
@@ -130,20 +131,39 @@ export async function POST(request: Request) {
 
     if (!subscription && type !== 'domain') {
       const now = new Date()
+      // Respect the plan's billing cycle instead of assuming one month.
+      // "lifetime" gets a far-future end date so nothing ever expires it.
+      const days = cycleDays((plan as { billingCycle?: string }).billingCycle || 'monthly')
+      const periodEnd = days
+        ? new Date(now.getTime() + days * 24 * 60 * 60 * 1000)
+        : new Date(now.getFullYear() + 100, now.getMonth(), now.getDate())
+
       subscription = await db.subscription.create({
         data: {
           userId: decoded.userId,
           planId: plan.id,
           status: 'pending',
           currentPeriodStart: now,
-          currentPeriodEnd: new Date(
-            now.getFullYear(),
-            now.getMonth() + 1,
-            now.getDate()
-          ),
+          currentPeriodEnd: periodEnd,
           stripeSubId: `sub_sim_${Date.now()}`,
         },
       })
+
+      // Raise an unpaid invoice for the period so the customer has a real
+      // document to pay against (essential for bank transfer) and a record
+      // afterwards. Settled automatically when the payment is confirmed.
+      await createSubscriptionInvoice({
+        userId: decoded.userId,
+        subscriptionId: subscription.id,
+        planId: plan.id,
+        planName: plan.name,
+        amount,
+        currency: (plan as { currency?: string }).currency || 'USD',
+        periodStart: now,
+        periodEnd,
+      }).catch((err) =>
+        console.error('[checkout] invoice creation failed:', err)
+      )
     }
 
     // ═══════════════════════════════════════════════════════════════

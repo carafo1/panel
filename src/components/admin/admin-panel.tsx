@@ -53,6 +53,9 @@ import { toast } from 'sonner'
 import { useAuthStore } from '@/store/auth-store'
 import { PaymentMethodsPanel } from '@/components/admin/payment-methods-panel'
 import { BillingAdminPanel } from '@/components/admin/billing-admin-panel'
+import { PlansAdminPanel } from '@/components/admin/plans-admin-panel'
+import { PromotionsAdminPanel } from '@/components/admin/promotions-admin-panel'
+import { ReportsAdminPanel } from '@/components/admin/reports-admin-panel'
 import { ServersPanel } from '@/components/admin/servers-panel'
 import { CmsPanel } from '@/components/admin/cms-panel'
 
@@ -371,6 +374,9 @@ export function AdminPanel() {
           <TabsTrigger value="users">Users</TabsTrigger>
           <TabsTrigger value="jobs">Job Queue</TabsTrigger>
           <TabsTrigger value="servers">Servers</TabsTrigger>
+          <TabsTrigger value="plans">Plans</TabsTrigger>
+          <TabsTrigger value="promotions">Discounts</TabsTrigger>
+          <TabsTrigger value="reports">Reports</TabsTrigger>
           <TabsTrigger value="billing">
             <CreditCard className="size-4 mr-1.5" />
             Billing
@@ -615,6 +621,18 @@ export function AdminPanel() {
         {/* ── Billing Tab (admin + super_admin) ──────────────────────────
             Confirming offline payments is day-to-day operational work, so
             it is not restricted to super_admin. The API allows both roles. */}
+        <TabsContent value="plans">
+          <PlansAdminPanel />
+        </TabsContent>
+
+        <TabsContent value="promotions">
+          <PromotionsAdminPanel />
+        </TabsContent>
+
+        <TabsContent value="reports">
+          <ReportsAdminPanel />
+        </TabsContent>
+
         <TabsContent value="billing">
           <BillingAdminPanel />
         </TabsContent>

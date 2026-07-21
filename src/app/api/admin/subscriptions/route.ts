@@ -3,6 +3,13 @@ import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { db } from '@/lib/db'
 import { createNotification } from '@/lib/notifications'
+import {
+  changeSubscriptionPlan,
+  changeBillingCycle,
+  transferSubscription,
+  forceCancelSubscription,
+} from '@/lib/subscription-changes'
+import { renewSubscription } from '@/lib/renewals'
 
 /**
  * Admin subscription management.
@@ -20,6 +27,15 @@ function requireAdmin(request: Request): {
   if (!decoded) return null
   if (decoded.role !== 'super_admin' && decoded.role !== 'admin') return null
   return { decoded }
+}
+
+/**
+ * True only for subscriptions genuinely billed by Stripe.
+ * Checkout stamps `sub_sim_<ts>` on locally-simulated subscriptions — treating
+ * those as Stripe-managed would lock the admin out of every subscription.
+ */
+function isStripeManaged(stripeSubId: string | null): boolean {
+  return Boolean(stripeSubId && !stripeSubId.startsWith('sub_sim_'))
 }
 
 /** GET /api/admin/subscriptions?status=active|past_due|suspended|all */
@@ -62,7 +78,14 @@ export async function GET(request: Request) {
         createdAt: s.createdAt,
         // Stripe-backed subs are driven by Stripe webhooks — the billing
         // sweep skips them and the admin shouldn't hand-edit their periods.
-        managedByStripe: Boolean(s.stripeSubId),
+        // NOTE: checkout stamps a `sub_sim_*` sentinel on locally-simulated
+        // subscriptions; those are NOT Stripe-managed and must stay editable.
+        managedByStripe: isStripeManaged(s.stripeSubId),
+        autoRenew: (s as { autoRenew?: boolean }).autoRenew !== false,
+        lastRenewedAt: (s as { lastRenewedAt?: Date | null }).lastRenewedAt ?? null,
+        renewalAttempts: (s as { renewalAttempts?: number }).renewalAttempts ?? 0,
+        lastRenewalError:
+          (s as { lastRenewalError?: string | null }).lastRenewalError ?? null,
         daysLeft,
         expired: end.getTime() <= now,
       }
@@ -108,6 +131,12 @@ export async function PATCH(request: Request) {
       id?: string
       action?: string
       days?: number
+      planId?: string
+      billingCycle?: string
+      newUserId?: string
+      reason?: string
+      prorate?: boolean
+      autoRenew?: boolean
     }
     const id = body.id
     const action = (body.action || '').toLowerCase()
@@ -128,7 +157,7 @@ export async function PATCH(request: Request) {
         { status: 404 }
       )
     }
-    if (sub.stripeSubId && action !== 'cancel') {
+    if (isStripeManaged(sub.stripeSubId) && action !== 'cancel') {
       return NextResponse.json(
         {
           error:
@@ -136,6 +165,133 @@ export async function PATCH(request: Request) {
         },
         { status: 400 }
       )
+    }
+
+    // ── Renew now (raises the next period's invoice) ─────────────────
+    if (action === 'renew') {
+      const result = await renewSubscription({
+        subscriptionId: id,
+        force: true,
+        adminUserId: auth.decoded.userId,
+      })
+      if (!result.success) {
+        return NextResponse.json(
+          { error: result.error || result.skipped || 'Renewal failed' },
+          { status: 400 }
+        )
+      }
+      await logAudit({
+        userId: auth.decoded.userId,
+        action: 'subscription.renew',
+        resource: 'subscription',
+        resourceId: id,
+        req: request,
+        metadata: {
+          invoiceNumber: result.invoiceNumber ?? null,
+          paidFromCredit: result.paidFromCredit ?? false,
+        },
+      }).catch(() => {})
+      return NextResponse.json({
+        ...result,
+        success: true,
+        message: result.paidFromCredit
+          ? `Renewed — invoice ${result.invoiceNumber} paid from account credit.`
+          : `Renewed — invoice ${result.invoiceNumber} raised.`,
+      })
+    }
+
+    // ── Toggle auto-renew ────────────────────────────────────────────
+    if (action === 'auto_renew') {
+      const enabled = body.autoRenew !== false
+      await db.subscription.update({
+        where: { id },
+        data: { autoRenew: enabled, ...(enabled ? { renewalAttempts: 0 } : {}) },
+      })
+      await logAudit({
+        userId: auth.decoded.userId,
+        action: 'subscription.auto_renew',
+        resource: 'subscription',
+        resourceId: id,
+        req: request,
+        metadata: { autoRenew: enabled },
+      }).catch(() => {})
+      return NextResponse.json({
+        success: true,
+        message: `Auto-renew ${enabled ? 'enabled' : 'disabled'}.`,
+      })
+    }
+
+    // ── Lifecycle actions delegated to the shared library ────────────
+    if (
+      action === 'change_plan' ||
+      action === 'change_cycle' ||
+      action === 'transfer' ||
+      action === 'force_cancel'
+    ) {
+      let result: { success: boolean; error?: string; [key: string]: unknown }
+
+      if (action === 'change_plan') {
+        if (!body.planId) {
+          return NextResponse.json(
+            { error: 'planId is required' },
+            { status: 400 }
+          )
+        }
+        result = { ...(await changeSubscriptionPlan({
+          subscriptionId: id,
+          newPlanId: body.planId,
+          prorate: body.prorate,
+          adminUserId: auth.decoded.userId,
+        })) }
+      } else if (action === 'change_cycle') {
+        if (!body.billingCycle) {
+          return NextResponse.json(
+            { error: 'billingCycle is required' },
+            { status: 400 }
+          )
+        }
+        result = await changeBillingCycle({
+          subscriptionId: id,
+          billingCycle: body.billingCycle,
+        })
+      } else if (action === 'transfer') {
+        if (!body.newUserId) {
+          return NextResponse.json(
+            { error: 'newUserId is required' },
+            { status: 400 }
+          )
+        }
+        result = await transferSubscription({
+          subscriptionId: id,
+          newUserId: body.newUserId,
+        })
+      } else {
+        result = await forceCancelSubscription({
+          subscriptionId: id,
+          reason: body.reason,
+        })
+      }
+
+      if (!result.success) {
+        return NextResponse.json({ error: result.error }, { status: 400 })
+      }
+
+      await logAudit({
+        userId: auth.decoded.userId,
+        action: `subscription.${action}`,
+        resource: 'subscription',
+        resourceId: id,
+        req: request,
+        metadata: {
+          planId: body.planId ?? null,
+          billingCycle: body.billingCycle ?? null,
+          newUserId: body.newUserId ?? null,
+          proration: result.proration ?? null,
+          invoiceNumber: result.invoiceNumber ?? null,
+        },
+      }).catch(() => {})
+
+      return NextResponse.json(result)
     }
 
     let data: Record<string, unknown> = {}

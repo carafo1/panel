@@ -172,12 +172,15 @@ export default function DomainsPanel() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Badge variant="outline" className="w-fit" title="Editable in the Pricing tab">
-            <Sparkles className="h-3 w-3 mr-1 text-amber-500" />
-            {globalMarkup !== null
-              ? `$${globalMarkup.toFixed(2)} markup applied`
-              : 'markup loading…'}
-          </Badge>
+          {/* Markup is the reseller margin — admin-only. Showing it to a
+              customer reveals our profit on every domain (and the old
+              "markup loading…" placeholder leaked into their view). */}
+          {isAdmin && globalMarkup !== null && (
+            <Badge variant="outline" className="w-fit" title="Editable in the Pricing tab">
+              <Sparkles className="h-3 w-3 mr-1 text-amber-500" />
+              {`$${globalMarkup.toFixed(2)} markup applied`}
+            </Badge>
+          )}
           <Button variant="outline" size="sm" onClick={() => setTransferOpen(true)}>
             <Send className="h-4 w-4 mr-1.5" />
             Transfer Domain
@@ -475,7 +478,9 @@ function SearchResultCard({
               <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400">
                 <CheckCircle2 className="h-4 w-4" />
                 <span className="text-sm font-medium">Available</span>
-                <Badge variant="outline" className="ml-2">{result.provider}</Badge>
+                {/* Upstream registrar / internal provider name removed — it
+                    exposed either "apsamo-demo" or the wholesale registrar
+                    to customers, and told them nothing useful. */}
               </div>
             ) : (
               <div className="flex items-center gap-2 text-red-600 dark:text-red-400">
