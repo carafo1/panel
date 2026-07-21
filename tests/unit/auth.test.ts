@@ -6,6 +6,11 @@
  */
 
 import { describe, it, expect } from 'bun:test'
+
+// bcrypt uses 12 salt rounds, which costs seconds per call on purpose.
+// The default 5s per-test budget is too small for that; raise the budget
+// rather than weakening the cost factor to make tests pass.
+const HASH_TIMEOUT = 30_000
 import { hashPassword, verifyPassword, generateToken, verifyToken, extractTokenFromHeader } from '../../src/lib/auth'
 
 // Set test secrets before importing
@@ -19,31 +24,31 @@ describe('auth.ts', () => {
       const hash = await hashPassword('MyPassword123!')
       expect(hash).not.toBe('MyPassword123!')
       expect(hash.length).toBeGreaterThan(50)
-    })
+    }, HASH_TIMEOUT)
 
     it('produces different hashes for same password (salt)', async () => {
       const hash1 = await hashPassword('MyPassword123!')
       const hash2 = await hashPassword('MyPassword123!')
       expect(hash1).not.toBe(hash2)
-    })
+    }, HASH_TIMEOUT)
 
     it('verifies correct password', async () => {
       const hash = await hashPassword('MyPassword123!')
       const isValid = await verifyPassword('MyPassword123!', hash)
       expect(isValid).toBe(true)
-    })
+    }, HASH_TIMEOUT)
 
     it('rejects wrong password', async () => {
       const hash = await hashPassword('MyPassword123!')
       const isValid = await verifyPassword('WrongPassword!', hash)
       expect(isValid).toBe(false)
-    })
+    }, HASH_TIMEOUT)
 
     it('rejects empty password', async () => {
       const hash = await hashPassword('MyPassword123!')
       const isValid = await verifyPassword('', hash)
       expect(isValid).toBe(false)
-    })
+    }, HASH_TIMEOUT)
   })
 
   // ── JWT signing + verification ───────────────────────────────────────

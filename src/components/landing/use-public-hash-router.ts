@@ -61,6 +61,9 @@ export function buildHash(page: PublicPageState): string {
       return '#/contact'
     case 'not-found':
       return '#/not-found'
+    default:
+      // Exhaustive today, but a new page must not silently return undefined.
+      return '#/'
   }
 }
 

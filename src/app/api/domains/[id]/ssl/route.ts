@@ -119,7 +119,8 @@ export async function GET(
       certificate: {
         id: `ssl_${domain.id}`,
         domain: domain.name,
-        issuer: state.customIssuer || state.issuer,
+        issuer:
+          (state as { customIssuer?: string }).customIssuer || state.issuer,
         status: state.status,
         type: state.type,
         issuedAt: state.issuedAt.toISOString(),

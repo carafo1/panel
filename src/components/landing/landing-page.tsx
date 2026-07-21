@@ -6,6 +6,8 @@ import { SiteDataProvider } from './site-data-context'
 
 interface LandingPageProps {
   onGetStarted: () => void
+  /** Callers pass this; declared so the prop is actually part of the contract. */
+  onLogin?: () => void
 }
 
 /**

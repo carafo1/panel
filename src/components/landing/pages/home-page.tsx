@@ -65,10 +65,10 @@ export function HomePage({ onGetStarted }: HomePageProps) {
       const [value = '', suffix = '', label = ''] = l.split('|').map((s) => s.trim())
       return { value: parseFloat(value) || 0, suffix, label }
     })
-  const stat0 = useCountUp(stats[0]?.value ?? 0, 2000)
-  const stat1 = useCountUp(stats[1]?.value ?? 0, 2000)
-  const stat2 = useCountUp(stats[2]?.value ?? 0, 2000)
-  const stat3 = useCountUp(stats[3]?.value ?? 0, 2000)
+  const stat0 = useCountUp<HTMLParagraphElement>(stats[0]?.value ?? 0, 2000)
+  const stat1 = useCountUp<HTMLParagraphElement>(stats[1]?.value ?? 0, 2000)
+  const stat2 = useCountUp<HTMLParagraphElement>(stats[2]?.value ?? 0, 2000)
+  const stat3 = useCountUp<HTMLParagraphElement>(stats[3]?.value ?? 0, 2000)
   const statRefs = [stat0, stat1, stat2, stat3]
 
   // Testimonials: one per line as "quote|name|role"; initials derived from name.

@@ -299,7 +299,6 @@ function TwoFactorCard({ enabled, onToggle }: TwoFactorCardProps) {
       })
       setBackupCodes(data.backupCodes)
       setEnableStep('backup')
-      setEnabled(true)
       onToggle(true)
       toast.success('Two-factor authentication enabled!')
     } catch (err) {
@@ -360,7 +359,6 @@ function TwoFactorCard({ enabled, onToggle }: TwoFactorCardProps) {
         method: 'POST',
         body: JSON.stringify({ token: disableToken }),
       })
-      setEnabled(false)
       onToggle(false)
       setDisableOpen(false)
       setDisableToken('')

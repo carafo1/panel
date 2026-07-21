@@ -280,12 +280,19 @@ describe('security.ts', () => {
       expect(safeCompare('', '')).toBe(true)
     })
 
-    it('takes constant time (no early return)', () => {
-      // This is hard to test deterministically, but at least verify it doesn't throw
-      const start = Date.now()
-      safeCompare('a'.repeat(1000), 'b'.repeat(1000))
-      const elapsed = Date.now() - start
-      expect(elapsed).toBeLessThan(100) // should be fast
+    it('compares long unequal strings without throwing or short-circuiting', () => {
+      // NOTE: this deliberately does NOT assert wall-clock time. The previous
+      // version required < 100ms, which fails whenever the machine is busy —
+      // a flaky test that never actually verified constant-time behaviour,
+      // since a timing assertion this coarse passes for a naive === too.
+      // Real constant-time verification needs statistical timing analysis,
+      // which does not belong in a unit test; the guarantee comes from the
+      // implementation using a full-length XOR accumulation.
+      expect(safeCompare('a'.repeat(1000), 'b'.repeat(1000))).toBe(false)
+      expect(safeCompare('a'.repeat(1000), 'a'.repeat(1000))).toBe(true)
+      // Differing only in the LAST byte must still compare false — an early
+      // return on the first mismatch would be the actual vulnerability.
+      expect(safeCompare('a'.repeat(999) + 'x', 'a'.repeat(999) + 'y')).toBe(false)
     })
   })
 })

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { processPendingJobs } from '@/lib/worker'
 import { isAdmin, safeCompare } from '@/lib/security'
+import { recordHeartbeat } from '@/lib/health'
 
 /**
  * CRON_API_KEY for the worker-service to trigger job processing without a
@@ -77,6 +78,13 @@ export async function POST(request: Request) {
       : 10
 
     const result = await processPendingJobs(limit)
+
+    // Liveness beacon — see lib/health.ts. A tick that runs is the only
+    // proof the worker can actually reach us.
+    await recordHeartbeat(
+      'jobs',
+      `processed=${(result as { processed?: number }).processed ?? 0}`
+    )
 
     return NextResponse.json({
       ...result,

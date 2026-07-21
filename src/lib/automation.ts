@@ -22,6 +22,9 @@ export type ActionType =
   | 'link_domain'
   | 'rollback_deployment'
   | 'deployment_status_check'
+  // Legacy: no longer produced, but already-queued jobs may still carry it
+  // and executeAction still handles it as a no-op.
+  | 'create_coolify_project'
 
 export interface AutomationEvent {
   type: EventType
@@ -666,7 +669,7 @@ export async function processEvent(event: AutomationEvent) {
     return { processed: true, actionsCount: 0, results: [] }
   }
 
-  const results = []
+  const results: Array<Record<string, unknown>> = []
 
   for (const action of actions) {
     // Create AutomationLog entry
@@ -769,7 +772,7 @@ export async function processPendingJobs() {
     take: 10,
   })
 
-  const results = []
+  const results: Array<Record<string, unknown>> = []
   for (const job of pendingJobs) {
     await processJob(job.id)
     const updated = await db.jobQueue.findUnique({ where: { id: job.id } })

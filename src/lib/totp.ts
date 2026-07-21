@@ -10,23 +10,37 @@
  * Implements RFC 6238 (TOTP) and RFC 6287 (OCRA) using otplib. Backup codes
  * are hashed with bcrypt so they can be safely stored alongside user records.
  */
-import { authenticator } from 'otplib'
+import { OTP } from 'otplib'
 import QRCode from 'qrcode'
 import bcryptjs from 'bcryptjs'
 import { randomInt } from 'crypto'
 
-// Configure TOTP: 6 digits, 30-second window
-authenticator.options = {
-  digits: 6,
-  step: 30,
-  window: 1, // accept tokens from the previous & current step (±30s)
-}
+/**
+ * otplib v13 replaced the `authenticator` singleton with a TOTP class, and
+ * made generate/verify async. The *Sync variants are used here so these
+ * helpers keep their synchronous signatures and every existing call site
+ * (2FA setup, login verify, disable) keeps working unchanged.
+ */
+// OTP (not TOTP): the sync variants used below live on this class.
+// In v13 digits/period are PER-CALL options, not constructor options — they
+// are spread into each call below. Both match the library defaults, but are
+// stated explicitly so an upstream default change can't silently invalidate
+// every existing user's enrolled authenticator.
+const totp = new OTP({ strategy: 'totp' })
+const TOTP_PARAMS = { digits: 6 as const, period: 30 }
+
+/**
+ * Accept the previous and next 30-second step, matching the old
+ * `window: 1`. v13 expresses tolerance in SECONDS, not steps — passing 1
+ * here would allow only a one-second skew and reject most valid tokens.
+ */
+const EPOCH_TOLERANCE: [number, number] = [30, 30]
 
 /**
  * Generate a new random base32-encoded TOTP secret.
  */
 export function generateSecret(): string {
-  return authenticator.generateSecret()
+  return totp.generateSecret()
 }
 
 /**
@@ -39,7 +53,8 @@ export async function generateQRCode(
   email: string,
   issuer = 'Apsamo Panel'
 ): Promise<string> {
-  const otpauthUri = authenticator.keyuri(email, issuer, secret)
+  // v13: keyuri(user, service, secret) → generateURI({ label, issuer, secret })
+  const otpauthUri = totp.generateURI({ ...TOTP_PARAMS, label: email, issuer, secret })
   return QRCode.toDataURL(otpauthUri, {
     width: 240,
     margin: 1,
@@ -55,7 +70,15 @@ export function verifyToken(token: string, secret: string): boolean {
   try {
     // Strip whitespace the user might have typed
     const cleaned = token.replace(/\s+/g, '')
-    return authenticator.verify({ token: cleaned, secret })
+    // v13 returns a result object, not a boolean — `if (result)` would always
+    // be truthy, so a wrong code would pass. Read `.valid` explicitly.
+    const result = totp.verifySync({
+      ...TOTP_PARAMS,
+      secret,
+      token: cleaned,
+      epochTolerance: EPOCH_TOLERANCE,
+    })
+    return result.valid === true
   } catch {
     return false
   }
@@ -65,7 +88,7 @@ export function verifyToken(token: string, secret: string): boolean {
  * Generate a 6-digit TOTP token for the given secret (mostly useful for tests).
  */
 export function generateToken(secret: string): string {
-  return authenticator.generate(secret)
+  return totp.generateSync({ ...TOTP_PARAMS, secret })
 }
 
 /**

@@ -482,7 +482,7 @@ export async function getFileContent(
     const parts = r.stdout.split('---')
     const sizeStr = (parts[0] || '').trim()
     const size = parseInt(sizeStr, 10) || 0
-    const raw = (parts[1] || '').toString('utf8')
+    const raw = String(parts[1] || '')
     const truncated = raw.length > maxBytes
     const content = truncated ? raw.slice(0, maxBytes) : raw
     return { content, size, truncated }

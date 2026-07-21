@@ -289,9 +289,23 @@ type StageLog = (msg: string) => void
 
 // ─── NEW: Method-based deploy pipeline ───────────────────────────────────
 
+
+/**
+ * A project as loaded by the deployer — always with its server relation.
+ *
+ * The bare `db.project.findUnique` return type omits `server`, so callers
+ * reached for `project.server!` and the non-null assertion hid the fact that
+ * the type was simply wrong. The queries do include the relation.
+ */
+type ProjectWithServer = NonNullable<
+  Awaited<ReturnType<typeof db.project.findUnique>>
+> & {
+  server: Awaited<ReturnType<typeof db.server.findUnique>>
+}
+
 async function deployMethodProject(
   req: DeployRequest,
-  project: NonNullable<Awaited<ReturnType<typeof db.project.findUnique>>>,
+  project: ProjectWithServer,
   methodId: DeploymentMethodId,
   runStage: RunStage,
   stageLog: StageLog,
@@ -318,7 +332,7 @@ async function deployMethodProject(
   })
 
   // ── DEMO MODE: simulated deploy with realistic build log ────────────
-  if (isServerInDemoMode(project.server!)) {
+  if (isServerInDemoMode(project.server)) {
     const buildLogStr = generateDemoBuildLog(project, method.name, containerName, containerPort, externalPort)
     for (const line of buildLogStr.split('\n')) {
       req.onStreamChunk?.({ stream: 'stdout', data: line + '\n' })
@@ -775,7 +789,7 @@ require_once ABSPATH . 'wp-settings.php';
 
 async function deployLegacyProject(
   req: DeployRequest,
-  project: NonNullable<Awaited<ReturnType<typeof db.project.findUnique>>>,
+  project: ProjectWithServer,
   runStage: RunStage,
   stageLog: StageLog,
   buildLog: string[],
@@ -797,7 +811,7 @@ async function deployLegacyProject(
   })
 
   // DEMO MODE
-  if (isServerInDemoMode(project.server!)) {
+  if (isServerInDemoMode(project.server)) {
     const buildLogStr = generateDemoBuildLog(project, stack.name, containerName, containerPort, externalPort)
     log('[demo mode] Simulating deploy…')
     for (const line of buildLogStr.split('\n')) {
@@ -1140,11 +1154,14 @@ export async function removeProjectContainer(projectId: string): Promise<{ ok: b
 export async function getContainerStatus(projectId: string): Promise<ContainerStatus | null> {
   const project = await db.project.findUnique({ where: { id: projectId }, include: { server: true } })
   if (!project || !project.containerName) return null
+  // Captured before the async closures below: TypeScript drops the
+  // non-null narrowing of `project.containerName` inside a callback.
+  const containerName: string = project.containerName
 
   if (isServerInDemoMode(project.server)) {
     return {
       containerId: project.containerId || 'demo',
-      name: project.containerName,
+      name: containerName,
       state: project.status === 'running' ? 'running' : 'exited',
       status: project.status === 'running' ? 'Up (simulated)' : 'Exited (simulated)',
       image: `deployhub/${project.stack}:latest`,
@@ -1158,13 +1175,13 @@ export async function getContainerStatus(projectId: string): Promise<ContainerSt
     return await withConnection(creds, async (client) => {
       const r = await exec(
         client,
-        `docker inspect --format '{{.Id}}|{{.Name}}|{{.State.Status}}|{{.State.Health.Status}}|{{.Config.Image}}|{{range $p, $conf := .NetworkSettings.Ports}}{{$p}}->{{(index $conf 0).HostPort}} {{end}}|{{.Created}}' ${shellQuote(project.containerName)} 2>/dev/null`,
+        `docker inspect --format '{{.Id}}|{{.Name}}|{{.State.Status}}|{{.State.Health.Status}}|{{.Config.Image}}|{{range $p, $conf := .NetworkSettings.Ports}}{{$p}}->{{(index $conf 0).HostPort}} {{end}}|{{.Created}}' ${shellQuote(containerName)} 2>/dev/null`,
         { timeoutMs: 10000 }
       )
       if (r.exitCode !== 0) {
         return {
           containerId: project.containerId || '',
-          name: project.containerName,
+          name: containerName,
           state: 'not_found' as const,
           status: 'Container not found on server',
           image: '',

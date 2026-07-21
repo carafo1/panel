@@ -42,6 +42,14 @@ const LOCAL_CADDYFILE = path.join(LOCAL_CADDY_DIR, 'Caddyfile')
 
 export interface ProxyConfig {
   hostname: string
+  /**
+   * Additional VERIFIED custom domains served by the same site.
+   *
+   * Caddy accepts several hostnames per block (`a.com, b.com { … }`) and
+   * issues a certificate for each. Only verified domains belong here — an
+   * unverified one would let a customer serve a hostname they don't own.
+   */
+  extraHostnames?: string[]
   upstream: string // e.g. deployhub-myapp:3000 (container_name:port on deployhub net)
   ssl: boolean
   sslCertStatus?: 'none' | 'pending' | 'issued' | 'failed' | 'renewing'
@@ -153,7 +161,7 @@ export async function configureProjectProxy(
       })
 
       // Load redirects + ipBlocks for every project on this server in parallel.
-      const [allRedirects, allIpBlocks] = await Promise.all([
+      const [allRedirects, allIpBlocks, allCustomDomains] = await Promise.all([
         db.redirect.findMany({
           where: { projectId: { in: allProjects.map((p) => p.id) }, enabled: true },
           select: { projectId: true, fromPath: true, toUrl: true, statusCode: true },
@@ -162,10 +170,19 @@ export async function configureProjectProxy(
           where: { projectId: { in: allProjects.map((p) => p.id) }, enabled: true },
           select: { projectId: true, ipAddress: true, action: true },
         }),
+        // VERIFIED custom domains only. An unverified row must never reach
+        // the proxy — that check is the whole point of the verify step.
+        db.websiteDomain.findMany({
+          where: { projectId: { in: allProjects.map((p) => p.id) }, verified: true },
+          select: { projectId: true, domain: true },
+        }),
       ])
 
       const configs: ProxyConfig[] = allProjects.map((p) => ({
         hostname: p.customDomain || p.subdomain,
+        extraHostnames: allCustomDomains
+          .filter((d) => d.projectId === p.id)
+          .map((d) => d.domain),
         // Localhost single-box: the host Caddy isn't on the docker network, so
         // it reaches the container via its published host port. Remote VPS:
         // Caddy shares the deployhub network and resolves the container name.
@@ -315,7 +332,7 @@ export async function removeProjectProxy(projectId: string): Promise<ProjectProx
       const isLocal = isLocalHost(project.server?.sshHost)
       // Load redirects + ipBlocks for the remaining projects so the regenerated
       // Caddyfile still has their `redir` + `@blocked` directives.
-      const [allRedirects, allIpBlocks] = await Promise.all([
+      const [allRedirects, allIpBlocks, allCustomDomains] = await Promise.all([
         db.redirect.findMany({
           where: { projectId: { in: allProjects.map((p) => p.id) }, enabled: true },
           select: { projectId: true, fromPath: true, toUrl: true, statusCode: true },
@@ -324,9 +341,18 @@ export async function removeProjectProxy(projectId: string): Promise<ProjectProx
           where: { projectId: { in: allProjects.map((p) => p.id) }, enabled: true },
           select: { projectId: true, ipAddress: true, action: true },
         }),
+        // VERIFIED custom domains only. An unverified row must never reach
+        // the proxy — that check is the whole point of the verify step.
+        db.websiteDomain.findMany({
+          where: { projectId: { in: allProjects.map((p) => p.id) }, verified: true },
+          select: { projectId: true, domain: true },
+        }),
       ])
       const configs: ProxyConfig[] = allProjects.map((p) => ({
         hostname: p.customDomain || p.subdomain,
+        extraHostnames: allCustomDomains
+          .filter((d) => d.projectId === p.id)
+          .map((d) => d.domain),
         upstream: isLocal
           ? `localhost:${p.externalPort || p.containerPort || 3000}`
           : `${p.containerName}:${p.containerPort || 3000}`,
@@ -380,11 +406,17 @@ export async function removeProjectProxy(projectId: string): Promise<ProjectProx
 export function generateCaddyBlock(cfg: ProxyConfig): string {
   const lines: string[] = []
 
+  // Deduplicate: the primary may also exist as a WebsiteDomain row, and a
+  // hostname repeated in a Caddy site address is a config error.
+  const allHosts = [cfg.hostname, ...(cfg.extraHostnames ?? [])].filter(
+    (h, i, arr) => h && arr.indexOf(h) === i
+  )
+
   if (cfg.ssl) {
-    lines.push(`${cfg.hostname} {`)
+    lines.push(`${allHosts.join(', ')} {`)
   } else {
     lines.push(`:80 {`)
-    lines.push(`  @host host ${cfg.hostname}`)
+    lines.push(`  @host host ${allHosts.join(' ')}`)
     lines.push(`  handle @host {`)
   }
 

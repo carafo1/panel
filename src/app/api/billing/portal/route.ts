@@ -85,9 +85,10 @@ export async function POST(request: Request) {
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || ''
     const returnUrl = `${appUrl}/?tab=billing`
 
-    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-      apiVersion: '2024-12-18.acacia' as Stripe.LatestApiVersion,
-    })
+    // No apiVersion override: the SDK pins the version it was built against,
+    // and hard-coding a stale one (plus casting to a type the SDK no longer
+    // exports) is what broke this. Let the SDK and the account default agree.
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!)
 
     const session = await stripe.billingPortal.sessions.create({
       customer: customerId,

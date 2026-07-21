@@ -63,8 +63,24 @@ export async function PATCH(
       updateData.sslStatus = body.sslEnabled ? 'pending' : 'none'
       sslChanged = true
     }
-    if (typeof body.verified === 'boolean') {
-      updateData.verified = body.verified
+    // SECURITY: `verified` is deliberately NOT accepted from the request body.
+    //
+    // It used to be, which meant the client simply declared itself verified —
+    // a PATCH of {verified: true} was the entire "verification". Combined with
+    // the previously per-project uniqueness check, a customer could attach a
+    // hostname belonging to someone else, self-certify it, and have it served.
+    //
+    // Ownership is now proven by DNS at
+    // POST /api/hosting/[id]/domains/[domainId]/verify, which is the only
+    // thing that may set this flag.
+    if ('verified' in (body as Record<string, unknown>)) {
+      return NextResponse.json(
+        {
+          error:
+            'Verification status cannot be set directly. Use the Verify action, which checks DNS ownership.',
+        },
+        { status: 400 }
+      )
     }
 
     const updated = await db.websiteDomain.update({

@@ -173,7 +173,9 @@ export async function POST(request: Request) {
     // ═══════════════════════════════════════════════════════════════
     if (requestedMethod === 'stripe' && isStripeDemoMode()) {
       // Create Project (hosting or both)
-      let project = null
+      // Typed explicitly: `let project = null` infers the type `null`, which
+      // makes every later `project.id` a `never` and hides real errors.
+      let project: Awaited<ReturnType<typeof db.project.create>> | null = null
       if (type === 'hosting' || type === 'both') {
         const name = projectName || `My ${plan.name} Project`
         const slug = slugify(name) + '-' + Date.now().toString(36)
@@ -203,7 +205,7 @@ export async function POST(request: Request) {
       }
 
       // Create Domain (domain or both)
-      let domain = null
+      let domain: Awaited<ReturnType<typeof db.domain.create>> | null = null
       if ((type === 'domain' || type === 'both') && domainName) {
         const domainLower = domainName.toLowerCase().trim()
 

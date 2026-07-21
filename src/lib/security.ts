@@ -138,11 +138,12 @@ export function sanitizeProjectForCustomer<T extends Record<string, unknown>>(
   delete sanitized.databasePassword
 
   // Strip server internals if nested
-  if (sanitized.server && typeof sanitized.server === 'object') {
-    sanitized.server = sanitizeServerForCustomer(
-      sanitized.server as Record<string, unknown>,
+  const withServer = sanitized as unknown as Record<string, unknown>
+  if (withServer.server && typeof withServer.server === 'object') {
+    withServer.server = sanitizeServerForCustomer(
+      withServer.server as Record<string, unknown>,
       userRole
-    ) as T[keyof T]
+    )
   }
 
   return sanitized

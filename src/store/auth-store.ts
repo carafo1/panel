@@ -33,7 +33,21 @@ interface AuthState {
 
 const API_BASE = '/api'
 
-export async function apiFetch(path: string, options?: RequestInit) {
+/**
+ * Authenticated fetch against the API.
+ *
+ * Generic so callers can name their response shape (`apiFetch<Plan[]>(…)`)
+ * instead of each panel re-wrapping this in its own typed helper.
+ */
+// Defaults to `any`, not `unknown`: this previously returned an implicit
+// `any` and ~70 call sites across the panels destructure the result directly.
+// Defaulting to `unknown` would be stricter but breaks all of them at once;
+// callers should pass an explicit type argument as they get touched.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function apiFetch<T = any>(
+  path: string,
+  options?: RequestInit
+): Promise<T> {
   const token = typeof window !== 'undefined' ? localStorage.getItem('apsamo_token') : null
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
@@ -47,7 +61,7 @@ export async function apiFetch(path: string, options?: RequestInit) {
     const data = await res.json().catch(() => ({ error: 'Request failed' }))
     throw new Error(data.error || `Request failed with status ${res.status}`)
   }
-  return res.json()
+  return res.json() as Promise<T>
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -62,7 +76,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   login: async (email, password) => {
-    const data = await apiFetch('/auth/login', {
+    const data = await apiFetch<{
+      requiresTwoFactor?: boolean
+      tempToken?: string
+      user: User
+      token: string
+    }>('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     })
@@ -71,14 +90,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // for the second factor via completeTwoFactorLogin() or
     // loginWithBackupCode().
     if (data.requiresTwoFactor) {
-      return { requiresTwoFactor: true, tempToken: data.tempToken }
+      return { requiresTwoFactor: true, tempToken: data.tempToken! }
     }
     get().setAuth(data.user, data.token)
     return { requiresTwoFactor: false, user: data.user, token: data.token }
   },
 
   completeTwoFactorLogin: async (tempToken, token) => {
-    const data = await apiFetch('/auth/2fa/login-verify', {
+    const data = await apiFetch<{ user: User; token: string }>('/auth/2fa/login-verify', {
       method: 'POST',
       body: JSON.stringify({ tempToken, token }),
     })
@@ -86,7 +105,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   loginWithBackupCode: async (email, backupCode) => {
-    const data = await apiFetch('/auth/2fa/verify-backup', {
+    const data = await apiFetch<{ user: User; token: string }>('/auth/2fa/verify-backup', {
       method: 'POST',
       body: JSON.stringify({ email, backupCode }),
     })
@@ -94,7 +113,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   register: async (name, email, password) => {
-    const data = await apiFetch('/auth/register', {
+    const data = await apiFetch<{ message: string }>('/auth/register', {
       method: 'POST',
       body: JSON.stringify({ name, email, password }),
     })
@@ -123,7 +142,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       return
     }
     try {
-      const data = await apiFetch('/auth/me')
+      const data = await apiFetch<{ user: User }>('/auth/me')
       set({ user: data.user, token, isAuthenticated: true, isLoading: false })
     } catch {
       localStorage.removeItem('apsamo_token')
@@ -132,7 +151,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   verifyEmail: async (verificationToken: string) => {
-    const data = await apiFetch(`/auth/verify-email?token=${verificationToken}`)
+    const data = await apiFetch<{ success?: boolean }>(
+      `/auth/verify-email?token=${verificationToken}`
+    )
     if (data.success) {
       set((state) => ({
         user: state.user ? { ...state.user, emailVerified: true } : state.user,
