@@ -53,7 +53,7 @@ export async function GET(
       try {
         const { content, filename } = await exportArchive(projectId, subdir)
         const type = filename.endsWith('.zip') ? 'application/zip' : 'application/gzip'
-        return new NextResponse(content, {
+        return new NextResponse(new Uint8Array(content), {
           status: 200,
           headers: {
             'Content-Type': type,

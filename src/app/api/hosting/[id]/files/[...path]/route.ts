@@ -54,7 +54,7 @@ export async function GET(
     // Default: download.
     try {
       const { content, filename, size } = await downloadFile(projectId, filePath)
-      return new NextResponse(content, {
+      return new NextResponse(new Uint8Array(content), {
         status: 200,
         headers: {
           'Content-Type': 'application/octet-stream',

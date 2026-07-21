@@ -70,7 +70,11 @@ export async function GET(request: Request) {
 }
 
 /** Strip wholesale + markup fields from a single TLD price row. */
-function stripWholesale<T extends Record<string, unknown>>(row: T): Omit<T, 'wholesale' | 'markup'> {
-  const { wholesale: _w, markup: _m, ...rest } = row
+function stripWholesale<T extends object>(row: T): Omit<T, 'wholesale' | 'markup'> {
+  // Cast for the destructure only — the generic keeps the caller's type.
+  const { wholesale: _w, markup: _m, ...rest } = row as T & {
+    wholesale?: unknown
+    markup?: unknown
+  }
   return rest
 }

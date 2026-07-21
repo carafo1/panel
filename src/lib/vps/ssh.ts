@@ -138,7 +138,7 @@ function connectAsync(client: Client, creds: SshCredentials): Promise<void> {
       reject(err)
     })
 
-    client.connect(opts as ConstructorParameters<typeof Client.connect>[0])
+    client.connect(opts as Parameters<Client['connect']>[0])
   })
 }
 
@@ -484,12 +484,21 @@ export function isVpsDemoMode(): boolean {
  * demo behavior (instead of throwing inside getServerCredentials) — UNLESS
  * it's a localhost server, which is always real.
  */
-export function isServerInDemoMode(server: {
-  sshHost?: string | null
-  sshPrivateKey?: string | null
-  sshPassword?: string | null
-}): boolean {
+export function isServerInDemoMode(
+  server:
+    | {
+        sshHost?: string | null
+        sshPrivateKey?: string | null
+        sshPassword?: string | null
+      }
+    | null
+    | undefined
+): boolean {
   if (isVpsDemoMode()) return true
+  // No server assigned at all — there is nothing to connect to, so treat it
+  // exactly like demo mode. Callers pass `project.server`, which is null
+  // whenever a project hasn't been placed on a server yet.
+  if (!server) return true
   if (!server.sshHost) return true
   // Localhost servers are real — LocalClient needs no SSH credentials.
   if (isLocalHost(server.sshHost)) return false

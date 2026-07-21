@@ -180,10 +180,13 @@ export async function createFtpAccount(
   if (password.length < 6) throw new Error('Password must be at least 6 characters')
   const directory = (opts.directory || '/').trim() || '/'
   const readOnly = !!opts.readOnly
+  const parsedQuota = Number(opts.quotaMB)
   const quotaMB =
-    opts.quotaMB === null || opts.quotaMB === undefined
+    opts.quotaMB === null ||
+    opts.quotaMB === undefined ||
+    !Number.isFinite(parsedQuota)
       ? null
-      : Math.max(1, Math.floor(Number(opts.quotaMB)) || null)
+      : Math.max(1, Math.floor(parsedQuota))
 
   const project = await db.project.findUnique({
     where: { id: projectId },
@@ -270,10 +273,11 @@ export async function updateFtpAccount(
     data.readOnly = !!patch.readOnly
   }
   if (patch.quotaMB !== undefined) {
+    const parsed = Number(patch.quotaMB)
     data.quotaMB =
-      patch.quotaMB === null
+      patch.quotaMB === null || !Number.isFinite(parsed)
         ? null
-        : Math.max(1, Math.floor(Number(patch.quotaMB)) || null)
+        : Math.max(1, Math.floor(parsed))
   }
   if (patch.enabled !== undefined) {
     data.enabled = !!patch.enabled

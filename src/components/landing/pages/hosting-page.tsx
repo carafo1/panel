@@ -140,10 +140,10 @@ export function HostingPage({ onGetStarted }: HostingPageProps) {
   const service = useServiceBySlug('web-hosting')
   const plans = service?.plans?.length ? service.plans : FALLBACK_PLANS
   const faqs = service?.faqs?.length ? service.faqs : FALLBACK_FAQS
-  const stat0 = useCountUp(STATS[0].value, 1800)
-  const stat1 = useCountUp(STATS[1].value, 1800)
-  const stat2 = useCountUp(STATS[2].value, 1800)
-  const stat3 = useCountUp(STATS[3].value, 1800)
+  const stat0 = useCountUp<HTMLParagraphElement>(STATS[0].value, 1800)
+  const stat1 = useCountUp<HTMLParagraphElement>(STATS[1].value, 1800)
+  const stat2 = useCountUp<HTMLParagraphElement>(STATS[2].value, 1800)
+  const stat3 = useCountUp<HTMLParagraphElement>(STATS[3].value, 1800)
   const statRefs = [stat0, stat1, stat2, stat3]
 
   return (

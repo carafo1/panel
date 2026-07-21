@@ -30,7 +30,7 @@ export async function POST(
     const body = await req.json()
     const events = Array.isArray(body) ? body : [body]
 
-    const created = []
+    const created: Awaited<ReturnType<typeof db.analyticsEvent.create>>[] = []
     for (const event of events) {
       const { type, path, method, status, duration, country, city, userAgent, ip } = event
 

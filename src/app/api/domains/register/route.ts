@@ -235,7 +235,7 @@ export async function POST(request: Request) {
     })
 
     // Auto-create default DNS records
-    const dnsRecords = []
+    const dnsRecords: Awaited<ReturnType<typeof db.dnsRecord.create>>[] = []
 
     // A record pointing to server IP
     if (server) {

@@ -2,7 +2,13 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { processEvent } from '@/lib/automation'
 import { provisionForPayment } from '@/lib/provision-on-payment'
-import { constructWebhookEvent, isStripeDemoMode } from '@/lib/stripe'
+import {
+  constructWebhookEvent,
+  isStripeDemoMode,
+  getSubscriptionPeriod,
+  getInvoiceSubscriptionId,
+  getInvoiceChargeId,
+} from '@/lib/stripe'
 import { createNotification } from '@/lib/notifications'
 import type Stripe from 'stripe'
 
@@ -42,11 +48,11 @@ export async function POST(request: Request) {
     }
 
     const eventType: string = event.type
-    const data = event.data?.object as Record<string, unknown> | undefined
+    const data = event.data?.object as unknown as Record<string, unknown> | undefined
 
     // ── checkout.session.completed ──────────────────────────────
     if (eventType === 'checkout.session.completed') {
-      const session = data as Stripe.Checkout.Session
+      const session = data as unknown as Stripe.Checkout.Session
       const sessionId = session?.id
       const metadata = (session?.metadata || {}) as Record<string, string>
       const userId = metadata.userId
@@ -152,7 +158,7 @@ export async function POST(request: Request) {
 
     // ── customer.subscription.updated ───────────────────────────
     else if (eventType === 'customer.subscription.updated') {
-      const sub = data as Stripe.Subscription
+      const sub = data as unknown as Stripe.Subscription
       const subId = sub?.id
       const status = sub?.status
 
@@ -163,12 +169,8 @@ export async function POST(request: Request) {
         })
         if (local) {
           const mappedStatus = mapStripeSubStatus(status)
-          const periodStart = sub?.current_period_start
-            ? new Date(sub.current_period_start * 1000)
-            : undefined
-          const periodEnd = sub?.current_period_end
-            ? new Date(sub.current_period_end * 1000)
-            : undefined
+          const { start: periodStart, end: periodEnd } =
+            getSubscriptionPeriod(sub)
           const cancelAtPeriodEnd = !!sub?.cancel_at_period_end
 
           await db.subscription.update({
@@ -194,7 +196,7 @@ export async function POST(request: Request) {
 
     // ── customer.subscription.deleted ───────────────────────────
     else if (eventType === 'customer.subscription.deleted') {
-      const sub = data as Stripe.Subscription
+      const sub = data as unknown as Stripe.Subscription
       const subId = sub?.id
 
       if (subId) {
@@ -229,11 +231,11 @@ export async function POST(request: Request) {
 
     // ── invoice.payment_succeeded ───────────────────────────────
     else if (eventType === 'invoice.payment_succeeded') {
-      const invoice = data as Stripe.Invoice
+      const invoice = data as unknown as Stripe.Invoice
       const customerId =
         (invoice?.customer as string) || (invoice?.customer as unknown as { id?: string })?.id
-      const subId = (invoice?.subscription as string) || null
-      const chargeId = (invoice?.charge as string) || null
+      const subId = getInvoiceSubscriptionId(invoice)
+      const chargeId = getInvoiceChargeId(invoice)
       const amountDue =
         typeof invoice?.amount_paid === 'number' ? invoice.amount_paid / 100 : 0
       const currency = invoice?.currency || 'usd'
@@ -291,8 +293,8 @@ export async function POST(request: Request) {
 
     // ── invoice.payment_failed ──────────────────────────────────
     else if (eventType === 'invoice.payment_failed') {
-      const invoice = data as Stripe.Invoice
-      const subId = (invoice?.subscription as string) || null
+      const invoice = data as unknown as Stripe.Invoice
+      const subId = getInvoiceSubscriptionId(invoice)
       const amountDue =
         typeof invoice?.amount_due === 'number' ? invoice.amount_due / 100 : 0
       const attemptCount = invoice?.attempt_count || 1

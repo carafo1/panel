@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { runUptimeChecks } from '@/lib/monitor'
 import { requireSecret, isAdmin, safeCompare } from '@/lib/security'
+import { recordHeartbeat } from '@/lib/health'
 
 // SECURITY: CRON_API_KEY is required. If unset, the cron-key auth path is
 // disabled entirely — only admin JWTs can trigger a sweep. This prevents
@@ -66,6 +67,11 @@ export async function POST(request: Request) {
     }
 
     const result = await runUptimeChecks()
+
+    await recordHeartbeat(
+      'monitors',
+      `checked=${(result as { checked?: number }).checked ?? 0}`
+    )
 
     return NextResponse.json({
       ...result,

@@ -421,7 +421,7 @@ export async function searchDomains(
   for (const [key, value] of Object.entries(response)) {
     if (key.startsWith('domain') && typeof value === 'object' && value !== null) {
       const dv = value as { Name?: string; Available?: string; Price?: string }
-      const parsed = parseDynadotPriceString(dv.Price)
+      const parsed = parseDynadotPriceString(dv.Price ?? '')
       results.push({
         domain: dv.Name || '',
         available: String(dv.Available).toLowerCase() === 'yes',

@@ -16,9 +16,15 @@ import { cn } from '@/lib/utils'
  * Animates a number from 0 → target over `duration` ms (ease-out cubic),
  * starting the first time the returned ref scrolls into view.
  * ──────────────────────────────────────────────────────────────────── */
-export function useCountUp(target: number, duration = 1800) {
+// Generic over the element it attaches to: React refs are invariant, so a
+// RefObject<HTMLSpanElement> cannot be handed to a <p>. Callers that use a
+// different tag pass it explicitly, e.g. useCountUp<HTMLParagraphElement>(…).
+export function useCountUp<T extends HTMLElement = HTMLSpanElement>(
+  target: number,
+  duration = 1800
+) {
   const [value, setValue] = useState(0)
-  const ref = useRef<HTMLSpanElement>(null)
+  const ref = useRef<T>(null)
   const started = useRef(false)
 
   useEffect(() => {

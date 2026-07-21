@@ -102,7 +102,7 @@ export async function PUT(
       return null
     }
 
-    const createdRecords = []
+    const createdRecords: Awaited<ReturnType<typeof db.dnsRecord.create>>[] = []
     for (const record of records) {
       if (!record.type || !record.name || !record.value) {
         continue

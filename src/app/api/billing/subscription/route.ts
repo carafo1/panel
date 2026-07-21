@@ -6,8 +6,7 @@ import {
   createCustomer,
   createSubscription,
   cancelSubscription,
-  isStripeDemoMode,
-} from '@/lib/stripe'
+  isStripeDemoMode, getSubscriptionPeriod } from '@/lib/stripe'
 import { createNotification } from '@/lib/notifications'
 
 export async function GET(request: Request) {
@@ -188,12 +187,11 @@ export async function POST(request: Request) {
           priceId: resolvedPriceId,
         })
         stripeSubId = stripeSub.id
-        if (stripeSub.current_period_start) {
-          periodStart = new Date(stripeSub.current_period_start * 1000)
-        }
-        if (stripeSub.current_period_end) {
-          periodEnd = new Date(stripeSub.current_period_end * 1000)
-        }
+        // Period lives on the subscription ITEM in current Stripe API
+        // versions; see getSubscriptionPeriod.
+        const period = getSubscriptionPeriod(stripeSub)
+        if (period.start) periodStart = period.start
+        if (period.end) periodEnd = period.end
       } catch (err) {
         console.error('[subscription] createSubscription failed:', err)
         return NextResponse.json(

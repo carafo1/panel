@@ -5,6 +5,7 @@ import { createNotification } from '@/lib/notifications'
 import { sendEmail } from '@/lib/email'
 import { runAutoRenewals, NOT_STRIPE_MANAGED } from '@/lib/renewals'
 import { collectAllUsage } from '@/lib/usage'
+import { recordHeartbeat } from '@/lib/health'
 
 /**
  * Billing sweep — subscription lifecycle enforcement.
@@ -204,6 +205,15 @@ export async function POST(request: Request) {
     if (renewals.renewed || renewals.failed || reminded.length || pastDue.length || suspended.length) {
       console.log('[billing-sweep]', JSON.stringify(summary))
     }
+
+    // Liveness beacon. This sweep silently never ran for weeks — first
+    // because it filtered out every subscription, then because the worker
+    // could not reach the panel at all. Recording each completion makes
+    // "renewals have not run since Tuesday" an answerable question.
+    await recordHeartbeat(
+      'billing',
+      `scanned=${subs.length} renewed=${renewals.renewed} usage=${usage.captured}`
+    )
 
     return NextResponse.json({ success: true, ...summary })
   } catch (error) {

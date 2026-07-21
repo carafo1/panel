@@ -24,9 +24,8 @@ function getClient(): Stripe | null {
   const key = getSecretKey()
   if (!key) return null
   if (!client) {
-    client = new Stripe(key, {
-      apiVersion: '2024-12-18.acacia' as Stripe.LatestApiVersion,
-    })
+    // No apiVersion override — the SDK pins the version it ships with.
+    client = new Stripe(key)
   }
   return client
 }
@@ -225,4 +224,70 @@ export async function retrieveCustomer(customerId: string): Promise<Stripe.Custo
   }
   const stripe = getClient()!
   return stripe.customers.retrieve(customerId)
+}
+
+/**
+ * Billing period for a subscription, across Stripe API versions.
+ *
+ * Stripe moved `current_period_start` / `current_period_end` OFF the
+ * Subscription object and onto each subscription item. Code reading the
+ * top-level fields against SDK v22 doesn't just fail to typecheck — it reads
+ * `undefined` at runtime, so the local subscription silently ends up with no
+ * period and the billing sweep can't reason about expiry.
+ *
+ * Reads the item first, then falls back to the legacy top-level field so this
+ * keeps working whichever API version the account is pinned to.
+ */
+export function getSubscriptionPeriod(
+  sub: Stripe.Subscription | null | undefined
+): { start?: Date; end?: Date } {
+  if (!sub) return {}
+
+  const item = sub.items?.data?.[0] as
+    | { current_period_start?: number; current_period_end?: number }
+    | undefined
+  const legacy = sub as unknown as {
+    current_period_start?: number
+    current_period_end?: number
+  }
+
+  const startSec = item?.current_period_start ?? legacy.current_period_start
+  const endSec = item?.current_period_end ?? legacy.current_period_end
+
+  return {
+    start: typeof startSec === 'number' ? new Date(startSec * 1000) : undefined,
+    end: typeof endSec === 'number' ? new Date(endSec * 1000) : undefined,
+  }
+}
+
+/**
+ * Subscription id attached to an invoice, across Stripe API versions.
+ *
+ * `invoice.subscription` was removed in newer versions; the link now lives at
+ * `invoice.parent.subscription_details.subscription`. Reading the old field
+ * returns undefined, which silently detaches every invoice webhook from its
+ * subscription — payments would be recorded against nothing.
+ */
+export function getInvoiceSubscriptionId(
+  invoice: Stripe.Invoice | null | undefined
+): string | null {
+  if (!invoice) return null
+  const inv = invoice as unknown as {
+    subscription?: string | { id?: string }
+    parent?: { subscription_details?: { subscription?: string | { id?: string } } }
+  }
+  const raw = inv.parent?.subscription_details?.subscription ?? inv.subscription
+  if (!raw) return null
+  return typeof raw === 'string' ? raw : (raw.id ?? null)
+}
+
+/** Charge id for an invoice; removed from the Invoice object in newer versions. */
+export function getInvoiceChargeId(
+  invoice: Stripe.Invoice | null | undefined
+): string | null {
+  if (!invoice) return null
+  const inv = invoice as unknown as { charge?: string | { id?: string } }
+  const raw = inv.charge
+  if (!raw) return null
+  return typeof raw === 'string' ? raw : (raw.id ?? null)
 }

@@ -13,7 +13,19 @@ async function resolveOwnedMonitor(
 ): Promise<
   | {
       ok: true
-      monitor: Awaited<ReturnType<typeof db.uptimeMonitor.findUnique>>
+      // The query includes the project relation; the bare findUnique return
+      // type does not, which is why callers needed `monitor!.project`.
+      monitor: NonNullable<
+        Awaited<ReturnType<typeof db.uptimeMonitor.findUnique>>
+      > & {
+        project: {
+          id: string
+          name: string
+          userId: string
+          subdomain: string
+          customDomain: string | null
+        }
+      }
     }
   | { ok: false; response: NextResponse }
 > {

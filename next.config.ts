@@ -4,7 +4,12 @@ const nextConfig: NextConfig = {
   output: "standalone",
   /* config options here */
   typescript: {
-    ignoreBuildErrors: true,
+    // Type errors now FAIL the build. This was `true`, which hid 106 errors —
+    // among them a 2FA handler calling an out-of-scope setter (so enabling 2FA
+    // reported "Verification failed" after succeeding), a Stripe field that
+    // moved onto subscription items (periods silently read undefined), and a
+    // domain import attributing rows to a non-existent user id.
+    ignoreBuildErrors: false,
   },
   reactStrictMode: false,
   // SECURITY: hide Next.js version from HTTP response headers

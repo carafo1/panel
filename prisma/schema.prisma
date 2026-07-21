@@ -1426,3 +1426,22 @@ model IpBlock {
 
   @@index([projectId])
 }
+
+// Liveness beacons for background work.
+//
+// A systemd service reporting "active" proves only that a process exists —
+// the worker sat "active" for days while every tick failed, because failures
+// were logged to a file nobody watched. Each tick now stamps a row here, so
+// "last successful billing sweep was 9 hours ago" is a question the system
+// can actually answer.
+model Heartbeat {
+  // Stable name of the beat: "jobs", "monitors", "billing", "usage".
+  key       String   @id
+  at        DateTime @updatedAt
+  // Free-form summary of the last run (counts, errors) for the health UI.
+  detail    String?
+  // Consecutive failures; reset to 0 on success.
+  failures  Int      @default(0)
+  lastError String?
+  createdAt DateTime @default(now())
+}

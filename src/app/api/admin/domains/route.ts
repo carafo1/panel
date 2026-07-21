@@ -95,11 +95,17 @@ export async function GET(request: Request) {
       try {
         // Find a system admin user to attribute newly-discovered domains to.
         // If none exists, fall back to the requesting admin.
-        const ownerUser =
-          (await db.user.findFirst({
-            where: { role: { in: ['super_admin', 'admin'] } },
-            orderBy: { createdAt: 'asc' },
-          })) || user
+        // NOTE: the fallback is the decoded token, whose id field is
+        // `userId` — reading `.id` on it gave undefined and Prisma would
+        // reject the create with a missing required relation.
+        const ownerUserId =
+          (
+            await db.user.findFirst({
+              where: { role: { in: ['super_admin', 'admin'] } },
+              orderBy: { createdAt: 'asc' },
+              select: { id: true },
+            })
+          )?.id ?? user.userId
 
         // ── 1. Registered domains (list_domain) ──────────────────────────
         const { main, deleted } = await listDomains()
@@ -154,7 +160,7 @@ export async function GET(request: Request) {
                 status: st,
                 registrar: 'dynadot',
                 provider: 'dynadot',
-                userId: ownerUser.id,
+                userId: ownerUserId,
                 registeredAt: d.registeredAt ? new Date(d.registeredAt) : new Date(),
                 expiresAt: d.expiresAt ? new Date(d.expiresAt) : null,
                 autoRenew: d.autoRenew,
@@ -204,7 +210,7 @@ export async function GET(request: Request) {
                 externalId: t.orderId,
                 registrar: 'dynadot',
                 provider: 'dynadot',
-                userId: ownerUser.id,
+                userId: ownerUserId,
                 registeredAt: t.submittedDate
                   ? new Date(t.submittedDate.replace(/\//g, '-'))
                   : new Date(),

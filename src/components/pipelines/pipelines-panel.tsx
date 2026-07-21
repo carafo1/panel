@@ -304,7 +304,7 @@ function createDefaultStage(type: PipelineStage['type'], order: number): Pipelin
 
 /** Migrate old-style stages (no id, command as config.command) to new format */
 function migrateStages(raw: unknown[]): PipelineStage[] {
-  return raw.map((s: Record<string, unknown>, i: number) => ({
+  return (raw as Record<string, unknown>[]).map((s, i) => ({
     id: (s.id as string) || generateStageId(),
     name: (s.name as string) || `Stage ${i + 1}`,
     type: (s.type as PipelineStage['type']) || 'custom',
