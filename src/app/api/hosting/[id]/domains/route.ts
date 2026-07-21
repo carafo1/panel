@@ -3,6 +3,15 @@ import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
 import { isAdmin } from '@/lib/security'
 import { logAudit } from '@/lib/audit'
+import {
+  isValidHostname,
+  isReservedHostname,
+  findConflict,
+  generateVerificationToken,
+  getServerIps,
+  VERIFY_PREFIX,
+} from '@/lib/custom-domains'
+import { BRAND_DOMAIN } from '@/lib/brand-config'
 
 /**
  * Project Domains Endpoint (collection)
@@ -45,6 +54,10 @@ export async function GET(
       sslStatus: string
       verified: boolean
       createdAt: string
+      verificationToken?: string | null
+      verifiedAt?: string | null
+      verificationMethod?: string | null
+      lastCheckError?: string | null
     }> = []
 
     if (project.customDomain) {
@@ -67,10 +80,20 @@ export async function GET(
         sslStatus: r.sslStatus,
         verified: r.verified,
         createdAt: r.createdAt.toISOString(),
+        // Exact records the customer must publish. Returned here so the UI
+        // shows real values instead of a "your.server.ip" placeholder.
+        verificationToken: r.verified ? null : r.verificationToken,
+        verifiedAt: r.verifiedAt ? r.verifiedAt.toISOString() : null,
+        verificationMethod: r.verificationMethod,
+        lastCheckError: r.verified ? null : r.lastCheckError,
       })
     }
 
-    return NextResponse.json({ domains })
+    return NextResponse.json({
+      domains,
+      // Where an A record should point, and the TXT hostname prefix.
+      dnsTarget: { ips: await getServerIps(), txtPrefix: VERIFY_PREFIX },
+    })
   } catch (error) {
     console.error('List project domains error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
@@ -100,17 +123,48 @@ export async function POST(
     const sslEnabled = body.sslEnabled !== false // default true
     const isPrimary = body.isPrimary === true
 
-    // Reject duplicates.
-    const dup = await db.websiteDomain.findFirst({ where: { projectId, domain } })
-    if (dup) {
+    if (!isValidHostname(domain)) {
       return NextResponse.json(
-        { error: `Domain ${domain} is already attached to this project` },
-        { status: 409 }
+        { error: `"${domain}" is not a valid domain name.` },
+        { status: 400 }
       )
     }
+
+    // Platform-owned hostnames are never claimable: serving the control
+    // panel's own name from a customer container is a phishing risk.
+    if (isReservedHostname(domain, BRAND_DOMAIN)) {
+      return NextResponse.json(
+        {
+          error: `${domain} belongs to the platform and cannot be attached. Use your own domain.`,
+        },
+        { status: 400 }
+      )
+    }
+
     if (project.customDomain === domain) {
       return NextResponse.json(
         { error: `${domain} is already the project's primary domain` },
+        { status: 409 }
+      )
+    }
+
+    // SECURITY: platform-wide conflict check, not per-project. The previous
+    // check only looked within this project, so a second tenant could claim a
+    // domain already serving someone else here and take over its traffic.
+    const conflict = await findConflict(domain, projectId)
+    if (conflict.conflict) {
+      return NextResponse.json(
+        {
+          error: `${domain} is already in use on this platform. If you own it, remove it from the other website first or contact support.`,
+        },
+        { status: 409 }
+      )
+    }
+
+    const ownDup = await db.websiteDomain.findFirst({ where: { projectId, domain } })
+    if (ownDup) {
+      return NextResponse.json(
+        { error: `Domain ${domain} is already attached to this project` },
         { status: 409 }
       )
     }
@@ -123,24 +177,24 @@ export async function POST(
       })
     }
 
+    const verificationToken = generateVerificationToken()
+
     const row = await db.websiteDomain.create({
       data: {
         projectId,
         domain,
         isPrimary,
         sslEnabled,
-        sslStatus: sslEnabled ? 'pending' : 'none',
+        sslStatus: 'none',
         verified: false,
+        verificationToken,
       },
     })
 
-    // If isPrimary, also update the project.customDomain for back-compat.
-    if (isPrimary) {
-      await db.project.update({
-        where: { id: projectId },
-        data: { customDomain: domain },
-      })
-    }
+    // NOTE: `project.customDomain` is deliberately NOT written here, even for
+    // a primary. That column is what the Caddy generator emits, so writing it
+    // now would serve an unverified hostname. It is set by the verify
+    // endpoint once ownership is proven.
 
     await logAudit({
       userId: decoded.userId,
@@ -161,6 +215,23 @@ export async function POST(
           sslStatus: row.sslStatus,
           verified: row.verified,
           createdAt: row.createdAt.toISOString(),
+        },
+        // Everything the customer needs to complete setup at their registrar.
+        // Returned on attach so the UI never has to guess or hardcode it.
+        setup: {
+          status: 'pending_verification',
+          message:
+            'Add ONE of these at your domain registrar, then press Verify. The site goes live once ownership is confirmed.',
+          txtRecord: {
+            type: 'TXT',
+            name: `${VERIFY_PREFIX}.${row.domain}`,
+            value: verificationToken,
+          },
+          aRecord: {
+            type: 'A',
+            name: row.domain,
+            value: await getServerIps(),
+          },
         },
       },
       { status: 201 }

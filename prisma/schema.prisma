@@ -434,17 +434,25 @@ model WebsiteBackup {
 model WebsiteDomain {
   id           String   @id @default(cuid())
   projectId    String
-  domain       String   // e.g. www.example.com, app.example.com
+  // Globally unique: without this two tenants could both attach the same
+  // domain, and whichever wrote `customDomain` last would serve traffic on
+  // the other's hostname. The per-project constraint alone did not stop that.
+  domain       String   @unique
   isPrimary    Boolean  @default(false)
   sslEnabled   Boolean  @default(true)
   sslStatus    String   @default("none") // none, pending, issued, failed, renewing
+  // A domain is only added to the reverse proxy once ownership is proven.
   verified     Boolean  @default(false)
-  verificationMethod String? // dns-txt, a-record, cname
+  verificationMethod String? // dns-txt, a-record
+  /// Random value the owner publishes as a TXT record to prove control.
+  verificationToken String?
+  verifiedAt   DateTime?
+  lastCheckedAt DateTime?
+  lastCheckError String?
   createdAt    DateTime @default(now())
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
-  @@unique([projectId, domain])
   @@index([projectId])
 }
 

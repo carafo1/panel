@@ -319,6 +319,10 @@ interface WebsiteDomain {
   sslStatus: string // none | pending | issued | failed | renewing
   verified: boolean
   verificationMethod?: string | null
+  /** Present only while unverified — the value to publish as TXT. */
+  verificationToken?: string | null
+  verifiedAt?: string | null
+  lastCheckError?: string | null
   createdAt: string
 }
 
@@ -2990,6 +2994,14 @@ export function DomainsTab({
   onProjectChanged?: () => void
 }) {
   const [domains, setDomains] = useState<WebsiteDomain[]>([])
+  /** Where an A record should point + the TXT prefix, from the API. */
+  const [dnsTarget, setDnsTarget] = useState<{ ips: string[]; txtPrefix: string } | null>(null)
+  /** DNS records still required, returned by a failed verification attempt. */
+  const [verifyHint, setVerifyHint] = useState<{
+    message: string
+    txt: { type: string; name: string; value: string } | null
+    a: { type: string; name: string; value: string[] } | null
+  } | null>(null)
   const [loading, setLoading] = useState(true)
   const [createOpen, setCreateOpen] = useState(false)
   const [createDomain, setCreateDomain] = useState('')
@@ -3011,6 +3023,7 @@ export function DomainsTab({
       const data = await res.json()
       if (res.ok) {
         setDomains(data.domains || [])
+        setDnsTarget(data.dnsTarget || null)
       } else {
         toast.error(data.error || 'Failed to load domains')
       }
@@ -3092,21 +3105,37 @@ export function DomainsTab({
     }
   }
 
+  /**
+   * Ask the server to prove domain ownership via DNS.
+   *
+   * This previously PATCHed `{ verified: true }` — the client simply asserting
+   * it was verified, which the API accepted. Real verification now happens
+   * server-side against DNS; a failure returns the records still to be added.
+   */
   const handleVerify = async () => {
     if (!verifyDomain) return
     setVerifying(true)
     try {
-      const res = await fetch(`/api/hosting/${projectId}/domains/${verifyDomain.id}`, {
-        method: 'PATCH',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ verified: true }),
-      })
+      const res = await fetch(
+        `/api/hosting/${projectId}/domains/${verifyDomain.id}/verify`,
+        { method: 'POST', headers: getAuthHeaders() }
+      )
       const data = await res.json()
-      if (res.ok) {
-        toast.success('Domain verified')
+      if (res.ok && data.verified) {
+        toast.success(data.message || 'Domain verified — now live.')
         setVerifyDomain(null)
+        setVerifyHint(null)
         fetchDomains()
         onProjectChanged?.()
+      } else if (res.ok) {
+        // Not an error: DNS just hasn't propagated yet. Keep the dialog open
+        // and show exactly what still needs adding.
+        toast.message(data.message || 'Not verified yet')
+        setVerifyHint({
+          message: data.message || '',
+          txt: data.txtRecord || null,
+          a: data.aRecord || null,
+        })
       } else {
         toast.error(data.error || 'Verification failed')
       }
@@ -3441,22 +3470,49 @@ export function DomainsTab({
           </DialogHeader>
           <div className="space-y-3 py-2 text-sm">
             <p className="text-muted-foreground">
-              Point one of these DNS records at your server, then click
-              &ldquo;Verify Now&rdquo;.
+              Add <strong>one</strong> of these records at your domain
+              registrar, then press Verify. We check DNS ourselves — the site
+              goes live only once ownership is confirmed.
             </p>
-            <div className="rounded-md border p-3 font-mono text-xs space-y-1">
-              <div>
-                <span className="text-muted-foreground">A &nbsp;&nbsp;</span>
-                {verifyDomain?.domain} → <span className="font-medium">your.server.ip</span>
-              </div>
-              <div>
-                <span className="text-muted-foreground">CNAME</span>
-                {verifyDomain?.domain} → <span className="font-medium">{subdomainHint}</span>
+
+            {/* Option A: TXT challenge — provable before moving live traffic. */}
+            <div className="rounded-md border p-3 space-y-1.5">
+              <p className="text-xs font-medium">Option 1 — TXT record</p>
+              <div className="font-mono text-[11px] space-y-0.5 break-all">
+                <div>
+                  <span className="text-muted-foreground">Name: </span>
+                  {dnsTarget?.txtPrefix ?? '_apsamo-verify'}.{verifyDomain?.domain}
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Value: </span>
+                  {verifyDomain?.verificationToken || '—'}
+                </div>
               </div>
             </div>
+
+            {/* Option B: already pointing here is itself proof of control. */}
+            <div className="rounded-md border p-3 space-y-1.5">
+              <p className="text-xs font-medium">Option 2 — A record (also makes it live)</p>
+              <div className="font-mono text-[11px] space-y-0.5 break-all">
+                <div>
+                  <span className="text-muted-foreground">Name: </span>
+                  {verifyDomain?.domain}
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Value: </span>
+                  {dnsTarget?.ips?.length ? dnsTarget.ips.join(', ') : '—'}
+                </div>
+              </div>
+            </div>
+
+            {verifyHint?.message && (
+              <p className="rounded-md border border-amber-500/40 bg-amber-500/5 p-2 text-xs text-amber-700 dark:text-amber-400">
+                {verifyHint.message}
+              </p>
+            )}
+
             <p className="text-xs text-muted-foreground">
-              DNS propagation may take a few minutes. Once your record is live,
-              click below to mark the domain as verified.
+              DNS changes can take up to an hour to propagate.
             </p>
           </div>
           <DialogFooter>
