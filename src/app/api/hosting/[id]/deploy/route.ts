@@ -31,9 +31,20 @@ export async function POST(
       )
     }
 
-    if (project.status !== 'running') {
+    // A failed install leaves the project in `error`, and a fresh one sits in
+    // `creating` — both are exactly the states the "Retry Installation" button
+    // is offered from. Requiring `running` made that button permanently dead:
+    // the only way to reach it is a failure, and a failure disqualifies you.
+    // `deploying` is excluded so a concurrent deploy isn't started twice.
+    const DEPLOYABLE = ['running', 'stopped', 'error', 'creating']
+    if (!DEPLOYABLE.includes(project.status)) {
       return NextResponse.json(
-        { error: 'Project must be running to deploy' },
+        {
+          error:
+            project.status === 'deploying'
+              ? 'A deployment is already in progress for this project.'
+              : `Project cannot be deployed while its status is "${project.status}".`,
+        },
         { status: 400 }
       )
     }

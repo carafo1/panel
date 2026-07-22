@@ -1239,16 +1239,67 @@ export async function getContainerLogs(
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
+/**
+ * Choose a free host port for a new container.
+ *
+ * The HOST is authoritative, not the database. Consulting only `Project.
+ * externalPort` handed out a port that Docker had already bound, and the
+ * deploy died with "Bind for 0.0.0.0:30000 failed: port is already
+ * allocated". Two ways the DB lies:
+ *
+ *   - a running container whose `externalPort` was never persisted (a
+ *     manually started or partially-failed deploy), and
+ *   - orphan containers with no Project row at all.
+ *
+ * Both are invisible to a DB-only query, so the port list is taken from
+ * Docker and the kernel as well. If the host can't be reached we fall back to
+ * the DB — a deploy that might collide beats refusing to deploy at all — and
+ * the caller surfaces Docker's error if it does.
+ */
 async function pickExternalPort(serverId: string): Promise<number> {
+  const used = new Set<number>()
+
   const projects = await db.project.findMany({
     where: { serverId, externalPort: { not: null } },
     select: { externalPort: true },
   })
-  const usedPorts = new Set(projects.map((p) => p.externalPort!))
-  for (let port = 30000; port < 40000; port++) {
-    if (!usedPorts.has(port)) return port
+  for (const p of projects) used.add(p.externalPort!)
+
+  try {
+    const server = await db.server.findUnique({ where: { id: serverId } })
+    if (server && !isServerInDemoMode(server)) {
+      const creds = await getServerCredentials(serverId)
+      await withConnection(creds, async (client) => {
+        // Every published container port, including stopped containers (a
+        // stopped container still reserves nothing, but a `docker start`
+        // would), and every port the kernel currently has bound.
+        const [ports, listening] = await Promise.all([
+          exec(client, "docker ps -a --format '{{.Ports}}'", { timeoutMs: 15000 }),
+          exec(client, 'ss -ltnH 2>/dev/null || netstat -ltn', { timeoutMs: 15000 }),
+        ])
+        for (const m of ports.stdout.matchAll(/:(\d{4,5})->/g)) {
+          used.add(parseInt(m[1], 10))
+        }
+        for (const m of listening.stdout.matchAll(/[:.](\d{4,5})\s/g)) {
+          used.add(parseInt(m[1], 10))
+        }
+      })
+    }
+  } catch (err) {
+    console.error(
+      '[deployer] could not read ports from host, falling back to DB only:',
+      err instanceof Error ? err.message : err
+    )
   }
-  return 30000 + Math.floor(Math.random() * 9999)
+
+  for (let port = 30000; port < 40000; port++) {
+    if (!used.has(port)) return port
+  }
+  // Previously returned a RANDOM port here, which could collide just as
+  // easily. Failing loudly is better than a confusing bind error later.
+  throw new Error(
+    'No free host port available in the 30000-39999 range on this server.'
+  )
 }
 
 async function getProjectEnvVars(projectId: string): Promise<Record<string, string>> {
@@ -1528,7 +1579,12 @@ services:
       WORDPRESS_DB_HOST: ${dbHost}:3306
       WORDPRESS_DB_USER: ${project.databaseUser || 'wp'}
       WORDPRESS_DB_NAME: ${project.databaseName || 'wp'}
-      WORDPRESS_DB_PASSWORD: \${WP_DB_PASSWORD}
+      # No WORDPRESS_DB_PASSWORD here on purpose. The real credential is
+      # written into wp-config-docker.php (mounted over wp-config.php), which
+      # is what WordPress actually reads. This previously referenced an
+      # undefined ${'$'}{WP_DB_PASSWORD}, so Compose printed
+      # "variable is not set. Defaulting to a blank string" in the customer's
+      # install log — alarming, and it looked like the cause of the failure.
 ${env ? env + '\n' : ''}    volumes:
       - ./wp-content:/var/www/html/wp-content
       - ./wp-config-docker.php:/var/www/html/wp-config.php
