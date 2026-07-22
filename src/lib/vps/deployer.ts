@@ -1115,22 +1115,60 @@ export async function removeProjectContainer(projectId: string): Promise<{ ok: b
   // Remove Caddy config first
   await removeProjectProxy(projectId).catch(() => {})
 
-  if (!isServerInDemoMode(project.server) && project.containerName) {
+  // The container name is derived, NOT trusted from the row.
+  //
+  // This used to be gated on `project.containerName`, so a project whose
+  // containerName was never persisted (a partially-failed deploy, or one
+  // started outside the normal path) skipped teardown entirely — and the
+  // function still returned {ok: true, message: 'Container removed'}. The
+  // container kept running, holding its host port forever. Three such orphans
+  // had accumulated on production, and two of them held the exact ports that
+  // later broke a WordPress install with "port is already allocated".
+  const containerName = project.containerName || `deployhub-${project.slug}`
+  let removalVerified = false
+
+  if (!isServerInDemoMode(project.server) && project.serverId) {
     try {
-      const creds = await getServerCredentials(project.serverId!)
+      const creds = await getServerCredentials(project.serverId)
       await withConnection(creds, async (client) => {
+        // Preferred: compose down, which also removes networks and volumes.
+        if (project.deployPath) {
+          await exec(
+            client,
+            `cd ${shellQuote(project.deployPath)} && docker compose down --rmi local -v 2>&1 || true`,
+            { timeoutMs: 60000 }
+          )
+        }
+        // Belt and braces: compose only removes what its file declares, and
+        // the deploy path may be gone. Force-remove by name too.
+        await exec(client, `docker rm -f ${shellQuote(containerName)} 2>&1 || true`, {
+          timeoutMs: 30000,
+        })
+        // Any sibling containers from the same compose project (e.g. the
+        // WordPress DB) share the name prefix.
         await exec(
           client,
-          `cd ${shellQuote(project.deployPath || '.')} && docker compose down --rmi local -v 2>&1 || true`,
-          { timeoutMs: 60000 }
+          `docker ps -aq --filter name=^${shellQuote(containerName)} | xargs -r docker rm -f 2>&1 || true`,
+          { timeoutMs: 30000 }
         )
         if (project.deployPath) {
           await exec(client, `rm -rf ${shellQuote(project.deployPath)}`, { timeoutMs: 30000 })
         }
+        // Confirm rather than assume — this function previously reported
+        // success without checking anything.
+        const check = await exec(
+          client,
+          `docker ps -aq --filter name=^${shellQuote(containerName)}$ | wc -l`,
+          { timeoutMs: 15000 }
+        )
+        removalVerified = check.stdout.trim() === '0'
       })
     } catch (err) {
       console.error('[vps-deploy] remove container error:', err)
     }
+  } else {
+    // Demo mode / no server: nothing to tear down.
+    removalVerified = true
   }
 
   await db.project.update({
@@ -1146,7 +1184,12 @@ export async function removeProjectContainer(projectId: string): Promise<{ ok: b
       sslCertExpiry: null,
     },
   })
-  return { ok: true, message: 'Container removed' }
+  return removalVerified
+    ? { ok: true, message: 'Container removed' }
+    : {
+        ok: false,
+        message: `Project record cleaned up, but container ${containerName} could not be confirmed removed on the server — check for an orphan holding its port.`,
+      }
 }
 
 // ─── Container status ────────────────────────────────────────────────────

@@ -166,6 +166,8 @@ export interface DomainSweepResult {
   connected: number
   stillPending: number
   failed: number
+  /** Domains whose certificate was confirmed working this run. */
+  sslConfirmed: number
 }
 
 /**
@@ -203,8 +205,47 @@ export async function sweepPendingDomains(): Promise<DomainSweepResult> {
     })
     .catch(() => [])
 
+  // Verified domains whose certificate hasn't been confirmed yet. Caddy
+  // issues lazily on first request, so an unvisited domain would sit in
+  // `pending` forever — the probe both triggers issuance and confirms it.
+  const awaitingSsl = await db.websiteDomain
+    .findMany({
+      where: { verified: true, sslEnabled: true, sslStatus: { in: ['pending', 'failed'] } },
+      select: { id: true, domain: true, projectId: true, project: { select: { userId: true, name: true } } },
+      take: 50,
+    })
+    .catch(() => [])
+
+  let sslConfirmed = 0
+  for (const row of awaitingSsl) {
+    const probe = await probeHttps(row.domain)
+    if (probe.ok) {
+      await db.websiteDomain
+        .update({
+          where: { id: row.id },
+          data: { sslStatus: 'issued', lastCheckedAt: new Date(), lastCheckError: null },
+        })
+        .catch(() => {})
+      sslConfirmed++
+      await createNotification({
+        userId: row.project.userId,
+        title: 'Website Live',
+        message: `${row.domain} is live over HTTPS with a valid certificate.`,
+        type: 'success',
+        link: '/?tab=hosting',
+      }).catch(() => {})
+    } else {
+      await db.websiteDomain
+        .update({
+          where: { id: row.id },
+          data: { lastCheckedAt: new Date(), lastCheckError: probe.error?.slice(0, 300) ?? null },
+        })
+        .catch(() => {})
+    }
+  }
+
   if (pending.length === 0) {
-    return { checked: 0, connected: 0, stillPending: 0, failed: 0 }
+    return { checked: 0, connected: 0, stillPending: 0, failed: 0, sslConfirmed }
   }
 
   const serverIps = await getServerIps()
@@ -301,5 +342,137 @@ export async function sweepPendingDomains(): Promise<DomainSweepResult> {
     connected,
     stillPending: pending.length - connected - failed,
     failed,
+    sslConfirmed,
+  }
+}
+
+/* ────────────────────────────────────────────────────────────────────
+ * Connection status
+ * ──────────────────────────────────────────────────────────────────── */
+
+export type ConnectionStage =
+  | 'awaiting_dns'
+  | 'dns_verified'
+  | 'issuing_ssl'
+  | 'live'
+  | 'blocked'
+
+export interface ConnectionStatus {
+  stage: ConnectionStage
+  label: string
+  detail: string
+  /** 0-100, for a progress indicator. */
+  percent: number
+  /** True while the customer still has something to do. */
+  needsAction: boolean
+}
+
+/**
+ * Human-readable connection state for one custom domain.
+ *
+ * Derived from what has actually been observed, never assumed: `live` means
+ * an HTTPS request to the domain succeeded, not merely that the hostname was
+ * written into the Caddy config.
+ */
+export function describeConnection(row: {
+  verified: boolean
+  sslEnabled: boolean
+  sslStatus: string
+  lastCheckError?: string | null
+}): ConnectionStatus {
+  if (!row.verified) {
+    const blocked = (row.lastCheckError || '').includes('in use by another')
+    if (blocked) {
+      return {
+        stage: 'blocked',
+        label: 'Blocked',
+        detail: row.lastCheckError || 'This domain is in use elsewhere on the platform.',
+        percent: 0,
+        needsAction: true,
+      }
+    }
+    return {
+      stage: 'awaiting_dns',
+      label: 'Waiting for DNS',
+      detail:
+        row.lastCheckError ||
+        'Add the DNS record shown below. We check every couple of minutes.',
+      percent: 10,
+      needsAction: true,
+    }
+  }
+
+  if (!row.sslEnabled) {
+    return {
+      stage: 'live',
+      label: 'Website Live',
+      detail: 'Serving over HTTP (SSL disabled for this domain).',
+      percent: 100,
+      needsAction: false,
+    }
+  }
+
+  if (row.sslStatus === 'issued') {
+    return {
+      stage: 'live',
+      label: 'Website Live',
+      detail: 'Verified, serving over HTTPS with a valid certificate.',
+      percent: 100,
+      needsAction: false,
+    }
+  }
+
+  if (row.sslStatus === 'failed') {
+    return {
+      stage: 'issuing_ssl',
+      label: 'SSL Failed',
+      detail:
+        'DNS is correct and the site is served, but the certificate could not be issued yet. This usually resolves itself; Let’s Encrypt rate limits can delay it.',
+      percent: 75,
+      needsAction: false,
+    }
+  }
+
+  return {
+    stage: 'issuing_ssl',
+    label: 'Issuing SSL',
+    detail:
+      'DNS verified and the domain is being served. The certificate is issued on the first HTTPS request — usually seconds.',
+    percent: 75,
+    needsAction: false,
+  }
+}
+
+/**
+ * Confirm HTTPS actually works for a domain.
+ *
+ * Caddy obtains certificates lazily, on the first request for a hostname, so
+ * a domain can sit in `pending` forever if nobody visits it. This both
+ * TRIGGERS issuance and verifies the result: a successful TLS handshake is
+ * proof the certificate exists, which "we added it to the config" is not.
+ */
+export async function probeHttps(
+  domain: string
+): Promise<{ ok: boolean; status?: number; error?: string }> {
+  try {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 20_000)
+    try {
+      const res = await fetch(`https://${domain}/`, {
+        method: 'HEAD',
+        redirect: 'manual',
+        signal: controller.signal,
+      })
+      // Any HTTP status means the TLS handshake completed, which is the thing
+      // being tested. A 404 from the app still proves the certificate works.
+      return { ok: true, status: res.status }
+    } finally {
+      clearTimeout(timer)
+    }
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message.slice(0, 200) : String(err),
+    }
   }
 }

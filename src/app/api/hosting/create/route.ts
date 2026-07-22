@@ -6,7 +6,7 @@ import { encrypt } from '@/lib/encryption'
 import { logAudit } from '@/lib/audit'
 import { deployProject } from '@/lib/vps'
 import { getDeploymentMethod, type DeploymentMethodId } from '@/lib/deployment-methods'
-import { BRAND_DOMAIN, NS1_HOSTNAME, NS2_HOSTNAME } from '@/lib/brand-config'
+import { BRAND_DOMAIN } from '@/lib/brand-config'
 import {
   isValidHostname,
   isReservedHostname,
@@ -393,7 +393,6 @@ async function handleWizardCreate(
     domain: string
     txtRecord: { type: string; name: string; value: string }
     aRecord: { type: string; name: string; value: string[] }
-    nameservers: string[]
   } | null = null
 
   if (externalDomain) {
@@ -418,7 +417,14 @@ async function handleWizardCreate(
           value: token,
         },
         aRecord: { type: 'A', name: externalDomain, value: await getServerIps() },
-        nameservers: [NS1_HOSTNAME, NS2_HOSTNAME],
+        // DELIBERATELY NO NAMESERVER OPTION.
+        //
+        // ns1/ns2.apsamo.com have A records but nothing authoritative listens
+        // on port 53 — `dig @ns1.apsamo.com` returns "connection refused".
+        // Telling a customer to delegate to them would stop their domain
+        // resolving entirely: website, email, every subdomain. Offering NS
+        // delegation requires actually running authoritative DNS (PowerDNS or
+        // similar) plus glue records at the registrar.
       }
     } catch (err) {
       // Never fail the whole site creation over the domain attachment — the

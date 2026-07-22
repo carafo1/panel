@@ -19,6 +19,7 @@ import {
   isValidHostname,
   isReservedHostname,
   generateVerificationToken,
+  describeConnection,
 } from '../../src/lib/custom-domains'
 
 describe('custom domain hostname validation', () => {
@@ -68,5 +69,63 @@ describe('custom domain hostname validation', () => {
     expect(a.startsWith('apsamo-verify-')).toBe(true)
     // 16 random bytes as hex.
     expect(a.length).toBeGreaterThanOrEqual('apsamo-verify-'.length + 32)
+  })
+})
+
+/**
+ * The connection pipeline shown to the customer.
+ *
+ * "Live" must mean an HTTPS request actually succeeded — not merely that the
+ * hostname was written into a config file. The stage is derived from observed
+ * facts, so these tests pin that a domain cannot appear Live prematurely.
+ */
+describe('connection pipeline stages', () => {
+  const base = { verified: false, sslEnabled: true, sslStatus: 'none' as string }
+
+  it('starts at Waiting for DNS and asks the customer to act', () => {
+    const c = describeConnection(base)
+    expect(c.stage).toBe('awaiting_dns')
+    expect(c.needsAction).toBe(true)
+    expect(c.percent).toBeLessThan(50)
+  })
+
+  it('surfaces the DNS reason when there is one', () => {
+    const c = describeConnection({
+      ...base,
+      lastCheckError: 'example.com currently points to 1.2.3.4, not to this server.',
+    })
+    expect(c.detail).toContain('1.2.3.4')
+  })
+
+  it('is NOT live once verified but before the certificate exists', () => {
+    const c = describeConnection({ ...base, verified: true, sslStatus: 'pending' })
+    expect(c.stage).toBe('issuing_ssl')
+    expect(c.stage).not.toBe('live')
+    expect(c.percent).toBeLessThan(100)
+  })
+
+  it('reaches Live only when the certificate is confirmed issued', () => {
+    const c = describeConnection({ ...base, verified: true, sslStatus: 'issued' })
+    expect(c.stage).toBe('live')
+    expect(c.percent).toBe(100)
+    expect(c.needsAction).toBe(false)
+  })
+
+  it('treats an SSL-disabled domain as live once verified', () => {
+    const c = describeConnection({
+      verified: true,
+      sslEnabled: false,
+      sslStatus: 'none',
+    })
+    expect(c.stage).toBe('live')
+  })
+
+  it('reports a cross-tenant clash as blocked, not merely pending', () => {
+    const c = describeConnection({
+      ...base,
+      lastCheckError: 'Domain is now in use by another site on this platform.',
+    })
+    expect(c.stage).toBe('blocked')
+    expect(c.needsAction).toBe(true)
   })
 })

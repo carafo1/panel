@@ -10,6 +10,7 @@ import {
   generateVerificationToken,
   getServerIps,
   VERIFY_PREFIX,
+  describeConnection,
 } from '@/lib/custom-domains'
 import { BRAND_DOMAIN } from '@/lib/brand-config'
 
@@ -58,6 +59,8 @@ export async function GET(
       verifiedAt?: string | null
       verificationMethod?: string | null
       lastCheckError?: string | null
+      lastCheckedAt?: string | null
+      connection?: ReturnType<typeof describeConnection>
     }> = []
 
     if (project.customDomain) {
@@ -85,7 +88,10 @@ export async function GET(
         verificationToken: r.verified ? null : r.verificationToken,
         verifiedAt: r.verifiedAt ? r.verifiedAt.toISOString() : null,
         verificationMethod: r.verificationMethod,
-        lastCheckError: r.verified ? null : r.lastCheckError,
+        lastCheckError: r.lastCheckError,
+        lastCheckedAt: r.lastCheckedAt ? r.lastCheckedAt.toISOString() : null,
+        // Derived stage for the connection pipeline in the UI.
+        connection: describeConnection(r),
       })
     }
 

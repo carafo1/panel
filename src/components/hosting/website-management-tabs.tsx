@@ -323,7 +323,85 @@ interface WebsiteDomain {
   verificationToken?: string | null
   verifiedAt?: string | null
   lastCheckError?: string | null
+  lastCheckedAt?: string | null
+  /** Server-derived pipeline stage. */
+  connection?: {
+    stage: 'awaiting_dns' | 'dns_verified' | 'issuing_ssl' | 'live' | 'blocked'
+    label: string
+    detail: string
+    percent: number
+    needsAction: boolean
+  }
   createdAt: string
+}
+
+/**
+ * The connection pipeline for a custom domain.
+ *
+ * Every stage reflects something OBSERVED: "Live" means an HTTPS request to
+ * the domain succeeded, not that the hostname was written to a config file.
+ */
+const CONNECTION_STEPS = [
+  { key: 'awaiting_dns', label: 'DNS' },
+  { key: 'dns_verified', label: 'Verified' },
+  { key: 'issuing_ssl', label: 'SSL' },
+  { key: 'live', label: 'Live' },
+] as const
+
+function ConnectionPipeline({ d }: { d: WebsiteDomain }) {
+  const conn = d.connection
+  if (!conn) return null
+  const reached =
+    conn.stage === 'live' ? 3
+      : conn.stage === 'issuing_ssl' ? 2
+      : conn.stage === 'dns_verified' ? 1
+      : 0
+  const blocked = conn.stage === 'blocked'
+
+  return (
+    <div className="mt-2 space-y-1.5">
+      <div className="flex items-center gap-1">
+        {CONNECTION_STEPS.map((step, i) => {
+          const done = !blocked && i <= reached
+          const current = !blocked && i === reached && conn.stage !== 'live'
+          return (
+            <div key={step.key} className="flex flex-1 items-center gap-1">
+              <div
+                className={`h-1.5 flex-1 rounded-full transition-all duration-500 ${
+                  blocked
+                    ? 'bg-red-500/30'
+                    : done
+                      ? 'bg-emerald-500'
+                      : 'bg-muted'
+                }`}
+                title={step.label}
+              />
+              {current && (
+                <Loader2 className="size-3 shrink-0 animate-spin text-muted-foreground" />
+              )}
+            </div>
+          )
+        })}
+      </div>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] font-medium">
+          {CONNECTION_STEPS.map((s) => s.label).join(' → ')}
+        </span>
+        <span
+          className={`text-[11px] ${
+            blocked
+              ? 'text-red-600 dark:text-red-400'
+              : conn.stage === 'live'
+                ? 'text-emerald-600 dark:text-emerald-400'
+                : 'text-muted-foreground'
+          }`}
+        >
+          {conn.label}
+        </span>
+      </div>
+      <p className="text-[11px] text-muted-foreground">{conn.detail}</p>
+    </div>
+  )
 }
 
 interface EmailMailbox {
@@ -3038,6 +3116,23 @@ export function DomainsTab({
     fetchDomains()
   }, [fetchDomains])
 
+  /**
+   * Poll while a domain is still connecting.
+   *
+   * The background sweep advances these stages on its own every couple of
+   * minutes, so the page must refresh itself — otherwise the customer stares
+   * at "Waiting for DNS" long after it has actually gone live. Polling stops
+   * once nothing is in flight, so a settled page makes no requests.
+   */
+  const connecting = domains.some(
+    (d) => d.connection && d.connection.stage !== 'live' && d.connection.stage !== 'blocked'
+  )
+  useEffect(() => {
+    if (!connecting) return
+    const t = setInterval(fetchDomains, 20_000)
+    return () => clearInterval(t)
+  }, [connecting, fetchDomains])
+
   const patchDomain = async (
     d: WebsiteDomain,
     body: { isPrimary?: boolean; sslEnabled?: boolean; verified?: boolean },
@@ -3276,6 +3371,11 @@ export function DomainsTab({
                         <Globe className="size-4 text-muted-foreground shrink-0" />
                         <span className="font-mono text-sm">{d.domain}</span>
                       </div>
+                      {/* Live connection pipeline. Only meaningful for a
+                          custom domain that is still being connected. */}
+                      {d.connection && d.connection.stage !== 'live' && (
+                        <ConnectionPipeline d={d} />
+                      )}
                     </TableCell>
                     <TableCell>
                       {d.isPrimary ? (

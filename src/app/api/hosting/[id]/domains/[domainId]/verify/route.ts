@@ -9,6 +9,8 @@ import {
   generateVerificationToken,
   findConflict,
   VERIFY_PREFIX,
+  probeHttps,
+  describeConnection,
 } from '@/lib/custom-domains'
 import { configureProjectProxy } from '@/lib/vps/proxy'
 
@@ -143,6 +145,24 @@ export async function POST(
       console.error('[domain-verify] proxy reload failed:', proxyDetail)
     }
 
+    // Trigger AND confirm the certificate in one step. Caddy issues lazily on
+    // the first request, so probing here means "Verify Now" usually lands the
+    // customer straight on Live instead of leaving them at "Issuing SSL".
+    let sslIssued = false
+    if (served && row.sslEnabled) {
+      const probe = await probeHttps(row.domain)
+      sslIssued = probe.ok
+      await db.websiteDomain
+        .update({
+          where: { id: row.id },
+          data: {
+            sslStatus: probe.ok ? 'issued' : 'pending',
+            lastCheckError: probe.ok ? null : (probe.error?.slice(0, 300) ?? null),
+          },
+        })
+        .catch(() => {})
+    }
+
     await logAudit({
       userId: decoded.userId,
       action: 'project.domain.verify',
@@ -152,13 +172,18 @@ export async function POST(
       metadata: { domain: row.domain, method: result.method, served },
     }).catch(() => {})
 
+    const fresh = await db.websiteDomain.findUnique({ where: { id: row.id } })
     return NextResponse.json({
       verified: true,
       method: result.method,
       served,
-      message: served
-        ? `${row.domain} is verified and now serving over HTTPS. The certificate is issued on the first request and may take a few seconds.`
-        : `${row.domain} is verified, but the web server could not be reloaded yet${proxyDetail ? `: ${proxyDetail}` : ''}. It will be picked up on the next deploy.`,
+      sslIssued,
+      connection: fresh ? describeConnection(fresh) : null,
+      message: !served
+        ? `${row.domain} is verified, but the web server could not be reloaded yet${proxyDetail ? `: ${proxyDetail}` : ''}. It will be picked up on the next deploy.`
+        : sslIssued
+          ? `${row.domain} is live over HTTPS with a valid certificate.`
+          : `${row.domain} is verified and being served. The certificate is still being issued — this usually takes a few seconds.`,
       detail: result.detail,
     })
   } catch (error) {
