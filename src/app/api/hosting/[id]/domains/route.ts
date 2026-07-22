@@ -13,6 +13,7 @@ import {
   describeConnection,
 } from '@/lib/custom-domains'
 import { APSAMO_NAMESERVERS } from '@/lib/dns-zones'
+import { CONNECT_HOSTNAME } from '@/lib/brand-config'
 import { BRAND_DOMAIN } from '@/lib/brand-config'
 
 /**
@@ -107,7 +108,13 @@ export async function GET(
       // the advanced option for customers who want to keep their DNS host.
       connectTarget: {
         nameservers: APSAMO_NAMESERVERS,
-        advanced: { ips: await getServerIps(), txtPrefix: VERIFY_PREFIX },
+        advanced: {
+          // Preferred: a CNAME at our hostname. The raw IP is only needed at
+          // the apex, where RFC 1034 forbids a CNAME.
+          cname: CONNECT_HOSTNAME,
+          ips: await getServerIps(),
+          txtPrefix: VERIFY_PREFIX,
+        },
       },
     })
   } catch (error) {

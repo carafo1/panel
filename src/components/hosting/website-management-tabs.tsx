@@ -3081,7 +3081,7 @@ export function DomainsTab({
   /** Where an A record should point + the TXT prefix, from the API. */
   const [connectTarget, setConnectTarget] = useState<{
     nameservers: string[]
-    advanced: { ips: string[]; txtPrefix: string }
+    advanced: { cname?: string; ips: string[]; txtPrefix: string }
   } | null>(null)
   /** Advanced (keep-your-own-DNS) records are hidden unless asked for. */
   const [showAdvancedDns, setShowAdvancedDns] = useState(false)
@@ -3629,14 +3629,35 @@ export function DomainsTab({
                   record there instead — everything else still happens
                   automatically.
                 </p>
+
+                {/* CNAME is the preferred target: it points at a hostname we
+                    control, so we can move a site between servers without every
+                    customer having to edit their DNS. */}
+                <div className="rounded bg-muted/50 px-2 py-1.5 font-mono text-[11px] break-all">
+                  <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+                    <span>
+                      <span className="text-muted-foreground">Type </span>CNAME
+                    </span>
+                    <span>
+                      <span className="text-muted-foreground">Name </span>www
+                    </span>
+                    <span>
+                      <span className="text-muted-foreground">Value </span>
+                      {connectTarget?.advanced?.cname ?? 'connect.apsamo.com'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* A record for the apex only — RFC 1034 forbids a CNAME at the
+                    root of a zone, which is why every platform still hands out
+                    an address here. */}
                 <div className="rounded bg-muted/50 px-2 py-1.5 font-mono text-[11px] break-all">
                   <div className="flex flex-wrap gap-x-3 gap-y-0.5">
                     <span>
                       <span className="text-muted-foreground">Type </span>A
                     </span>
                     <span>
-                      <span className="text-muted-foreground">Name </span>
-                      {verifyDomain?.domain}
+                      <span className="text-muted-foreground">Name </span>@
                     </span>
                     <span>
                       <span className="text-muted-foreground">Value </span>
@@ -3646,9 +3667,20 @@ export function DomainsTab({
                     </span>
                   </div>
                 </div>
+
                 <p className="text-[11px] text-muted-foreground">
-                  Note: your MX and other records stay under your control, so
-                  email is unaffected.
+                  The root of a domain can&apos;t use a CNAME, so it needs the
+                  address above. If your DNS provider supports ALIAS or ANAME
+                  records (Cloudflare and Route&nbsp;53 do), you can point the
+                  root at{' '}
+                  <span className="font-mono">
+                    {connectTarget?.advanced?.cname ?? 'connect.apsamo.com'}
+                  </span>{' '}
+                  instead.
+                </p>
+                <p className="text-[11px] text-muted-foreground">
+                  Your MX and other records stay under your control, so email is
+                  unaffected.
                 </p>
               </div>
             )}
