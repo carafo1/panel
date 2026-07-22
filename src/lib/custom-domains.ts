@@ -28,7 +28,7 @@ export const VERIFY_PREFIX = '_apsamo-verify'
 
 export interface VerifyResult {
   verified: boolean
-  method?: 'dns-txt' | 'a-record'
+  method?: 'nameserver' | 'dns-txt' | 'a-record'
   detail: string
 }
 
@@ -103,8 +103,39 @@ export async function checkOwnership(opts: {
   domain: string
   token: string
   serverIps: string[]
+  /** 'nameserver' (default) or 'manual'. */
+  method?: string
 }): Promise<VerifyResult> {
   const { domain, token, serverIps } = opts
+
+  // ── Primary proof: the domain is delegated to our nameservers ─────
+  //
+  // This is the default path and needs no DNS knowledge from the customer:
+  // they change two fields at their registrar and we host the zone. Control
+  // of a domain's delegation is the strongest possible proof of ownership —
+  // stronger than a TXT record, since it is set at the registrar itself.
+  if (opts.method !== 'manual') {
+    const { checkNameserverDelegation } = await import('@/lib/dns-zones')
+    const ns = await checkNameserverDelegation(domain)
+    if (ns.delegated) {
+      return { verified: true, method: 'nameserver', detail: ns.detail }
+    }
+    // Fall through to the record checks — a customer who chose nameservers
+    // but already pointed an A record here should not be left stuck.
+    const fallback = await checkRecordProofs(domain, token, serverIps)
+    if (fallback.verified) return fallback
+    return { verified: false, detail: ns.detail }
+  }
+
+  return checkRecordProofs(domain, token, serverIps)
+}
+
+/** TXT / A-record proofs — the advanced path, and a fallback. */
+async function checkRecordProofs(
+  domain: string,
+  token: string,
+  serverIps: string[]
+): Promise<VerifyResult> {
 
   // ── Proof 1: TXT challenge ────────────────────────────────────────
   // getDnsRecords already returns [] for NXDOMAIN/ENODATA rather than throwing.
@@ -198,6 +229,7 @@ export async function sweepPendingDomains(): Promise<DomainSweepResult> {
         isPrimary: true,
         verificationToken: true,
         sslEnabled: true,
+        connectionMethod: true,
         createdAt: true,
         project: { select: { userId: true, name: true } },
       },
@@ -266,7 +298,12 @@ export async function sweepPendingDomains(): Promise<DomainSweepResult> {
         })
       }
 
-      const result = await checkOwnership({ domain: row.domain, token, serverIps })
+      const result = await checkOwnership({
+        domain: row.domain,
+        token,
+        serverIps,
+        method: row.connectionMethod,
+      })
 
       if (!result.verified) {
         await db.websiteDomain.update({
@@ -307,6 +344,19 @@ export async function sweepPendingDomains(): Promise<DomainSweepResult> {
           sslStatus: row.sslEnabled ? 'pending' : 'none',
         },
       })
+
+      // Delegated to us → we are now authoritative, so publish the zone
+      // immediately. Any delay here is a window where the domain resolves
+      // to nothing at all.
+      if (result.method === 'nameserver') {
+        const zone = await ensureZoneForDomain({
+          domainRowId: row.id,
+          domain: row.domain,
+        }).catch((err) => ({ ok: false, detail: String(err) }))
+        if (!zone.ok) {
+          console.error('[domain-sweep] zone creation failed for', row.domain, zone.detail)
+        }
+      }
 
       if (row.isPrimary) {
         await db.project
@@ -351,9 +401,10 @@ export async function sweepPendingDomains(): Promise<DomainSweepResult> {
  * ──────────────────────────────────────────────────────────────────── */
 
 export type ConnectionStage =
-  | 'awaiting_dns'
-  | 'dns_verified'
-  | 'issuing_ssl'
+  | 'awaiting_nameservers'
+  | 'nameservers_verified'
+  | 'configuring_dns'
+  | 'installing_ssl'
   | 'live'
   | 'blocked'
 
@@ -379,10 +430,13 @@ export function describeConnection(row: {
   sslEnabled: boolean
   sslStatus: string
   lastCheckError?: string | null
+  connectionMethod?: string
+  zoneCreated?: boolean
 }): ConnectionStatus {
+  const manual = row.connectionMethod === 'manual'
+
   if (!row.verified) {
-    const blocked = (row.lastCheckError || '').includes('in use by another')
-    if (blocked) {
+    if ((row.lastCheckError || '').includes('in use by another')) {
       return {
         stage: 'blocked',
         label: 'Blocked',
@@ -392,13 +446,26 @@ export function describeConnection(row: {
       }
     }
     return {
-      stage: 'awaiting_dns',
-      label: 'Waiting for DNS',
+      stage: 'awaiting_nameservers',
+      label: manual ? 'Waiting for DNS Record' : 'Waiting for Nameserver Update',
       detail:
         row.lastCheckError ||
-        'Add the DNS record shown below. We check every couple of minutes.',
+        (manual
+          ? 'Point the A record at our server. We re-check every couple of minutes.'
+          : 'Update the nameservers at your registrar to the ones shown below. We re-check every couple of minutes.'),
       percent: 10,
       needsAction: true,
+    }
+  }
+
+  // Delegated to us, but the zone we serve isn't published yet.
+  if (!manual && !row.zoneCreated) {
+    return {
+      stage: 'nameservers_verified',
+      label: 'Nameservers Verified',
+      detail: 'Your nameservers point here. Building your DNS zone…',
+      percent: 40,
+      needsAction: false,
     }
   }
 
@@ -406,7 +473,7 @@ export function describeConnection(row: {
     return {
       stage: 'live',
       label: 'Website Live',
-      detail: 'Serving over HTTP (SSL disabled for this domain).',
+      detail: 'Serving over HTTP (SSL is disabled for this domain).',
       percent: 100,
       needsAction: false,
     }
@@ -416,7 +483,9 @@ export function describeConnection(row: {
     return {
       stage: 'live',
       label: 'Website Live',
-      detail: 'Verified, serving over HTTPS with a valid certificate.',
+      detail: manual
+        ? 'Connected and serving over HTTPS with a valid certificate.'
+        : 'DNS is hosted here and the site is serving over HTTPS with a valid certificate.',
       percent: 100,
       needsAction: false,
     }
@@ -424,21 +493,21 @@ export function describeConnection(row: {
 
   if (row.sslStatus === 'failed') {
     return {
-      stage: 'issuing_ssl',
-      label: 'SSL Failed',
+      stage: 'installing_ssl',
+      label: 'SSL Retrying',
       detail:
-        'DNS is correct and the site is served, but the certificate could not be issued yet. This usually resolves itself; Let’s Encrypt rate limits can delay it.',
-      percent: 75,
+        'DNS is configured and the site is served, but the certificate has not been issued yet. This usually clears on its own; Let’s Encrypt rate limits can delay it.',
+      percent: 80,
       needsAction: false,
     }
   }
 
   return {
-    stage: 'issuing_ssl',
-    label: 'Issuing SSL',
+    stage: 'installing_ssl',
+    label: 'Installing SSL',
     detail:
-      'DNS verified and the domain is being served. The certificate is issued on the first HTTPS request — usually seconds.',
-    percent: 75,
+      'DNS configured. The certificate is issued on the first HTTPS request — usually within seconds.',
+    percent: 80,
     needsAction: false,
   }
 }
@@ -475,4 +544,57 @@ export async function probeHttps(
       error: err instanceof Error ? err.message.slice(0, 200) : String(err),
     }
   }
+}
+
+/**
+ * Publish the DNS zone for a domain that is now delegated to our nameservers.
+ *
+ * IMPORTANT: the customer's existing MX and TXT records are read from their
+ * OLD DNS and carried into the new zone. Once delegation flips we answer for
+ * everything, so publishing a website-only zone would delete their mail
+ * routing and SPF — breaking email invisibly, which is far worse than the
+ * website being late.
+ *
+ * Idempotent and safe to call repeatedly.
+ */
+export async function ensureZoneForDomain(opts: {
+  domainRowId: string
+  domain: string
+}): Promise<{ ok: boolean; detail: string }> {
+  const {
+    isDnsHostingConfigured,
+    snapshotExistingRecords,
+    buildDefaultRecords,
+    createZone,
+  } = await import('@/lib/dns-zones')
+
+  if (!isDnsHostingConfigured()) {
+    return { ok: false, detail: 'DNS hosting is not configured on this server.' }
+  }
+
+  const serverIps = await getServerIps()
+  if (serverIps.length === 0) {
+    return { ok: false, detail: 'No server IP available to point the zone at.' }
+  }
+
+  // Snapshot BEFORE creating the zone — once ours is authoritative these
+  // lookups would return our own records instead of the customer's originals.
+  const preserve = await snapshotExistingRecords(opts.domain)
+
+  const records = buildDefaultRecords({
+    domain: opts.domain,
+    serverIp: serverIps[0],
+    preserve,
+  })
+
+  const result = await createZone({ domain: opts.domain, records })
+  if (result.ok) {
+    await db.websiteDomain
+      .update({
+        where: { id: opts.domainRowId },
+        data: { zoneCreated: true, zoneCreatedAt: new Date() },
+      })
+      .catch(() => {})
+  }
+  return { ok: result.ok, detail: result.detail }
 }

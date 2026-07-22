@@ -80,11 +80,20 @@ describe('custom domain hostname validation', () => {
  * facts, so these tests pin that a domain cannot appear Live prematurely.
  */
 describe('connection pipeline stages', () => {
-  const base = { verified: false, sslEnabled: true, sslStatus: 'none' as string }
+  // Nameserver delegation is the default method, so a fresh domain starts by
+  // waiting on the registrar change — not on a DNS record.
+  const base = {
+    verified: false,
+    sslEnabled: true,
+    sslStatus: 'none' as string,
+    connectionMethod: 'nameserver',
+    zoneCreated: false,
+  }
 
-  it('starts at Waiting for DNS and asks the customer to act', () => {
+  it('starts at Waiting for Nameserver Update and asks the customer to act', () => {
     const c = describeConnection(base)
-    expect(c.stage).toBe('awaiting_dns')
+    expect(c.stage).toBe('awaiting_nameservers')
+    expect(c.label).toContain('Nameserver')
     expect(c.needsAction).toBe(true)
     expect(c.percent).toBeLessThan(50)
   })
@@ -97,15 +106,33 @@ describe('connection pipeline stages', () => {
     expect(c.detail).toContain('1.2.3.4')
   })
 
+  it('reports Nameservers Verified before the zone is published', () => {
+    // Delegation proven but our zone isn't live yet — the domain resolves to
+    // nothing in this window, so it must not claim to be connected.
+    const c = describeConnection({ ...base, verified: true, zoneCreated: false })
+    expect(c.stage).toBe('nameservers_verified')
+    expect(c.percent).toBeLessThan(100)
+  })
+
   it('is NOT live once verified but before the certificate exists', () => {
-    const c = describeConnection({ ...base, verified: true, sslStatus: 'pending' })
-    expect(c.stage).toBe('issuing_ssl')
+    const c = describeConnection({
+      ...base,
+      verified: true,
+      zoneCreated: true,
+      sslStatus: 'pending',
+    })
+    expect(c.stage).toBe('installing_ssl')
     expect(c.stage).not.toBe('live')
     expect(c.percent).toBeLessThan(100)
   })
 
   it('reaches Live only when the certificate is confirmed issued', () => {
-    const c = describeConnection({ ...base, verified: true, sslStatus: 'issued' })
+    const c = describeConnection({
+      ...base,
+      verified: true,
+      zoneCreated: true,
+      sslStatus: 'issued',
+    })
     expect(c.stage).toBe('live')
     expect(c.percent).toBe(100)
     expect(c.needsAction).toBe(false)
@@ -116,8 +143,29 @@ describe('connection pipeline stages', () => {
       verified: true,
       sslEnabled: false,
       sslStatus: 'none',
+      connectionMethod: 'nameserver',
+      zoneCreated: true,
     })
     expect(c.stage).toBe('live')
+  })
+
+  it('uses record wording for the advanced (manual DNS) method', () => {
+    const c = describeConnection({ ...base, connectionMethod: 'manual' })
+    expect(c.stage).toBe('awaiting_nameservers')
+    expect(c.label).toContain('DNS Record')
+  })
+
+  it('does not gate the manual method on a zone we do not host', () => {
+    // With manual DNS the customer keeps their own host, so there is no
+    // Apsamo zone to wait for — it must go straight to SSL.
+    const c = describeConnection({
+      ...base,
+      connectionMethod: 'manual',
+      verified: true,
+      zoneCreated: false,
+      sslStatus: 'pending',
+    })
+    expect(c.stage).toBe('installing_ssl')
   })
 
   it('reports a cross-tenant clash as blocked, not merely pending', () => {

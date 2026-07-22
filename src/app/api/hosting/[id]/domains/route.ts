@@ -12,6 +12,7 @@ import {
   VERIFY_PREFIX,
   describeConnection,
 } from '@/lib/custom-domains'
+import { APSAMO_NAMESERVERS } from '@/lib/dns-zones'
 import { BRAND_DOMAIN } from '@/lib/brand-config'
 
 /**
@@ -60,6 +61,8 @@ export async function GET(
       verificationMethod?: string | null
       lastCheckError?: string | null
       lastCheckedAt?: string | null
+      connectionMethod?: string
+      zoneCreated?: boolean
       connection?: ReturnType<typeof describeConnection>
     }> = []
 
@@ -90,6 +93,8 @@ export async function GET(
         verificationMethod: r.verificationMethod,
         lastCheckError: r.lastCheckError,
         lastCheckedAt: r.lastCheckedAt ? r.lastCheckedAt.toISOString() : null,
+        connectionMethod: r.connectionMethod,
+        zoneCreated: r.zoneCreated,
         // Derived stage for the connection pipeline in the UI.
         connection: describeConnection(r),
       })
@@ -98,7 +103,12 @@ export async function GET(
     return NextResponse.json({
       domains,
       // Where an A record should point, and the TXT hostname prefix.
-      dnsTarget: { ips: await getServerIps(), txtPrefix: VERIFY_PREFIX },
+      // Nameservers are the DEFAULT connection method; the A/TXT records are
+      // the advanced option for customers who want to keep their DNS host.
+      connectTarget: {
+        nameservers: APSAMO_NAMESERVERS,
+        advanced: { ips: await getServerIps(), txtPrefix: VERIFY_PREFIX },
+      },
     })
   } catch (error) {
     console.error('List project domains error:', error)

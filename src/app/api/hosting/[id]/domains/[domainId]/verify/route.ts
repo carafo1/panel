@@ -11,7 +11,9 @@ import {
   VERIFY_PREFIX,
   probeHttps,
   describeConnection,
+  ensureZoneForDomain,
 } from '@/lib/custom-domains'
+import { APSAMO_NAMESERVERS } from '@/lib/dns-zones'
 import { configureProjectProxy } from '@/lib/vps/proxy'
 
 /**
@@ -89,6 +91,7 @@ export async function POST(
       domain: row.domain,
       token,
       serverIps,
+      method: row.connectionMethod,
     })
 
     if (!result.verified) {
@@ -100,13 +103,17 @@ export async function POST(
         {
           verified: false,
           message: result.detail,
-          // Repeat the instructions so the UI can show them inline on failure.
-          txtRecord: {
-            type: 'TXT',
-            name: `${VERIFY_PREFIX}.${row.domain}`,
-            value: token,
+          // Nameservers first — this is the default path and needs no DNS
+          // knowledge. The record options are only for the advanced flow.
+          nameservers: APSAMO_NAMESERVERS,
+          advanced: {
+            txtRecord: {
+              type: 'TXT',
+              name: `${VERIFY_PREFIX}.${row.domain}`,
+              value: token,
+            },
+            aRecord: { type: 'A', name: row.domain, value: serverIps },
           },
-          aRecord: { type: 'A', name: row.domain, value: serverIps },
         },
         { status: 200 }
       )
@@ -124,6 +131,18 @@ export async function POST(
         sslStatus: row.sslEnabled ? 'pending' : 'none',
       },
     })
+
+    // Delegated to us → publish the zone before anything else, since we are
+    // now the authoritative answer for this domain.
+    let zoneDetail = ''
+    if (result.method === 'nameserver') {
+      const zone = await ensureZoneForDomain({
+        domainRowId: row.id,
+        domain: row.domain,
+      }).catch((err) => ({ ok: false, detail: String(err) }))
+      zoneDetail = zone.detail
+      if (!zone.ok) console.error('[domain-verify] zone creation failed:', zone.detail)
+    }
 
     // Only now does the hostname enter the proxy. Promoting the primary
     // writes `project.customDomain`, which is what the Caddy generator emits.
@@ -178,6 +197,7 @@ export async function POST(
       method: result.method,
       served,
       sslIssued,
+      zoneDetail,
       connection: fresh ? describeConnection(fresh) : null,
       message: !served
         ? `${row.domain} is verified, but the web server could not be reloaded yet${proxyDetail ? `: ${proxyDetail}` : ''}. It will be picked up on the next deploy.`

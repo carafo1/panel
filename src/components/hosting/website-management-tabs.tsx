@@ -326,7 +326,13 @@ interface WebsiteDomain {
   lastCheckedAt?: string | null
   /** Server-derived pipeline stage. */
   connection?: {
-    stage: 'awaiting_dns' | 'dns_verified' | 'issuing_ssl' | 'live' | 'blocked'
+    stage:
+      | 'awaiting_nameservers'
+      | 'nameservers_verified'
+      | 'configuring_dns'
+      | 'installing_ssl'
+      | 'live'
+      | 'blocked'
     label: string
     detail: string
     percent: number
@@ -342,9 +348,9 @@ interface WebsiteDomain {
  * the domain succeeded, not that the hostname was written to a config file.
  */
 const CONNECTION_STEPS = [
-  { key: 'awaiting_dns', label: 'DNS' },
-  { key: 'dns_verified', label: 'Verified' },
-  { key: 'issuing_ssl', label: 'SSL' },
+  { key: 'awaiting_nameservers', label: 'Nameservers' },
+  { key: 'nameservers_verified', label: 'DNS' },
+  { key: 'installing_ssl', label: 'SSL' },
   { key: 'live', label: 'Live' },
 ] as const
 
@@ -353,8 +359,8 @@ function ConnectionPipeline({ d }: { d: WebsiteDomain }) {
   if (!conn) return null
   const reached =
     conn.stage === 'live' ? 3
-      : conn.stage === 'issuing_ssl' ? 2
-      : conn.stage === 'dns_verified' ? 1
+      : conn.stage === 'installing_ssl' ? 2
+      : conn.stage === 'nameservers_verified' || conn.stage === 'configuring_dns' ? 1
       : 0
   const blocked = conn.stage === 'blocked'
 
@@ -3073,7 +3079,12 @@ export function DomainsTab({
 }) {
   const [domains, setDomains] = useState<WebsiteDomain[]>([])
   /** Where an A record should point + the TXT prefix, from the API. */
-  const [dnsTarget, setDnsTarget] = useState<{ ips: string[]; txtPrefix: string } | null>(null)
+  const [connectTarget, setConnectTarget] = useState<{
+    nameservers: string[]
+    advanced: { ips: string[]; txtPrefix: string }
+  } | null>(null)
+  /** Advanced (keep-your-own-DNS) records are hidden unless asked for. */
+  const [showAdvancedDns, setShowAdvancedDns] = useState(false)
   /** DNS records still required, returned by a failed verification attempt. */
   const [verifyHint, setVerifyHint] = useState<{
     message: string
@@ -3101,7 +3112,7 @@ export function DomainsTab({
       const data = await res.json()
       if (res.ok) {
         setDomains(data.domains || [])
-        setDnsTarget(data.dnsTarget || null)
+        setConnectTarget(data.connectTarget || null)
       } else {
         toast.error(data.error || 'Failed to load domains')
       }
@@ -3556,54 +3567,80 @@ export function DomainsTab({
         </DialogContent>
       </Dialog>
 
-      {/* Verify dialog */}
+      {/* Connect dialog — nameserver-led */}
       <Dialog open={!!verifyDomain} onOpenChange={(v) => !v && setVerifyDomain(null)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <CheckCircle2 className={`size-5 ${primaryText}`} />
-              Verify Domain
+              <Globe className={`size-5 ${primaryText}`} />
+              Connect Domain
             </DialogTitle>
             <DialogDescription>
               <span className="font-mono">{verifyDomain?.domain}</span>
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-2 text-sm">
+            {/* Live pipeline so the customer can see where they are. */}
+            {verifyDomain && <ConnectionPipeline d={verifyDomain} />}
+
             <p className="text-muted-foreground">
-              Add <strong>one</strong> of these records at your domain
-              registrar, then press Verify. We check DNS ourselves — the site
-              goes live only once ownership is confirmed.
+              Sign in to your domain registrar and set your nameservers to the
+              two below. That is the only step — we handle DNS, SSL and going
+              live automatically once the change is detected.
             </p>
 
-            {/* Option A: TXT challenge — provable before moving live traffic. */}
             <div className="rounded-md border p-3 space-y-1.5">
-              <p className="text-xs font-medium">Option 1 — TXT record</p>
-              <div className="font-mono text-[11px] space-y-0.5 break-all">
-                <div>
-                  <span className="text-muted-foreground">Name: </span>
-                  {dnsTarget?.txtPrefix ?? '_apsamo-verify'}.{verifyDomain?.domain}
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Value: </span>
-                  {verifyDomain?.verificationToken || '—'}
-                </div>
+              <p className="text-xs font-medium">Nameservers</p>
+              <div className="font-mono text-xs space-y-1">
+                {(connectTarget?.nameservers ?? ['ns1.apsamo.com', 'ns2.apsamo.com']).map(
+                  (ns) => (
+                    <div key={ns} className="rounded bg-muted/50 px-2 py-1">
+                      {ns}
+                    </div>
+                  )
+                )}
               </div>
+              <p className="text-[11px] text-muted-foreground">
+                Replace any existing nameservers. Registrar changes usually
+                apply within an hour, occasionally up to 24.
+              </p>
             </div>
 
-            {/* Option B: already pointing here is itself proof of control. */}
-            <div className="rounded-md border p-3 space-y-1.5">
-              <p className="text-xs font-medium">Option 2 — A record (also makes it live)</p>
-              <div className="font-mono text-[11px] space-y-0.5 break-all">
-                <div>
-                  <span className="text-muted-foreground">Name: </span>
-                  {verifyDomain?.domain}
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Value: </span>
-                  {dnsTarget?.ips?.length ? dnsTarget.ips.join(', ') : '—'}
+            {/* Advanced: keep your own DNS host. Hidden by default so the
+                common path stays a two-field change. */}
+            <button
+              type="button"
+              onClick={() => setShowAdvancedDns((v) => !v)}
+              className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+            >
+              {showAdvancedDns ? 'Hide' : 'Advanced:'} keep my current DNS host
+            </button>
+
+            {showAdvancedDns && (
+              <div className="rounded-md border border-dashed p-3 space-y-2">
+                <p className="text-[11px] text-muted-foreground">
+                  Prefer to manage DNS elsewhere? Point an A record at our
+                  server instead. You stay responsible for your own DNS, MX and
+                  any future record changes.
+                </p>
+                <div className="font-mono text-[11px] space-y-0.5 break-all">
+                  <div>
+                    <span className="text-muted-foreground">A record: </span>
+                    {verifyDomain?.domain} →{' '}
+                    {connectTarget?.advanced?.ips?.length
+                      ? connectTarget.advanced.ips.join(', ')
+                      : '—'}
+                  </div>
+                  {verifyDomain?.verificationToken && (
+                    <div>
+                      <span className="text-muted-foreground">Or TXT: </span>
+                      {connectTarget?.advanced?.txtPrefix ?? '_apsamo-verify'}.
+                      {verifyDomain.domain} = {verifyDomain.verificationToken}
+                    </div>
+                  )}
                 </div>
               </div>
-            </div>
+            )}
 
             {verifyHint?.message && (
               <p className="rounded-md border border-amber-500/40 bg-amber-500/5 p-2 text-xs text-amber-700 dark:text-amber-400">
@@ -3612,7 +3649,8 @@ export function DomainsTab({
             )}
 
             <p className="text-xs text-muted-foreground">
-              DNS changes can take up to an hour to propagate.
+              We re-check automatically every couple of minutes — you can close
+              this and come back.
             </p>
           </div>
           <DialogFooter>
@@ -3623,7 +3661,7 @@ export function DomainsTab({
               {verifying ? (
                 <>
                   <Loader2 className="size-4 mr-2 animate-spin" />
-                  Verifying...
+                  Checking…
                 </>
               ) : (
                 <>

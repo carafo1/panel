@@ -441,9 +441,18 @@ model WebsiteDomain {
   isPrimary    Boolean  @default(false)
   sslEnabled   Boolean  @default(true)
   sslStatus    String   @default("none") // none, pending, issued, failed, renewing
+  // How the customer is connecting this domain.
+  //   nameserver — they point their registrar at ns1/ns2 and we host the zone
+  //                (the default, and the only one that needs no DNS knowledge)
+  //   manual     — advanced: they keep their DNS host and point an A record
+  /// nameserver | manual
+  connectionMethod String @default("nameserver")
   // A domain is only added to the reverse proxy once ownership is proven.
   verified     Boolean  @default(false)
-  verificationMethod String? // dns-txt, a-record
+  verificationMethod String? // nameserver, dns-txt, a-record
+  /// Set once our zone exists and its records are published.
+  zoneCreated  Boolean  @default(false)
+  zoneCreatedAt DateTime?
   /// Random value the owner publishes as a TXT record to prove control.
   verificationToken String?
   verifiedAt   DateTime?
