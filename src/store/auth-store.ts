@@ -43,7 +43,6 @@ const API_BASE = '/api'
 // `any` and ~70 call sites across the panels destructure the result directly.
 // Defaulting to `unknown` would be stricter but breaks all of them at once;
 // callers should pass an explicit type argument as they get touched.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function apiFetch<T = any>(
   path: string,
   options?: RequestInit

@@ -145,7 +145,7 @@ export function buildDefaultRecords(opts: {
   domain: string
   serverIp: string
   serverIpV6?: string | null
-  preserve?: { mx?: string[]; txt?: string[] }
+  preserve?: { mx?: string[]; txt?: string[]; extra?: ZoneRecord[] }
 }): ZoneRecord[] {
   const { domain, serverIp, serverIpV6, preserve } = opts
   const records: ZoneRecord[] = [
@@ -174,21 +174,112 @@ export function buildDefaultRecords(opts: {
     records.push({ name: domain, type: 'TXT', content: `"v=spf1 mx a:${domain} ~all"` })
   }
 
+  // Everything discovered at non-apex names: subdomains, DKIM selectors,
+  // SaaS CNAMEs. Skip `www`, which is recreated above pointing at us.
+  for (const r of preserve?.extra ?? []) {
+    if (r.name === `www.${domain}`) continue
+    records.push(r)
+  }
+
   return records
 }
 
 /**
- * Read the customer's existing MX/TXT before we take the zone over, so they
- * can be carried into the new zone.
+ * Names worth probing before we take a zone over.
+ *
+ * DNS has no "list every record" operation — AXFR is refused essentially
+ * everywhere — so a complete copy of someone's zone is impossible from the
+ * outside. The best available approach is to ask for the names that are
+ * actually common and keep whatever answers.
+ *
+ * DKIM selectors matter most: losing one doesn't break anything visibly, it
+ * just makes the customer's mail start failing DMARC and landing in spam,
+ * which nobody connects to a DNS change made days earlier.
  */
-export async function snapshotExistingRecords(
-  domain: string
-): Promise<{ mx: string[]; txt: string[] }> {
+const COMMON_SUBDOMAINS = [
+  'www', 'mail', 'webmail', 'smtp', 'imap', 'pop', 'ftp',
+  'blog', 'shop', 'store', 'api', 'app', 'admin', 'portal',
+  'dev', 'staging', 'test', 'cdn', 'static', 'assets', 'm',
+  'autodiscover', 'autoconfig', 'remote', 'vpn', 'git', 'docs',
+]
+
+/** Selector names used by the major mail providers and ESPs. */
+const DKIM_SELECTORS = [
+  'default', 'google', 'selector1', 'selector2', 'k1', 'k2',
+  's1', 's2', 'mail', 'dkim', 'zoho', 'mandrill', 'sendgrid',
+  'mailjet', 'mailgun', 'postmark', 'sm', 'smtp', 'protonmail',
+]
+
+/** TXT names that carry policy rather than content. */
+const POLICY_TXT = ['_dmarc', '_domainkey', '_mta-sts', '_smtp._tls']
+
+export interface ZoneSnapshot {
+  mx: string[]
+  txt: string[]
+  /** Records found at names other than the apex. */
+  extra: ZoneRecord[]
+  /** True if anything beyond the apex was found — used to warn the customer. */
+  hasComplexDns: boolean
+}
+
+/**
+ * Read as much of the customer's existing zone as DNS allows.
+ *
+ * Runs BEFORE delegation flips, because once we are authoritative these
+ * lookups return our own records instead of the customer's originals.
+ */
+export async function snapshotExistingRecords(domain: string): Promise<ZoneSnapshot> {
   const [mx, txt] = await Promise.all([
     getDnsRecords(domain, 'MX').catch(() => []),
     getDnsRecords(domain, 'TXT').catch(() => []),
   ])
-  return { mx, txt }
+
+  const extra: ZoneRecord[] = []
+
+  // Probe in parallel but in bounded batches — a few dozen lookups at once
+  // is fine, a few hundred would look like abuse to a resolver.
+  const probe = async (name: string) => {
+    const fqName = `${name}.${domain}`
+    const [a, cname] = await Promise.all([
+      getDnsRecords(fqName, 'A').catch(() => []),
+      getDnsRecords(fqName, 'CNAME').catch(() => []),
+    ])
+    // A CNAME and an A cannot coexist; prefer the CNAME as the more
+    // meaningful record (it usually points at a SaaS provider).
+    if (cname.length > 0) {
+      extra.push({ name: fqName, type: 'CNAME', content: cname[0] })
+    } else if (a.length > 0) {
+      for (const ip of a) extra.push({ name: fqName, type: 'A', content: ip })
+    }
+  }
+
+  const probeTxt = async (name: string) => {
+    const fqName = `${name}.${domain}`
+    const t = await getDnsRecords(fqName, 'TXT').catch(() => [])
+    for (const v of t) {
+      extra.push({ name: fqName, type: 'TXT', content: `"${v.replace(/^"|"$/g, '')}"` })
+    }
+  }
+
+  const batch = async <T>(items: T[], fn: (t: T) => Promise<void>, size = 12) => {
+    for (let i = 0; i < items.length; i += size) {
+      await Promise.all(items.slice(i, i + size).map(fn))
+    }
+  }
+
+  await batch(COMMON_SUBDOMAINS, probe)
+  await batch(
+    [...POLICY_TXT, ...DKIM_SELECTORS.map((sel) => `${sel}._domainkey`)],
+    probeTxt
+  )
+
+  return {
+    mx,
+    txt,
+    extra,
+    // `www` alone isn't "complex" — we recreate that ourselves.
+    hasComplexDns: extra.some((r) => !r.name.startsWith(`www.`)),
+  }
 }
 
 /** Does the zone already exist on our nameservers? */

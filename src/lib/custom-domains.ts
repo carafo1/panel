@@ -587,6 +587,12 @@ export async function ensureZoneForDomain(opts: {
     preserve,
   })
 
+  if (preserve.hasComplexDns) {
+    console.log(
+      `[dns-zone] ${opts.domain}: carried ${preserve.extra.length} existing record(s) across`
+    )
+  }
+
   const result = await createZone({ domain: opts.domain, records })
   if (result.ok) {
     await db.websiteDomain

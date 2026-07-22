@@ -3589,6 +3589,26 @@ export function DomainsTab({
               live automatically once the change is detected.
             </p>
 
+            {/* Delegation makes us authoritative for the WHOLE domain, not
+                just the website. We copy across what we can find, but DNS has
+                no way to list a zone, so anything unusual has to be re-added.
+                Saying so up front is cheaper than a customer discovering it
+                when their mail starts failing DMARC a week later. */}
+            <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-2.5">
+              <p className="flex items-start gap-1.5 text-[11px] text-amber-700 dark:text-amber-400">
+                <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+                <span>
+                  <strong>Already using this domain for email or other
+                  services?</strong> Changing nameservers moves all DNS for the
+                  domain to us. We copy across the records we can detect
+                  (mail, SPF, DKIM and common subdomains), but anything unusual
+                  should be re-added here afterwards. If you&apos;d rather not
+                  risk it, use the advanced option below and keep your current
+                  DNS provider.
+                </span>
+              </p>
+            </div>
+
             <div className="rounded-md border p-3 space-y-1.5">
               <p className="text-xs font-medium">Nameservers</p>
               <div className="font-mono text-xs space-y-1">
