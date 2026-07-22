@@ -44,6 +44,10 @@ const MONITORS_INTERVAL_MS = 60_000 // 60s
 // Subscription lifecycle: remind before expiry, mark past_due, suspend after
 // grace. Hourly is plenty — these are day-scale transitions.
 const BILLING_INTERVAL_MS = 60 * 60_000 // 1h
+// Custom domains are checked far more often than billing: a customer who has
+// just added a DNS record is watching the page, and DNS commonly propagates
+// within a minute or two.
+const DOMAINS_INTERVAL_MS = 2 * 60_000 // 2m
 
 // ── State ─────────────────────────────────────────────────────────────
 interface RunStats {
@@ -88,6 +92,7 @@ const startedAt = Date.now()
 let jobsTimer: ReturnType<typeof setInterval> | null = null
 let monitorsTimer: ReturnType<typeof setInterval> | null = null
 let billingTimer: ReturnType<typeof setInterval> | null = null
+let domainsTimer: ReturnType<typeof setInterval> | null = null
 
 // ── HTTP helper ───────────────────────────────────────────────────────
 async function callNextApi(
@@ -212,6 +217,34 @@ async function billingTick(): Promise<void> {
   }
 }
 
+// ── Custom-domain verification tick ───────────────────────────────────
+// Connects externally-registered domains as soon as their DNS propagates,
+// so the customer never has to come back and press "Verify".
+async function domainsTick(): Promise<void> {
+  try {
+    const res = await callNextApi('/api/domains/sweep', { timeoutMs: 90_000 })
+    if (!res.ok) {
+      console.error(
+        `[worker] /api/domains/sweep failed: HTTP ${res.status}: ${
+          typeof res.body === 'object' && res.body ? JSON.stringify(res.body) : String(res.body)
+        }`
+      )
+      return
+    }
+    const body = res.body as { checked?: number; connected?: number } | null
+    if ((body?.connected ?? 0) > 0) {
+      console.log(
+        `[worker] domains: checked=${body?.checked ?? 0} connected=${body?.connected ?? 0}`
+      )
+    }
+  } catch (err) {
+    console.error(
+      '[worker] domains tick error:',
+      err instanceof Error ? err.message : String(err)
+    )
+  }
+}
+
 // ── Uptime monitor tick ───────────────────────────────────────────────
 async function runMonitorsTick() {
   stats.monitors.runs++
@@ -318,7 +351,7 @@ httpServer.listen(PORT, () => {
     })`
   )
   console.log(
-    `[worker] Schedules: jobs every ${JOBS_INTERVAL_MS}ms, monitors every ${MONITORS_INTERVAL_MS}ms, billing every ${BILLING_INTERVAL_MS}ms`
+    `[worker] Schedules: jobs every ${JOBS_INTERVAL_MS}ms, monitors every ${MONITORS_INTERVAL_MS}ms, billing every ${BILLING_INTERVAL_MS}ms, domains every ${DOMAINS_INTERVAL_MS}ms`
   )
 
   // Kick off an immediate tick on startup so we don't wait a full interval
@@ -345,6 +378,15 @@ httpServer.listen(PORT, () => {
       console.error('[worker] scheduled monitors tick failed:', err)
     )
   }, MONITORS_INTERVAL_MS)
+
+  domainsTick().catch((err) =>
+    console.error('[worker] initial domains tick failed:', err)
+  )
+  domainsTimer = setInterval(() => {
+    domainsTick().catch((err) =>
+      console.error('[worker] domains tick failed:', err)
+    )
+  }, DOMAINS_INTERVAL_MS)
 
   billingTimer = setInterval(() => {
     billingTick().catch((err) =>

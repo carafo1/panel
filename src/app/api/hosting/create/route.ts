@@ -7,6 +7,14 @@ import { logAudit } from '@/lib/audit'
 import { deployProject } from '@/lib/vps'
 import { getDeploymentMethod, type DeploymentMethodId } from '@/lib/deployment-methods'
 import { BRAND_DOMAIN } from '@/lib/brand-config'
+import {
+  isValidHostname,
+  isReservedHostname,
+  findConflict,
+  generateVerificationToken,
+  getServerIps,
+  VERIFY_PREFIX,
+} from '@/lib/custom-domains'
 
 /**
  * Create-Website Wizard API
@@ -113,7 +121,7 @@ export async function POST(request: Request) {
 
 interface WizardPayload {
   name: string
-  domainType?: 'subdomain' | 'existing' | 'new'
+  domainType?: 'subdomain' | 'existing' | 'new' | 'external'
   domain?: string
   method: DeploymentMethodId
   source: 'git' | 'zip' | 'manual' | 'template'
@@ -201,6 +209,9 @@ async function handleWizardCreate(
   const slug = slugify(name) + '-' + randomSuffix(4)
   let subdomain: string
   let customDomain: string | null = null
+  // Set instead of customDomain when the domain is registered elsewhere: it
+  // is attached as a pending WebsiteDomain and only serves once verified.
+  let externalDomain: string | null = null
 
   const domainType = body.domainType || 'subdomain'
   if (domainType === 'subdomain') {
@@ -213,23 +224,54 @@ async function handleWizardCreate(
         { status: 400 }
       )
     }
-    // For "existing" domains, verify the domain is registered to the user.
-    // For "new" domains (user owns externally + will configure DNS), accept
-    // the domain without an ownership check — DNS / SSL verification happens
-    // later in the deploy pipeline.
+    if (!isValidHostname(requestedDomain)) {
+      return NextResponse.json(
+        { error: `"${requestedDomain}" is not a valid domain name.` },
+        { status: 400 }
+      )
+    }
+    if (isReservedHostname(requestedDomain, BRAND_DOMAIN)) {
+      return NextResponse.json(
+        { error: `${requestedDomain} belongs to the platform and cannot be used. Use your own domain.` },
+        { status: 400 }
+      )
+    }
+    // Platform-wide, so a customer cannot claim a hostname already serving
+    // another tenant here.
+    const clash = await findConflict(requestedDomain)
+    if (clash.conflict) {
+      return NextResponse.json(
+        { error: `${requestedDomain} is already in use on this platform.` },
+        { status: 409 }
+      )
+    }
+
     if (domainType === 'existing') {
       const owned = await db.domain.findFirst({
         where: { userId: decoded.userId, name: requestedDomain },
       })
       if (!owned) {
         return NextResponse.json(
-          { error: `Domain ${requestedDomain} not found in your account. Choose "New Domain" if you want to use a domain registered elsewhere.` },
+          { error: `Domain ${requestedDomain} not found in your account. Choose "Use a domain registered elsewhere" if it is with another registrar.` },
           { status: 400 }
         )
       }
     }
+
     subdomain = `${slug}.${BRAND_DOMAIN}` // always also assigned a subdomain
-    customDomain = requestedDomain
+
+    // SECURITY: `customDomain` is what the Caddy generator emits, so it is
+    // only set for a domain we already know the customer controls (one
+    // registered through this platform). An EXTERNAL domain is recorded as a
+    // pending WebsiteDomain instead — the site goes live on its subdomain
+    // immediately, and the domain is attached automatically by the domain
+    // sweep once DNS proves ownership. Writing it here would serve a hostname
+    // nobody has proven they own.
+    if (domainType === 'existing') {
+      customDomain = requestedDomain
+    } else {
+      externalDomain = requestedDomain
+    }
   }
 
   // Check slug uniqueness.
@@ -341,6 +383,55 @@ async function handleWizardCreate(
       installSettings,
     },
   })
+
+  // ── External domain: attach as PENDING ────────────────────────────
+  // Hosting is provisioned immediately and serves on the subdomain. The
+  // domain sweep connects this hostname (and Caddy issues its certificate)
+  // as soon as the customer's DNS proves ownership — no transfer required,
+  // and no manual "Verify" click needed.
+  let pendingDomainSetup: {
+    domain: string
+    txtRecord: { type: string; name: string; value: string }
+    aRecord: { type: string; name: string; value: string[] }
+  } | null = null
+
+  if (externalDomain) {
+    try {
+      const token = generateVerificationToken()
+      await db.websiteDomain.create({
+        data: {
+          projectId: project.id,
+          domain: externalDomain,
+          isPrimary: true,
+          sslEnabled: true,
+          sslStatus: 'none',
+          verified: false,
+          verificationToken: token,
+        },
+      })
+      pendingDomainSetup = {
+        domain: externalDomain,
+        txtRecord: {
+          type: 'TXT',
+          name: `${VERIFY_PREFIX}.${externalDomain}`,
+          value: token,
+        },
+        aRecord: { type: 'A', name: externalDomain, value: await getServerIps() },
+        // DELIBERATELY NO NAMESERVER OPTION.
+        //
+        // ns1/ns2.apsamo.com have A records but nothing authoritative listens
+        // on port 53 — `dig @ns1.apsamo.com` returns "connection refused".
+        // Telling a customer to delegate to them would stop their domain
+        // resolving entirely: website, email, every subdomain. Offering NS
+        // delegation requires actually running authoritative DNS (PowerDNS or
+        // similar) plus glue records at the registrar.
+      }
+    } catch (err) {
+      // Never fail the whole site creation over the domain attachment — the
+      // customer can add it from the Domains tab afterwards.
+      console.error('[hosting/create] external domain attach failed:', err)
+    }
+  }
 
   // ── Persist env vars (encrypted) ──────────────────────────────────
   if (Array.isArray(cfg.envVars)) {
@@ -454,6 +545,10 @@ async function handleWizardCreate(
         status: project.status,
         subdomain,
         customDomain,
+        // Pending external domain, if one was supplied. The site is already
+        // live on `subdomain`; this one connects automatically once DNS
+        // proves ownership.
+        pendingDomain: pendingDomainSetup,
         sslEnabled: project.sslEnabled,
         deploymentMethod: methodId,
         deploymentSource: source,

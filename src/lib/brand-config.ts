@@ -25,6 +25,17 @@ export const MAIL_SERVER_HOSTNAME =
   process.env.MAIL_SERVER_HOSTNAME || `mail.${BRAND_DOMAIN}`
 export const NS1_HOSTNAME = process.env.NS1_HOSTNAME || `ns1.${BRAND_DOMAIN}`
 export const NS2_HOSTNAME = process.env.NS2_HOSTNAME || `ns2.${BRAND_DOMAIN}`
+/**
+ * Stable CNAME target customers point their domains at.
+ *
+ * Handing out a raw server IP works, but it hard-codes today's infrastructure
+ * into every customer's DNS: moving to another server would mean each of them
+ * editing their records or going dark. Pointing at a hostname we control means
+ * a migration is one record change on our side. It also keeps the origin IP
+ * out of the customer UI.
+ */
+export const CONNECT_HOSTNAME =
+  process.env.CONNECT_HOSTNAME || `connect.${BRAND_DOMAIN}`
 export const APP_SUBDOMAIN_PATTERN =
   process.env.APP_SUBDOMAIN_PATTERN || `{slug}.${BRAND_DOMAIN}`
 

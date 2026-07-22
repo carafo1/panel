@@ -10,7 +10,10 @@ import {
   generateVerificationToken,
   getServerIps,
   VERIFY_PREFIX,
+  describeConnection,
 } from '@/lib/custom-domains'
+import { APSAMO_NAMESERVERS } from '@/lib/dns-zones'
+import { CONNECT_HOSTNAME } from '@/lib/brand-config'
 import { BRAND_DOMAIN } from '@/lib/brand-config'
 
 /**
@@ -58,6 +61,10 @@ export async function GET(
       verifiedAt?: string | null
       verificationMethod?: string | null
       lastCheckError?: string | null
+      lastCheckedAt?: string | null
+      connectionMethod?: string
+      zoneCreated?: boolean
+      connection?: ReturnType<typeof describeConnection>
     }> = []
 
     if (project.customDomain) {
@@ -85,14 +92,30 @@ export async function GET(
         verificationToken: r.verified ? null : r.verificationToken,
         verifiedAt: r.verifiedAt ? r.verifiedAt.toISOString() : null,
         verificationMethod: r.verificationMethod,
-        lastCheckError: r.verified ? null : r.lastCheckError,
+        lastCheckError: r.lastCheckError,
+        lastCheckedAt: r.lastCheckedAt ? r.lastCheckedAt.toISOString() : null,
+        connectionMethod: r.connectionMethod,
+        zoneCreated: r.zoneCreated,
+        // Derived stage for the connection pipeline in the UI.
+        connection: describeConnection(r),
       })
     }
 
     return NextResponse.json({
       domains,
       // Where an A record should point, and the TXT hostname prefix.
-      dnsTarget: { ips: await getServerIps(), txtPrefix: VERIFY_PREFIX },
+      // Nameservers are the DEFAULT connection method; the A/TXT records are
+      // the advanced option for customers who want to keep their DNS host.
+      connectTarget: {
+        nameservers: APSAMO_NAMESERVERS,
+        advanced: {
+          // Preferred: a CNAME at our hostname. The raw IP is only needed at
+          // the apex, where RFC 1034 forbids a CNAME.
+          cname: CONNECT_HOSTNAME,
+          ips: await getServerIps(),
+          txtPrefix: VERIFY_PREFIX,
+        },
+      },
     })
   } catch (error) {
     console.error('List project domains error:', error)

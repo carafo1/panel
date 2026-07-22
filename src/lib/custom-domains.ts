@@ -28,7 +28,7 @@ export const VERIFY_PREFIX = '_apsamo-verify'
 
 export interface VerifyResult {
   verified: boolean
-  method?: 'dns-txt' | 'a-record'
+  method?: 'nameserver' | 'dns-txt' | 'a-record'
   detail: string
 }
 
@@ -103,8 +103,39 @@ export async function checkOwnership(opts: {
   domain: string
   token: string
   serverIps: string[]
+  /** 'nameserver' (default) or 'manual'. */
+  method?: string
 }): Promise<VerifyResult> {
   const { domain, token, serverIps } = opts
+
+  // ── Primary proof: the domain is delegated to our nameservers ─────
+  //
+  // This is the default path and needs no DNS knowledge from the customer:
+  // they change two fields at their registrar and we host the zone. Control
+  // of a domain's delegation is the strongest possible proof of ownership —
+  // stronger than a TXT record, since it is set at the registrar itself.
+  if (opts.method !== 'manual') {
+    const { checkNameserverDelegation } = await import('@/lib/dns-zones')
+    const ns = await checkNameserverDelegation(domain)
+    if (ns.delegated) {
+      return { verified: true, method: 'nameserver', detail: ns.detail }
+    }
+    // Fall through to the record checks — a customer who chose nameservers
+    // but already pointed an A record here should not be left stuck.
+    const fallback = await checkRecordProofs(domain, token, serverIps)
+    if (fallback.verified) return fallback
+    return { verified: false, detail: ns.detail }
+  }
+
+  return checkRecordProofs(domain, token, serverIps)
+}
+
+/** TXT / A-record proofs — the advanced path, and a fallback. */
+async function checkRecordProofs(
+  domain: string,
+  token: string,
+  serverIps: string[]
+): Promise<VerifyResult> {
 
   // ── Proof 1: TXT challenge ────────────────────────────────────────
   // getDnsRecords already returns [] for NXDOMAIN/ENODATA rather than throwing.
@@ -155,4 +186,421 @@ export async function getServerIps(): Promise<string[]> {
     if (s.sshHost && /^\d+\.\d+\.\d+\.\d+$/.test(s.sshHost)) ips.add(s.sshHost)
   }
   return [...ips]
+}
+
+/* ────────────────────────────────────────────────────────────────────
+ * Continuous verification
+ * ──────────────────────────────────────────────────────────────────── */
+
+export interface DomainSweepResult {
+  checked: number
+  connected: number
+  stillPending: number
+  failed: number
+  /** Domains whose certificate was confirmed working this run. */
+  sslConfirmed: number
+}
+
+/**
+ * Re-check every pending custom domain and connect the ones that now resolve.
+ *
+ * Without this, a customer who adds the DNS record has to come back and press
+ * "Verify" — and if they don't, their site never goes live even though the
+ * DNS is correct. This runs on the worker tick so a domain connects on its own
+ * within minutes of propagating.
+ *
+ * Only touches domains that are already attached and unverified. Verified
+ * domains are left alone: re-checking them would risk pulling a live site out
+ * of the proxy over a transient DNS blip.
+ */
+export async function sweepPendingDomains(): Promise<DomainSweepResult> {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { configureProjectProxy } = require('@/lib/vps/proxy') as typeof import('@/lib/vps/proxy')
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { createNotification } = require('@/lib/notifications') as typeof import('@/lib/notifications')
+
+  const pending = await db.websiteDomain
+    .findMany({
+      where: { verified: false },
+      select: {
+        id: true,
+        domain: true,
+        projectId: true,
+        isPrimary: true,
+        verificationToken: true,
+        sslEnabled: true,
+        connectionMethod: true,
+        createdAt: true,
+        project: { select: { userId: true, name: true } },
+      },
+      take: 200,
+    })
+    .catch(() => [])
+
+  // Verified domains whose certificate hasn't been confirmed yet. Caddy
+  // issues lazily on first request, so an unvisited domain would sit in
+  // `pending` forever — the probe both triggers issuance and confirms it.
+  const awaitingSsl = await db.websiteDomain
+    .findMany({
+      where: { verified: true, sslEnabled: true, sslStatus: { in: ['pending', 'failed'] } },
+      select: { id: true, domain: true, projectId: true, project: { select: { userId: true, name: true } } },
+      take: 50,
+    })
+    .catch(() => [])
+
+  let sslConfirmed = 0
+  for (const row of awaitingSsl) {
+    const probe = await probeHttps(row.domain)
+    if (probe.ok) {
+      await db.websiteDomain
+        .update({
+          where: { id: row.id },
+          data: { sslStatus: 'issued', lastCheckedAt: new Date(), lastCheckError: null },
+        })
+        .catch(() => {})
+      sslConfirmed++
+      await createNotification({
+        userId: row.project.userId,
+        title: 'Website Live',
+        message: `${row.domain} is live over HTTPS with a valid certificate.`,
+        type: 'success',
+        link: '/?tab=hosting',
+      }).catch(() => {})
+    } else {
+      await db.websiteDomain
+        .update({
+          where: { id: row.id },
+          data: { lastCheckedAt: new Date(), lastCheckError: probe.error?.slice(0, 300) ?? null },
+        })
+        .catch(() => {})
+    }
+  }
+
+  if (pending.length === 0) {
+    return { checked: 0, connected: 0, stillPending: 0, failed: 0, sslConfirmed }
+  }
+
+  const serverIps = await getServerIps()
+  let connected = 0
+  let failed = 0
+  const touchedProjects = new Set<string>()
+
+  for (const row of pending) {
+    try {
+      // A row with no token predates this feature; mint one so the TXT proof
+      // is available rather than skipping the domain forever.
+      let token = row.verificationToken
+      if (!token) {
+        token = generateVerificationToken()
+        await db.websiteDomain.update({
+          where: { id: row.id },
+          data: { verificationToken: token },
+        })
+      }
+
+      const result = await checkOwnership({
+        domain: row.domain,
+        token,
+        serverIps,
+        method: row.connectionMethod,
+      })
+
+      if (!result.verified) {
+        await db.websiteDomain.update({
+          where: { id: row.id },
+          data: {
+            lastCheckedAt: new Date(),
+            lastCheckError: result.detail.slice(0, 300),
+          },
+        })
+        continue
+      }
+
+      // Re-check the conflict at connect time: another project could have
+      // claimed and verified this hostname while this row sat pending.
+      const conflict = await findConflict(row.domain, row.projectId)
+      if (conflict.conflict) {
+        await db.websiteDomain.update({
+          where: { id: row.id },
+          data: {
+            lastCheckedAt: new Date(),
+            lastCheckError: 'Domain is now in use by another site on this platform.',
+          },
+        })
+        failed++
+        continue
+      }
+
+      await db.websiteDomain.update({
+        where: { id: row.id },
+        data: {
+          verified: true,
+          verifiedAt: new Date(),
+          verificationMethod: result.method,
+          lastCheckedAt: new Date(),
+          lastCheckError: null,
+          // Caddy issues the certificate on first request once the hostname
+          // is in its config; 'pending' until we observe it succeed.
+          sslStatus: row.sslEnabled ? 'pending' : 'none',
+        },
+      })
+
+      // Delegated to us → we are now authoritative, so publish the zone
+      // immediately. Any delay here is a window where the domain resolves
+      // to nothing at all.
+      if (result.method === 'nameserver') {
+        const zone = await ensureZoneForDomain({
+          domainRowId: row.id,
+          domain: row.domain,
+        }).catch((err) => ({ ok: false, detail: String(err) }))
+        if (!zone.ok) {
+          console.error('[domain-sweep] zone creation failed for', row.domain, zone.detail)
+        }
+      }
+
+      if (row.isPrimary) {
+        await db.project
+          .update({ where: { id: row.projectId }, data: { customDomain: row.domain } })
+          .catch(() => {})
+      }
+
+      touchedProjects.add(row.projectId)
+      connected++
+
+      await createNotification({
+        userId: row.project.userId,
+        title: 'Domain Connected',
+        message: `${row.domain} is verified and now serving ${row.project.name} over HTTPS.`,
+        type: 'success',
+        link: '/?tab=hosting',
+      }).catch(() => {})
+    } catch (err) {
+      failed++
+      console.error('[domain-sweep] failed for', row.domain, err)
+    }
+  }
+
+  // Reload the proxy once per project, not once per domain.
+  for (const projectId of touchedProjects) {
+    await configureProjectProxy(projectId).catch((err: unknown) =>
+      console.error('[domain-sweep] proxy reload failed for', projectId, err)
+    )
+  }
+
+  return {
+    checked: pending.length,
+    connected,
+    stillPending: pending.length - connected - failed,
+    failed,
+    sslConfirmed,
+  }
+}
+
+/* ────────────────────────────────────────────────────────────────────
+ * Connection status
+ * ──────────────────────────────────────────────────────────────────── */
+
+export type ConnectionStage =
+  | 'awaiting_nameservers'
+  | 'nameservers_verified'
+  | 'configuring_dns'
+  | 'installing_ssl'
+  | 'live'
+  | 'blocked'
+
+export interface ConnectionStatus {
+  stage: ConnectionStage
+  label: string
+  detail: string
+  /** 0-100, for a progress indicator. */
+  percent: number
+  /** True while the customer still has something to do. */
+  needsAction: boolean
+}
+
+/**
+ * Human-readable connection state for one custom domain.
+ *
+ * Derived from what has actually been observed, never assumed: `live` means
+ * an HTTPS request to the domain succeeded, not merely that the hostname was
+ * written into the Caddy config.
+ */
+export function describeConnection(row: {
+  verified: boolean
+  sslEnabled: boolean
+  sslStatus: string
+  lastCheckError?: string | null
+  connectionMethod?: string
+  zoneCreated?: boolean
+}): ConnectionStatus {
+  const manual = row.connectionMethod === 'manual'
+
+  if (!row.verified) {
+    if ((row.lastCheckError || '').includes('in use by another')) {
+      return {
+        stage: 'blocked',
+        label: 'Blocked',
+        detail: row.lastCheckError || 'This domain is in use elsewhere on the platform.',
+        percent: 0,
+        needsAction: true,
+      }
+    }
+    return {
+      stage: 'awaiting_nameservers',
+      label: manual ? 'Waiting for DNS Record' : 'Waiting for Nameserver Update',
+      detail:
+        row.lastCheckError ||
+        (manual
+          ? 'Point the A record at our server. We re-check every couple of minutes.'
+          : 'Update the nameservers at your registrar to the ones shown below. We re-check every couple of minutes.'),
+      percent: 10,
+      needsAction: true,
+    }
+  }
+
+  // Delegated to us, but the zone we serve isn't published yet.
+  if (!manual && !row.zoneCreated) {
+    return {
+      stage: 'nameservers_verified',
+      label: 'Nameservers Verified',
+      detail: 'Your nameservers point here. Building your DNS zone…',
+      percent: 40,
+      needsAction: false,
+    }
+  }
+
+  if (!row.sslEnabled) {
+    return {
+      stage: 'live',
+      label: 'Website Live',
+      detail: 'Serving over HTTP (SSL is disabled for this domain).',
+      percent: 100,
+      needsAction: false,
+    }
+  }
+
+  if (row.sslStatus === 'issued') {
+    return {
+      stage: 'live',
+      label: 'Website Live',
+      detail: manual
+        ? 'Connected and serving over HTTPS with a valid certificate.'
+        : 'DNS is hosted here and the site is serving over HTTPS with a valid certificate.',
+      percent: 100,
+      needsAction: false,
+    }
+  }
+
+  if (row.sslStatus === 'failed') {
+    return {
+      stage: 'installing_ssl',
+      label: 'SSL Retrying',
+      detail:
+        'DNS is configured and the site is served, but the certificate has not been issued yet. This usually clears on its own; Let’s Encrypt rate limits can delay it.',
+      percent: 80,
+      needsAction: false,
+    }
+  }
+
+  return {
+    stage: 'installing_ssl',
+    label: 'Installing SSL',
+    detail:
+      'DNS configured. The certificate is issued on the first HTTPS request — usually within seconds.',
+    percent: 80,
+    needsAction: false,
+  }
+}
+
+/**
+ * Confirm HTTPS actually works for a domain.
+ *
+ * Caddy obtains certificates lazily, on the first request for a hostname, so
+ * a domain can sit in `pending` forever if nobody visits it. This both
+ * TRIGGERS issuance and verifies the result: a successful TLS handshake is
+ * proof the certificate exists, which "we added it to the config" is not.
+ */
+export async function probeHttps(
+  domain: string
+): Promise<{ ok: boolean; status?: number; error?: string }> {
+  try {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 20_000)
+    try {
+      const res = await fetch(`https://${domain}/`, {
+        method: 'HEAD',
+        redirect: 'manual',
+        signal: controller.signal,
+      })
+      // Any HTTP status means the TLS handshake completed, which is the thing
+      // being tested. A 404 from the app still proves the certificate works.
+      return { ok: true, status: res.status }
+    } finally {
+      clearTimeout(timer)
+    }
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message.slice(0, 200) : String(err),
+    }
+  }
+}
+
+/**
+ * Publish the DNS zone for a domain that is now delegated to our nameservers.
+ *
+ * IMPORTANT: the customer's existing MX and TXT records are read from their
+ * OLD DNS and carried into the new zone. Once delegation flips we answer for
+ * everything, so publishing a website-only zone would delete their mail
+ * routing and SPF — breaking email invisibly, which is far worse than the
+ * website being late.
+ *
+ * Idempotent and safe to call repeatedly.
+ */
+export async function ensureZoneForDomain(opts: {
+  domainRowId: string
+  domain: string
+}): Promise<{ ok: boolean; detail: string }> {
+  const {
+    isDnsHostingConfigured,
+    snapshotExistingRecords,
+    buildDefaultRecords,
+    createZone,
+  } = await import('@/lib/dns-zones')
+
+  if (!isDnsHostingConfigured()) {
+    return { ok: false, detail: 'DNS hosting is not configured on this server.' }
+  }
+
+  const serverIps = await getServerIps()
+  if (serverIps.length === 0) {
+    return { ok: false, detail: 'No server IP available to point the zone at.' }
+  }
+
+  // Snapshot BEFORE creating the zone — once ours is authoritative these
+  // lookups would return our own records instead of the customer's originals.
+  const preserve = await snapshotExistingRecords(opts.domain)
+
+  const records = buildDefaultRecords({
+    domain: opts.domain,
+    serverIp: serverIps[0],
+    preserve,
+  })
+
+  if (preserve.hasComplexDns) {
+    console.log(
+      `[dns-zone] ${opts.domain}: carried ${preserve.extra.length} existing record(s) across`
+    )
+  }
+
+  const result = await createZone({ domain: opts.domain, records })
+  if (result.ok) {
+    await db.websiteDomain
+      .update({
+        where: { id: opts.domainRowId },
+        data: { zoneCreated: true, zoneCreatedAt: new Date() },
+      })
+      .catch(() => {})
+  }
+  return { ok: result.ok, detail: result.detail }
 }

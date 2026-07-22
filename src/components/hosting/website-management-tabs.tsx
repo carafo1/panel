@@ -323,7 +323,91 @@ interface WebsiteDomain {
   verificationToken?: string | null
   verifiedAt?: string | null
   lastCheckError?: string | null
+  lastCheckedAt?: string | null
+  /** Server-derived pipeline stage. */
+  connection?: {
+    stage:
+      | 'awaiting_nameservers'
+      | 'nameservers_verified'
+      | 'configuring_dns'
+      | 'installing_ssl'
+      | 'live'
+      | 'blocked'
+    label: string
+    detail: string
+    percent: number
+    needsAction: boolean
+  }
   createdAt: string
+}
+
+/**
+ * The connection pipeline for a custom domain.
+ *
+ * Every stage reflects something OBSERVED: "Live" means an HTTPS request to
+ * the domain succeeded, not that the hostname was written to a config file.
+ */
+const CONNECTION_STEPS = [
+  { key: 'awaiting_nameservers', label: 'Nameservers' },
+  { key: 'nameservers_verified', label: 'DNS' },
+  { key: 'installing_ssl', label: 'SSL' },
+  { key: 'live', label: 'Live' },
+] as const
+
+function ConnectionPipeline({ d }: { d: WebsiteDomain }) {
+  const conn = d.connection
+  if (!conn) return null
+  const reached =
+    conn.stage === 'live' ? 3
+      : conn.stage === 'installing_ssl' ? 2
+      : conn.stage === 'nameservers_verified' || conn.stage === 'configuring_dns' ? 1
+      : 0
+  const blocked = conn.stage === 'blocked'
+
+  return (
+    <div className="mt-2 space-y-1.5">
+      <div className="flex items-center gap-1">
+        {CONNECTION_STEPS.map((step, i) => {
+          const done = !blocked && i <= reached
+          const current = !blocked && i === reached && conn.stage !== 'live'
+          return (
+            <div key={step.key} className="flex flex-1 items-center gap-1">
+              <div
+                className={`h-1.5 flex-1 rounded-full transition-all duration-500 ${
+                  blocked
+                    ? 'bg-red-500/30'
+                    : done
+                      ? 'bg-emerald-500'
+                      : 'bg-muted'
+                }`}
+                title={step.label}
+              />
+              {current && (
+                <Loader2 className="size-3 shrink-0 animate-spin text-muted-foreground" />
+              )}
+            </div>
+          )
+        })}
+      </div>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] font-medium">
+          {CONNECTION_STEPS.map((s) => s.label).join(' → ')}
+        </span>
+        <span
+          className={`text-[11px] ${
+            blocked
+              ? 'text-red-600 dark:text-red-400'
+              : conn.stage === 'live'
+                ? 'text-emerald-600 dark:text-emerald-400'
+                : 'text-muted-foreground'
+          }`}
+        >
+          {conn.label}
+        </span>
+      </div>
+      <p className="text-[11px] text-muted-foreground">{conn.detail}</p>
+    </div>
+  )
 }
 
 interface EmailMailbox {
@@ -2995,7 +3079,12 @@ export function DomainsTab({
 }) {
   const [domains, setDomains] = useState<WebsiteDomain[]>([])
   /** Where an A record should point + the TXT prefix, from the API. */
-  const [dnsTarget, setDnsTarget] = useState<{ ips: string[]; txtPrefix: string } | null>(null)
+  const [connectTarget, setConnectTarget] = useState<{
+    nameservers: string[]
+    advanced: { cname?: string; ips: string[]; txtPrefix: string }
+  } | null>(null)
+  /** Advanced (keep-your-own-DNS) records are hidden unless asked for. */
+  const [showAdvancedDns, setShowAdvancedDns] = useState(false)
   /** DNS records still required, returned by a failed verification attempt. */
   const [verifyHint, setVerifyHint] = useState<{
     message: string
@@ -3023,7 +3112,7 @@ export function DomainsTab({
       const data = await res.json()
       if (res.ok) {
         setDomains(data.domains || [])
-        setDnsTarget(data.dnsTarget || null)
+        setConnectTarget(data.connectTarget || null)
       } else {
         toast.error(data.error || 'Failed to load domains')
       }
@@ -3037,6 +3126,23 @@ export function DomainsTab({
   useEffect(() => {
     fetchDomains()
   }, [fetchDomains])
+
+  /**
+   * Poll while a domain is still connecting.
+   *
+   * The background sweep advances these stages on its own every couple of
+   * minutes, so the page must refresh itself — otherwise the customer stares
+   * at "Waiting for DNS" long after it has actually gone live. Polling stops
+   * once nothing is in flight, so a settled page makes no requests.
+   */
+  const connecting = domains.some(
+    (d) => d.connection && d.connection.stage !== 'live' && d.connection.stage !== 'blocked'
+  )
+  useEffect(() => {
+    if (!connecting) return
+    const t = setInterval(fetchDomains, 20_000)
+    return () => clearInterval(t)
+  }, [connecting, fetchDomains])
 
   const patchDomain = async (
     d: WebsiteDomain,
@@ -3276,6 +3382,11 @@ export function DomainsTab({
                         <Globe className="size-4 text-muted-foreground shrink-0" />
                         <span className="font-mono text-sm">{d.domain}</span>
                       </div>
+                      {/* Live connection pipeline. Only meaningful for a
+                          custom domain that is still being connected. */}
+                      {d.connection && d.connection.stage !== 'live' && (
+                        <ConnectionPipeline d={d} />
+                      )}
                     </TableCell>
                     <TableCell>
                       {d.isPrimary ? (
@@ -3456,54 +3567,143 @@ export function DomainsTab({
         </DialogContent>
       </Dialog>
 
-      {/* Verify dialog */}
+      {/* Connect dialog — nameserver-led */}
       <Dialog open={!!verifyDomain} onOpenChange={(v) => !v && setVerifyDomain(null)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <CheckCircle2 className={`size-5 ${primaryText}`} />
-              Verify Domain
+              <Globe className={`size-5 ${primaryText}`} />
+              Connect Domain
             </DialogTitle>
             <DialogDescription>
               <span className="font-mono">{verifyDomain?.domain}</span>
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-2 text-sm">
+            {/* Live pipeline so the customer can see where they are. */}
+            {verifyDomain && <ConnectionPipeline d={verifyDomain} />}
+
             <p className="text-muted-foreground">
-              Add <strong>one</strong> of these records at your domain
-              registrar, then press Verify. We check DNS ourselves — the site
-              goes live only once ownership is confirmed.
+              Sign in to your domain registrar and set your nameservers to the
+              two below. That is the only step — we handle DNS, SSL and going
+              live automatically once the change is detected.
             </p>
 
-            {/* Option A: TXT challenge — provable before moving live traffic. */}
-            <div className="rounded-md border p-3 space-y-1.5">
-              <p className="text-xs font-medium">Option 1 — TXT record</p>
-              <div className="font-mono text-[11px] space-y-0.5 break-all">
-                <div>
-                  <span className="text-muted-foreground">Name: </span>
-                  {dnsTarget?.txtPrefix ?? '_apsamo-verify'}.{verifyDomain?.domain}
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Value: </span>
-                  {verifyDomain?.verificationToken || '—'}
-                </div>
-              </div>
+            {/* Delegation makes us authoritative for the WHOLE domain, not
+                just the website. We copy across what we can find, but DNS has
+                no way to list a zone, so anything unusual has to be re-added.
+                Saying so up front is cheaper than a customer discovering it
+                when their mail starts failing DMARC a week later. */}
+            <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-2.5">
+              <p className="flex items-start gap-1.5 text-[11px] text-amber-700 dark:text-amber-400">
+                <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+                <span>
+                  <strong>Already using this domain for email or other
+                  services?</strong> Changing nameservers moves all DNS for the
+                  domain to us. We copy across the records we can detect
+                  (mail, SPF, DKIM and common subdomains), but anything unusual
+                  should be re-added here afterwards. If you&apos;d rather not
+                  risk it, use the advanced option below and keep your current
+                  DNS provider.
+                </span>
+              </p>
             </div>
 
-            {/* Option B: already pointing here is itself proof of control. */}
             <div className="rounded-md border p-3 space-y-1.5">
-              <p className="text-xs font-medium">Option 2 — A record (also makes it live)</p>
-              <div className="font-mono text-[11px] space-y-0.5 break-all">
-                <div>
-                  <span className="text-muted-foreground">Name: </span>
-                  {verifyDomain?.domain}
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Value: </span>
-                  {dnsTarget?.ips?.length ? dnsTarget.ips.join(', ') : '—'}
-                </div>
+              <p className="text-xs font-medium">Nameservers</p>
+              <div className="font-mono text-xs space-y-1">
+                {(connectTarget?.nameservers ?? ['ns1.apsamo.com', 'ns2.apsamo.com']).map(
+                  (ns) => (
+                    <div key={ns} className="rounded bg-muted/50 px-2 py-1">
+                      {ns}
+                    </div>
+                  )
+                )}
               </div>
+              <p className="text-[11px] text-muted-foreground">
+                Replace any existing nameservers. Registrar changes usually
+                apply within an hour, occasionally up to 24.
+              </p>
             </div>
+
+            {/* Advanced: keep your own DNS host. Hidden by default so the
+                common path stays a two-field change. */}
+            <button
+              type="button"
+              onClick={() => setShowAdvancedDns((v) => !v)}
+              className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+            >
+              {showAdvancedDns ? 'Hide' : 'Advanced:'} keep my current DNS host
+            </button>
+
+            {showAdvancedDns && (
+              /* For customers who must keep their existing DNS provider —
+                 most commonly Cloudflare, where delegating to us would drop
+                 their CDN and WAF. Deliberately shows ONLY the A record: the
+                 record itself proves control, so the TXT challenge that used
+                 to be printed here was redundant and read as developer
+                 clutter in a customer-facing screen. */
+              <div className="rounded-md border border-dashed p-3 space-y-2">
+                <p className="text-[11px] text-muted-foreground">
+                  Staying with Cloudflare or another DNS provider? Create this
+                  record there instead — everything else still happens
+                  automatically.
+                </p>
+
+                {/* CNAME is the preferred target: it points at a hostname we
+                    control, so we can move a site between servers without every
+                    customer having to edit their DNS. */}
+                <div className="rounded bg-muted/50 px-2 py-1.5 font-mono text-[11px] break-all">
+                  <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+                    <span>
+                      <span className="text-muted-foreground">Type </span>CNAME
+                    </span>
+                    <span>
+                      <span className="text-muted-foreground">Name </span>www
+                    </span>
+                    <span>
+                      <span className="text-muted-foreground">Value </span>
+                      {connectTarget?.advanced?.cname ?? 'connect.apsamo.com'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* A record for the apex only — RFC 1034 forbids a CNAME at the
+                    root of a zone, which is why every platform still hands out
+                    an address here. */}
+                <div className="rounded bg-muted/50 px-2 py-1.5 font-mono text-[11px] break-all">
+                  <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+                    <span>
+                      <span className="text-muted-foreground">Type </span>A
+                    </span>
+                    <span>
+                      <span className="text-muted-foreground">Name </span>@
+                    </span>
+                    <span>
+                      <span className="text-muted-foreground">Value </span>
+                      {connectTarget?.advanced?.ips?.length
+                        ? connectTarget.advanced.ips.join(', ')
+                        : '—'}
+                    </span>
+                  </div>
+                </div>
+
+                <p className="text-[11px] text-muted-foreground">
+                  The root of a domain can&apos;t use a CNAME, so it needs the
+                  address above. If your DNS provider supports ALIAS or ANAME
+                  records (Cloudflare and Route&nbsp;53 do), you can point the
+                  root at{' '}
+                  <span className="font-mono">
+                    {connectTarget?.advanced?.cname ?? 'connect.apsamo.com'}
+                  </span>{' '}
+                  instead.
+                </p>
+                <p className="text-[11px] text-muted-foreground">
+                  Your MX and other records stay under your control, so email is
+                  unaffected.
+                </p>
+              </div>
+            )}
 
             {verifyHint?.message && (
               <p className="rounded-md border border-amber-500/40 bg-amber-500/5 p-2 text-xs text-amber-700 dark:text-amber-400">
@@ -3512,7 +3712,8 @@ export function DomainsTab({
             )}
 
             <p className="text-xs text-muted-foreground">
-              DNS changes can take up to an hour to propagate.
+              We re-check automatically every couple of minutes — you can close
+              this and come back.
             </p>
           </div>
           <DialogFooter>
@@ -3523,7 +3724,7 @@ export function DomainsTab({
               {verifying ? (
                 <>
                   <Loader2 className="size-4 mr-2 animate-spin" />
-                  Verifying...
+                  Checking…
                 </>
               ) : (
                 <>
