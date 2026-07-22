@@ -3617,28 +3617,39 @@ export function DomainsTab({
             </button>
 
             {showAdvancedDns && (
+              /* For customers who must keep their existing DNS provider —
+                 most commonly Cloudflare, where delegating to us would drop
+                 their CDN and WAF. Deliberately shows ONLY the A record: the
+                 record itself proves control, so the TXT challenge that used
+                 to be printed here was redundant and read as developer
+                 clutter in a customer-facing screen. */
               <div className="rounded-md border border-dashed p-3 space-y-2">
                 <p className="text-[11px] text-muted-foreground">
-                  Prefer to manage DNS elsewhere? Point an A record at our
-                  server instead. You stay responsible for your own DNS, MX and
-                  any future record changes.
+                  Staying with Cloudflare or another DNS provider? Create this
+                  record there instead — everything else still happens
+                  automatically.
                 </p>
-                <div className="font-mono text-[11px] space-y-0.5 break-all">
-                  <div>
-                    <span className="text-muted-foreground">A record: </span>
-                    {verifyDomain?.domain} →{' '}
-                    {connectTarget?.advanced?.ips?.length
-                      ? connectTarget.advanced.ips.join(', ')
-                      : '—'}
+                <div className="rounded bg-muted/50 px-2 py-1.5 font-mono text-[11px] break-all">
+                  <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+                    <span>
+                      <span className="text-muted-foreground">Type </span>A
+                    </span>
+                    <span>
+                      <span className="text-muted-foreground">Name </span>
+                      {verifyDomain?.domain}
+                    </span>
+                    <span>
+                      <span className="text-muted-foreground">Value </span>
+                      {connectTarget?.advanced?.ips?.length
+                        ? connectTarget.advanced.ips.join(', ')
+                        : '—'}
+                    </span>
                   </div>
-                  {verifyDomain?.verificationToken && (
-                    <div>
-                      <span className="text-muted-foreground">Or TXT: </span>
-                      {connectTarget?.advanced?.txtPrefix ?? '_apsamo-verify'}.
-                      {verifyDomain.domain} = {verifyDomain.verificationToken}
-                    </div>
-                  )}
                 </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Note: your MX and other records stay under your control, so
+                  email is unaffected.
+                </p>
               </div>
             )}
 
