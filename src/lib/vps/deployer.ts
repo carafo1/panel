@@ -316,7 +316,10 @@ async function deployMethodProject(
   const method = getDeploymentMethod(methodId)!
 
   const deployPath = project.deployPath || `/opt/deployhub/projects/${project.slug}`
-  const containerName = project.containerName || `deployhub-${project.slug}`
+  // The name we ASK for. A project that brings its own compose file names its
+  // own services, so the name we actually GET is resolved after `compose up`
+  // and everything downstream uses that instead.
+  let containerName = project.containerName || `deployhub-${project.slug}`
   const containerPort = project.containerPort || method.defaultPort
   const externalPort = project.externalPort || (await pickExternalPort(project.serverId!))
 
@@ -431,6 +434,14 @@ async function deployMethodProject(
   await runStage('download_source', 'Downloading source…', async () => {
     await withConnection(creds, async (client) => {
       const source = project.deploymentSource || 'git'
+      if (source === 'imported') {
+        // The migration runner already placed the customer's real site here.
+        // Every other branch below either replaces the directory contents or
+        // writes a placeholder app, so re-running the source stage on an
+        // imported project would delete the site it is meant to be building.
+        stageLog('Files were placed by a site import — keeping them as-is.')
+        return
+      }
       if (source === 'git' && project.repoUrl) {
         stageLog(`Cloning ${project.repoUrl}…`)
         const branch = project.sourceBranch || 'main'
@@ -506,14 +517,49 @@ async function deployMethodProject(
   }
 
   // Generate + write Dockerfile.
+  //
+  // The `docker` method means "this project builds itself" — its whole point
+  // is the Dockerfile and compose file the customer wrote. Those were being
+  // overwritten unconditionally: generateMethodDockerfile returns only a
+  // comment for this method, so the customer's build instructions were
+  // replaced with a file containing no FROM, and `docker build` then failed
+  // with a syntax error on a Dockerfile they never wrote.
+  const usesOwnBuildFiles = methodId === 'docker'
+  // Set when we deferred to a compose file the project supplied, which means
+  // the running container's name is theirs to choose, not ours to assume.
+  let usingProvidedCompose = false
   const dockerfile = generateMethodDockerfile(methodId, project, settings)
   await runStage('write_dockerfile', 'Writing Dockerfile…', async () => {
     await withConnection(creds, async (client) => {
-      await putFile(client, `${deployPath}/Dockerfile`, dockerfile, { mode: 0o644 })
-      // .dockerignore for cleaner builds.
-      await putFile(client, `${deployPath}/.dockerignore`, '.git\nnode_modules\n.env\n.env.local\n', { mode: 0o644 })
+      const theirs = usesOwnBuildFiles
+        ? await exec(
+            client,
+            `test -f ${shellQuote(deployPath + '/Dockerfile')} && echo yes || echo no`,
+            { timeoutMs: 15000 }
+          )
+        : null
+      if (theirs?.stdout.trim() === 'yes') {
+        stageLog('Using the Dockerfile from your project (not overwriting it).')
+      } else {
+        if (usesOwnBuildFiles) {
+          throw new Error(
+            'This project is set to build from its own Dockerfile, but no Dockerfile was found at the project root.'
+          )
+        }
+        await putFile(client, `${deployPath}/Dockerfile`, dockerfile, { mode: 0o644 })
+        stageLog(`Dockerfile written (${dockerfile.length} bytes)`)
+      }
+      // .dockerignore is additive and safe to refresh either way — but don't
+      // clobber one the customer supplied.
+      const ignore = await exec(
+        client,
+        `test -f ${shellQuote(deployPath + '/.dockerignore')} && echo yes || echo no`,
+        { timeoutMs: 15000 }
+      )
+      if (ignore.stdout.trim() !== 'yes') {
+        await putFile(client, `${deployPath}/.dockerignore`, '.git\nnode_modules\n.env\n.env.local\n', { mode: 0o644 })
+      }
     })
-    stageLog(`Dockerfile written (${dockerfile.length} bytes)`)
   })
 
   // Generate + write docker-compose.yml.
@@ -526,9 +572,26 @@ async function deployMethodProject(
   })
   await runStage('write_compose', 'Writing docker-compose.yml…', async () => {
     await withConnection(creds, async (client) => {
+      if (usesOwnBuildFiles) {
+        // compose.yaml is the modern spelling; both are honoured by
+        // `docker compose`, and either one means the customer has defined
+        // their own services — including ones we know nothing about.
+        const existing = await exec(
+          client,
+          `for f in docker-compose.yml docker-compose.yaml compose.yml compose.yaml; do ` +
+            `[ -f ${shellQuote(deployPath)}/$f ] && echo $f && break; done`,
+          { timeoutMs: 15000 }
+        )
+        const found = existing.stdout.trim()
+        if (found) {
+          usingProvidedCompose = true
+          stageLog(`Using ${found} from your project (not overwriting it).`)
+          return
+        }
+      }
       await putFile(client, `${deployPath}/docker-compose.yml`, composeYml, { mode: 0o644 })
+      stageLog('docker-compose.yml written')
     })
-    stageLog('docker-compose.yml written')
   })
 
   // For Laravel: write .env with DB credentials before build.
@@ -582,6 +645,35 @@ async function deployMethodProject(
         req.onStreamChunk?.(r.value)
         stageLog(r.value.data.replace(/\n$/, ''))
       }
+      // A project-supplied compose file names its own containers, so the name
+      // we assumed does not exist. Ask compose which container it actually
+      // started rather than inspecting a name nothing answers to — otherwise
+      // the deploy succeeds and then fails its own verification.
+      if (usingProvidedCompose) {
+        const ids = await exec(
+          client,
+          `cd ${shellQuote(deployPath)} && (docker compose ps -q 2>/dev/null || docker-compose ps -q 2>/dev/null) | head -1`,
+          { timeoutMs: 30000 }
+        )
+        const firstId = ids.stdout.trim().split('\n')[0]?.trim()
+        if (firstId) {
+          const nameOut = await exec(
+            client,
+            `docker inspect --format '{{.Name}}' ${shellQuote(firstId)} 2>/dev/null || true`,
+            { timeoutMs: 15000 }
+          )
+          const realName = nameOut.stdout.trim().replace(/^\//, '')
+          if (realName && realName !== containerName) {
+            stageLog(`Your compose file started "${realName}" — tracking that container.`)
+            containerName = realName
+          }
+        } else {
+          throw new Error(
+            'Your compose file did not start any containers. Check that it defines at least one service.'
+          )
+        }
+      }
+
       // Connect to deployhub network.
       await exec(client, `docker network connect deployhub ${shellQuote(containerName)} 2>/dev/null || true`, { timeoutMs: 15000 })
       // Verify running.
@@ -1299,6 +1391,10 @@ export async function getContainerLogs(
  * the DB — a deploy that might collide beats refusing to deploy at all — and
  * the caller surfaces Docker's error if it does.
  */
+export async function pickExternalPortForServer(serverId: string): Promise<number> {
+  return pickExternalPort(serverId)
+}
+
 async function pickExternalPort(serverId: string): Promise<number> {
   const used = new Set<number>()
 

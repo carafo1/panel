@@ -111,6 +111,48 @@ export function leaveProjectRoom(projectId: string): void {
   sock.off('deployment:status')
 }
 
+export interface MigrationLogData {
+  migrationId: string
+  line: string
+  timestamp: string
+}
+
+export interface MigrationStatusData {
+  migrationId: string
+  projectId: string
+  status: string
+  progress: number
+  stage?: string
+  url?: string
+}
+
+/**
+ * Subscribe to a website import's live progress.
+ *
+ * Imports run for minutes with long gaps between visible steps, so the
+ * dashboard needs a push channel — a poll interval short enough to feel live
+ * would hammer the API for the whole run, and one long enough to be polite
+ * would make a 40-second stage look frozen.
+ */
+export function joinMigrationRoom(
+  migrationId: string,
+  onLog: (data: MigrationLogData) => void,
+  onStatus: (data: MigrationStatusData) => void
+): Socket {
+  const sock = getSocket()
+  sock.emit('join-room', `migration:${migrationId}`)
+  sock.on('migration:log', onLog)
+  sock.on('migration:status', onStatus)
+  return sock
+}
+
+export function leaveMigrationRoom(migrationId: string): void {
+  const sock = getSocket()
+  sock.emit('leave-room', `migration:${migrationId}`)
+  sock.off('migration:log')
+  sock.off('migration:status')
+}
+
 export function joinUserRoom(
   userId: string,
   onNotification: (data: NotificationData) => void

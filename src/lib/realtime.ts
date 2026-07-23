@@ -56,6 +56,35 @@ export function broadcastDeploymentStatus(
   void broadcast(`project:${projectId}`, 'deployment:status', data)
 }
 
+/**
+ * Stream one line of import progress to everyone watching this migration.
+ *
+ * Migrations run for minutes and the dashboard is the only place a customer
+ * can see what is happening, so the log is pushed live rather than polled —
+ * a 30-second poll on a stage that takes 30 seconds shows nothing at all.
+ */
+export function broadcastMigrationLog(migrationId: string, line: string): void {
+  void broadcast(`migration:${migrationId}`, 'migration:log', {
+    migrationId,
+    line,
+    timestamp: new Date().toISOString(),
+  })
+}
+
+/** Broadcast a migration stage/status transition with its progress percentage. */
+export function broadcastMigrationStatus(
+  migrationId: string,
+  projectId: string,
+  status: string,
+  progress: number,
+  stage?: string,
+  url?: string
+): void {
+  const data = { migrationId, projectId, status, progress, stage, url }
+  void broadcast(`migration:${migrationId}`, 'migration:status', data)
+  void broadcast(`project:${projectId}`, 'migration:status', data)
+}
+
 /** Push a user-facing notification to a specific user's room. */
 export function broadcastNotification(
   userId: string,
