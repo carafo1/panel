@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
-import { removeProjectContainer, dropProjectDatabase, deleteBackup } from '@/lib/vps'
+import { purgeProject } from '@/lib/project-teardown'
 import { isAdmin } from '@/lib/security'
 
 export async function GET(
@@ -334,59 +334,15 @@ export async function DELETE(
       )
     }
 
-    // ── Tear down the real VPS deployment ────────────────────────────
-    // removeProjectContainer() gracefully handles demo mode (no sshHost),
-    // missing containers, and un-deployed projects. It removes the Caddy
-    // proxy entry, runs `docker compose down -v --rmi local` on the VPS,
-    // deletes /opt/deployhub/projects/<slug>, and clears the Project's
-    // containerId/containerName/containerPort/externalPort/deployPath fields.
-    // The Project row is then marked 'stopped'.
-    try {
-      await removeProjectContainer(id)
-    } catch (err) {
-      // Don't abort the delete — the user still wants the project gone
-      // from the dashboard. Log and fall back to a soft status update.
-      console.error(
-        `[hosting/delete] removeProjectContainer failed for ${id}:`,
-        err instanceof Error ? err.message : err
-      )
-      await db.project
-        .update({
-          where: { id },
-          data: { status: 'stopped' },
-        })
-        .catch(() => {})
-    }
+    // ── Permanently delete the project ───────────────────────────────
+    // Tears down the VPS deployment (container, proxy entry, deploy path,
+    // databases, backups), then removes the Project row and its children.
+    // Server-side cleanup is best-effort and never blocks the row deletion —
+    // anything that could not be removed comes back in `warnings`.
+    const { warnings } = await purgeProject(id)
 
-    // ── NEW: Clean up related rows (DBs, backups, domains, stages) ────
-    // Each of these best-effort: a failure to drop one DB doesn't block
-    // the rest of the cleanup.
-    try {
-      const dbs = await db.websiteDatabase.findMany({ where: { projectId: id }, select: { id: true } })
-      for (const d of dbs) {
-        await dropProjectDatabase(id, d.id).catch((err) => {
-          console.error(`[hosting/delete] dropProjectDatabase ${d.id} failed:`, err)
-        })
-      }
-    } catch (err) {
-      console.error('[hosting/delete] database cleanup failed:', err)
-    }
-
-    try {
-      const backups = await db.websiteBackup.findMany({ where: { projectId: id }, select: { id: true } })
-      for (const b of backups) {
-        await deleteBackup(id, b.id).catch((err) => {
-          console.error(`[hosting/delete] deleteBackup ${b.id} failed:`, err)
-        })
-      }
-    } catch (err) {
-      console.error('[hosting/delete] backup cleanup failed:', err)
-    }
-
-    // WebsiteDomain rows cascade automatically (onDelete: Cascade in Prisma).
-    // DeploymentStage rows cascade from Deployment, which itself stays (for audit history).
-
-    // Audit project delete (stop)
+    // Audit the delete. This AuditLog row is not FK'd to the Project, so it
+    // survives the deletion and is the durable record of what was removed.
     await logAudit({
       userId: decoded.userId,
       action: 'project.delete',
@@ -397,16 +353,20 @@ export async function DELETE(
         name: project.name,
         framework: project.framework,
         subdomain: project.subdomain,
+        ...(warnings.length > 0 ? { warnings } : {}),
       },
     })
 
     return NextResponse.json({
       success: true,
-      message: 'Project deleted — container removed from VPS',
+      message:
+        warnings.length > 0
+          ? 'Project deleted — some server-side cleanup could not be confirmed'
+          : 'Project deleted — container removed from VPS',
+      warnings,
       project: {
         id: project.id,
         name: project.name,
-        status: 'stopped',
       },
     })
   } catch (error) {
