@@ -195,6 +195,7 @@ model Project {
   websiteDatabases  WebsiteDatabase[]
   websiteBackups    WebsiteBackup[]
   websiteDomains    WebsiteDomain[]
+  migrations        SiteMigration[]
   cronJobs          CronJob[]
   ftpAccounts       FtpAccount[]
   redirects         Redirect[]
@@ -1152,4 +1153,75 @@ model IpBlock {
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@index([projectId])
+}
+
+// ── Website import / migration ────────────────────────────────────────
+//
+// A migration is a long-running, multi-step operation against a customer's
+// real data, so it is tracked as a first-class row rather than a fire-and-
+// forget job. Every stage records what it did and — critically — how to undo
+// it, because a half-imported site is worse than a failed import: the customer
+// sees a broken site where they used to see nothing.
+model SiteMigration {
+  id        String @id @default(cuid())
+  projectId String
+  userId    String
+
+  /// wordpress-zip | wpress | duplicator | updraftplus | cpanel | files-sql | git | docker
+  sourceType String
+  /// Where the payload came from: upload | url | git
+  sourceMode  String  @default("upload")
+  sourceRef   String? // upload path, URL, or git remote
+  // Float, not Int: backups routinely exceed the 2 GB that a 32-bit integer
+  // can hold, and a double represents byte counts exactly to 8 PB.
+  sizeBytes   Float?
+  originalUrl String? // site URL found inside the backup
+  targetUrl   String? // URL it will serve on here
+
+  /// pending | detecting | running | verifying | completed | failed | rolled_back | cancelled
+  status String @default("pending")
+  /// Machine-readable current step, for the progress UI.
+  currentStage String?
+  progress     Int     @default(0) // 0-100
+  error        String?
+  /// What detection concluded, as JSON — stack, doc root, SQL file, WP version.
+  detection String?
+  /// Full option payload the run was started with, so a retry is reproducible.
+  options String?
+
+  startedAt   DateTime?
+  completedAt DateTime?
+  attempts    Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  project Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  stages  MigrationStage[]
+
+  @@index([projectId])
+  @@index([userId])
+  @@index([status])
+}
+
+// One step of a migration. Kept separately so the UI can stream progress and
+// so a failure knows exactly which steps need undoing.
+model MigrationStage {
+  id          String @id @default(cuid())
+  migrationId String
+  name        String // extract | detect | create_db | import_sql | ...
+  label       String
+  /// pending | running | completed | failed | skipped | rolled_back
+  status String @default("pending")
+  order  Int    @default(0)
+  log    String? // captured output, truncated
+  error  String?
+  /// Set when this stage made a change that rollback must reverse.
+  undo       String? // JSON describing the compensating action
+  startedAt  DateTime?
+  finishedAt DateTime?
+  durationMs Int?
+
+  migration SiteMigration @relation(fields: [migrationId], references: [id], onDelete: Cascade)
+
+  @@index([migrationId])
 }

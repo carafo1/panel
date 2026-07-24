@@ -48,6 +48,10 @@ const BILLING_INTERVAL_MS = 60 * 60_000 // 1h
 // just added a DNS record is watching the page, and DNS commonly propagates
 // within a minute or two.
 const DOMAINS_INTERVAL_MS = 2 * 60_000 // 2m
+// Import housekeeping: reap abandoned multi-gigabyte uploads off the panel's
+// disk, and fail imports orphaned by a restart. Neither is urgent, and both
+// touch the filesystem, so it runs well below the other sweeps' cadence.
+const MIGRATIONS_INTERVAL_MS = 30 * 60_000 // 30m
 
 // ── State ─────────────────────────────────────────────────────────────
 interface RunStats {
@@ -93,6 +97,7 @@ let jobsTimer: ReturnType<typeof setInterval> | null = null
 let monitorsTimer: ReturnType<typeof setInterval> | null = null
 let billingTimer: ReturnType<typeof setInterval> | null = null
 let domainsTimer: ReturnType<typeof setInterval> | null = null
+let migrationsTimer: ReturnType<typeof setInterval> | null = null
 
 // ── HTTP helper ───────────────────────────────────────────────────────
 async function callNextApi(
@@ -212,6 +217,37 @@ async function billingTick(): Promise<void> {
   } catch (err) {
     console.error(
       '[worker] billing tick error:',
+      err instanceof Error ? err.message : String(err)
+    )
+  }
+}
+
+// ── Website-import housekeeping tick ──────────────────────────────────
+// Removes staged backups nobody imported (they are gigabytes each and sit on
+// the panel's own disk), and fails imports that a panel restart orphaned so
+// the customer sees a retryable error instead of a bar stuck at 45% forever.
+async function migrationsTick(): Promise<void> {
+  try {
+    const res = await callNextApi('/api/migrations/sweep', { timeoutMs: 120_000 })
+    if (!res.ok) {
+      console.error(
+        `[worker] /api/migrations/sweep failed: HTTP ${res.status}: ${
+          typeof res.body === 'object' && res.body ? JSON.stringify(res.body) : String(res.body)
+        }`
+      )
+      return
+    }
+    const body = res.body as
+      | { uploadsRemoved?: number; orphansFailed?: number }
+      | null
+    if ((body?.uploadsRemoved ?? 0) > 0 || (body?.orphansFailed ?? 0) > 0) {
+      console.log(
+        `[worker] migrations: uploads_removed=${body?.uploadsRemoved ?? 0} orphans_failed=${body?.orphansFailed ?? 0}`
+      )
+    }
+  } catch (err) {
+    console.error(
+      '[worker] migrations tick error:',
       err instanceof Error ? err.message : String(err)
     )
   }
@@ -393,6 +429,15 @@ httpServer.listen(PORT, () => {
       console.error('[worker] scheduled billing tick failed:', err)
     )
   }, BILLING_INTERVAL_MS)
+
+  migrationsTick().catch((err) =>
+    console.error('[worker] initial migrations tick failed:', err)
+  )
+  migrationsTimer = setInterval(() => {
+    migrationsTick().catch((err) =>
+      console.error('[worker] migrations tick failed:', err)
+    )
+  }, MIGRATIONS_INTERVAL_MS)
 })
 
 // ── Graceful shutdown ─────────────────────────────────────────────────
@@ -401,6 +446,11 @@ function shutdown(signal: string) {
   if (jobsTimer) clearInterval(jobsTimer)
   if (monitorsTimer) clearInterval(monitorsTimer)
   if (billingTimer) clearInterval(billingTimer)
+  // domainsTimer was already being left running here; an uncleared interval
+  // keeps firing during the 5s grace period and can start work the process is
+  // about to abandon.
+  if (domainsTimer) clearInterval(domainsTimer)
+  if (migrationsTimer) clearInterval(migrationsTimer)
   httpServer.close(() => {
     console.log('[worker] HTTP server closed')
     process.exit(0)

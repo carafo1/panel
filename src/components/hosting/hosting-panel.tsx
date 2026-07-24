@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { toast } from 'sonner'
 import {
+  HardDriveDownload,
   Plus,
   Globe,
   Rocket,
@@ -75,6 +76,8 @@ import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import CreateWebsiteWizard from '@/components/hosting/create-website-wizard'
+import ImportWizard from '@/components/hosting/import-wizard'
+import ImportDashboard from '@/components/hosting/import-dashboard'
 import {
   Dialog,
   DialogContent,
@@ -150,6 +153,7 @@ const PROJECT_SUBTABS: { id: string; label: string; icon: React.ElementType }[] 
   { id: 'cron', label: 'Cron Jobs', icon: Clock },
   { id: 'ftp', label: 'FTP', icon: HardDriveUpload },
   { id: 'backups', label: 'Backups', icon: Archive },
+  { id: 'import', label: 'Import', icon: HardDriveDownload },
   { id: 'domains', label: 'Domains', icon: Globe },
   { id: 'redirects', label: 'Redirects', icon: ArrowRightLeft },
   { id: 'security', label: 'IP Blocker', icon: Ban },
@@ -1407,6 +1411,13 @@ function ProjectDetailView({
         return
       }
       toast.success('Project deleted')
+      // The row is gone either way, but the container may have outlived it —
+      // say so rather than reporting a clean delete.
+      if (Array.isArray(data.warnings) && data.warnings.length > 0) {
+        toast.warning('Some server-side cleanup could not be confirmed', {
+          description: data.warnings.join(' · '),
+        })
+      }
       onRefresh()
       onBack()
     } catch {
@@ -2770,6 +2781,16 @@ function ProjectDetailView({
       <section id="databases" className="scroll-mt-32"><DatabaseTab projectId={project.id} /></section>
       <section id="email" className="scroll-mt-32"><EmailTab projectId={project.id} /></section>
       <section id="backups" className="scroll-mt-32"><BackupsTab projectId={project.id} /></section>
+      {/* Importing into an existing website replaces its files and database,
+          so it lives beside Backups rather than in the creation flow — the
+          customer should be one click from taking a backup first. */}
+      <section id="import" className="scroll-mt-32">
+        <Card>
+          <CardContent className="pt-6">
+            <ImportDashboard projectId={project.id} projectName={project.name} />
+          </CardContent>
+        </Card>
+      </section>
       <section id="files" className="scroll-mt-32"><FilesTab projectId={project.id} /></section>
       <section id="terminal" className="scroll-mt-32"><TerminalTab projectId={project.id} /></section>
       <section id="resources" className="scroll-mt-32"><ResourcesTab projectId={project.id} /></section>
@@ -2851,7 +2872,7 @@ function ProjectDetailView({
               Delete Project
             </AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete <strong>{project.name}</strong>? This action cannot be undone. All deployments, domains, and associated data will be permanently removed.
+              Are you sure you want to delete <strong>{project.name}</strong>? This action cannot be undone. The container, deployment history, databases, backups, and environment variables will be permanently removed. Domains you own stay in your account and are simply detached from this site.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -3002,6 +3023,9 @@ export default function HostingPanel() {
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
   const [showCreate, setShowCreate] = useState(false)
+  const [showImport, setShowImport] = useState(false)
+  // 'projects' is the website list; 'imports' is the migration dashboard.
+  const [view, setView] = useState<'projects' | 'imports'>('projects')
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
 
   // ── Search / filter / sort state ──────────────────────────────────
@@ -3165,6 +3189,14 @@ export default function HostingPanel() {
       } else {
         toast.warning(`${succeeded} deleted, ${failed} failed`)
       }
+      // Deletes that succeeded but left unconfirmed server-side cleanup.
+      const partial = (data.results as Array<{ warning?: string }>).filter((r) => r.warning)
+      if (partial.length > 0) {
+        toast.warning(
+          `${partial.length} project${partial.length !== 1 ? 's' : ''}: server-side cleanup could not be confirmed`,
+          { description: partial.map((r) => r.warning).join(' · ') }
+        )
+      }
       clearSelection()
       setBulkDeleteConfirmOpen(false)
       fetchProjects()
@@ -3189,6 +3221,20 @@ export default function HostingPanel() {
     )
   }
 
+  // The import dashboard is a peer view of the project list, not a tab inside
+  // a project: an import creates the website it lands in, so it cannot live
+  // under a website that does not exist yet.
+  if (view === 'imports') {
+    return (
+      <ImportDashboard
+        onChooseFreshInstall={() => {
+          setView('projects')
+          setShowCreate(true)
+        }}
+      />
+    )
+  }
+
   const selectedCount = selectedIds.size
   const hasActiveFilters = searchInput !== '' || statusFilter !== 'all' || frameworkFilter !== 'all'
 
@@ -3209,13 +3255,23 @@ export default function HostingPanel() {
             Manage your deployed applications and services
           </p>
         </div>
-        <Button
-          onClick={() => setShowCreate(true)}
-          className="bg-indigo-600 hover:bg-indigo-700 text-white shrink-0"
-        >
-          <Plus className="size-4 mr-2" />
-          Create Website
-        </Button>
+        <div className="flex items-center gap-2 shrink-0">
+          <Button
+            variant="outline"
+            onClick={() => setView('imports')}
+            title="Move an existing website here from another host"
+          >
+            <HardDriveDownload className="size-4 mr-2" />
+            Import
+          </Button>
+          <Button
+            onClick={() => setShowCreate(true)}
+            className="bg-indigo-600 hover:bg-indigo-700 text-white"
+          >
+            <Plus className="size-4 mr-2" />
+            Create Website
+          </Button>
+        </div>
       </div>
 
       {/* Search & Filter Bar */}
@@ -3456,16 +3512,23 @@ export default function HostingPanel() {
               <>
                 <Rocket className="size-12 text-muted-foreground/40 mb-4" />
                 <h3 className="text-lg font-semibold mb-1">No projects yet</h3>
-                <p className="text-sm text-muted-foreground mb-4">
-                  Create your first hosting project to get started
+                <p className="text-sm text-muted-foreground mb-4 text-center max-w-sm">
+                  Start a new site, or bring an existing one over from another
+                  host — we handle the database, URLs, and SSL for you.
                 </p>
-                <Button
-                  onClick={() => setShowCreate(true)}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white"
-                >
-                  <Plus className="size-4 mr-2" />
-                  Create Website
-                </Button>
+                <div className="flex flex-wrap justify-center gap-2">
+                  <Button
+                    onClick={() => setShowCreate(true)}
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white"
+                  >
+                    <Plus className="size-4 mr-2" />
+                    Create Website
+                  </Button>
+                  <Button variant="outline" onClick={() => setShowImport(true)}>
+                    <HardDriveDownload className="size-4 mr-2" />
+                    Import existing site
+                  </Button>
+                </div>
               </>
             )}
           </CardContent>
@@ -3509,6 +3572,13 @@ export default function HostingPanel() {
         onCreated={() => fetchProjects()}
       />
 
+      <ImportWizard
+        open={showImport}
+        onClose={() => setShowImport(false)}
+        onCompleted={() => fetchProjects()}
+        onChooseFreshInstall={() => setShowCreate(true)}
+      />
+
       {/* Bulk Delete Confirmation */}
       <AlertDialog open={bulkDeleteConfirmOpen} onOpenChange={setBulkDeleteConfirmOpen}>
         <AlertDialogContent>
@@ -3519,9 +3589,9 @@ export default function HostingPanel() {
             </AlertDialogTitle>
             <AlertDialogDescription>
               This will permanently delete <strong>{selectedCount}</strong> project
-              {selectedCount !== 1 ? 's' : ''} along with all their deployments,
-              environment variables, and associated data. This action
-              <strong> cannot be undone</strong>.
+              {selectedCount !== 1 ? 's' : ''} along with their containers, deployments,
+              environment variables, databases, and backups. Domains you own stay in
+              your account. This action <strong>cannot be undone</strong>.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

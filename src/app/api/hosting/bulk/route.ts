@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
+import { purgeProject } from '@/lib/project-teardown'
 
 type BulkAction = 'deploy' | 'stop' | 'restart' | 'delete'
 
@@ -14,6 +15,8 @@ interface BulkResultItem {
   id: string
   success: boolean
   error?: string
+  /** Set on a successful delete whose server-side cleanup was incomplete. */
+  warning?: string
 }
 
 export async function POST(request: Request) {
@@ -215,31 +218,11 @@ export async function POST(request: Request) {
 
           results.push({ id: project.id, success: true })
         } else if (action === 'delete') {
-          // Hard-delete: cascade removes env vars, analytics events,
-          // pipelines, uptime monitors, website databases/backups/domains
-          // (those relations have onDelete: Cascade in the schema).
-          // The relations below are NOT cascaded (FK is nullable or required
-          // without cascade), so we have to clean them up explicitly before
-          // removing the Project row, otherwise SQLite raises a FK violation.
-          await db.deployment.deleteMany({ where: { projectId: project.id } })
-          await db.automationLog.deleteMany({ where: { projectId: project.id } })
-          await db.githubIntegration.deleteMany({ where: { projectId: project.id } })
-          await db.webhook.deleteMany({ where: { projectId: project.id } })
-          // Domains keep their projectId nullable but reference the project —
-          // detach them rather than deleting (the user may still own the domain).
-          await db.domain.updateMany({
-            where: { projectId: project.id },
-            data: { projectId: null },
-          })
-          // Teams can own projects — detach.
-          await db.project.update({
-            where: { id: project.id },
-            data: { teamId: null },
-          })
-          // Finally, remove the project row.
-          await db.project.delete({
-            where: { id: project.id },
-          })
+          // Hard-delete, sharing the exact teardown the single-project
+          // DELETE /api/hosting/[id] runs. This block used to drop the row
+          // without touching the VPS, which left the container running and
+          // holding its host port with no row left to clean it up from.
+          const { warnings } = await purgeProject(project.id)
 
           await logAudit({
             userId: decoded.userId,
@@ -252,10 +235,17 @@ export async function POST(request: Request) {
               framework: project.framework,
               subdomain: project.subdomain,
               bulk: true,
+              ...(warnings.length > 0 ? { warnings } : {}),
             },
           })
 
-          results.push({ id: project.id, success: true })
+          // The row is gone, so this is a success even when some server-side
+          // cleanup could not be confirmed — the warning rides along.
+          results.push({
+            id: project.id,
+            success: true,
+            ...(warnings.length > 0 ? { warning: warnings.join('; ') } : {}),
+          })
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error'
