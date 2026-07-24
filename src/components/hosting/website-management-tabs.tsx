@@ -319,7 +319,95 @@ interface WebsiteDomain {
   sslStatus: string // none | pending | issued | failed | renewing
   verified: boolean
   verificationMethod?: string | null
+  /** Present only while unverified — the value to publish as TXT. */
+  verificationToken?: string | null
+  verifiedAt?: string | null
+  lastCheckError?: string | null
+  lastCheckedAt?: string | null
+  /** Server-derived pipeline stage. */
+  connection?: {
+    stage:
+      | 'awaiting_nameservers'
+      | 'nameservers_verified'
+      | 'configuring_dns'
+      | 'installing_ssl'
+      | 'live'
+      | 'blocked'
+    label: string
+    detail: string
+    percent: number
+    needsAction: boolean
+  }
   createdAt: string
+}
+
+/**
+ * The connection pipeline for a custom domain.
+ *
+ * Every stage reflects something OBSERVED: "Live" means an HTTPS request to
+ * the domain succeeded, not that the hostname was written to a config file.
+ */
+const CONNECTION_STEPS = [
+  { key: 'awaiting_nameservers', label: 'Nameservers' },
+  { key: 'nameservers_verified', label: 'DNS' },
+  { key: 'installing_ssl', label: 'SSL' },
+  { key: 'live', label: 'Live' },
+] as const
+
+function ConnectionPipeline({ d }: { d: WebsiteDomain }) {
+  const conn = d.connection
+  if (!conn) return null
+  const reached =
+    conn.stage === 'live' ? 3
+      : conn.stage === 'installing_ssl' ? 2
+      : conn.stage === 'nameservers_verified' || conn.stage === 'configuring_dns' ? 1
+      : 0
+  const blocked = conn.stage === 'blocked'
+
+  return (
+    <div className="mt-2 space-y-1.5">
+      <div className="flex items-center gap-1">
+        {CONNECTION_STEPS.map((step, i) => {
+          const done = !blocked && i <= reached
+          const current = !blocked && i === reached && conn.stage !== 'live'
+          return (
+            <div key={step.key} className="flex flex-1 items-center gap-1">
+              <div
+                className={`h-1.5 flex-1 rounded-full transition-all duration-500 ${
+                  blocked
+                    ? 'bg-red-500/30'
+                    : done
+                      ? 'bg-emerald-500'
+                      : 'bg-muted'
+                }`}
+                title={step.label}
+              />
+              {current && (
+                <Loader2 className="size-3 shrink-0 animate-spin text-muted-foreground" />
+              )}
+            </div>
+          )
+        })}
+      </div>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] font-medium">
+          {CONNECTION_STEPS.map((s) => s.label).join(' → ')}
+        </span>
+        <span
+          className={`text-[11px] ${
+            blocked
+              ? 'text-red-600 dark:text-red-400'
+              : conn.stage === 'live'
+                ? 'text-emerald-600 dark:text-emerald-400'
+                : 'text-muted-foreground'
+          }`}
+        >
+          {conn.label}
+        </span>
+      </div>
+      <p className="text-[11px] text-muted-foreground">{conn.detail}</p>
+    </div>
+  )
 }
 
 interface EmailMailbox {
@@ -652,6 +740,19 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
+                        {['mysql', 'mariadb'].includes((db.type || '').toLowerCase()) && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className={`h-7 text-xs ${primaryText}`}
+                            onClick={() =>
+                              window.open(`/db-studio/${projectId}/${db.id}`, '_blank')
+                            }
+                          >
+                            <DatabaseIcon className="size-3 mr-1" />
+                            Studio
+                          </Button>
+                        )}
                         <Button
                           variant="ghost"
                           size="sm"
@@ -1327,6 +1428,8 @@ export function FilesTab({ projectId }: { projectId: string }) {
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [dragOver, setDragOver] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const [importing, setImporting] = useState(false)
 
   // Editor dialog
   const [editorFile, setEditorFile] = useState<FileEntry | null>(null)
@@ -1346,6 +1449,13 @@ export function FilesTab({ projectId }: { projectId: string }) {
   const [deleteEntry, setDeleteEntry] = useState<FileEntry | null>(null)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const importInputRef = useRef<HTMLInputElement>(null)
+
+  // Encode a project-relative path for use as URL path segments in the
+  // /files/[...path] routes: encode each segment but keep the "/" separators
+  // so nested paths (e.g. wp-content/themes/style.css) route correctly.
+  // For a single segment (root files) this is identical to encodeURIComponent.
+  const encodePath = (p: string) => p.split('/').map(encodeURIComponent).join('/')
 
   const fetchFiles = useCallback(
     async (path: string) => {
@@ -1444,7 +1554,7 @@ export function FilesTab({ projectId }: { projectId: string }) {
   const handleDownload = async (entry: FileEntry) => {
     try {
       const res = await fetch(
-        `/api/hosting/${projectId}/files/${encodeURIComponent(entry.path)}?action=download`,
+        `/api/hosting/${projectId}/files/${encodePath(entry.path)}?action=download`,
         { headers: getAuthHeaders() }
       )
       if (!res.ok) {
@@ -1466,6 +1576,67 @@ export function FilesTab({ projectId }: { projectId: string }) {
     }
   }
 
+  // Export the current folder (or whole site at root) as a downloadable archive.
+  const handleExport = async () => {
+    setExporting(true)
+    try {
+      const qs = currentPath ? `&path=${encodeURIComponent(currentPath)}` : ''
+      const res = await fetch(`/api/hosting/${projectId}/files?action=export${qs}`, {
+        headers: getAuthHeaders(),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => null)
+        throw new Error(data?.error || 'Export failed')
+      }
+      const blob = await res.blob()
+      const cd = res.headers.get('Content-Disposition') || ''
+      const match = cd.match(/filename="?([^"]+)"?/)
+      const fallback = `${currentPath ? currentPath.split('/').pop() : 'website'}-export.zip`
+      const filename = match?.[1] || fallback
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      toast.success('Export ready — download started')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Export failed')
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  // Import a .zip / .tar.gz archive and extract it into the current folder.
+  const handleImport = async (file: File) => {
+    setImporting(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('path', currentPath)
+      formData.append('action', 'import')
+      const token = localStorage.getItem('apsamo_token')
+      const res = await fetch(`/api/hosting/${projectId}/files`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      })
+      const data = await res.json().catch(() => null)
+      if (res.ok) {
+        toast.success(data?.message || `Imported ${file.name}`)
+        fetchFiles(currentPath)
+      } else {
+        toast.error(data?.error || 'Import failed')
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Import failed')
+    } finally {
+      setImporting(false)
+    }
+  }
+
   const openEditor = async (entry: FileEntry) => {
     setEditorFile(entry)
     setEditorContent('')
@@ -1474,7 +1645,7 @@ export function FilesTab({ projectId }: { projectId: string }) {
     setEditorLoading(true)
     try {
       const res = await fetch(
-        `/api/hosting/${projectId}/files/${encodeURIComponent(entry.path)}?action=content`,
+        `/api/hosting/${projectId}/files/${encodePath(entry.path)}?action=content`,
         { headers: getAuthHeaders() }
       )
       const data = await res.json()
@@ -1499,7 +1670,7 @@ export function FilesTab({ projectId }: { projectId: string }) {
     setEditorSaving(true)
     try {
       const res = await fetch(
-        `/api/hosting/${projectId}/files/${encodeURIComponent(editorFile.path)}`,
+        `/api/hosting/${projectId}/files/${encodePath(editorFile.path)}`,
         {
           method: 'PUT',
           headers: getAuthHeaders(),
@@ -1529,7 +1700,7 @@ export function FilesTab({ projectId }: { projectId: string }) {
     }
     try {
       const res = await fetch(
-        `/api/hosting/${projectId}/files/${encodeURIComponent(currentPath)}`,
+        `/api/hosting/${projectId}/files/${encodePath(currentPath)}`,
         {
           method: 'POST',
           headers: getAuthHeaders(),
@@ -1559,7 +1730,7 @@ export function FilesTab({ projectId }: { projectId: string }) {
     const fullPath = currentPath ? `${currentPath}/${name}` : name
     try {
       const res = await fetch(
-        `/api/hosting/${projectId}/files/${encodeURIComponent(fullPath)}`,
+        `/api/hosting/${projectId}/files/${encodePath(fullPath)}`,
         {
           method: 'PUT',
           headers: getAuthHeaders(),
@@ -1589,7 +1760,7 @@ export function FilesTab({ projectId }: { projectId: string }) {
     }
     try {
       const res = await fetch(
-        `/api/hosting/${projectId}/files/${encodeURIComponent(renameEntry.path)}`,
+        `/api/hosting/${projectId}/files/${encodePath(renameEntry.path)}`,
         {
           method: 'POST',
           headers: getAuthHeaders(),
@@ -1614,7 +1785,7 @@ export function FilesTab({ projectId }: { projectId: string }) {
     if (!deleteEntry) return
     try {
       const res = await fetch(
-        `/api/hosting/${projectId}/files/${encodeURIComponent(deleteEntry.path)}`,
+        `/api/hosting/${projectId}/files/${encodePath(deleteEntry.path)}`,
         { method: 'DELETE', headers: getAuthHeaders() }
       )
       const data = await res.json()
@@ -1667,6 +1838,18 @@ export function FilesTab({ projectId }: { projectId: string }) {
                   }
                 }}
               />
+              <input
+                ref={importInputRef}
+                type="file"
+                accept=".zip,.tar.gz,.tgz,.tar"
+                className="hidden"
+                onChange={(e) => {
+                  if (e.target.files && e.target.files[0]) {
+                    handleImport(e.target.files[0])
+                    e.target.value = ''
+                  }
+                }}
+              />
               <Button
                 variant="outline"
                 size="sm"
@@ -1698,6 +1881,36 @@ export function FilesTab({ projectId }: { projectId: string }) {
               >
                 <FilePlus className="size-3.5 mr-1" />
                 New File
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs"
+                onClick={handleExport}
+                disabled={exporting}
+                title="Download this folder (or the whole site at the root) as an archive"
+              >
+                {exporting ? (
+                  <Loader2 className="size-3.5 mr-1 animate-spin" />
+                ) : (
+                  <Download className="size-3.5 mr-1" />
+                )}
+                Export
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs"
+                onClick={() => importInputRef.current?.click()}
+                disabled={importing}
+                title="Upload a .zip / .tar.gz archive and extract it into this folder"
+              >
+                {importing ? (
+                  <Loader2 className="size-3.5 mr-1 animate-spin" />
+                ) : (
+                  <Archive className="size-3.5 mr-1" />
+                )}
+                Import
               </Button>
               <Button
                 variant="outline"
@@ -2878,6 +3091,19 @@ export function DomainsTab({
   onProjectChanged?: () => void
 }) {
   const [domains, setDomains] = useState<WebsiteDomain[]>([])
+  /** Where an A record should point + the TXT prefix, from the API. */
+  const [connectTarget, setConnectTarget] = useState<{
+    nameservers: string[]
+    advanced: { cname?: string; ips: string[]; txtPrefix: string }
+  } | null>(null)
+  /** Advanced (keep-your-own-DNS) records are hidden unless asked for. */
+  const [showAdvancedDns, setShowAdvancedDns] = useState(false)
+  /** DNS records still required, returned by a failed verification attempt. */
+  const [verifyHint, setVerifyHint] = useState<{
+    message: string
+    txt: { type: string; name: string; value: string } | null
+    a: { type: string; name: string; value: string[] } | null
+  } | null>(null)
   const [loading, setLoading] = useState(true)
   const [createOpen, setCreateOpen] = useState(false)
   const [createDomain, setCreateDomain] = useState('')
@@ -2899,6 +3125,7 @@ export function DomainsTab({
       const data = await res.json()
       if (res.ok) {
         setDomains(data.domains || [])
+        setConnectTarget(data.connectTarget || null)
       } else {
         toast.error(data.error || 'Failed to load domains')
       }
@@ -2912,6 +3139,23 @@ export function DomainsTab({
   useEffect(() => {
     fetchDomains()
   }, [fetchDomains])
+
+  /**
+   * Poll while a domain is still connecting.
+   *
+   * The background sweep advances these stages on its own every couple of
+   * minutes, so the page must refresh itself — otherwise the customer stares
+   * at "Waiting for DNS" long after it has actually gone live. Polling stops
+   * once nothing is in flight, so a settled page makes no requests.
+   */
+  const connecting = domains.some(
+    (d) => d.connection && d.connection.stage !== 'live' && d.connection.stage !== 'blocked'
+  )
+  useEffect(() => {
+    if (!connecting) return
+    const t = setInterval(fetchDomains, 20_000)
+    return () => clearInterval(t)
+  }, [connecting, fetchDomains])
 
   const patchDomain = async (
     d: WebsiteDomain,
@@ -2980,21 +3224,37 @@ export function DomainsTab({
     }
   }
 
+  /**
+   * Ask the server to prove domain ownership via DNS.
+   *
+   * This previously PATCHed `{ verified: true }` — the client simply asserting
+   * it was verified, which the API accepted. Real verification now happens
+   * server-side against DNS; a failure returns the records still to be added.
+   */
   const handleVerify = async () => {
     if (!verifyDomain) return
     setVerifying(true)
     try {
-      const res = await fetch(`/api/hosting/${projectId}/domains/${verifyDomain.id}`, {
-        method: 'PATCH',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ verified: true }),
-      })
+      const res = await fetch(
+        `/api/hosting/${projectId}/domains/${verifyDomain.id}/verify`,
+        { method: 'POST', headers: getAuthHeaders() }
+      )
       const data = await res.json()
-      if (res.ok) {
-        toast.success('Domain verified')
+      if (res.ok && data.verified) {
+        toast.success(data.message || 'Domain verified — now live.')
         setVerifyDomain(null)
+        setVerifyHint(null)
         fetchDomains()
         onProjectChanged?.()
+      } else if (res.ok) {
+        // Not an error: DNS just hasn't propagated yet. Keep the dialog open
+        // and show exactly what still needs adding.
+        toast.message(data.message || 'Not verified yet')
+        setVerifyHint({
+          message: data.message || '',
+          txt: data.txtRecord || null,
+          a: data.aRecord || null,
+        })
       } else {
         toast.error(data.error || 'Verification failed')
       }
@@ -3071,7 +3331,8 @@ export function DomainsTab({
     )
   }
 
-  const subdomainHint = projectId ? `${projectId.slice(-6)}.apsamo.app` : 'your-subdomain.apsamo.app'
+  const brandDomain = process.env.NEXT_PUBLIC_BRAND_DOMAIN || 'apsamo.com'
+  const subdomainHint = projectId ? `${projectId.slice(-6)}.${brandDomain}` : `your-subdomain.${brandDomain}`
 
   return (
     <Card>
@@ -3134,6 +3395,11 @@ export function DomainsTab({
                         <Globe className="size-4 text-muted-foreground shrink-0" />
                         <span className="font-mono text-sm">{d.domain}</span>
                       </div>
+                      {/* Live connection pipeline. Only meaningful for a
+                          custom domain that is still being connected. */}
+                      {d.connection && d.connection.stage !== 'live' && (
+                        <ConnectionPipeline d={d} />
+                      )}
                     </TableCell>
                     <TableCell>
                       {d.isPrimary ? (
@@ -3314,36 +3580,153 @@ export function DomainsTab({
         </DialogContent>
       </Dialog>
 
-      {/* Verify dialog */}
+      {/* Connect dialog — nameserver-led */}
       <Dialog open={!!verifyDomain} onOpenChange={(v) => !v && setVerifyDomain(null)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <CheckCircle2 className={`size-5 ${primaryText}`} />
-              Verify Domain
+              <Globe className={`size-5 ${primaryText}`} />
+              Connect Domain
             </DialogTitle>
             <DialogDescription>
               <span className="font-mono">{verifyDomain?.domain}</span>
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-2 text-sm">
+            {/* Live pipeline so the customer can see where they are. */}
+            {verifyDomain && <ConnectionPipeline d={verifyDomain} />}
+
             <p className="text-muted-foreground">
-              Point one of these DNS records at your server, then click
-              &ldquo;Verify Now&rdquo;.
+              Sign in to your domain registrar and set your nameservers to the
+              two below. That is the only step — we handle DNS, SSL and going
+              live automatically once the change is detected.
             </p>
-            <div className="rounded-md border p-3 font-mono text-xs space-y-1">
-              <div>
-                <span className="text-muted-foreground">A &nbsp;&nbsp;</span>
-                {verifyDomain?.domain} → <span className="font-medium">your.server.ip</span>
-              </div>
-              <div>
-                <span className="text-muted-foreground">CNAME</span>
-                {verifyDomain?.domain} → <span className="font-medium">{subdomainHint}</span>
-              </div>
+
+            {/* Delegation makes us authoritative for the WHOLE domain, not
+                just the website. We copy across what we can find, but DNS has
+                no way to list a zone, so anything unusual has to be re-added.
+                Saying so up front is cheaper than a customer discovering it
+                when their mail starts failing DMARC a week later. */}
+            <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-2.5">
+              <p className="flex items-start gap-1.5 text-[11px] text-amber-700 dark:text-amber-400">
+                <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+                <span>
+                  <strong>Already using this domain for email or other
+                  services?</strong> Changing nameservers moves all DNS for the
+                  domain to us. We copy across the records we can detect
+                  (mail, SPF, DKIM and common subdomains), but anything unusual
+                  should be re-added here afterwards. If you&apos;d rather not
+                  risk it, use the advanced option below and keep your current
+                  DNS provider.
+                </span>
+              </p>
             </div>
+
+            <div className="rounded-md border p-3 space-y-1.5">
+              <p className="text-xs font-medium">Nameservers</p>
+              <div className="font-mono text-xs space-y-1">
+                {(connectTarget?.nameservers ?? ['ns1.apsamo.com', 'ns2.apsamo.com']).map(
+                  (ns) => (
+                    <div key={ns} className="rounded bg-muted/50 px-2 py-1">
+                      {ns}
+                    </div>
+                  )
+                )}
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Replace any existing nameservers. Registrar changes usually
+                apply within an hour, occasionally up to 24.
+              </p>
+            </div>
+
+            {/* Advanced: keep your own DNS host. Hidden by default so the
+                common path stays a two-field change. */}
+            <button
+              type="button"
+              onClick={() => setShowAdvancedDns((v) => !v)}
+              className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+            >
+              {showAdvancedDns ? 'Hide' : 'Advanced:'} keep my current DNS host
+            </button>
+
+            {showAdvancedDns && (
+              /* For customers who must keep their existing DNS provider —
+                 most commonly Cloudflare, where delegating to us would drop
+                 their CDN and WAF. Deliberately shows ONLY the A record: the
+                 record itself proves control, so the TXT challenge that used
+                 to be printed here was redundant and read as developer
+                 clutter in a customer-facing screen. */
+              <div className="rounded-md border border-dashed p-3 space-y-2">
+                <p className="text-[11px] text-muted-foreground">
+                  Staying with Cloudflare or another DNS provider? Create this
+                  record there instead — everything else still happens
+                  automatically.
+                </p>
+
+                {/* CNAME is the preferred target: it points at a hostname we
+                    control, so we can move a site between servers without every
+                    customer having to edit their DNS. */}
+                <div className="rounded bg-muted/50 px-2 py-1.5 font-mono text-[11px] break-all">
+                  <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+                    <span>
+                      <span className="text-muted-foreground">Type </span>CNAME
+                    </span>
+                    <span>
+                      <span className="text-muted-foreground">Name </span>www
+                    </span>
+                    <span>
+                      <span className="text-muted-foreground">Value </span>
+                      {connectTarget?.advanced?.cname ?? 'connect.apsamo.com'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* A record for the apex only — RFC 1034 forbids a CNAME at the
+                    root of a zone, which is why every platform still hands out
+                    an address here. */}
+                <div className="rounded bg-muted/50 px-2 py-1.5 font-mono text-[11px] break-all">
+                  <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+                    <span>
+                      <span className="text-muted-foreground">Type </span>A
+                    </span>
+                    <span>
+                      <span className="text-muted-foreground">Name </span>@
+                    </span>
+                    <span>
+                      <span className="text-muted-foreground">Value </span>
+                      {connectTarget?.advanced?.ips?.length
+                        ? connectTarget.advanced.ips.join(', ')
+                        : '—'}
+                    </span>
+                  </div>
+                </div>
+
+                <p className="text-[11px] text-muted-foreground">
+                  The root of a domain can&apos;t use a CNAME, so it needs the
+                  address above. If your DNS provider supports ALIAS or ANAME
+                  records (Cloudflare and Route&nbsp;53 do), you can point the
+                  root at{' '}
+                  <span className="font-mono">
+                    {connectTarget?.advanced?.cname ?? 'connect.apsamo.com'}
+                  </span>{' '}
+                  instead.
+                </p>
+                <p className="text-[11px] text-muted-foreground">
+                  Your MX and other records stay under your control, so email is
+                  unaffected.
+                </p>
+              </div>
+            )}
+
+            {verifyHint?.message && (
+              <p className="rounded-md border border-amber-500/40 bg-amber-500/5 p-2 text-xs text-amber-700 dark:text-amber-400">
+                {verifyHint.message}
+              </p>
+            )}
+
             <p className="text-xs text-muted-foreground">
-              DNS propagation may take a few minutes. Once your record is live,
-              click below to mark the domain as verified.
+              We re-check automatically every couple of minutes — you can close
+              this and come back.
             </p>
           </div>
           <DialogFooter>
@@ -3354,7 +3737,7 @@ export function DomainsTab({
               {verifying ? (
                 <>
                   <Loader2 className="size-4 mr-2 animate-spin" />
-                  Verifying...
+                  Checking…
                 </>
               ) : (
                 <>
