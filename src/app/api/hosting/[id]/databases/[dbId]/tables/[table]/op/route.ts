@@ -10,7 +10,7 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { logAudit } from '@/lib/audit'
 import { resolveTenantDatabase, DbAccessError } from '@/lib/db-engine'
-import { tableOperation } from '@/lib/db-engine/mariadb'
+import { driverFor } from '@/lib/db-engine/driver'
 
 const bodySchema = z.object({
   op: z.enum(['truncate', 'drop', 'rename', 'optimize', 'analyze']),
@@ -25,7 +25,7 @@ export async function POST(
   try {
     const { conn, auth } = await resolveTenantDatabase(request, id, dbId)
     const body = bodySchema.parse(await request.json())
-    const result = await tableOperation(conn, table, body.op, body.newName)
+    const result = await driverFor(conn).tableOperation(conn, table, body.op, body.newName)
     await logAudit({
       userId: auth.userId,
       action: `db.table.${body.op}`,

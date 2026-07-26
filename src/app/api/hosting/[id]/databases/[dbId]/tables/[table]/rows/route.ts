@@ -12,12 +12,7 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { logAudit } from '@/lib/audit'
 import { resolveTenantDatabase, DbAccessError } from '@/lib/db-engine'
-import {
-  getTableRows,
-  updateRow,
-  insertRow,
-  deleteRow,
-} from '@/lib/db-engine/mariadb'
+import { driverFor } from '@/lib/db-engine/driver'
 
 type Ctx = { params: Promise<{ id: string; dbId: string; table: string }> }
 
@@ -39,7 +34,7 @@ export async function GET(request: Request, { params }: Ctx) {
   try {
     const { conn, auth } = await resolveTenantDatabase(request, id, dbId)
     const q = new URL(request.url).searchParams
-    const result = await getTableRows(conn, table, {
+    const result = await driverFor(conn).getTableRows(conn, table, {
       limit: q.get('limit') ? Number(q.get('limit')) : undefined,
       offset: q.get('offset') ? Number(q.get('offset')) : undefined,
       orderBy: q.get('orderBy') ?? undefined,
@@ -66,7 +61,7 @@ export async function PATCH(request: Request, { params }: Ctx) {
   try {
     const { conn, auth } = await resolveTenantDatabase(request, id, dbId)
     const body = z.object({ key: rowMap, changes: rowMap }).parse(await request.json())
-    const r = await updateRow(conn, table, body.key, body.changes)
+    const r = await driverFor(conn).updateRow(conn, table, body.key, body.changes)
     await logAudit({
       userId: auth.userId,
       action: 'db.row.update',
@@ -86,7 +81,7 @@ export async function POST(request: Request, { params }: Ctx) {
   try {
     const { conn, auth } = await resolveTenantDatabase(request, id, dbId)
     const body = z.object({ values: rowMap }).parse(await request.json())
-    const r = await insertRow(conn, table, body.values)
+    const r = await driverFor(conn).insertRow(conn, table, body.values)
     await logAudit({
       userId: auth.userId,
       action: 'db.row.insert',
@@ -106,7 +101,7 @@ export async function DELETE(request: Request, { params }: Ctx) {
   try {
     const { conn, auth } = await resolveTenantDatabase(request, id, dbId)
     const body = z.object({ key: rowMap }).parse(await request.json())
-    const r = await deleteRow(conn, table, body.key)
+    const r = await driverFor(conn).deleteRow(conn, table, body.key)
     await logAudit({
       userId: auth.userId,
       action: 'db.row.delete',

@@ -202,9 +202,11 @@ export interface DumpInput {
   user: string
   password: string
   database: string
-  /** extra mariadb-dump flags, e.g. ['--no-data'] for structure-only */
+  /** extra dump flags, e.g. ['--no-data'] for structure-only */
   extraArgs?: string[]
   timeoutMs?: number
+  /** defaults to mariadb/mysql; 'postgres' switches to pg_dump */
+  engine?: DbEngine
 }
 
 /**
@@ -214,18 +216,35 @@ export interface DumpInput {
  */
 export function execDump(input: DumpInput): Promise<ExecResult> {
   const timeoutMs = input.timeoutMs ?? 120_000
-  const args = [
-    'exec',
-    '-e',
-    `MYSQL_PWD=${input.password}`,
-    input.container,
-    'mariadb-dump',
-    `-u${input.user}`,
-    '--single-transaction',
-    '--skip-lock-tables',
-    ...(input.extraArgs ?? []),
-    input.database,
-  ]
+  const isPg = input.engine === 'postgres'
+  const args = isPg
+    ? [
+        'exec',
+        '-e',
+        `PGPASSWORD=${input.password}`,
+        input.container,
+        'pg_dump',
+        '-U',
+        input.user,
+        '-h',
+        '127.0.0.1',
+        '--no-owner',
+        '--no-privileges',
+        ...(input.extraArgs ?? []),
+        input.database,
+      ]
+    : [
+        'exec',
+        '-e',
+        `MYSQL_PWD=${input.password}`,
+        input.container,
+        'mariadb-dump',
+        `-u${input.user}`,
+        '--single-transaction',
+        '--skip-lock-tables',
+        ...(input.extraArgs ?? []),
+        input.database,
+      ]
   const started = Date.now()
   return new Promise<ExecResult>((resolve) => {
     const child = spawn('docker', args, { stdio: ['ignore', 'pipe', 'pipe'] })

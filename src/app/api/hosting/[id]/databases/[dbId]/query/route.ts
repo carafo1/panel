@@ -10,7 +10,7 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { logAudit } from '@/lib/audit'
 import { resolveTenantDatabase, DbAccessError } from '@/lib/db-engine'
-import { runStatement, classifyCommand, isReadCommand } from '@/lib/db-engine/mariadb'
+import { driverFor } from '@/lib/db-engine/driver'
 
 const bodySchema = z.object({
   sql: z.string().min(1, 'SQL is required').max(200_000),
@@ -42,12 +42,13 @@ export async function POST(
     return NextResponse.json({ error: msg }, { status: 400 })
   }
 
-  const command = classifyCommand(body.sql)
+  const driver = driverFor(conn)
+  const command = driver.classifyCommand(body.sql)
   try {
-    const result = await runStatement(conn, body.sql, { maxRows: body.maxRows })
+    const result = await driver.runStatement(conn, body.sql, { maxRows: body.maxRows })
     await logAudit({
       userId: auth.userId,
-      action: isReadCommand(command) ? 'db.query.read' : 'db.query.write',
+      action: driver.isReadCommand(command) ? 'db.query.read' : 'db.query.write',
       resource: 'database',
       resourceId: dbId,
       req: request,
@@ -64,7 +65,7 @@ export async function POST(
     // SQL errors (bad syntax, permission denied by the engine) land here.
     await logAudit({
       userId: auth.userId,
-      action: isReadCommand(command) ? 'db.query.read' : 'db.query.write',
+      action: driver.isReadCommand(command) ? 'db.query.read' : 'db.query.write',
       resource: 'database',
       resourceId: dbId,
       req: request,
