@@ -4,7 +4,7 @@
  */
 import { NextResponse } from 'next/server'
 import { resolveTenantDatabase, DbAccessError } from '@/lib/db-engine'
-import { getDatabaseStats } from '@/lib/db-engine/mariadb'
+import { driverFor } from '@/lib/db-engine/driver'
 
 export async function GET(
   request: Request,
@@ -13,7 +13,7 @@ export async function GET(
   const { id, dbId } = await params
   try {
     const { conn } = await resolveTenantDatabase(request, id, dbId)
-    const stats = await getDatabaseStats(conn)
+    const stats = await driverFor(conn).getDatabaseStats(conn)
     return NextResponse.json({ stats })
   } catch (err) {
     if (err instanceof DbAccessError) {

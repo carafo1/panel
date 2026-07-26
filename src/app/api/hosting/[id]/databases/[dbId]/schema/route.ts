@@ -6,7 +6,7 @@
 import { NextResponse } from 'next/server'
 import { logAudit } from '@/lib/audit'
 import { resolveTenantDatabase, DbAccessError } from '@/lib/db-engine'
-import { getSchemaTree } from '@/lib/db-engine/mariadb'
+import { driverFor } from '@/lib/db-engine/driver'
 
 export async function GET(
   request: Request,
@@ -15,7 +15,7 @@ export async function GET(
   const { id, dbId } = await params
   try {
     const { conn, auth } = await resolveTenantDatabase(request, id, dbId)
-    const tree = await getSchemaTree(conn)
+    const tree = await driverFor(conn).getSchemaTree(conn)
     await logAudit({
       userId: auth.userId,
       action: 'db.schema.read',

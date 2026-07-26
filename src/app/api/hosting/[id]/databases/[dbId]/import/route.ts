@@ -8,7 +8,7 @@ import { NextResponse } from 'next/server'
 import { gunzipSync } from 'zlib'
 import { logAudit } from '@/lib/audit'
 import { resolveTenantDatabase, DbAccessError } from '@/lib/db-engine'
-import { importSql } from '@/lib/db-engine/mariadb'
+import { driverFor } from '@/lib/db-engine/driver'
 
 // Allow long-running imports where the platform honours it.
 export const maxDuration = 300
@@ -47,7 +47,7 @@ export async function POST(
       return NextResponse.json({ error: 'The file is empty' }, { status: 400 })
     }
 
-    const result = await importSql(conn, sql)
+    const result = await driverFor(conn).importSql(conn, sql)
 
     await logAudit({
       userId: auth.userId,

@@ -522,6 +522,12 @@ export function generateFullCaddyfile(
       out.push(pma)
       out.push('')
     }
+    // pgAdmin 4, gated by forward_auth against the panel.
+    const pgadmin = generatePgAdminBlock()
+    if (pgadmin) {
+      out.push(pgadmin)
+      out.push('')
+    }
   }
   for (const cfg of configs) {
     out.push(generateCaddyBlock(cfg))
@@ -662,6 +668,65 @@ function generatePmaBlock(): string {
     `        header_up Host {host}`,
     `        header_up X-Forwarded-For {remote_host}`,
     `        header_up X-Forwarded-Proto {scheme}`,
+    `    }`,
+    `    tls ${email}`,
+    `}`,
+  ].join('\n')
+}
+
+/**
+ * Caddy block for pgAdmin 4, emitted when `PGADMIN_URL` is set.
+ *
+ * Unlike phpMyAdmin (which authenticates itself from a signon ticket), pgAdmin
+ * trusts an identity header supplied by the proxy, so this block IS the
+ * security boundary:
+ *
+ *   1. `/apsamo-sso` is routed to the PANEL, which exchanges the hand-off token
+ *      for a session cookie scoped to this host.
+ *   2. Every other request is gated by `forward_auth` against the panel; on a
+ *      2xx, Caddy copies `X-Remote-User` from that response onto the upstream
+ *      request — replacing anything the client sent, so a tenant cannot
+ *      impersonate another by setting the header themselves.
+ */
+function generatePgAdminBlock(): string {
+  const raw = (process.env.PGADMIN_URL || '').trim()
+  if (!raw) return ''
+  let host = ''
+  try {
+    host = new URL(raw).host
+  } catch {
+    return ''
+  }
+  if (!host || host.startsWith('127.0.0.1') || host.startsWith('localhost')) return ''
+  const port = process.env.PGADMIN_HTTP_PORT || '8896'
+  const panelPort = process.env.PANEL_HTTP_PORT || '3000'
+  const email = process.env.LE_EMAIL || ADMIN_EMAIL
+  return [
+    `# ── pgAdmin 4 (panel SSO only) — auto-managed ──`,
+    `${host} {`,
+    `    encode gzip zstd`,
+    `    header {`,
+    `        X-Frame-Options "DENY"`,
+    `        X-Content-Type-Options "nosniff"`,
+    `        Referrer-Policy "no-referrer"`,
+    `        Strict-Transport-Security "max-age=31536000; includeSubDomains"`,
+    `        -Server`,
+    `    }`,
+    `    handle /apsamo-sso* {`,
+    `        rewrite * /api/pgadmin/sso?{query}`,
+    `        reverse_proxy localhost:${panelPort} {`,
+    `            header_up Host {host}`,
+    `            header_up X-Forwarded-Proto {scheme}`,
+    `        }`,
+    `    }`,
+    `    handle {`,
+    `        forward_auth localhost:${panelPort} {`,
+    `            uri /api/pgadmin/authorize`,
+    `            copy_headers X-Remote-User`,
+    `        }`,
+    `        reverse_proxy localhost:${port} {`,
+    `            header_up X-Forwarded-Proto {scheme}`,
+    `        }`,
     `    }`,
     `    tls ${email}`,
     `}`,

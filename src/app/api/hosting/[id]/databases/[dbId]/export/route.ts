@@ -5,7 +5,8 @@
 import { NextResponse } from 'next/server'
 import { logAudit } from '@/lib/audit'
 import { resolveTenantDatabase, DbAccessError } from '@/lib/db-engine'
-import { dumpDatabase, type DumpMode } from '@/lib/db-engine/mariadb'
+import { driverFor } from '@/lib/db-engine/driver'
+import type { DumpMode } from '@/lib/db-engine/mariadb'
 
 export async function GET(
   request: Request,
@@ -18,7 +19,7 @@ export async function GET(
     const mode: DumpMode =
       modeParam === 'structure' || modeParam === 'data' ? modeParam : 'full'
 
-    const { sql, durationMs } = await dumpDatabase(conn, mode)
+    const { sql, durationMs } = await driverFor(conn).dumpDatabase(conn, mode)
 
     await logAudit({
       userId: auth.userId,
