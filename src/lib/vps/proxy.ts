@@ -29,7 +29,7 @@ import {
 } from './ssh'
 import { getServerCredentials } from './provisioner'
 import { isLocalHost, ensureDir } from './local-exec'
-import { ADMIN_EMAIL } from '@/lib/brand-config'
+import { ADMIN_EMAIL, BRAND_DOMAIN } from '@/lib/brand-config'
 import path from 'path'
 import fs from 'fs'
 
@@ -42,6 +42,14 @@ const LOCAL_CADDYFILE = path.join(LOCAL_CADDY_DIR, 'Caddyfile')
 
 export interface ProxyConfig {
   hostname: string
+  /**
+   * Additional VERIFIED custom domains served by the same site.
+   *
+   * Caddy accepts several hostnames per block (`a.com, b.com { … }`) and
+   * issues a certificate for each. Only verified domains belong here — an
+   * unverified one would let a customer serve a hostname they don't own.
+   */
+  extraHostnames?: string[]
   upstream: string // e.g. deployhub-myapp:3000 (container_name:port on deployhub net)
   ssl: boolean
   sslCertStatus?: 'none' | 'pending' | 'issued' | 'failed' | 'renewing'
@@ -132,7 +140,6 @@ export async function configureProjectProxy(
   // and atomically swap it in. Each project's redirects + ipBlocks are loaded
   // so the generated Caddyfile includes `redir` and `@blocked` directives.
   const isLocal = isLocalHost(project.server?.sshHost)
-  const caddyfilePath = isLocal ? LOCAL_CADDYFILE : '/etc/caddy/Caddyfile'
   const creds = await getServerCredentials(project.serverId)
   try {
     await withConnection(creds, async (client) => {
@@ -148,12 +155,13 @@ export async function configureProjectProxy(
           subdomain: true,
           containerName: true,
           containerPort: true,
+          externalPort: true,
           sslEnabled: true,
         },
       })
 
       // Load redirects + ipBlocks for every project on this server in parallel.
-      const [allRedirects, allIpBlocks] = await Promise.all([
+      const [allRedirects, allIpBlocks, allCustomDomains] = await Promise.all([
         db.redirect.findMany({
           where: { projectId: { in: allProjects.map((p) => p.id) }, enabled: true },
           select: { projectId: true, fromPath: true, toUrl: true, statusCode: true },
@@ -162,11 +170,25 @@ export async function configureProjectProxy(
           where: { projectId: { in: allProjects.map((p) => p.id) }, enabled: true },
           select: { projectId: true, ipAddress: true, action: true },
         }),
+        // VERIFIED custom domains only. An unverified row must never reach
+        // the proxy — that check is the whole point of the verify step.
+        db.websiteDomain.findMany({
+          where: { projectId: { in: allProjects.map((p) => p.id) }, verified: true },
+          select: { projectId: true, domain: true },
+        }),
       ])
 
       const configs: ProxyConfig[] = allProjects.map((p) => ({
         hostname: p.customDomain || p.subdomain,
-        upstream: `${p.containerName}:${p.containerPort || 3000}`,
+        extraHostnames: allCustomDomains
+          .filter((d) => d.projectId === p.id)
+          .map((d) => d.domain),
+        // Localhost single-box: the host Caddy isn't on the docker network, so
+        // it reaches the container via its published host port. Remote VPS:
+        // Caddy shares the deployhub network and resolves the container name.
+        upstream: isLocal
+          ? `localhost:${p.externalPort || p.containerPort || 3000}`
+          : `${p.containerName}:${p.containerPort || 3000}`,
         ssl: p.sslEnabled,
         redirects: allRedirects
           .filter((r) => r.projectId === p.id)
@@ -180,43 +202,36 @@ export async function configureProjectProxy(
           .map((b) => ({ ipAddress: b.ipAddress, action: b.action })),
       }))
 
-      const caddyfile = generateFullCaddyfile(configs)
+      // On single-box installs, include the panel's own block so regenerating
+      // the Caddyfile for a project never knocks the control panel offline.
+      const caddyfile = generateFullCaddyfile(configs, { includePanelBlock: isLocal })
       log(`Writing Caddyfile (${caddyfile.length} bytes, ${configs.length} sites)…`)
 
+      // Write the REAL system Caddyfile + validate + reload — for BOTH localhost
+      // (LocalClient runs cp/mv/caddy/systemctl on the panel host) and remote.
+      await exec(client, 'cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak 2>/dev/null || true', { timeoutMs: 5000 })
+      await putFile(client, '/etc/caddy/Caddyfile.new', caddyfile, { mode: 0o644 })
+      await exec(client, 'mv /etc/caddy/Caddyfile.new /etc/caddy/Caddyfile', { timeoutMs: 5000 })
+      log('Validating Caddyfile…')
+      const validate = await exec(client, 'caddy validate --config /etc/caddy/Caddyfile', { timeoutMs: 20000 })
+      if (validate.exitCode !== 0) {
+        await exec(client, 'mv /etc/caddy/Caddyfile.bak /etc/caddy/Caddyfile 2>/dev/null || true', { timeoutMs: 5000 })
+        throw new Error(`Caddyfile validation failed: ${validate.stderr}`)
+      }
+      log('Reloading Caddy…')
+      const reload = await exec(client, 'systemctl reload caddy', { timeoutMs: 20000 })
+      if (reload.exitCode !== 0) {
+        throw new Error(`Caddy reload failed: ${reload.stderr}`)
+      }
+      log('Caddy reloaded successfully')
+      // Keep a copy in storage for display/debugging.
       if (isLocal) {
-        // Local mode: write to storage/caddy/Caddyfile (no systemctl, no /etc).
-        // Caddy enforcement isn't needed locally — the Next.js proxy handles
-        // redirects + IP blocks. We keep the file for display/debugging.
-        await ensureDir(LOCAL_CADDY_DIR)
-        fs.writeFileSync(LOCAL_CADDYFILE, caddyfile, { mode: 0o644 })
-        log('Caddyfile written to local storage (enforcement via Next.js proxy)')
-      } else {
-        // Remote mode: write to /etc/caddy/Caddyfile + reload via systemctl.
-        await putFile(client, '/etc/caddy/Caddyfile.new', caddyfile, { mode: 0o644 })
-        await exec(client, 'mv /etc/caddy/Caddyfile.new /etc/caddy/Caddyfile', {
-          timeoutMs: 5000,
-        })
-
-        // Validate before reload
-        log('Validating Caddyfile…')
-        const validate = await exec(client, 'caddy validate --config /etc/caddy/Caddyfile', {
-          timeoutMs: 15000,
-        })
-        if (validate.exitCode !== 0) {
-          await exec(client, 'mv /etc/caddy/Caddyfile.bak /etc/caddy/Caddyfile 2>/dev/null || true', {
-            timeoutMs: 5000,
-          })
-          throw new Error(`Caddyfile validation failed: ${validate.stderr}`)
+        try {
+          await ensureDir(LOCAL_CADDY_DIR)
+          fs.writeFileSync(LOCAL_CADDYFILE, caddyfile, { mode: 0o644 })
+        } catch {
+          /* noop */
         }
-
-        log('Reloading Caddy…')
-        const reload = await exec(client, 'systemctl reload caddy', {
-          timeoutMs: 15000,
-        })
-        if (reload.exitCode !== 0) {
-          throw new Error(`Caddy reload failed: ${reload.stderr}`)
-        }
-        log('Caddy reloaded successfully')
       }
     })
 
@@ -310,12 +325,14 @@ export async function removeProjectProxy(projectId: string): Promise<ProjectProx
           subdomain: true,
           containerName: true,
           containerPort: true,
+          externalPort: true,
           sslEnabled: true,
         },
       })
+      const isLocal = isLocalHost(project.server?.sshHost)
       // Load redirects + ipBlocks for the remaining projects so the regenerated
       // Caddyfile still has their `redir` + `@blocked` directives.
-      const [allRedirects, allIpBlocks] = await Promise.all([
+      const [allRedirects, allIpBlocks, allCustomDomains] = await Promise.all([
         db.redirect.findMany({
           where: { projectId: { in: allProjects.map((p) => p.id) }, enabled: true },
           select: { projectId: true, fromPath: true, toUrl: true, statusCode: true },
@@ -324,10 +341,21 @@ export async function removeProjectProxy(projectId: string): Promise<ProjectProx
           where: { projectId: { in: allProjects.map((p) => p.id) }, enabled: true },
           select: { projectId: true, ipAddress: true, action: true },
         }),
+        // VERIFIED custom domains only. An unverified row must never reach
+        // the proxy — that check is the whole point of the verify step.
+        db.websiteDomain.findMany({
+          where: { projectId: { in: allProjects.map((p) => p.id) }, verified: true },
+          select: { projectId: true, domain: true },
+        }),
       ])
       const configs: ProxyConfig[] = allProjects.map((p) => ({
         hostname: p.customDomain || p.subdomain,
-        upstream: `${p.containerName}:${p.containerPort || 3000}`,
+        extraHostnames: allCustomDomains
+          .filter((d) => d.projectId === p.id)
+          .map((d) => d.domain),
+        upstream: isLocal
+          ? `localhost:${p.externalPort || p.containerPort || 3000}`
+          : `${p.containerName}:${p.containerPort || 3000}`,
         ssl: p.sslEnabled,
         redirects: allRedirects
           .filter((r) => r.projectId === p.id)
@@ -340,16 +368,19 @@ export async function removeProjectProxy(projectId: string): Promise<ProjectProx
           .filter((b) => b.projectId === p.id)
           .map((b) => ({ ipAddress: b.ipAddress, action: b.action })),
       }))
-      const caddyfile = generateFullCaddyfile(configs)
-      const isLocal = isLocalHost(project.server?.sshHost)
+      const caddyfile = generateFullCaddyfile(configs, { includePanelBlock: isLocal })
+      await exec(client, 'cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak 2>/dev/null || true', { timeoutMs: 5000 })
+      await putFile(client, '/etc/caddy/Caddyfile.new', caddyfile, { mode: 0o644 })
+      await exec(client, 'mv /etc/caddy/Caddyfile.new /etc/caddy/Caddyfile && caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy', {
+        timeoutMs: 30000,
+      })
       if (isLocal) {
-        await ensureDir(LOCAL_CADDY_DIR)
-        fs.writeFileSync(LOCAL_CADDYFILE, caddyfile, { mode: 0o644 })
-      } else {
-        await putFile(client, '/etc/caddy/Caddyfile.new', caddyfile, { mode: 0o644 })
-        await exec(client, 'mv /etc/caddy/Caddyfile.new /etc/caddy/Caddyfile && caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy', {
-          timeoutMs: 30000,
-        })
+        try {
+          await ensureDir(LOCAL_CADDY_DIR)
+          fs.writeFileSync(LOCAL_CADDYFILE, caddyfile, { mode: 0o644 })
+        } catch {
+          /* noop */
+        }
       }
     })
     return { ok: true, message: 'Proxy entry removed' }
@@ -375,11 +406,17 @@ export async function removeProjectProxy(projectId: string): Promise<ProjectProx
 export function generateCaddyBlock(cfg: ProxyConfig): string {
   const lines: string[] = []
 
+  // Deduplicate: the primary may also exist as a WebsiteDomain row, and a
+  // hostname repeated in a Caddy site address is a config error.
+  const allHosts = [cfg.hostname, ...(cfg.extraHostnames ?? [])].filter(
+    (h, i, arr) => h && arr.indexOf(h) === i
+  )
+
   if (cfg.ssl) {
-    lines.push(`${cfg.hostname} {`)
+    lines.push(`${allHosts.join(', ')} {`)
   } else {
     lines.push(`:80 {`)
-    lines.push(`  @host host ${cfg.hostname}`)
+    lines.push(`  @host host ${allHosts.join(' ')}`)
     lines.push(`  handle @host {`)
   }
 
@@ -420,18 +457,16 @@ export function generateCaddyBlock(cfg: ProxyConfig): string {
   }
 
   if (cfg.ssl) {
-    // Request compression + logging
     lines.push(`    encode gzip zstd`)
-    lines.push(`    log {`)
-    lines.push(`      output file /opt/deployhub/logs/${cfg.hostname.replace(/\W+/g, '_')}.log`)
-    lines.push(`      format json`)
-    lines.push(`    }`)
+    // (Access logs go to journald by default — no file-log directive, which
+    // would need a caddy-writable path and can break `caddy reload`.)
     // Caddy will automatically use Let's Encrypt — no explicit tls directive needed.
     // But we can be explicit about the email for ACME account.
+    // Hostname is explicit in the site address, so Caddy auto-issues a normal
+    // Let's Encrypt cert. (No on_demand — that needs a global on_demand_tls ask
+    // policy or Caddy refuses it.)
     const email = process.env.LE_EMAIL || ADMIN_EMAIL
-    lines.push(`    tls ${email} {`)
-    lines.push(`      on_demand`)
-    lines.push(`    }`)
+    lines.push(`    tls ${email}`)
   }
 
   if (!cfg.ssl) {
@@ -445,7 +480,10 @@ export function generateCaddyBlock(cfg: ProxyConfig): string {
  * Generate the full /etc/caddy/Caddyfile for a server. Includes the global
  * options block (ACME email, etc.) + one block per project.
  */
-export function generateFullCaddyfile(configs: ProxyConfig[]): string {
+export function generateFullCaddyfile(
+  configs: ProxyConfig[],
+  opts: { includePanelBlock?: boolean } = {}
+): string {
   const email = process.env.LE_EMAIL || ADMIN_EMAIL
   const out: string[] = [
     `# Managed by Apsamo Panel — DO NOT EDIT MANUALLY`,
@@ -454,23 +492,180 @@ export function generateFullCaddyfile(configs: ProxyConfig[]): string {
     ``,
     `{`,
     `  email ${email}`,
-    `  admin off`,
-    `  log {
-    output file /opt/deployhub/logs/caddy-global.log
-    format json
-  }`,
     `}`,
     ``,
   ]
+  // On a single-box (localhost) install the panel AND the hosted projects share
+  // this Caddy. ALWAYS emit the panel's own block first, so regenerating the
+  // file for a project deploy never knocks the control panel offline.
+  if (opts.includePanelBlock) {
+    const panel = generatePanelBlock()
+    if (panel) {
+      out.push(panel)
+      out.push('')
+    }
+    // Mail server (Mailcow) admin UI, when configured on this box.
+    const mail = generateMailBlock()
+    if (mail) {
+      out.push(mail)
+      out.push('')
+    }
+    // Customer webmail (SOGo) on its own host, root redirected to /SOGo/.
+    const webmail = generateWebmailBlock()
+    if (webmail) {
+      out.push(webmail)
+      out.push('')
+    }
+    // phpMyAdmin, reachable only via the panel's SSO hand-off.
+    const pma = generatePmaBlock()
+    if (pma) {
+      out.push(pma)
+      out.push('')
+    }
+  }
   for (const cfg of configs) {
     out.push(generateCaddyBlock(cfg))
     out.push('')
   }
-  if (configs.length === 0) {
+  if (configs.length === 0 && !opts.includePanelBlock) {
     out.push(`# No sites configured yet — Apsamo Panel will add them here.`)
     out.push(`:80 { respond "Apsamo Panel — no sites configured" 200 }`)
   }
   return out.join('\n')
+}
+
+/**
+ * The panel's own Caddy site block (control plane). Serves the dashboard on the
+ * APP_URL host + the brand apex → the Next.js server on :3000, with Socket.IO
+ * (realtime) routed via the XTransformPort query param. Included in the
+ * generated Caddyfile only on single-box (localhost) servers, where the panel
+ * shares Caddy with the projects it hosts.
+ */
+function generatePanelBlock(): string {
+  let appHost = ''
+  try {
+    appHost = new URL(process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || '').host
+  } catch {
+    /* ignore malformed APP_URL */
+  }
+  const brand = process.env.BRAND_DOMAIN || BRAND_DOMAIN
+  const hosts = [...new Set([appHost, brand].filter(Boolean))]
+  if (hosts.length === 0) return ''
+  return [
+    `# ── Apsamo Panel (control plane) — auto-managed ──`,
+    `${hosts.join(', ')} {`,
+    `    encode gzip zstd`,
+    `    @realtime {`,
+    `        query XTransformPort=*`,
+    `        path /socket.io/*`,
+    `    }`,
+    `    handle @realtime {`,
+    `        reverse_proxy localhost:{query.XTransformPort} {`,
+    `            header_up Host {host}`,
+    `        }`,
+    `    }`,
+    `    handle {`,
+    `        reverse_proxy localhost:3000 {`,
+    `            header_up Host {host}`,
+    `            header_up X-Forwarded-For {remote_host}`,
+    `            header_up X-Forwarded-Proto {scheme}`,
+    `        }`,
+    `    }`,
+    `}`,
+  ].join('\n')
+}
+
+/**
+ * Caddy block for the mail server (Mailcow) web UI + webmail, emitted only on
+ * single-box installs where `MAIL_SERVER_HOSTNAME` is set. Mailcow runs on
+ * internal ports (HTTPS 8443, snake-oil cert); Caddy terminates the public
+ * Let's Encrypt cert and proxies to it. Its SMTP/IMAP ports bind directly and
+ * do not go through Caddy.
+ */
+function generateMailBlock(): string {
+  const host = (process.env.MAIL_SERVER_HOSTNAME || '').trim()
+  if (!host) return ''
+  const email = process.env.LE_EMAIL || ADMIN_EMAIL
+  return [
+    `# ── Mail server (Mailcow) — auto-managed ──`,
+    `${host} {`,
+    `    encode gzip zstd`,
+    `    reverse_proxy https://localhost:8443 {`,
+    `        transport http {`,
+    `            tls_insecure_skip_verify`,
+    `        }`,
+    `    }`,
+    `    tls ${email}`,
+    `}`,
+  ].join('\n')
+}
+
+/**
+ * Caddy block for customer webmail (SOGo), emitted when `WEBMAIL_HOSTNAME` is
+ * set. The bare root redirects to `/SOGo/` so mailbox users land straight on the
+ * clean webmail login (no admin / domain-admin screen); everything proxies to
+ * Mailcow. Keep the admin UI on the separate `MAIL_SERVER_HOSTNAME` host.
+ */
+function generateWebmailBlock(): string {
+  const host = (process.env.WEBMAIL_HOSTNAME || '').trim()
+  if (!host) return ''
+  const email = process.env.LE_EMAIL || ADMIN_EMAIL
+  return [
+    `# ── Webmail (SOGo) for mailbox users — auto-managed ──`,
+    `${host} {`,
+    `    redir / /SOGo/ 302`,
+    `    reverse_proxy https://localhost:8443 {`,
+    `        transport http {`,
+    `            tls_insecure_skip_verify`,
+    `        }`,
+    `    }`,
+    `    tls ${email}`,
+    `}`,
+  ].join('\n')
+}
+
+/**
+ * Caddy block for phpMyAdmin, emitted when `PMA_URL` is set. Customers reach it
+ * only through the panel's SSO hand-off (see `src/lib/db-engine/pma-sso.ts`),
+ * which signs them in as their own non-root database user.
+ *
+ * The container publishes on 127.0.0.1 only, so Caddy is the sole public entry
+ * point and terminates TLS. `X-Frame-Options: DENY` is deliberate: phpMyAdmin
+ * holds a live database session, so it must never be framed by another site
+ * (clickjacking), and we don't embed it in the panel either — it opens in its
+ * own tab.
+ */
+function generatePmaBlock(): string {
+  const raw = (process.env.PMA_URL || '').trim()
+  if (!raw) return ''
+  let host = ''
+  try {
+    host = new URL(raw).host
+  } catch {
+    return ''
+  }
+  if (!host || host.startsWith('127.0.0.1') || host.startsWith('localhost')) return ''
+  const port = process.env.PMA_HTTP_PORT || '8892'
+  const email = process.env.LE_EMAIL || ADMIN_EMAIL
+  return [
+    `# ── phpMyAdmin (panel SSO only) — auto-managed ──`,
+    `${host} {`,
+    `    encode gzip zstd`,
+    `    header {`,
+    `        X-Frame-Options "DENY"`,
+    `        X-Content-Type-Options "nosniff"`,
+    `        Referrer-Policy "no-referrer"`,
+    `        Strict-Transport-Security "max-age=31536000; includeSubDomains"`,
+    `        -Server`,
+    `    }`,
+    `    reverse_proxy localhost:${port} {`,
+    `        header_up Host {host}`,
+    `        header_up X-Forwarded-For {remote_host}`,
+    `        header_up X-Forwarded-Proto {scheme}`,
+    `    }`,
+    `    tls ${email}`,
+    `}`,
+  ].join('\n')
 }
 
 // ─── Get current Caddyfile from a server ─────────────────────────────────

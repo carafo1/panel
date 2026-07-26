@@ -72,6 +72,7 @@ import {
   KeyRound,
   ChevronDown,
   ChevronUp,
+  ExternalLink,
 } from 'lucide-react'
 import {
   Card,
@@ -454,6 +455,7 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
   const [revealed, setRevealed] = useState<Record<string, string>>({})
   const [revealing, setRevealing] = useState<Record<string, boolean>>({})
   const [testing, setTesting] = useState<Record<string, boolean>>({})
+  const [openingPma, setOpeningPma] = useState<Record<string, boolean>>({})
   const [createOpen, setCreateOpen] = useState(false)
   const [createType, setCreateType] = useState<'mysql' | 'mariadb' | 'postgres' | 'sqlite'>('mysql')
   const [createName, setCreateName] = useState('')
@@ -532,6 +534,33 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
       toast.error('Network error testing connection')
     } finally {
       setTesting((p) => ({ ...p, [db.id]: false }))
+    }
+  }
+
+  /**
+   * Open phpMyAdmin for a database via panel SSO. The blank tab is opened up
+   * front, while we still have the user's click, so the popup blocker doesn't
+   * swallow it while the one-time session is being minted.
+   */
+  const handleOpenPma = async (db: WebsiteDatabase) => {
+    const tab = window.open('', '_blank')
+    setOpeningPma((p) => ({ ...p, [db.id]: true }))
+    try {
+      const res = await fetch(
+        `/api/hosting/${projectId}/databases/${db.id}/pma?json=1`,
+        { headers: getAuthHeaders() }
+      )
+      const data = await res.json()
+      if (!res.ok || !data.url) {
+        throw new Error(data.error || 'Could not start a phpMyAdmin session')
+      }
+      if (tab) tab.location.href = data.url
+      else window.location.href = data.url
+    } catch (err) {
+      tab?.close()
+      toast.error(err instanceof Error ? err.message : 'Failed to open phpMyAdmin')
+    } finally {
+      setOpeningPma((p) => ({ ...p, [db.id]: false }))
     }
   }
 
@@ -741,17 +770,34 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
                         {['mysql', 'mariadb'].includes((db.type || '').toLowerCase()) && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className={`h-7 text-xs ${primaryText}`}
-                            onClick={() =>
-                              window.open(`/db-studio/${projectId}/${db.id}`, '_blank')
-                            }
-                          >
-                            <DatabaseIcon className="size-3 mr-1" />
-                            Studio
-                          </Button>
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className={`h-7 text-xs ${primaryText}`}
+                              onClick={() =>
+                                window.open(`/db-studio/${projectId}/${db.id}`, '_blank')
+                              }
+                            >
+                              <DatabaseIcon className="size-3 mr-1" />
+                              Studio
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 text-xs text-[#706FD3] hover:text-[#8888FF] hover:bg-[#706FD3]/10"
+                              disabled={!!openingPma[db.id]}
+                              onClick={() => handleOpenPma(db)}
+                              title="Open phpMyAdmin (signed in automatically)"
+                            >
+                              {openingPma[db.id] ? (
+                                <Loader2 className="size-3 mr-1 animate-spin" />
+                              ) : (
+                                <ExternalLink className="size-3 mr-1" />
+                              )}
+                              phpMyAdmin
+                            </Button>
+                          </>
                         )}
                         <Button
                           variant="ghost"
