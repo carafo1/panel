@@ -31,6 +31,7 @@
  */
 import crypto from 'crypto'
 import { spawn } from 'child_process'
+import { friendlyContainerError } from './exec'
 
 export interface PmaTicket {
   /** docker container name of the tenant's DB (phpMyAdmin dials this host) */
@@ -98,15 +99,21 @@ function writeTicket(token: string, ticket: PmaTicket): Promise<void> {
     child.stderr.on('data', (d: Buffer) => {
       stderr += d.toString('utf8')
     })
-    child.on('error', (e) => reject(new Error(`docker exec failed: ${e.message}`)))
+    child.on('error', (e) =>
+      reject(
+        Object.assign(new Error(friendlyContainerError(e.message, 'phpMyAdmin')), {
+          detail: e.message,
+        })
+      )
+    )
     child.on('close', (code) => {
       if (code === 0) resolve()
-      else
+      else {
+        const detail = stderr.trim().slice(0, 300)
         reject(
-          new Error(
-            `Could not prepare the phpMyAdmin session (exit ${code}). ${stderr.trim().slice(0, 200)}`
-          )
+          Object.assign(new Error(friendlyContainerError(detail, 'phpMyAdmin')), { detail })
         )
+      }
     })
     child.stdin.end(JSON.stringify(ticket))
   })
