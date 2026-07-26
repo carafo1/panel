@@ -4,7 +4,7 @@
  */
 import { NextResponse } from 'next/server'
 import { resolveTenantDatabase, DbAccessError } from '@/lib/db-engine'
-import { getColumns, getIndexes, getForeignKeys } from '@/lib/db-engine/mariadb'
+import { driverFor } from '@/lib/db-engine/driver'
 
 export async function GET(
   request: Request,
@@ -13,10 +13,11 @@ export async function GET(
   const { id, dbId, table } = await params
   try {
     const { conn } = await resolveTenantDatabase(request, id, dbId)
+    const d = driverFor(conn)
     const [columns, indexes, foreignKeys] = await Promise.all([
-      getColumns(conn, table),
-      getIndexes(conn, table),
-      getForeignKeys(conn, table),
+      d.getColumns(conn, table),
+      d.getIndexes(conn, table),
+      d.getForeignKeys(conn, table),
     ])
     return NextResponse.json({ table, columns, indexes, foreignKeys })
   } catch (err) {

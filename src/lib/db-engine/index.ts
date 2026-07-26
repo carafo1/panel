@@ -72,9 +72,8 @@ export async function resolveTenantDatabase(
   if (engine === 'sqlite') {
     throw new DbAccessError('SQLite databases are not managed in Database Studio', 400)
   }
-  if (engine === 'postgres') {
-    throw new DbAccessError('PostgreSQL support in Database Studio is coming soon', 400)
-  }
+  // MySQL/MariaDB and PostgreSQL are both supported; the engine-specific work
+  // is behind `driverFor()` (see ./driver).
 
   // The docker-exec transport runs on THIS host. Databases whose project is
   // pinned to a remote server aren't reachable yet.
