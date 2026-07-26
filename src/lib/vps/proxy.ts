@@ -516,6 +516,12 @@ export function generateFullCaddyfile(
       out.push(webmail)
       out.push('')
     }
+    // phpMyAdmin, reachable only via the panel's SSO hand-off.
+    const pma = generatePmaBlock()
+    if (pma) {
+      out.push(pma)
+      out.push('')
+    }
   }
   for (const cfg of configs) {
     out.push(generateCaddyBlock(cfg))
@@ -612,6 +618,50 @@ function generateWebmailBlock(): string {
     `        transport http {`,
     `            tls_insecure_skip_verify`,
     `        }`,
+    `    }`,
+    `    tls ${email}`,
+    `}`,
+  ].join('\n')
+}
+
+/**
+ * Caddy block for phpMyAdmin, emitted when `PMA_URL` is set. Customers reach it
+ * only through the panel's SSO hand-off (see `src/lib/db-engine/pma-sso.ts`),
+ * which signs them in as their own non-root database user.
+ *
+ * The container publishes on 127.0.0.1 only, so Caddy is the sole public entry
+ * point and terminates TLS. `X-Frame-Options: DENY` is deliberate: phpMyAdmin
+ * holds a live database session, so it must never be framed by another site
+ * (clickjacking), and we don't embed it in the panel either — it opens in its
+ * own tab.
+ */
+function generatePmaBlock(): string {
+  const raw = (process.env.PMA_URL || '').trim()
+  if (!raw) return ''
+  let host = ''
+  try {
+    host = new URL(raw).host
+  } catch {
+    return ''
+  }
+  if (!host || host.startsWith('127.0.0.1') || host.startsWith('localhost')) return ''
+  const port = process.env.PMA_HTTP_PORT || '8892'
+  const email = process.env.LE_EMAIL || ADMIN_EMAIL
+  return [
+    `# ── phpMyAdmin (panel SSO only) — auto-managed ──`,
+    `${host} {`,
+    `    encode gzip zstd`,
+    `    header {`,
+    `        X-Frame-Options "DENY"`,
+    `        X-Content-Type-Options "nosniff"`,
+    `        Referrer-Policy "no-referrer"`,
+    `        Strict-Transport-Security "max-age=31536000; includeSubDomains"`,
+    `        -Server`,
+    `    }`,
+    `    reverse_proxy localhost:${port} {`,
+    `        header_up Host {host}`,
+    `        header_up X-Forwarded-For {remote_host}`,
+    `        header_up X-Forwarded-Proto {scheme}`,
     `    }`,
     `    tls ${email}`,
     `}`,
