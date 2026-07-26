@@ -240,10 +240,28 @@ interface WebsiteDatabase {
   host: string
   port: number
   username: string
-  password: string // masked unless ?reveal=true
+  /** Always present: first 2 chars + "****". */
+  passwordMasked: string
+  /** Plaintext — only populated when the row was fetched with ?reveal=true. */
+  passwordPlain?: string
   externalRef?: string | null
   isPrimary: boolean
   createdAt: string
+}
+
+/**
+ * Shape returned by POST /databases right after provisioning. Distinct from
+ * {@link WebsiteDatabase}: the freshly generated password is returned in
+ * plaintext exactly once here, so it can be shown for the customer to save.
+ */
+interface CreatedDatabase {
+  name: string
+  type: string
+  host: string
+  port: number
+  username: string
+  password: string
+  externalRef?: string | null
 }
 
 interface WebsiteBackup {
@@ -456,11 +474,18 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
   const [revealing, setRevealing] = useState<Record<string, boolean>>({})
   const [testing, setTesting] = useState<Record<string, boolean>>({})
   const [openingPma, setOpeningPma] = useState<Record<string, boolean>>({})
+  const [resetPwFor, setResetPwFor] = useState<WebsiteDatabase | null>(null)
+  const [resettingPw, setResettingPw] = useState(false)
+  const [newPw, setNewPw] = useState<{
+    name: string
+    username: string
+    password: string
+  } | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
   const [createType, setCreateType] = useState<'mysql' | 'mariadb' | 'postgres' | 'sqlite'>('mysql')
   const [createName, setCreateName] = useState('')
   const [creating, setCreating] = useState(false)
-  const [createdDb, setCreatedDb] = useState<WebsiteDatabase | null>(null)
+  const [createdDb, setCreatedDb] = useState<CreatedDatabase | null>(null)
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
 
@@ -504,8 +529,16 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
         { headers: getAuthHeaders() }
       )
       const data = await res.json()
-      if (res.ok && data.database) {
-        setRevealed((prev) => ({ ...prev, [db.id]: data.database.password }))
+      const plain = data?.database?.passwordPlain
+      if (res.ok && typeof plain === 'string' && plain !== '') {
+        setRevealed((prev) => ({ ...prev, [db.id]: plain }))
+      } else if (res.ok) {
+        // Row exists but the stored secret could not be decrypted (e.g. the
+        // ENCRYPTION_KEY changed since it was provisioned). Say so plainly
+        // instead of silently showing a blank field.
+        toast.error(
+          'This password could not be decrypted. Use "Reset password" to generate a new one.'
+        )
       } else {
         toast.error(data.error || 'Failed to reveal password')
       }
@@ -534,6 +567,35 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
       toast.error('Network error testing connection')
     } finally {
       setTesting((p) => ({ ...p, [db.id]: false }))
+    }
+  }
+
+  /**
+   * Rotate a database user's password. The new secret comes back once, so we
+   * surface it in a dialog for the customer to copy before it is masked again.
+   */
+  const handleResetPassword = async (db: WebsiteDatabase) => {
+    setResettingPw(true)
+    try {
+      const res = await fetch(`/api/hosting/${projectId}/databases/${db.id}`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ action: 'reset-password' }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data.password) {
+        throw new Error(data.error || 'Failed to reset password')
+      }
+      setResetPwFor(null)
+      setNewPw({ name: db.name, username: db.username, password: data.password })
+      // Show the fresh secret in the row too, so it lines up with the dialog.
+      setRevealed((prev) => ({ ...prev, [db.id]: data.password }))
+      fetchDatabases()
+      toast.success('Database password reset')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to reset password')
+    } finally {
+      setResettingPw(false)
     }
   }
 
@@ -726,7 +788,7 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
                     <TableCell>
                       <div className="flex items-center gap-2">
                         <span className="font-mono text-xs text-muted-foreground">
-                          {revealed[db.id] ?? maskPassword(db.password)}
+                          {revealed[db.id] ?? db.passwordMasked}
                         </span>
                         <Tooltip>
                           <TooltipTrigger asChild>
@@ -813,6 +875,18 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
                           )}
                           Test
                         </Button>
+                        {(db.type || '').toLowerCase() !== 'sqlite' && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs"
+                            onClick={() => setResetPwFor(db)}
+                            title="Generate a new password for this database user"
+                          >
+                            <KeyRound className="size-3 mr-1" />
+                            Reset password
+                          </Button>
+                        )}
                         <Button
                           variant="ghost"
                           size="sm"
@@ -942,6 +1016,100 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
           )}
           <DialogFooter>
             <Button className={primaryBtn} onClick={() => setCreatedDb(null)}>
+              Done
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Confirm password reset */}
+      <Dialog open={!!resetPwFor} onOpenChange={(v) => !v && setResetPwFor(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <KeyRound className="size-5 text-amber-500" />
+              Reset database password
+            </DialogTitle>
+            <DialogDescription>
+              A new secure password will be generated for{' '}
+              <span className="font-mono">{resetPwFor?.username}</span> on{' '}
+              <span className="font-mono">{resetPwFor?.name}</span>.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-md border border-amber-300/60 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/20 p-3 text-sm">
+            <p className="font-medium text-amber-800 dark:text-amber-300">
+              Any app using the old password will stop connecting
+            </p>
+            <p className="mt-1 text-amber-700 dark:text-amber-400/90">
+              If a site (WordPress, Laravel, …) connects to this database, update its
+              config with the new password right after resetting.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setResetPwFor(null)}>
+              Cancel
+            </Button>
+            <Button
+              className={primaryBtn}
+              disabled={resettingPw}
+              onClick={() => resetPwFor && handleResetPassword(resetPwFor)}
+            >
+              {resettingPw ? (
+                <>
+                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  Resetting…
+                </>
+              ) : (
+                <>
+                  <KeyRound className="size-4 mr-2" />
+                  Reset password
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Show the newly generated password once */}
+      <Dialog open={!!newPw} onOpenChange={(v) => !v && setNewPw(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CheckCircle2 className="size-5 text-emerald-600" />
+              New password generated
+            </DialogTitle>
+            <DialogDescription>
+              Copy it now and update any app that connects to{' '}
+              <span className="font-mono">{newPw?.name}</span>.
+            </DialogDescription>
+          </DialogHeader>
+          {newPw && (
+            <div className="grid gap-3 py-2 text-sm">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">User</span>
+                <span className="font-mono">{newPw.username}</span>
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-muted-foreground">New password</span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => copyToClipboard(newPw.password, 'Password copied')}
+                  >
+                    <Copy className="size-3 mr-1" />
+                    Copy
+                  </Button>
+                </div>
+                <code className="block w-full rounded-md bg-muted px-3 py-2 font-mono text-xs break-all">
+                  {newPw.password}
+                </code>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button className={primaryBtn} onClick={() => setNewPw(null)}>
               Done
             </Button>
           </DialogFooter>
