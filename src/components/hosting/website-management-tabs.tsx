@@ -474,6 +474,7 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
   const [revealing, setRevealing] = useState<Record<string, boolean>>({})
   const [testing, setTesting] = useState<Record<string, boolean>>({})
   const [openingPma, setOpeningPma] = useState<Record<string, boolean>>({})
+  const [openingPgAdmin, setOpeningPgAdmin] = useState<Record<string, boolean>>({})
   const [resetPwFor, setResetPwFor] = useState<WebsiteDatabase | null>(null)
   const [resettingPw, setResettingPw] = useState(false)
   const [newPw, setNewPw] = useState<{
@@ -567,6 +568,32 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
       toast.error('Network error testing connection')
     } finally {
       setTesting((p) => ({ ...p, [db.id]: false }))
+    }
+  }
+
+  /**
+   * Open pgAdmin for a PostgreSQL database via panel SSO. Same popup-blocker
+   * dance as phpMyAdmin: claim the tab on the click, fill it in afterwards.
+   */
+  const handleOpenPgAdmin = async (db: WebsiteDatabase) => {
+    const tab = window.open('', '_blank')
+    setOpeningPgAdmin((p) => ({ ...p, [db.id]: true }))
+    try {
+      const res = await fetch(
+        `/api/hosting/${projectId}/databases/${db.id}/pgadmin?json=1`,
+        { headers: getAuthHeaders() }
+      )
+      const data = await res.json()
+      if (!res.ok || !data.url) {
+        throw new Error(data.error || 'Could not start a pgAdmin session')
+      }
+      if (tab) tab.location.href = data.url
+      else window.location.href = data.url
+    } catch (err) {
+      tab?.close()
+      toast.error(err instanceof Error ? err.message : 'Failed to open pgAdmin')
+    } finally {
+      setOpeningPgAdmin((p) => ({ ...p, [db.id]: false }))
     }
   }
 
@@ -875,6 +902,23 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
                           )}
                           Test
                         </Button>
+                        {['postgres', 'postgresql'].includes((db.type || '').toLowerCase()) && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs text-[#706FD3] hover:text-[#8888FF] hover:bg-[#706FD3]/10"
+                            disabled={!!openingPgAdmin[db.id]}
+                            onClick={() => handleOpenPgAdmin(db)}
+                            title="Open pgAdmin (signed in automatically)"
+                          >
+                            {openingPgAdmin[db.id] ? (
+                              <Loader2 className="size-3 mr-1 animate-spin" />
+                            ) : (
+                              <ExternalLink className="size-3 mr-1" />
+                            )}
+                            pgAdmin
+                          </Button>
+                        )}
                         {(db.type || '').toLowerCase() !== 'sqlite' && (
                           <Button
                             variant="ghost"
