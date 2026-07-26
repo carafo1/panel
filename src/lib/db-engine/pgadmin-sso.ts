@@ -31,6 +31,7 @@
  */
 import { spawn } from 'child_process'
 import { encryptJSON, decryptJSON } from '@/lib/encryption'
+import { friendlyContainerError } from './exec'
 
 // ─── Config ────────────────────────────────────────────────────────────────
 
@@ -153,7 +154,7 @@ function execInContainer(script: string, stdin = ''): Promise<{ ok: boolean; out
 export async function provisionPgAdminTenant(
   username: string,
   servers: PgServerSpec[]
-): Promise<{ ok: boolean; message: string }> {
+): Promise<{ ok: boolean; message: string; detail?: string }> {
   // The whole payload (including passwords) goes over stdin, never argv, so it
   // never appears in a process list.
   const payload = JSON.stringify({
@@ -241,12 +242,10 @@ exit $rc
 
   const r = await execInContainer(script, payload)
   if (!r.ok || !r.out.includes('APSAMO_PROVISION_OK')) {
-    return {
-      ok: false,
-      message: `Could not prepare pgAdmin for this account: ${
-        r.out.trim().slice(0, 300) || 'no output from pgAdmin container'
-      }`,
-    }
+    const detail = r.out.trim().slice(0, 300) || 'no output from pgAdmin container'
+    // Customer-facing text stays plain; `detail` carries the raw cause for the
+    // audit log so support can still see exactly what failed.
+    return { ok: false, message: friendlyContainerError(detail, 'pgAdmin'), detail }
   }
   return { ok: true, message: 'pgAdmin session prepared' }
 }

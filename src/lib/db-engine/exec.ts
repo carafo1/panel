@@ -195,6 +195,33 @@ export function parseBatchTsv(stdout: string): {
   return { columns, rows }
 }
 
+// ─── Failure messages ──────────────────────────────────────────────────────
+
+/**
+ * Turn a raw `docker exec` failure into something a hosting customer can act
+ * on. These paths are reached when the admin tool's container is stopped,
+ * missing, or the daemon is unreachable — infrastructure problems the customer
+ * can neither see nor fix, so telling them "container <sha> is not running"
+ * only causes confusion. The raw text is still returned to the caller for the
+ * audit log; only the customer-facing sentence is rewritten.
+ */
+export function friendlyContainerError(raw: string, tool: string): string {
+  const t = (raw || '').toLowerCase()
+  if (t.includes('is not running') || t.includes('is not up')) {
+    return `${tool} is temporarily unavailable — the service is not running. Please try again in a moment, or contact support if this persists.`
+  }
+  if (t.includes('no such container') || t.includes('not found')) {
+    return `${tool} is not available on this server yet. Please contact support.`
+  }
+  if (t.includes('cannot connect to the docker daemon') || t.includes('permission denied')) {
+    return `${tool} could not be reached because of a server configuration problem. Please contact support.`
+  }
+  if (t.includes('timed out') || t.includes('timeout')) {
+    return `${tool} took too long to respond. Please try again.`
+  }
+  return `${tool} could not be opened right now. Please try again, or contact support if this persists.`
+}
+
 // ─── mysqldump transport (Export) ──────────────────────────────────────────
 
 export interface DumpInput {

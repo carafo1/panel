@@ -115,9 +115,11 @@ export async function GET(
         resourceId: dbId,
         req: request,
         status: 'failure',
-        metadata: { error: prov.message },
+        // `detail` is the raw cause (stopped container, daemon error, …) kept
+        // for support; the customer only sees `message`.
+        metadata: { error: prov.message, detail: prov.detail },
       })
-      return NextResponse.json({ error: prov.message }, { status: 500 })
+      return NextResponse.json({ error: prov.message }, { status: 503 })
     }
 
     const token = mintHandoffToken(username, ownerId)

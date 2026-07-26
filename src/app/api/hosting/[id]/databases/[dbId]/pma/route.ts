@@ -48,14 +48,18 @@ export async function GET(
       return NextResponse.json({ error: err.message }, { status: err.status })
     }
     const message = err instanceof Error ? err.message : 'Failed to open phpMyAdmin'
+    // `detail` carries the raw docker/stderr cause for support; the customer
+    // only ever sees the friendly `message`.
+    const detail = (err as { detail?: string })?.detail
     await logAudit({
       action: 'db.pma.open',
       resource: 'database',
       resourceId: dbId,
       req: request,
       status: 'failure',
-      metadata: { error: message },
+      metadata: { error: message, detail },
     })
-    return NextResponse.json({ error: message }, { status: 500 })
+    // 503: the tool is unavailable, not a bad request from the customer.
+    return NextResponse.json({ error: message }, { status: detail ? 503 : 500 })
   }
 }
