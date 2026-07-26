@@ -8,6 +8,7 @@ import {
   dropProjectDatabase,
   testDatabaseConnection,
 } from '@/lib/vps'
+import { resetDatabasePassword } from '@/lib/db-engine/password'
 
 /**
  * Project Database Endpoint (single)
@@ -94,9 +95,32 @@ export async function POST(
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
     }
     const body = await request.json().catch(() => ({}))
+
+    // Rotate the database user's own password. Returns the new secret ONCE;
+    // it is stored encrypted and shown to the owner only in this response.
+    if (body?.action === 'reset-password') {
+      const reset = await resetDatabasePassword(projectId, dbId)
+      await logAudit({
+        userId: decoded.userId,
+        action: 'project.database.password.reset',
+        resource: 'project',
+        resourceId: projectId,
+        req: request,
+        status: reset.ok ? 'success' : 'failure',
+        metadata: { dbId, message: reset.message },
+      })
+      if (!reset.ok) {
+        return NextResponse.json({ error: reset.message }, { status: 400 })
+      }
+      return NextResponse.json(
+        { ok: true, password: reset.password, message: reset.message },
+        { headers: { 'Cache-Control': 'no-store' } }
+      )
+    }
+
     if (body?.action !== 'test') {
       return NextResponse.json(
-        { error: 'Unknown action (expected { action: "test" })' },
+        { error: 'Unknown action (expected { action: "test" | "reset-password" })' },
         { status: 400 }
       )
     }
