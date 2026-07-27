@@ -12,6 +12,7 @@ import { authenticateRequest } from '@/lib/auth'
 import { db } from '@/lib/db'
 import { dynadotService } from '@/lib/dynadot-service'
 import { ok, apiError } from '@/lib/api-response'
+import { assertRegistrarManaged } from '@/lib/domain-ownership'
 import { encrypt, decrypt } from '@/lib/encryption'
 import { isAdmin } from '@/lib/security'
 import bcrypt from 'bcryptjs'
@@ -50,6 +51,12 @@ export async function GET(
     } else if (!isOwner) {
       return apiError.forbidden()
     }
+
+    // Registrar-only operation. An EPP code can only come from the registrar
+    // holding the domain — for an external domain the customer must get it from
+    // their own provider, and asking Dynadot returns a confusing failure.
+    const notOurs = assertRegistrarManaged(domain)
+    if (notOurs) return notOurs
 
     const result = await dynadotService.getAuthCode(domain.name)
     if (!result.success || !result.authCode) {

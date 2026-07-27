@@ -23,6 +23,7 @@ import { dynadotService } from './dynadot-service'
 import { getPriceForDomain } from './pricing'
 import { processPayment } from './payment-methods'
 import { nextInvoiceNumber, markInvoicePaid } from './invoices'
+import { isRegistrarManaged, registrarUnavailableReason } from './domain-ownership'
 import {
   runRegistrationPipeline,
   runRenewalPipeline,
@@ -269,6 +270,15 @@ export async function createDomainOrder(
       }
       if (owned.name.toLowerCase() !== domain) {
         return { success: false, error: 'Domain mismatch.' }
+      }
+      // Only a domain actually in our registrar account can be renewed here.
+      // Taking money to renew a domain registered somewhere else would charge
+      // for something we cannot deliver.
+      if (!isRegistrarManaged(owned)) {
+        return {
+          success: false,
+          error: registrarUnavailableReason(owned),
+        }
       }
     }
   }

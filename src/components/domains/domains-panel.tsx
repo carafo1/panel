@@ -283,6 +283,16 @@ interface Domain {
   id: string
   name: string
   status: string
+  /**
+   * 'managed'  — registered through us, sitting in our registrar account.
+   *              Full registrar control available.
+   * 'external' — registered at another provider and pointed here for hosting.
+   *              We control DNS and hosting only; no registrar authority.
+   *
+   * Server-supplied: customers can't derive it, because `provider` is
+   * deliberately masked to hide the upstream registrar's brand.
+   */
+  mode?: 'managed' | 'external'
   registrar: string
   provider: string
   registeredAt?: string
@@ -1210,6 +1220,7 @@ function DomainsListTab({ onSelect }: { onSelect: (id: string) => void }) {
                     <Badge className={statusColor(d.status)} variant="outline">
                       {d.status}
                     </Badge>
+                    <ModeBadge mode={d.mode} />
                     {d.premium && (
                       <Badge className="bg-amber-500/15 text-amber-600 border-amber-500/30" variant="outline">
                         <Sparkles className="h-3 w-3 mr-1" />Premium
@@ -1259,6 +1270,79 @@ function DomainsListTab({ onSelect }: { onSelect: (id: string) => void }) {
 
 // ─── Domain Detail ────────────────────────────────────────────────────────────
 
+/**
+ * Badge distinguishing a domain we hold at the registrar from one the customer
+ * registered elsewhere and merely pointed at this server.
+ */
+function ModeBadge({ mode }: { mode?: 'managed' | 'external' }) {
+  if (mode === 'managed') {
+    return (
+      <Badge variant="outline" className="bg-indigo-500/15 text-indigo-600 border-indigo-500/30 text-[10px]">
+        Registered with us
+      </Badge>
+    )
+  }
+  if (mode === 'external') {
+    return (
+      <Badge variant="outline" className="bg-sky-500/15 text-sky-700 dark:text-sky-400 border-sky-500/30 text-[10px]">
+        Connected
+      </Badge>
+    )
+  }
+  return null
+}
+
+/**
+ * Shown on an external domain's detail view, in place of the registrar tabs.
+ * States plainly what we can and cannot do, so nobody goes looking for a
+ * renew button that was never going to work.
+ */
+function ExternalDomainNotice({ domain }: { domain: Domain }) {
+  return (
+    <Card className="border-sky-500/30 bg-sky-500/5">
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Globe className="h-4 w-4 text-sky-600" />
+          Connected domain
+        </CardTitle>
+        <CardDescription>
+          {domain.name} is registered with another provider. It&apos;s connected here
+          for hosting, but its registration is managed where you bought it.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-4 sm:grid-cols-2 text-sm">
+        <div>
+          <div className="font-medium mb-1.5 flex items-center gap-1.5">
+            <CheckCircle2 className="h-3.5 w-3.5 text-indigo-500" />
+            You can do here
+          </div>
+          <ul className="list-disc list-inside space-y-0.5 text-muted-foreground text-xs">
+            <li>Point it at a website on this server</li>
+            <li>Manage DNS records (once delegated to our nameservers)</li>
+            <li>Automatic SSL certificates</li>
+          </ul>
+        </div>
+        <div>
+          <div className="font-medium mb-1.5 flex items-center gap-1.5">
+            <ExternalLink className="h-3.5 w-3.5 text-muted-foreground" />
+            Do at your registrar
+          </div>
+          <ul className="list-disc list-inside space-y-0.5 text-muted-foreground text-xs">
+            <li>Renewals and expiry</li>
+            <li>Nameserver changes</li>
+            <li>Transfer lock &amp; WHOIS privacy</li>
+            <li>Auth / EPP codes</li>
+          </ul>
+        </div>
+        <p className="sm:col-span-2 text-xs text-muted-foreground">
+          Want everything in one place? Transfer it in from the Domains page and
+          we&apos;ll manage the registration for you.
+        </p>
+      </CardContent>
+    </Card>
+  )
+}
+
 function DomainDetail({
   domainId, onBack, isAdmin,
 }: {
@@ -1288,6 +1372,17 @@ function DomainDetail({
   }, [domainId])
 
   useEffect(() => { load() }, [load])
+
+  // Registrar-only tabs don't exist for an external domain. If one is selected
+  // when we discover the domain is external — from a stale link, or because a
+  // reconcile reclassified it — fall back to Overview rather than rendering a
+  // panel of controls that will all 409.
+  const isExternal = domain ? domain.mode === 'external' : false
+  useEffect(() => {
+    if (isExternal && (section === 'nameservers' || section === 'security' || section === 'renew')) {
+      setSection('overview')
+    }
+  }, [isExternal, section])
 
   if (loading) {
     return (
@@ -1331,7 +1426,12 @@ function DomainDetail({
               </CardTitle>
               <div className="flex items-center gap-2 mt-2 flex-wrap">
                 <Badge className={statusColor(domain.status)} variant="outline">{domain.status}</Badge>
-                <Badge variant="outline">{domain.registrar}</Badge>
+                <ModeBadge mode={domain.mode} />
+                {/* The registrar label is only meaningful for domains we hold;
+                    for external ones the mode badge already says it better. */}
+                {domain.mode !== 'external' && (
+                  <Badge variant="outline">{domain.registrar}</Badge>
+                )}
                 {domain.premium && (
                   <Badge className="bg-amber-500/15 text-amber-600 border-amber-500/30" variant="outline">
                     <Sparkles className="h-3 w-3 mr-1" />Premium
@@ -1362,13 +1462,27 @@ function DomainDetail({
         </CardHeader>
       </Card>
 
+      {/*
+        External domains are registered somewhere else. Nameservers, transfer
+        lock, WHOIS privacy, auto-renew, auth codes and renewal are all
+        registrar operations we cannot perform on them — the API now refuses
+        with a 409, so showing the controls would only produce dead buttons.
+      */}
+      {isExternal && <ExternalDomainNotice domain={domain} />}
+
       <Tabs value={section} onValueChange={(v) => setSection(v as typeof section)}>
-        <TabsList className="grid w-full grid-cols-3 sm:grid-cols-6 h-auto">
+        <TabsList className={`grid w-full h-auto ${isExternal ? 'grid-cols-3' : 'grid-cols-3 sm:grid-cols-6'}`}>
           <TabsTrigger value="overview" className="text-xs">Overview</TabsTrigger>
-          <TabsTrigger value="nameservers" className="text-xs">Nameservers</TabsTrigger>
+          {!isExternal && (
+            <TabsTrigger value="nameservers" className="text-xs">Nameservers</TabsTrigger>
+          )}
           <TabsTrigger value="dns" className="text-xs">DNS</TabsTrigger>
-          <TabsTrigger value="security" className="text-xs">Security</TabsTrigger>
-          <TabsTrigger value="renew" className="text-xs">Renew/Transfer</TabsTrigger>
+          {!isExternal && (
+            <>
+              <TabsTrigger value="security" className="text-xs">Security</TabsTrigger>
+              <TabsTrigger value="renew" className="text-xs">Renew/Transfer</TabsTrigger>
+            </>
+          )}
           <TabsTrigger value="logs" className="text-xs">Logs</TabsTrigger>
         </TabsList>
 
