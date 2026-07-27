@@ -532,7 +532,14 @@ export default function HomeClient({
             setAuthMode(mode)
           }}
           onClose={() => {
-            if (isPanelHostView) {
+            // AuthModal also calls onClose after a SUCCESSFUL sign-in, so the
+            // authenticated case must be handled first — otherwise logging in
+            // on the panel host bounces the user to the marketing site instead
+            // of their dashboard. Read the store directly rather than the
+            // captured `isAuthenticated`, which can still be false in this
+            // closure at the moment login resolves.
+            const signedIn = useAuthStore.getState().isAuthenticated
+            if (isPanelHostView && !signedIn) {
               // The panel host (panel.<brand>) has no marketing content behind
               // the login, so closing must take the user to the brand site
               // rather than leave them on a blank screen.
