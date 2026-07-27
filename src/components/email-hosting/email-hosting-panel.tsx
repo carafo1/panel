@@ -147,6 +147,34 @@ interface EmailPlan {
   emailTotalStorageGB: number | null
 }
 
+interface PayAccount {
+  label: string | null
+  type: string | null
+  accountName: string | null
+  accountNumber: string | null
+  iban: string | null
+  swift: string | null
+  phone: string | null
+  note: string | null
+}
+
+interface CheckoutResult {
+  status: string
+  method: string
+  redirectUrl?: string | null
+  paymentDetails?: {
+    reference: string | null
+    instructions: string | null
+    accounts: PayAccount[]
+  }
+  message?: string
+}
+
+interface PayMethod {
+  method: string
+  displayName: string
+}
+
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
 function authHeaders(): HeadersInit {
@@ -221,14 +249,55 @@ function CopyButton({ value }: { value: string }) {
 
 // ─── Empty state: the plan line-up ─────────────────────────────────────────
 
-function PlanLineup() {
+function PlanLineup({ onPurchased }: { onPurchased: () => void }) {
   const [plans, setPlans] = useState<EmailPlan[] | null>(null)
+  const [methods, setMethods] = useState<PayMethod[]>([])
+  const [chosen, setChosen] = useState<EmailPlan | null>(null)
+  const [domain, setDomain] = useState('')
+  const [method, setMethod] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState<CheckoutResult | null>(null)
 
   useEffect(() => {
     api<{ plans: EmailPlan[] }>('/api/billing/plans?type=email')
       .then((d) => setPlans(d.plans || []))
       .catch(() => setPlans([]))
+    api<{ methods: PayMethod[] }>('/api/billing/methods')
+      .then((d) => {
+        const list = d.methods || []
+        setMethods(list)
+        if (list[0]) setMethod(list[0].method)
+      })
+      .catch(() => setMethods([]))
   }, [])
+
+  const buy = async () => {
+    if (!chosen) return
+    setBusy(true)
+    try {
+      const res = await api<CheckoutResult>('/api/billing/checkout', {
+        method: 'POST',
+        body: JSON.stringify({
+          planId: chosen.id,
+          type: 'email',
+          domainName: domain.trim().toLowerCase(),
+          method,
+        }),
+      })
+      // A redirect method (card/wallet) hands off to the provider; an offline
+      // method returns instructions to pay against instead.
+      if (res.status === 'redirect_required' && res.redirectUrl) {
+        window.location.href = res.redirectUrl
+        return
+      }
+      setResult(res)
+      onPurchased()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Checkout failed')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -298,11 +367,11 @@ function PlanLineup() {
                 <Button
                   className="w-full"
                   variant={p.popular ? 'default' : 'outline'}
-                  onClick={() =>
-                    toast.info(
-                      'Choose this plan from Billing → Plans to complete checkout.'
-                    )
-                  }
+                  onClick={() => {
+                    setChosen(p)
+                    setResult(null)
+                    setDomain('')
+                  }}
                 >
                   Choose {p.name}
                 </Button>
@@ -311,6 +380,139 @@ function PlanLineup() {
           ))}
         </div>
       )}
+
+      {/* ── Checkout ── */}
+      <Dialog
+        open={chosen !== null}
+        onOpenChange={(o) => {
+          if (!o) {
+            setChosen(null)
+            setResult(null)
+          }
+        }}
+      >
+        <DialogContent>
+          {result ? (
+            <>
+              <DialogHeader>
+                <DialogTitle>Almost there</DialogTitle>
+                <DialogDescription>
+                  {result.message ||
+                    'Your order has been placed and is awaiting confirmation.'}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-3 text-sm">
+                {result.paymentDetails?.reference && (
+                  <div className="flex items-center justify-between gap-2 rounded-md border p-3">
+                    <div>
+                      <p className="text-muted-foreground text-xs">Payment reference</p>
+                      <p className="font-mono font-medium">
+                        {result.paymentDetails.reference}
+                      </p>
+                    </div>
+                    <CopyButton value={result.paymentDetails.reference} />
+                  </div>
+                )}
+                {result.paymentDetails?.instructions && (
+                  <p className="text-muted-foreground">
+                    {result.paymentDetails.instructions}
+                  </p>
+                )}
+                {result.paymentDetails?.accounts?.map((a, i) => (
+                  <div key={i} className="rounded-md border p-3 space-y-1">
+                    <p className="font-medium">{a.label}</p>
+                    {a.accountName && (
+                      <p className="text-muted-foreground text-xs">{a.accountName}</p>
+                    )}
+                    {(a.accountNumber || a.phone) && (
+                      <div className="flex items-center justify-between gap-2">
+                        <code className="text-sm">{a.accountNumber || a.phone}</code>
+                        <CopyButton value={(a.accountNumber || a.phone) as string} />
+                      </div>
+                    )}
+                    {a.iban && <p className="text-xs">IBAN: {a.iban}</p>}
+                    {a.note && <p className="text-xs text-muted-foreground">{a.note}</p>}
+                  </div>
+                ))}
+                <p className="text-muted-foreground text-xs">
+                  Your mailboxes are created automatically as soon as the payment is
+                  confirmed — you&apos;ll be notified, and {domain} will appear here.
+                </p>
+              </div>
+              <DialogFooter>
+                <Button
+                  onClick={() => {
+                    setChosen(null)
+                    setResult(null)
+                  }}
+                >
+                  Done
+                </Button>
+              </DialogFooter>
+            </>
+          ) : (
+            <>
+              <DialogHeader>
+                <DialogTitle>{chosen?.name}</DialogTitle>
+                <DialogDescription>
+                  ${chosen?.price.toFixed(2)} per month — {chosen?.emailMailboxes} mailboxes,{' '}
+                  {chosen?.emailStoragePerMailboxGB} GB each.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="eh-domain">Your domain</Label>
+                  <Input
+                    id="eh-domain"
+                    value={domain}
+                    onChange={(e) => setDomain(e.target.value)}
+                    placeholder="yourcompany.com"
+                    autoComplete="off"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    The domain you already own and want email on. You&apos;ll get DNS
+                    records to publish once it&apos;s set up.
+                  </p>
+                </div>
+                {methods.length > 1 && (
+                  <div className="space-y-2">
+                    <Label htmlFor="eh-method">Payment method</Label>
+                    <select
+                      id="eh-method"
+                      className="w-full h-9 rounded-md border bg-background px-3 text-sm"
+                      value={method}
+                      onChange={(e) => setMethod(e.target.value)}
+                    >
+                      {methods.map((m) => (
+                        <option key={m.method} value={m.method}>
+                          {m.displayName}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                {methods.length === 0 && (
+                  <p className="text-sm text-amber-600">
+                    No payment method is currently available. Please contact support.
+                  </p>
+                )}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setChosen(null)} disabled={busy}>
+                  Cancel
+                </Button>
+                <Button
+                  onClick={() => void buy()}
+                  disabled={busy || domain.trim().length < 3 || methods.length === 0}
+                >
+                  {busy && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+                  Continue
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
@@ -900,7 +1102,7 @@ export default function EmailHostingPanel() {
           <Skeleton className="h-32 w-full" />
         </div>
       ) : services.length === 0 ? (
-        <PlanLineup />
+        <PlanLineup onPurchased={() => void load()} />
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
           {services.map((s) => (
