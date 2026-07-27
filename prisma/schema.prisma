@@ -13,6 +13,13 @@ model User {
   name         String
   password     String
   role         String        @default("user") // "super_admin", "client", "user", "admin"
+  // Account standing, independent of role. Anything other than "active"
+  // blocks sign-in — this is how a non-paying or fraudulent account is
+  // actually stopped, rather than only being marked in a report.
+  /// active | suspended | fraud | closed
+  status                  String   @default("active")
+  statusReason            String?
+  statusChangedAt         DateTime?
   emailVerified           Boolean  @default(false)
   emailVerificationToken  String?
   avatar                  String?
@@ -41,10 +48,19 @@ model User {
   domainInvoices     Invoice[]
   domainLogs         DomainLog[]
   domainPriceUpdates DomainPrice[]  @relation("PriceUpdatedBy")
+  // ── Billing: wallet + tax profile ───────────────────────────────────
+  // Balance is denormalised for fast reads; CreditTransaction is the
+  // authoritative append-only history.
+  creditBalance      Float    @default(0)
+  taxExempt          Boolean  @default(false)
+  taxCountry         String?
+  creditTransactions CreditTransaction[]
+
   // ── Marketplace relations ───────────────────────────────────────────
   submittedTemplates  Template[]       @relation("SubmittedTemplates")
   templateRatings     TemplateRating[]
   templateReviews     TemplateReview[]
+  emailServices      EmailService[]
 }
 
 model Plan {
@@ -52,8 +68,8 @@ model Plan {
   name        String   @unique // Starter, Pro, Business
   slug        String   @unique
   description String
-  price       Float    // monthly price in USD
-  ram         String   // e.g. "1GB"
+  price       Float    // price for ONE billing period, in `currency`
+  ram         String   // e.g. "1GB"  (display string, kept for back-compat)
   cpu         String   // e.g. "1 vCPU"
   storage     String   // e.g. "10GB"
   bandwidth   String   // e.g. "100GB"
@@ -65,7 +81,133 @@ model Plan {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  // ── Billing ────────────────────────────────────────────────────────
+  // How long one `price` buys. "lifetime" never renews.
+  billingCycle String  @default("monthly") // monthly|quarterly|annual|biennial|lifetime
+  currency     String  @default("USD")
+  trialDays    Int     @default(0)         // 0 = no free trial
+  setupFee     Float   @default(0)
+
+  // ── Availability ───────────────────────────────────────────────────
+  active     Boolean @default(true)  // disabled plans can't be subscribed to
+  hidden     Boolean @default(false) // not shown publicly; direct/admin assign only
+  archived   Boolean @default(false) // retired; existing subs keep running
+  promotional Boolean @default(false)
+
+  // ── Numeric resource limits (0 or null = unlimited) ────────────────
+  diskMB        Int?
+  bandwidthMB   Int?
+  cpuCores      Float?
+  ramMB         Int?
+  ioMBps        Int?
+  processes     Int?
+  inodes        Int?
+  maxDatabases  Int?
+  maxEmailAccounts Int?
+  maxFtpAccounts   Int?
+  maxCronJobs      Int?
+  maxBackups       Int?
+  maxDnsZones      Int?
+  maxDomains       Int?
+  maxSubdomains    Int?
+  maxParkedDomains Int?
+  maxAddonDomains  Int?
+  maxSslCerts      Int?
+
+  // JSON array of enabled application slugs, e.g.
+  // ["wordpress","laravel","nodejs","python","php","docker","nextjs"]
+  // null/empty = allow all.
+  allowedApps String?
+
+  // ── Yearly billing ─────────────────────────────────────────────────
+  // `price` buys one `billingCycle`. `annualPrice` is the discounted
+  // 12-month price behind the monthly/yearly toggle on the pricing page.
+  // Null = this plan is not offered yearly.
+  annualPrice Float?
+
+  // ── Marketing copy (public pricing page) ───────────────────────────
+  tagline    String?  // "Best value for growing businesses"
+  idealFor   String?  // "Business Websites" — first row of the comparison table
+  badge      String?  // "Most Popular" ribbon; null = no ribbon
+  highlights String?  // JSON array of card bullets, in display order
+
+  // ── Comparison-table attributes ────────────────────────────────────
+  // Qualitative tiers that the numeric limit columns above cannot express.
+  backupRetentionDays Int?
+  uptimeSla           String?  // "99.9%"
+  supportLevel        String?  // "Standard" | "High" | "VIP 24/7"
+  malwareScanner      String?  // "Basic" | "Advanced" | "Premium"
+  wafLevel            String?  // "Standard" | "Advanced" | "Enterprise"
+  ddosLevel           String?  // "Standard" | "Advanced" | "Premium"
+  dockerSupport       String?  @default("none") // "none" | "optional" | "included"
+  sshAccess           Boolean  @default(false)
+  stagingEnvironment  Boolean  @default(false)
+  gitDeployment       Boolean  @default(true)
+  cdnIntegration      Boolean  @default(true)
+  freeMigrations      Int?     // free website migrations; null = unlimited
+
+  // ── Product type ───────────────────────────────────────────────────
+  // Plans are no longer all web hosting: "email" plans sell mailboxes on a
+  // domain with no website attached. Defaults to "hosting" so every existing
+  // row keeps its current meaning.
+  /// hosting | email | domain
+  planType String @default("hosting")
+
+  // ── Email-hosting resources (planType = "email") ───────────────────
+  // `maxEmailAccounts` above stays the hosting-plan allowance; these describe
+  // a standalone email product.
+  emailMailboxes           Int? // e.g. 3 / 10 / 25
+  emailStoragePerMailboxGB Int? // quota applied to each mailbox
+  emailTotalStorageGB      Int? // ceiling across the whole domain
+
   subscriptions Subscription[]
+  emailServices EmailService[]
+}
+
+/// A standalone email-hosting service: one customer's mail domain, its plan
+/// limits, and the Mailcow state backing it. Deliberately separate from
+/// `Project` — email hosting is sold on its own and must not require a website.
+model EmailService {
+  id     String @id @default(cuid())
+  userId String
+  planId String
+  /// The subscription that pays for this service (null for admin-granted/free).
+  subscriptionId String?
+
+  /// The mail domain, e.g. "example.com". One service per domain, globally:
+  /// two customers must never both host mail for the same domain.
+  domain String @unique
+
+  /// active | suspended | pending | cancelled
+  status String @default("pending")
+
+  // Limits copied from the plan at purchase time, plus any add-ons. Stored
+  // here rather than read from the plan so an upgrade, a bought extra mailbox
+  // or a grandfathered allowance is per-service and survives plan edits.
+  mailboxLimit           Int @default(1)
+  storagePerMailboxGB    Int @default(1)
+  totalStorageGB         Int @default(1)
+  /// Paid add-ons on top of the plan.
+  extraMailboxes         Int @default(0)
+  extraStorageGB         Int @default(0)
+
+  // ── Mailcow provisioning state ─────────────────────────────────────
+  mailcowDomainCreated Boolean   @default(false)
+  dkimGenerated        Boolean   @default(false)
+  provisionedAt        DateTime?
+  lastError            String?
+
+  /// Set when the service is suspended so a grace period can be measured.
+  suspendedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan         Plan          @relation(fields: [planId], references: [id])
+  subscription Subscription? @relation(fields: [subscriptionId], references: [id])
+
+  @@index([userId])
+  @@index([status])
 }
 
 model Subscription {
@@ -81,9 +223,24 @@ model Subscription {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  // ── Renewal ────────────────────────────────────────────────────────
+  // When true the billing sweep raises the next period's invoice
+  // automatically (and charges it if a gateway supports auto-charge).
+  autoRenew        Boolean   @default(true)
+  // Accumulating counters (bandwidth) are measured from this point, so an
+  // admin can reset usage without touching the billing period.
+  usageResetAt     DateTime?
+  lastRenewedAt    DateTime?
+  renewalAttempts  Int       @default(0)
+  lastRenewalError String?
+  // Coupon that keeps applying on each renewal (recurring discounts).
+  couponCode       String?
+
   user User  @relation(fields: [userId], references: [id])
   plan Plan  @relation(fields: [planId], references: [id])
   payments Payment[]
+  invoices Invoice[]
+  emailServices EmailService[]
 }
 
 model Payment {
@@ -183,6 +340,7 @@ model Project {
   websiteDatabases   WebsiteDatabase[]
   websiteBackups     WebsiteBackup[]
   websiteDomains     WebsiteDomain[]
+  migrations         SiteMigration[]
   cronJobs           CronJob[]
   ftpAccounts        FtpAccount[]
   redirects          Redirect[]
@@ -195,7 +353,7 @@ model Domain {
   projectId       String?
   name            String   @unique // e.g. example.com
   status          String   @default("pending") // pending, active, expired, transferring, suspended, deleted
-  registrar       String   @default("dynadot")
+  registrar       String   @default("external") // set to "dynadot" only when a real registration exists
   registeredAt    DateTime?
   expiresAt       DateTime?
   autoRenew       Boolean  @default(true)
@@ -212,7 +370,7 @@ model Domain {
   project      Project?      @relation(fields: [projectId], references: [id])
   dnsRecords   DnsRecord[]
   automationLogs AutomationLog[]
-  provider           String   @default("dynadot") // "deployhub", "dynadot"
+  provider           String   @default("external") // "dynadot" = in our registrar account; "external" = registered elsewhere
   externalId         String?  // Dynadot domain ID
   emailHosted        Boolean  @default(false)
   mailcowDomainId    String?
@@ -367,17 +525,34 @@ model WebsiteBackup {
 model WebsiteDomain {
   id           String   @id @default(cuid())
   projectId    String
-  domain       String   // e.g. www.example.com, app.example.com
+  // Globally unique: without this two tenants could both attach the same
+  // domain, and whichever wrote `customDomain` last would serve traffic on
+  // the other's hostname. The per-project constraint alone did not stop that.
+  domain       String   @unique
   isPrimary    Boolean  @default(false)
   sslEnabled   Boolean  @default(true)
   sslStatus    String   @default("none") // none, pending, issued, failed, renewing
+  // How the customer is connecting this domain.
+  //   nameserver — they point their registrar at ns1/ns2 and we host the zone
+  //                (the default, and the only one that needs no DNS knowledge)
+  //   manual     — advanced: they keep their DNS host and point an A record
+  /// nameserver | manual
+  connectionMethod String @default("nameserver")
+  // A domain is only added to the reverse proxy once ownership is proven.
   verified     Boolean  @default(false)
-  verificationMethod String? // dns-txt, a-record, cname
+  verificationMethod String? // nameserver, dns-txt, a-record
+  /// Set once our zone exists and its records are published.
+  zoneCreated  Boolean  @default(false)
+  zoneCreatedAt DateTime?
+  /// Random value the owner publishes as a TXT record to prove control.
+  verificationToken String?
+  verifiedAt   DateTime?
+  lastCheckedAt DateTime?
+  lastCheckError String?
   createdAt    DateTime @default(now())
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
-  @@unique([projectId, domain])
   @@index([projectId])
 }
 
@@ -822,6 +997,150 @@ model EmailMailbox {
   @@index([domainId])
 }
 
+// ─── Billing: coupons, tax, wallet credit ────────────────────────────────
+
+/// Point-in-time usage snapshot, written periodically by the worker.
+/// The series gives usage history; the newest row is "current usage".
+/// Measured values come from `docker stats` / disk inspection; counted values
+/// are queried from the database.
+model UsageRecord {
+  id             String   @id @default(cuid())
+  userId         String
+  subscriptionId String?
+  projectId      String?
+
+  // Measured
+  diskMB      Float @default(0)
+  ramMB       Float @default(0)
+  cpuPercent  Float @default(0)
+  bandwidthMB Float @default(0)
+
+  // Counted
+  websites      Int @default(0)
+  databases     Int @default(0)
+  emailAccounts Int @default(0)
+  ftpAccounts   Int @default(0)
+  cronJobs      Int @default(0)
+  domains       Int @default(0)
+  subdomains    Int @default(0)
+  backups       Int @default(0)
+
+  capturedAt DateTime @default(now())
+
+  @@index([userId, capturedAt])
+  @@index([subscriptionId])
+  @@index([projectId])
+}
+
+/// A refund issued against an invoice. Money can go back to the customer's
+/// wallet (instant, always available) or be recorded as returned via the
+/// original gateway (the admin performs that in the gateway's own dashboard —
+/// we never move money at a PSP we don't hold credentials for).
+model Refund {
+  id          String   @id @default(cuid())
+  invoiceId   String
+  userId      String
+  amount      Float
+  currency    String   @default("USD")
+  /// wallet | gateway | manual
+  destination String   @default("wallet")
+  reason      String?
+  /// pending | completed | failed
+  status      String   @default("completed")
+  gatewayRef  String?
+  adminUserId String?
+  createdAt   DateTime @default(now())
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@index([userId])
+}
+
+model Coupon {
+  id          String   @id @default(cuid())
+  code        String   @unique // customer-facing, e.g. "LAUNCH20"
+  description String?
+  type        String   @default("percent") // percent | fixed
+  value       Float    // 20 = 20% (percent) or 20.00 off (fixed)
+  currency    String   @default("USD") // only meaningful for `fixed`
+
+  // Scope — null means "applies to everything"
+  planId            String?
+  userId            String? // customer-specific coupon
+  firstPurchaseOnly Boolean @default(false)
+  // true  = discount repeats on every renewal
+  // false = one-time (first invoice only)
+  recurring         Boolean @default(false)
+  minSubtotal       Float?
+
+  // Limits
+  maxRedemptions Int? // total across all customers
+  maxPerCustomer Int?
+  redemptions    Int  @default(0)
+
+  startsAt  DateTime?
+  expiresAt DateTime?
+  active    Boolean   @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  redemptionRecords CouponRedemption[]
+
+  @@index([active])
+}
+
+model CouponRedemption {
+  id        String   @id @default(cuid())
+  couponId  String
+  userId    String
+  invoiceId String?
+  amount    Float // discount actually given
+  createdAt DateTime @default(now())
+
+  coupon Coupon @relation(fields: [couponId], references: [id], onDelete: Cascade)
+
+  @@index([couponId])
+  @@index([userId])
+}
+
+model TaxRate {
+  id       String  @id @default(cuid())
+  name     String // "VAT", "GST", "Sales Tax"
+  rate     Float // 20 = 20%
+  country  String? // ISO-2, null = applies everywhere (default rate)
+  region   String? // state/province, optional
+  active   Boolean @default(true)
+  priority Int     @default(0)
+  // Compound taxes are charged on (subtotal + previously applied taxes)
+  compound Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([active])
+}
+
+/// Append-only wallet ledger. `amount` is positive when credit is added and
+/// negative when it is consumed; `balanceAfter` snapshots the running total so
+/// history stays readable even if a row is later corrected.
+model CreditTransaction {
+  id           String   @id @default(cuid())
+  userId       String
+  amount       Float
+  balanceAfter Float
+  type         String // topup | refund | applied | adjustment
+  description  String?
+  invoiceId    String?
+  adminUserId  String?
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
 model PaymentMethodSetting {
   id          String   @id @default(cuid())
   method      String   @unique // "stripe", "waafi", "manual"
@@ -890,10 +1209,30 @@ model Invoice {
   userId          String
   orderId         String?
   domainId        String?
+  // Subscription billing (hosting plans). Until now invoices were only ever
+  // raised for domain orders, so hosting customers had nothing to pay against.
+  subscriptionId  String?
+  planId          String?
+  periodStart     DateTime?
+  periodEnd       DateTime?
+  notes           String?
   items           String   // JSON array of line items
   subtotal        Float
+  discount        Float    @default(0) // coupon discount applied
+  couponId        String?
+  couponCode      String?
   tax             Float    @default(0)
-  total           Float
+  taxName         String?  // e.g. "VAT 20%"
+  creditApplied   Float    @default(0) // paid from wallet balance
+  total           Float    // subtotal - discount + tax - creditApplied
+  // Running total of money actually received (supports partial payments).
+  // status becomes 'partially_paid' when 0 < amountPaid < total.
+  amountPaid      Float    @default(0)
+  amountRefunded  Float    @default(0)
+  refundedAt      DateTime?
+  // Credit note / refund document pointing back at the invoice it corrects.
+  type            String   @default("standard") // standard | credit_note | manual
+  parentInvoiceId String?
   currency        String   @default("USD")
   status          String   @default("unpaid") // unpaid, paid, void, refunded
   paidAt          DateTime?
@@ -904,10 +1243,13 @@ model Invoice {
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   order           DomainOrder? @relation(fields: [orderId], references: [id])
   domain          Domain?  @relation(fields: [domainId], references: [id])
+  subscription    Subscription? @relation(fields: [subscriptionId], references: [id])
   transactions    Transaction[]
+  refunds         Refund[]
 
   @@index([userId])
   @@index([status])
+  @@index([subscriptionId])
 }
 
 model Transaction {
@@ -1191,4 +1533,94 @@ model IpBlock {
   project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@index([projectId])
+}
+
+// Liveness beacons for background work.
+//
+// A systemd service reporting "active" proves only that a process exists —
+// the worker sat "active" for days while every tick failed, because failures
+// were logged to a file nobody watched. Each tick now stamps a row here, so
+// "last successful billing sweep was 9 hours ago" is a question the system
+// can actually answer.
+model Heartbeat {
+  // Stable name of the beat: "jobs", "monitors", "billing", "usage".
+  key       String   @id
+  at        DateTime @updatedAt
+  // Free-form summary of the last run (counts, errors) for the health UI.
+  detail    String?
+  // Consecutive failures; reset to 0 on success.
+  failures  Int      @default(0)
+  lastError String?
+  createdAt DateTime @default(now())
+}
+
+// ── Website import / migration ────────────────────────────────────────
+//
+// A migration is a long-running, multi-step operation against a customer's
+// real data, so it is tracked as a first-class row rather than a fire-and-
+// forget job. Every stage records what it did and — critically — how to undo
+// it, because a half-imported site is worse than a failed import: the customer
+// sees a broken site where they used to see nothing.
+model SiteMigration {
+  id          String   @id @default(cuid())
+  projectId   String
+  userId      String
+
+  /// wordpress-zip | wpress | duplicator | updraftplus | cpanel | files-sql | git | docker
+  sourceType  String
+  /// Where the payload came from: upload | url | git
+  sourceMode  String   @default("upload")
+  sourceRef   String?  // upload path, URL, or git remote
+  // Float, not Int: backups routinely exceed the 2 GB that a 32-bit integer
+  // can hold, and a double represents byte counts exactly to 8 PB.
+  sizeBytes   Float?
+  originalUrl String?  // site URL found inside the backup
+  targetUrl   String?  // URL it will serve on here
+
+  /// pending | detecting | running | verifying | completed | failed | rolled_back
+  status      String   @default("pending")
+  /// Machine-readable current step, for the progress UI.
+  currentStage String?
+  progress    Int      @default(0) // 0-100
+  error       String?
+  /// What detection concluded, as JSON — stack, doc root, SQL file, WP version.
+  detection   String?
+  /// Full option payload the run was started with, so a retry is reproducible.
+  options     String?
+
+  startedAt   DateTime?
+  completedAt DateTime?
+  attempts    Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  stages  MigrationStage[]
+
+  @@index([projectId])
+  @@index([userId])
+  @@index([status])
+}
+
+// One step of a migration. Kept separately so the UI can stream progress and
+// so a failure knows exactly which steps need undoing.
+model MigrationStage {
+  id          String   @id @default(cuid())
+  migrationId String
+  name        String   // extract | detect | create_db | import_sql | ...
+  label       String
+  /// pending | running | completed | failed | skipped | rolled_back
+  status      String   @default("pending")
+  order       Int      @default(0)
+  log         String?  // captured output, truncated
+  error       String?
+  /// Set when this stage made a change that rollback must reverse.
+  undo        String?  // JSON describing the compensating action
+  startedAt   DateTime?
+  finishedAt  DateTime?
+  durationMs  Int?
+
+  migration SiteMigration @relation(fields: [migrationId], references: [id], onDelete: Cascade)
+
+  @@index([migrationId])
 }

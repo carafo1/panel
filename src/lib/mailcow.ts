@@ -30,6 +30,10 @@ function getConfig(): MailcowConfig | null {
   const url = process.env.MAILCOW_API_URL
   const key = process.env.MAILCOW_API_KEY
   if (!url || !key) return null
+  // Treat the .env.example placeholders as "not configured". A literal
+  // "replace-with-…" key would otherwise read as real and make every Mailcow
+  // call hit a non-existent server — or be reported to customers as working.
+  if (/^replace-with/i.test(key) || url === 'https://mail.example.com') return null
   // Normalise: callers may include or omit the trailing /api/v1.
   const trimmed = url.replace(/\/+$/, '')
   return { url: trimmed, key }
@@ -161,6 +165,9 @@ export async function addDomain(
       description: opts.description || '',
       aliases: opts.aliases ?? 20,
       mailboxes: opts.mailboxes ?? 10,
+      // Mailcow requires defquota <= maxquota <= (domain) quota. Match defquota
+      // to maxquota so adding a domain never trips defquota_exceeds_maxquota.
+      defquota: opts.quota ?? 1024,
       maxquota: opts.quota ?? 1024,
       quota: (opts.quota ?? 1024) * (opts.mailboxes ?? 10),
       active: '1',
@@ -474,7 +481,9 @@ export async function listMailboxes(
     const arr = await mailcowFetch<
       Array<Record<string, unknown>>
     >(`/get/mailbox/${encodeURIComponent(domain)}`)
-    const mailboxes: MailboxInfo[] = (arr || []).map((m) => ({
+    // Mailcow returns {} (not []) for a domain with no mailboxes — guard so we
+    // never call .map on a non-array.
+    const mailboxes: MailboxInfo[] = (Array.isArray(arr) ? arr : []).map((m) => ({
       address: String(m.username || m.address || ''),
       name: String(m.name || ''),
       active: String(m.active) === '1' || m.active === true,
@@ -512,7 +521,10 @@ export async function deleteMailbox(
   try {
     const env = await mailcowFetch<MailcowEnvelope>('/delete/mailbox', {
       method: 'POST',
-      body: JSON.stringify({ items: [address] }),
+      // Mailcow's delete endpoints take a BARE ARRAY of identifiers. Sending
+      // { items: [...] } comes back "access_denied" while the HTTP call still
+      // looks fine, so the delete silently never happened.
+      body: JSON.stringify([address]),
     })
     const result = envelopeResult(env)
     return { success: result.success, error: result.error }
@@ -541,7 +553,8 @@ export async function removeDomain(
   try {
     const env = await mailcowFetch<MailcowEnvelope>('/delete/domain', {
       method: 'POST',
-      body: JSON.stringify({ items: [domain] }),
+      // Bare array, not { items: [...] } — see deleteMailbox above.
+      body: JSON.stringify([domain]),
     })
     const result = envelopeResult(env)
     return { success: result.success, error: result.error }
