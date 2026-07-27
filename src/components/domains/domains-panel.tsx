@@ -293,13 +293,31 @@ interface Domain {
    * deliberately masked to hide the upstream registrar's brand.
    */
   mode?: 'managed' | 'external'
+  /**
+   * What the worker last observed about whether this domain actually reaches
+   * this server. Present for connected domains; null when the domain has not
+   * been attached to a website yet.
+   */
+  connection?: {
+    verified: boolean
+    sslStatus: string
+    zoneCreated: boolean
+    method: string
+    lastError?: string | null
+    lastCheckedAt?: string | null
+  } | null
   registrar: string
   provider: string
   registeredAt?: string
-  expiresAt?: string
-  autoRenew: boolean
-  whoisPrivacy: boolean
-  locked: boolean
+  /**
+   * Registrar-held facts. Null for external domains: we cannot read them, and
+   * the underlying columns are schema defaults rather than observed state.
+   * Render `—`, never a confident value.
+   */
+  expiresAt?: string | null
+  autoRenew: boolean | null
+  whoisPrivacy: boolean | null
+  locked: boolean | null
   premium: boolean
   nameservers?: string | null
   dnsRecords?: DnsRecord[]
@@ -354,15 +372,41 @@ type Tab = 'search' | 'domains' | 'invoices' | 'pricing' | 'admin'
 
 function statusColor(status: string): string {
   switch (status) {
-    case 'active': return 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border-indigo-500/30'
-    case 'pending': case 'pending_verification': return 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30'
+    case 'active': case 'connected': return 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border-indigo-500/30'
+    case 'pending': case 'pending_verification': case 'pending_dns':
+      return 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30'
     case 'transferring': return 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border-indigo-500/30'
+    case 'not_connected': return 'bg-gray-500/15 text-gray-600 dark:text-gray-400 border-gray-500/30'
     case 'expired': case 'suspended': case 'deleted': return 'bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/30'
     default: return 'bg-gray-500/15 text-gray-600 dark:text-gray-400 border-gray-500/30'
   }
 }
 
-function daysUntil(dateStr?: string): number | null {
+/** Human wording for the machine status values, including the connection ones. */
+function statusLabel(status: string): string {
+  switch (status) {
+    case 'connected': return 'connected'
+    case 'pending_dns': return 'awaiting DNS'
+    case 'not_connected': return 'not connected'
+    case 'pending_verification': return 'pending verification'
+    default: return status
+  }
+}
+
+/**
+ * One line describing how far an external domain has got toward serving from
+ * this server — derived from what the worker actually observed, never from a
+ * stored status string.
+ */
+function connectionLabel(d: Domain): string {
+  const c = d.connection
+  if (!c) return 'Not attached to a site'
+  if (c.verified && c.zoneCreated) return 'Live'
+  if (c.verified) return 'Verified, finishing setup'
+  return 'Awaiting DNS change'
+}
+
+function daysUntil(dateStr?: string | null): number | null {
   if (!dateStr) return null
   const diff = new Date(dateStr).getTime() - Date.now()
   return Math.ceil(diff / (24 * 60 * 60 * 1000))
@@ -399,12 +443,18 @@ export default function DomainsPanel() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
+          {/*
+            "Domain Reseller" is how WE describe the business to ourselves.
+            To a customer it says we are a middleman, and "via Apsamo" is
+            redundant on a page they reached by logging into Apsamo. Name the
+            thing they came to do instead.
+          */}
           <h2 className="text-2xl font-bold tracking-tight flex items-center gap-2">
             <Globe className="h-6 w-6 text-indigo-500" />
-            Domain Reseller
+            Domains
           </h2>
           <p className="text-sm text-muted-foreground mt-1">
-            Search, register, renew, transfer &amp; manage domains via Apsamo
+            Search and register new domains, or connect one you already own
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -1218,7 +1268,7 @@ function DomainsListTab({ onSelect }: { onSelect: (id: string) => void }) {
                   </CardTitle>
                   <div className="flex items-center gap-2 mt-2 flex-wrap">
                     <Badge className={statusColor(d.status)} variant="outline">
-                      {d.status}
+                      {statusLabel(d.status)}
                     </Badge>
                     <ModeBadge mode={d.mode} />
                     {d.premium && (
@@ -1232,34 +1282,69 @@ function DomainsListTab({ onSelect }: { onSelect: (id: string) => void }) {
               </div>
             </CardHeader>
             <CardContent className="space-y-2 text-sm">
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground flex items-center gap-1">
-                  <Calendar className="h-3 w-3" /> Expires
-                </span>
-                <span className={expiringSoon ? 'text-amber-600 font-medium' : ''}>
-                  {d.expiresAt ? new Date(d.expiresAt).toLocaleDateString() : '—'}
-                  {expiringSoon && ` (${days}d)`}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground flex items-center gap-1">
-                  {d.locked ? <Lock className="h-3 w-3" /> : <Unlock className="h-3 w-3" />}
-                  Lock
-                </span>
-                <span>{d.locked ? 'Locked' : 'Unlocked'}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground flex items-center gap-1">
-                  <Shield className="h-3 w-3" /> Privacy
-                </span>
-                <span>{d.whoisPrivacy ? 'On' : 'Off'}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground flex items-center gap-1">
-                  <RefreshCw className="h-3 w-3" /> Auto-renew
-                </span>
-                <span>{d.autoRenew ? 'On' : 'Off'}</span>
-              </div>
+              {d.mode === 'external' ? (
+                /*
+                  Expiry, lock, WHOIS privacy and auto-renew are facts held by
+                  whoever registered the domain. We cannot read them, so we show
+                  what we CAN observe: whether the domain actually reaches this
+                  server yet.
+                */
+                <>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground flex items-center gap-1">
+                      <Globe className="h-3 w-3" /> Connection
+                    </span>
+                    <span>{connectionLabel(d)}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground flex items-center gap-1">
+                      <ShieldCheck className="h-3 w-3" /> SSL
+                    </span>
+                    <span>
+                      {d.connection?.sslStatus && d.connection.sslStatus !== 'none'
+                        ? d.connection.sslStatus
+                        : 'Not issued yet'}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground flex items-center gap-1">
+                      <Server className="h-3 w-3" /> Registration
+                    </span>
+                    <span className="text-muted-foreground">At your provider</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground flex items-center gap-1">
+                      <Calendar className="h-3 w-3" /> Expires
+                    </span>
+                    <span className={expiringSoon ? 'text-amber-600 font-medium' : ''}>
+                      {d.expiresAt ? new Date(d.expiresAt).toLocaleDateString() : '—'}
+                      {expiringSoon && ` (${days}d)`}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground flex items-center gap-1">
+                      {d.locked ? <Lock className="h-3 w-3" /> : <Unlock className="h-3 w-3" />}
+                      Lock
+                    </span>
+                    <span>{d.locked == null ? '—' : d.locked ? 'Locked' : 'Unlocked'}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground flex items-center gap-1">
+                      <Shield className="h-3 w-3" /> Privacy
+                    </span>
+                    <span>{d.whoisPrivacy == null ? '—' : d.whoisPrivacy ? 'On' : 'Off'}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground flex items-center gap-1">
+                      <RefreshCw className="h-3 w-3" /> Auto-renew
+                    </span>
+                    <span>{d.autoRenew == null ? '—' : d.autoRenew ? 'On' : 'Off'}</span>
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
         )
@@ -1425,7 +1510,7 @@ function DomainDetail({
                 {domain.name}
               </CardTitle>
               <div className="flex items-center gap-2 mt-2 flex-wrap">
-                <Badge className={statusColor(domain.status)} variant="outline">{domain.status}</Badge>
+                <Badge className={statusColor(domain.status)} variant="outline">{statusLabel(domain.status)}</Badge>
                 <ModeBadge mode={domain.mode} />
                 {/* The registrar label is only meaningful for domains we hold;
                     for external ones the mode badge already says it better. */}
@@ -1440,23 +1525,44 @@ function DomainDetail({
               </div>
             </div>
             <div className="grid grid-cols-2 gap-2 text-sm">
-              <div className="rounded-md bg-muted/50 px-3 py-2">
-                <div className="text-xs text-muted-foreground">Expires</div>
-                <div className="font-medium">
-                  {domain.expiresAt ? new Date(domain.expiresAt).toLocaleDateString() : '—'}
-                </div>
-                {days !== null && (
-                  <div className={`text-xs ${days < 30 ? 'text-amber-600' : 'text-muted-foreground'}`}>
-                    {days > 0 ? `${days} days left` : 'Expired'}
+              {/*
+                Expiry belongs to whoever registered the domain. For an external
+                one we genuinely do not know it, so show the connection state —
+                the thing we DO observe — instead of an empty date field that
+                reads as "no expiry".
+              */}
+              {domain.mode === 'external' ? (
+                <>
+                  <div className="rounded-md bg-muted/50 px-3 py-2">
+                    <div className="text-xs text-muted-foreground">Connection</div>
+                    <div className="font-medium">{connectionLabel(domain)}</div>
                   </div>
-                )}
-              </div>
-              <div className="rounded-md bg-muted/50 px-3 py-2">
-                <div className="text-xs text-muted-foreground">Registered</div>
-                <div className="font-medium">
-                  {domain.registeredAt ? new Date(domain.registeredAt).toLocaleDateString() : '—'}
-                </div>
-              </div>
+                  <div className="rounded-md bg-muted/50 px-3 py-2">
+                    <div className="text-xs text-muted-foreground">Expiry &amp; renewal</div>
+                    <div className="font-medium text-muted-foreground">At your provider</div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="rounded-md bg-muted/50 px-3 py-2">
+                    <div className="text-xs text-muted-foreground">Expires</div>
+                    <div className="font-medium">
+                      {domain.expiresAt ? new Date(domain.expiresAt).toLocaleDateString() : '—'}
+                    </div>
+                    {days !== null && (
+                      <div className={`text-xs ${days < 30 ? 'text-amber-600' : 'text-muted-foreground'}`}>
+                        {days > 0 ? `${days} days left` : 'Expired'}
+                      </div>
+                    )}
+                  </div>
+                  <div className="rounded-md bg-muted/50 px-3 py-2">
+                    <div className="text-xs text-muted-foreground">Registered</div>
+                    <div className="font-medium">
+                      {domain.registeredAt ? new Date(domain.registeredAt).toLocaleDateString() : '—'}
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </CardHeader>
@@ -1511,14 +1617,34 @@ function DomainDetail({
 }
 
 function OverviewSection({ domain }: { domain: Domain }) {
-  const stats = [
-    { label: 'Status', value: domain.status, icon: Globe, color: 'text-indigo-500' },
-    { label: 'Registrar', value: domain.registrar, icon: Server, color: 'text-indigo-500' },
-    { label: 'Auto-Renew', value: domain.autoRenew ? 'Enabled' : 'Disabled', icon: RefreshCw, color: domain.autoRenew ? 'text-indigo-500' : 'text-muted-foreground' },
-    { label: 'WHOIS Privacy', value: domain.whoisPrivacy ? 'Enabled' : 'Disabled', icon: Shield, color: domain.whoisPrivacy ? 'text-indigo-500' : 'text-muted-foreground' },
-    { label: 'Registrar Lock', value: domain.locked ? 'Locked' : 'Unlocked', icon: Lock, color: domain.locked ? 'text-indigo-500' : 'text-amber-500' },
-    { label: 'Premium', value: domain.premium ? 'Yes' : 'No', icon: Sparkles, color: domain.premium ? 'text-amber-500' : 'text-muted-foreground' },
-  ]
+  // Auto-renew, WHOIS privacy and registrar lock are facts held by whoever
+  // registered the domain. For an external one we cannot read them — the
+  // columns hold schema defaults — so report the connection instead of
+  // presenting a default as if it were observed state.
+  const stats =
+    domain.mode === 'external'
+      ? [
+          { label: 'Status', value: statusLabel(domain.status), icon: Globe, color: 'text-indigo-500' },
+          { label: 'Connection', value: connectionLabel(domain), icon: Server, color: 'text-sky-500' },
+          {
+            label: 'SSL',
+            value:
+              domain.connection?.sslStatus && domain.connection.sslStatus !== 'none'
+                ? domain.connection.sslStatus
+                : 'Not issued yet',
+            icon: ShieldCheck,
+            color: 'text-indigo-500',
+          },
+          { label: 'Registration', value: 'At your provider', icon: ExternalLink, color: 'text-muted-foreground' },
+        ]
+      : [
+          { label: 'Status', value: statusLabel(domain.status), icon: Globe, color: 'text-indigo-500' },
+          { label: 'Registrar', value: domain.registrar, icon: Server, color: 'text-indigo-500' },
+          { label: 'Auto-Renew', value: domain.autoRenew == null ? '—' : domain.autoRenew ? 'Enabled' : 'Disabled', icon: RefreshCw, color: domain.autoRenew ? 'text-indigo-500' : 'text-muted-foreground' },
+          { label: 'WHOIS Privacy', value: domain.whoisPrivacy == null ? '—' : domain.whoisPrivacy ? 'Enabled' : 'Disabled', icon: Shield, color: domain.whoisPrivacy ? 'text-indigo-500' : 'text-muted-foreground' },
+          { label: 'Registrar Lock', value: domain.locked == null ? '—' : domain.locked ? 'Locked' : 'Unlocked', icon: Lock, color: domain.locked ? 'text-indigo-500' : 'text-amber-500' },
+          { label: 'Premium', value: domain.premium ? 'Yes' : 'No', icon: Sparkles, color: domain.premium ? 'text-amber-500' : 'text-muted-foreground' },
+        ]
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
       {stats.map((s) => (
@@ -1825,7 +1951,7 @@ function SecuritySection({ domain, onUpdated }: { domain: Domain; onUpdated: () 
             icon={domain.whoisPrivacy ? ShieldCheck : ShieldOff}
             title="WHOIS Privacy"
             description="Hide your personal contact info from public WHOIS lookups"
-            checked={domain.whoisPrivacy}
+            checked={domain.whoisPrivacy ?? false}
             disabled={busy === 'whoisPrivacy'}
             onToggle={(v) => toggle('whoisPrivacy', v)}
           />
@@ -1834,7 +1960,7 @@ function SecuritySection({ domain, onUpdated }: { domain: Domain; onUpdated: () 
             icon={domain.locked ? Lock : Unlock}
             title="Registrar Lock"
             description="Prevent unauthorized domain transfers (recommended: ON)"
-            checked={domain.locked}
+            checked={domain.locked ?? false}
             disabled={busy === 'locked'}
             onToggle={(v) => toggle('locked', v)}
           />
@@ -1843,7 +1969,7 @@ function SecuritySection({ domain, onUpdated }: { domain: Domain; onUpdated: () 
             icon={RefreshCw}
             title="Auto-Renew"
             description="Automatically renew before expiration to prevent loss"
-            checked={domain.autoRenew}
+            checked={domain.autoRenew ?? false}
             disabled={busy === 'autoRenew'}
             onToggle={(v) => toggle('autoRenew', v)}
           />
