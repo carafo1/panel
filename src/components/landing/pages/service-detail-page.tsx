@@ -10,6 +10,7 @@ import { ArrowRight, Check, Sparkles } from 'lucide-react'
 import { getServiceBySlug } from '../services-data'
 import { PageHero, ScrollReveal, StaggerCard } from '../ui-helpers'
 import { DomainSearchWidget } from '../domain-search-widget'
+import { HostingPlansSection } from '../plan-pricing'
 import { useAppStore } from '@/store/app-store'
 
 interface ServiceDetailPageProps {
@@ -29,6 +30,10 @@ export function ServiceDetailPage({ slug, onGetStarted }: ServiceDetailPageProps
       </div>
     )
   }
+
+  // Web hosting is the one service sold as a subscription, so its prices come
+  // from the billing catalogue rather than CMS copy.
+  const isBilledHosting = service.slug === 'web-hosting'
 
   const Icon = service.icon
 
@@ -118,6 +123,13 @@ export function ServiceDetailPage({ slug, onGetStarted }: ServiceDetailPageProps
               <p className="mt-3 text-muted-foreground">Start small, scale infinitely. No hidden fees.</p>
             </div>
           </ScrollReveal>
+          {/* Hosting prices live in the billing catalogue (Admin -> Plans) so
+              the site cannot quote something checkout will not charge. Other
+              services keep their CMS plans -- those are quotes for bespoke
+              work, not subscribable products. */}
+          {isBilledHosting ? (
+            <HostingPlansSection onGetStarted={() => onGetStarted()} showComparison={false} />
+          ) : (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
             {service.plans.map((plan, i) => (
               <StaggerCard key={plan.name} index={i}>
@@ -150,6 +162,7 @@ export function ServiceDetailPage({ slug, onGetStarted }: ServiceDetailPageProps
               </StaggerCard>
             ))}
           </div>
+          )}
         </div>
       </section>
 

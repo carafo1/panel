@@ -12,18 +12,13 @@ import {
 } from '../ui-helpers'
 import { DomainSearchWidget } from '../domain-search-widget'
 import { useAppStore } from '@/store/app-store'
+import { HostingPlansSection } from '../plan-pricing'
 import { useSiteContent, resolveIcon } from '../site-data-context'
 import { HeroIllustration } from '../hero-illustration'
 
 // Icons for the feature cards, paired by position with the admin-editable
 // `home.features.items` content (title|desc per line).
 const FEATURE_ICONS = [Zap, Shield, Globe2, Activity, Users, GitBranch]
-
-const PRICING_PREVIEW = [
-  { name: 'Starter', price: 9, period: '/mo', desc: 'Perfect for personal projects & hobbies', features: ['1 project', '1 GB storage', 'Custom domain', 'SSL certificate', 'Community support'], popular: false },
-  { name: 'Pro', price: 29, period: '/mo', desc: 'For growing apps & small teams', features: ['10 projects', '50 GB storage', 'Unlimited domains', 'Auto-scaling', 'Priority support', 'Team collaboration'], popular: true },
-  { name: 'Business', price: 79, period: '/mo', desc: 'For production workloads at scale', features: ['Unlimited projects', '500 GB storage', 'Dedicated resources', '99.99% SLA', '24/7 phone support', 'SSO & audit logs'], popular: false },
-]
 
 interface HomePageProps {
   onGetStarted: () => void
@@ -32,22 +27,6 @@ interface HomePageProps {
 export function HomePage({ onGetStarted }: HomePageProps) {
   const { setPublicPage } = useAppStore()
   const { services, getContent } = useSiteContent()
-  // Pricing preview comes from the live "Web Hosting" service (real Plan prices
-  // via the CMS live overlay), falling back to the static preview only until the
-  // service data loads — so the home page can never show a price that differs
-  // from checkout.
-  const hostingService = services.find((s) => /host/i.test(s.slug) || /host/i.test(s.name))
-  const pricingPreview =
-    hostingService && hostingService.plans.length > 0
-      ? hostingService.plans.map((p) => ({
-          name: p.name,
-          price: p.price,
-          period: p.period,
-          desc: p.description,
-          features: p.features,
-          popular: p.popular,
-        }))
-      : PRICING_PREVIEW
   const techStack = getContent('home.techStack.items')
     .split(',')
     .map((s) => s.trim())
@@ -350,43 +329,9 @@ export function HomePage({ onGetStarted }: HomePageProps) {
               <p className="mt-4 text-lg text-muted-foreground">{getContent('home.pricing.subtitle')}</p>
             </div>
           </ScrollReveal>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
-            {pricingPreview.map((plan, i) => (
-              <StaggerCard key={plan.name} index={i}>
-                <Card className={`relative flex flex-col h-full transition-all duration-500 bg-card/80 backdrop-blur-sm ${plan.popular ? 'border-indigo-500 shadow-glow-indigo scale-[1.03] shimmer-border' : 'hover:border-indigo-500/30 hover:shadow-modern-lg'}`}>
-                  {plan.popular && (
-                    <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                      <Badge className="bg-gradient-to-r from-indigo-400 to-indigo-600 text-white border-0 px-4 py-0.5 shadow-glow-indigo">POPULAR</Badge>
-                    </div>
-                  )}
-                  <CardContent className="p-6 flex flex-col flex-1">
-                    <h3 className="text-lg font-bold mb-1">{plan.name}</h3>
-                    <p className="text-xs text-muted-foreground mb-4">{plan.desc}</p>
-                    <div className="flex items-baseline gap-1 mb-6">
-                      <span className="text-4xl font-extrabold">${plan.price}</span>
-                      <span className="text-sm text-muted-foreground">{plan.period}</span>
-                    </div>
-                    <ul className="space-y-2.5 mb-6 flex-1">
-                      {plan.features.map((feat) => (
-                        <li key={feat} className="flex items-start gap-2 text-sm">
-                          <Check className="size-4 text-indigo-500 shrink-0 mt-0.5" />
-                          <span className="text-muted-foreground">{feat}</span>
-                        </li>
-                      ))}
-                    </ul>
-                    <Button onClick={onGetStarted} className={plan.popular ? 'btn-shimmer w-full bg-indigo-500 hover:bg-indigo-600 text-white border-0 shadow-glow-indigo' : 'w-full'} variant={plan.popular ? 'default' : 'outline'}>
-                      Get Started
-                    </Button>
-                  </CardContent>
-                </Card>
-              </StaggerCard>
-            ))}
-          </div>
-          <div className="text-center mt-10">
-            <button onClick={() => setPublicPage({ page: 'pricing' })} className="inline-flex items-center gap-1 text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:gap-2 transition-all">
-              View all pricing <ArrowRight className="size-4" />
-            </button>
-          </div>
+          {/* Rendered from the billing catalogue so the home page cannot
+              quote a price different from checkout. Edit in Admin -> Plans. */}
+          <HostingPlansSection onGetStarted={() => onGetStarted()} showComparison={false} />
         </div>
       </section>
 
