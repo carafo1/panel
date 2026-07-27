@@ -18,6 +18,7 @@
  * the rest of the platform can be exercised without a real Mailcow server.
  */
 import crypto from 'crypto'
+import { spawn } from 'child_process'
 
 interface MailcowConfig {
   /** Base URL, e.g. https://mail.example.com (no trailing /api/v1) */
@@ -604,6 +605,112 @@ export async function listMailboxes(
   }
 }
 
+export interface UpdateMailboxOptions {
+  address: string
+  /** New password. Omit to leave it unchanged. */
+  password?: string
+  name?: string
+  /** Per-mailbox quota in MB. Callers must clamp this to the plan first. */
+  quotaMB?: number
+  /** false disables login and delivery without deleting stored mail. */
+  active?: boolean
+}
+
+/**
+ * Drop a user's cached credentials from Dovecot.
+ *
+ * Dovecot runs with `auth_cache_ttl = 5 mins`, so after a password change the
+ * OLD password keeps working for up to five minutes — verified by real IMAP
+ * logins: both old and new succeeded until the cache was flushed. For a
+ * password reset after a compromise that window is the whole point of the
+ * reset, so every password change flushes the entry.
+ *
+ * Best-effort by design: it shells out to the Dovecot container, and a panel
+ * host without docker access should not fail the password change itself.
+ */
+async function flushDovecotAuthCache(address: string): Promise<void> {
+  const container = process.env.MAILCOW_DOVECOT_CONTAINER || 'mailcowdockerized-dovecot-mailcow-1'
+  await new Promise<void>((resolve) => {
+    let settled = false
+    const done = () => {
+      if (!settled) {
+        settled = true
+        resolve()
+      }
+    }
+    try {
+      // Arguments are passed as an argv array, never a shell string, so the
+      // address cannot be interpreted as shell syntax.
+      const child = spawn(
+        'docker',
+        ['exec', container, 'doveadm', 'auth', 'cache', 'flush', address],
+        { stdio: ['ignore', 'ignore', 'ignore'] }
+      )
+      const timer = setTimeout(() => {
+        child.kill('SIGKILL')
+        done()
+      }, 10_000)
+      child.on('error', () => {
+        clearTimeout(timer)
+        done()
+      })
+      child.on('close', () => {
+        clearTimeout(timer)
+        done()
+      })
+    } catch {
+      done()
+    }
+  })
+}
+
+/**
+ * Change an existing mailbox.
+ * POST /api/v1/edit/mailbox — takes the `{ items, attr }` envelope.
+ *
+ * Mailcow requires the confirmation field `password2` alongside `password`;
+ * sending only `password` leaves the old one in place and still reports
+ * success.
+ */
+export async function updateMailbox(
+  opts: UpdateMailboxOptions
+): Promise<{ success: boolean; error?: string }> {
+  if (!isMailcowConfigured()) {
+    console.log('[mailcow] DEMO MODE: updateMailbox', opts.address)
+    return { success: true }
+  }
+
+  const attr: Record<string, unknown> = {}
+  if (opts.password) {
+    attr.password = opts.password
+    attr.password2 = opts.password
+  }
+  if (opts.name !== undefined) attr.name = opts.name
+  if (opts.quotaMB !== undefined) attr.quota = opts.quotaMB
+  if (opts.active !== undefined) attr.active = opts.active ? '1' : '0'
+  if (Object.keys(attr).length === 0) return { success: true }
+
+  try {
+    const env = await mailcowFetch<MailcowEnvelope | MailcowEnvelope[]>(
+      '/edit/mailbox',
+      {
+        method: 'POST',
+        body: JSON.stringify({ items: [opts.address], attr }),
+      }
+    )
+    const result = envelopeResult(env)
+    if (result.success && opts.password) {
+      await flushDovecotAuthCache(opts.address)
+    }
+    return result
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    }
+  }
+}
+
 interface DeleteMailboxResult {
   success: boolean
   error?: string
@@ -632,6 +739,9 @@ export async function deleteMailbox(
       body: JSON.stringify([address]),
     })
     const result = envelopeResult(env)
+    // Same cache window as a password change: without this the deleted
+    // address can still authenticate for up to five minutes.
+    if (result.success) await flushDovecotAuthCache(address)
     return { success: result.success, error: result.error }
   } catch (err) {
     return {
