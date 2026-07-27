@@ -1713,7 +1713,7 @@ services:
     container_name: ${opts.containerName}
     restart: unless-stopped
     ports:
-      - "${opts.externalPort}:80"
+      - "127.0.0.1:${opts.externalPort}:80"
     environment:
       WORDPRESS_DB_HOST: ${dbHost}:3306
       WORDPRESS_DB_USER: ${project.databaseUser || 'wp'}
@@ -1746,7 +1746,7 @@ services:
     container_name: ${opts.containerName}
     restart: unless-stopped
     ports:
-      - "${opts.externalPort}:${opts.containerPort}"
+      - "127.0.0.1:${opts.externalPort}:${opts.containerPort}"
 ${env ? env + '\n' : ''}${limits ? limits + '\n' : ''}    networks:
       - default
       - deployhub
@@ -1765,7 +1765,7 @@ services:
     container_name: ${opts.containerName}
     restart: unless-stopped
     ports:
-      - "${opts.externalPort}:${opts.containerPort}"
+      - "127.0.0.1:${opts.externalPort}:${opts.containerPort}"
 ${env ? env + '\n' : ''}${limits ? limits + '\n' : ''}    networks:
       - default
       - deployhub
@@ -1798,7 +1798,7 @@ services:
     container_name: ${opts.containerName}
     restart: unless-stopped
     ports:
-      - "${opts.externalPort}:80"
+      - "127.0.0.1:${opts.externalPort}:80"
     environment:
       WORDPRESS_DB_HOST: db
       WORDPRESS_DB_USER: wp
@@ -1839,7 +1839,7 @@ services:
     container_name: ${opts.containerName}
     restart: unless-stopped
     ports:
-      - "${opts.externalPort}:${opts.containerPort}"
+      - "127.0.0.1:${opts.externalPort}:${opts.containerPort}"
 ${env ? env + '\n' : ''}${limits ? limits + '\n' : ''}    networks:
       - default
       - deployhub
@@ -1857,7 +1857,7 @@ services:
     container_name: ${opts.containerName}
     restart: unless-stopped
     ports:
-      - "${opts.externalPort}:${opts.containerPort}"
+      - "127.0.0.1:${opts.externalPort}:${opts.containerPort}"
 ${env ? env + '\n' : ''}${limits ? limits + '\n' : ''}    networks:
       - default
       - deployhub
