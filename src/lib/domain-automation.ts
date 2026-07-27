@@ -26,7 +26,7 @@ import {
   tldFromDomain,
 } from './pricing'
 import { sendEmail } from './email'
-import { randomUUID } from 'crypto'
+import { nextInvoiceNumber } from './invoices'
 import { MAIL_SERVER_HOSTNAME, NS1_HOSTNAME, NS2_HOSTNAME } from './brand-config'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -64,6 +64,19 @@ export interface RegisterPipelineInput {
   }>
   serverIp?: string // IP for default A record
   paymentMethod?: string // "stripe", "waafi", "manual", "balance"
+  /**
+   * Order/invoice raised by domain-checkout BEFORE payment. When supplied the
+   * pipeline updates those rows instead of creating a second set — otherwise a
+   * paid order ends up with a duplicate pending invoice attached to it.
+   */
+  existingOrderId?: string
+  existingInvoiceId?: string
+}
+
+/** Order/invoice already raised at checkout, for the renew/transfer pipelines. */
+export interface ExistingBilling {
+  existingOrderId?: string
+  existingInvoiceId?: string
 }
 
 export interface PipelineStep {
@@ -85,11 +98,9 @@ export interface PipelineResult {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function generateInvoiceNumber(): string {
-  const year = new Date().getFullYear()
-  const seq = String(Math.floor(Math.random() * 90000) + 10000)
-  return `INV-${year}-${seq}`
-}
+// Invoice numbers come from nextInvoiceNumber() in ./invoices — the old local
+// generator picked a random 5-digit suffix, which collides with ~50% odds after
+// only ~350 invoices and would then blow up on the unique constraint.
 
 async function logDomainEvent(
   domainId: string | null,
@@ -363,70 +374,80 @@ export async function runRegistrationPipeline(
       skip('save_contacts', 'No contacts provided')
     }
 
-    // ── Step 7: Create Order ───────────────────────────────────────────────
+    // ── Step 7: Order ──────────────────────────────────────────────────────
+    // The order normally already exists: domain-checkout raised it before
+    // taking payment, and this pipeline only runs once the money is confirmed.
     begin('create_order')
     const unitPrice = price?.registration ?? applyMarkup(19.99)
     const totalAmount = Math.round(unitPrice * input.duration * 100) / 100
-    const order = await db.domainOrder.create({
-      data: {
-        userId: input.userId,
-        domainId,
-        domainName: domainLower,
-        type: 'register',
-        duration: input.duration,
-        status: 'completed',
-        unitPrice,
-        totalAmount,
-        currency: 'USD',
-        provider: 'dynadot',
-        providerOrderId: registerResult.orderId,
-      },
-    })
-    ok('create_order', `Order ${order.id} created ($${totalAmount})`)
+    let order: { id: string }
+    if (input.existingOrderId) {
+      order = await db.domainOrder.update({
+        where: { id: input.existingOrderId },
+        data: { domainId, providerOrderId: registerResult.orderId },
+      })
+      ok('create_order', `Order ${order.id} fulfilled ($${totalAmount})`)
+    } else {
+      order = await db.domainOrder.create({
+        data: {
+          userId: input.userId,
+          domainId,
+          domainName: domainLower,
+          type: 'register',
+          duration: input.duration,
+          status: 'completed',
+          unitPrice,
+          totalAmount,
+          currency: 'USD',
+          provider: 'dynadot',
+          providerOrderId: registerResult.orderId,
+        },
+      })
+      ok('create_order', `Order ${order.id} created ($${totalAmount})`)
+    }
 
-    // ── Step 8: Create Invoice ─────────────────────────────────────────────
+    // ── Step 8: Invoice ────────────────────────────────────────────────────
+    // Settlement is the caller's job — fulfilDomainOrder marks the invoice
+    // paid once delivery succeeds — so don't raise a second document here.
     begin('create_invoice')
-    const invoiceNumber = generateInvoiceNumber()
-    const invoice = await db.invoice.create({
-      data: {
-        number: invoiceNumber,
-        userId: input.userId,
-        orderId: order.id,
-        domainId,
-        items: JSON.stringify([
-          {
-            description: `Domain registration: ${domainLower} (${input.duration} year${input.duration > 1 ? 's' : ''})`,
-            quantity: input.duration,
-            unitPrice,
-            total: totalAmount,
-          },
-        ]),
-        subtotal: totalAmount,
-        tax: 0,
-        total: totalAmount,
-        currency: 'USD',
-        // SECURITY: mark invoice as 'pending' until payment is confirmed
-        // via Stripe webhook / WaafiPay callback / admin manual mark.
-        // Was previously 'paid' with paidAt: new Date() — customers could
-        // register domains for free (H9).
-        status: 'pending',
-        paidAt: null,
-      },
-    })
-
-    // Transaction record
-    await db.transaction.create({
-      data: {
-        invoiceId: invoice.id,
-        userId: input.userId,
-        gateway: input.paymentMethod || 'manual',
-        amount: totalAmount,
-        currency: 'USD',
-        status: 'completed',
-        reference: randomUUID(),
-      },
-    })
-    ok('create_invoice', `Invoice ${invoiceNumber} paid`)
+    let invoiceNumber: string
+    if (input.existingInvoiceId) {
+      const linked = await db.invoice.update({
+        where: { id: input.existingInvoiceId },
+        data: { domainId },
+      })
+      invoiceNumber = linked.number
+      ok('create_invoice', `Invoice ${invoiceNumber} linked to domain`)
+    } else {
+      // Legacy/admin path: no checkout ran, so raise an unpaid invoice for
+      // someone to settle. Never mark it paid here, and never write a
+      // completed Transaction for money nobody received — that combination
+      // was what made domains look bought when they had not been paid for.
+      invoiceNumber = await nextInvoiceNumber()
+      await db.invoice.create({
+        data: {
+          number: invoiceNumber,
+          userId: input.userId,
+          orderId: order.id,
+          domainId,
+          items: JSON.stringify([
+            {
+              description: `Domain registration: ${domainLower} (${input.duration} year${input.duration > 1 ? 's' : ''})`,
+              quantity: input.duration,
+              unitPrice,
+              total: totalAmount,
+            },
+          ]),
+          subtotal: totalAmount,
+          tax: 0,
+          total: totalAmount,
+          currency: 'USD',
+          status: 'pending',
+          paidAt: null,
+        },
+      })
+      ok('create_invoice', `Invoice ${invoiceNumber} raised (awaiting payment)`)
+    }
 
     // ── Step 9: Generate Log ───────────────────────────────────────────────
     begin('generate_log')
@@ -490,7 +511,8 @@ export async function runRegistrationPipeline(
 export async function runRenewalPipeline(
   userId: string,
   domainId: string,
-  duration: number
+  duration: number,
+  billing: ExistingBilling = {}
 ): Promise<{ success: boolean; invoiceNumber?: string; error?: string }> {
   const domain = await db.domain.findUnique({ where: { id: domainId } })
   if (!domain) return { success: false, error: 'Domain not found' }
@@ -532,43 +554,61 @@ export async function runRenewalPipeline(
       },
     })
 
-    // 4. Order + Invoice
-    const order = await db.domainOrder.create({
-      data: {
-        userId,
-        domainId,
-        domainName: domain.name,
-        type: 'renew',
-        duration,
-        status: 'completed',
-        unitPrice: pricePerYear,
-        totalAmount: total,
-        providerOrderId: result.orderId,
-      },
-    })
-    const invoiceNumber = generateInvoiceNumber()
-    await db.invoice.create({
-      data: {
-        number: invoiceNumber,
-        userId,
-        orderId: order.id,
-        domainId,
-        items: JSON.stringify([
-          {
-            description: `Domain renewal: ${domain.name} (${duration} year${duration > 1 ? 's' : ''})`,
-            quantity: duration,
-            unitPrice: pricePerYear,
-            total,
-          },
-        ]),
-        subtotal: total,
-        tax: 0,
-        total,
-        // SECURITY: mark invoice as 'pending' until payment is confirmed (H9)
-        status: 'pending',
-        paidAt: null,
-      },
-    })
+    // 4. Order + Invoice — reuse the ones raised at checkout when present.
+    let order: { id: string }
+    if (billing.existingOrderId) {
+      order = await db.domainOrder.update({
+        where: { id: billing.existingOrderId },
+        data: { domainId, providerOrderId: result.orderId },
+      })
+    } else {
+      order = await db.domainOrder.create({
+        data: {
+          userId,
+          domainId,
+          domainName: domain.name,
+          type: 'renew',
+          duration,
+          status: 'completed',
+          unitPrice: pricePerYear,
+          totalAmount: total,
+          providerOrderId: result.orderId,
+        },
+      })
+    }
+
+    let invoiceNumber: string
+    if (billing.existingInvoiceId) {
+      const linked = await db.invoice.update({
+        where: { id: billing.existingInvoiceId },
+        data: { domainId },
+      })
+      invoiceNumber = linked.number
+    } else {
+      invoiceNumber = await nextInvoiceNumber()
+      await db.invoice.create({
+        data: {
+          number: invoiceNumber,
+          userId,
+          orderId: order.id,
+          domainId,
+          items: JSON.stringify([
+            {
+              description: `Domain renewal: ${domain.name} (${duration} year${duration > 1 ? 's' : ''})`,
+              quantity: duration,
+              unitPrice: pricePerYear,
+              total,
+            },
+          ]),
+          subtotal: total,
+          tax: 0,
+          total,
+          // Unpaid until a gateway or an admin confirms the money.
+          status: 'pending',
+          paidAt: null,
+        },
+      })
+    }
 
     await logDomainEvent(domainId, userId, 'renew', 'success', 'Domain renewed', {
       duration,
@@ -590,7 +630,8 @@ export async function runRenewalPipeline(
 export async function runTransferPipeline(
   userId: string,
   domain: string,
-  authCode: string
+  authCode: string,
+  billing: ExistingBilling & { contacts?: RegisterPipelineInput['contacts'] } = {}
 ): Promise<{ success: boolean; domainId?: string; invoiceNumber?: string; error?: string }> {
   const domainLower = domain.toLowerCase().trim()
 
@@ -630,45 +671,73 @@ export async function runTransferPipeline(
       domainId = created.id
     }
 
-    // 3. Order + Invoice
+    // 3. Persist the registrant contacts supplied at checkout, so the
+    //    transferred domain carries the customer's details rather than
+    //    whatever the losing registrar had on file.
+    if (billing.contacts && billing.contacts.length > 0) {
+      await db.domainContact.deleteMany({ where: { domainId } }).catch(() => {})
+      for (const c of billing.contacts) {
+        await db.domainContact.create({ data: { domainId, ...c } }).catch(() => {})
+      }
+    }
+
+    // 4. Order + Invoice — reuse the ones raised at checkout when present.
     const price = await getPriceForDomain(domainLower)
     const total = price?.transfer ?? applyMarkup(19.99)
-    const order = await db.domainOrder.create({
-      data: {
-        userId,
-        domainId,
-        domainName: domainLower,
-        type: 'transfer',
-        duration: 1,
-        status: 'completed',
-        unitPrice: total,
-        totalAmount: total,
-        providerOrderId: result.orderId,
-      },
-    })
-    const invoiceNumber = generateInvoiceNumber()
-    await db.invoice.create({
-      data: {
-        number: invoiceNumber,
-        userId,
-        orderId: order.id,
-        domainId,
-        items: JSON.stringify([
-          {
-            description: `Domain transfer: ${domainLower}`,
-            quantity: 1,
-            unitPrice: total,
-            total,
-          },
-        ]),
-        subtotal: total,
-        tax: 0,
-        total,
-        // SECURITY: mark invoice as 'pending' until payment is confirmed (H9)
-        status: 'pending',
-        paidAt: null,
-      },
-    })
+    let order: { id: string }
+    if (billing.existingOrderId) {
+      order = await db.domainOrder.update({
+        where: { id: billing.existingOrderId },
+        data: { domainId, providerOrderId: result.orderId },
+      })
+    } else {
+      order = await db.domainOrder.create({
+        data: {
+          userId,
+          domainId,
+          domainName: domainLower,
+          type: 'transfer',
+          duration: 1,
+          status: 'completed',
+          unitPrice: total,
+          totalAmount: total,
+          providerOrderId: result.orderId,
+        },
+      })
+    }
+
+    let invoiceNumber: string
+    if (billing.existingInvoiceId) {
+      const linked = await db.invoice.update({
+        where: { id: billing.existingInvoiceId },
+        data: { domainId },
+      })
+      invoiceNumber = linked.number
+    } else {
+      invoiceNumber = await nextInvoiceNumber()
+      await db.invoice.create({
+        data: {
+          number: invoiceNumber,
+          userId,
+          orderId: order.id,
+          domainId,
+          items: JSON.stringify([
+            {
+              description: `Domain transfer: ${domainLower}`,
+              quantity: 1,
+              unitPrice: total,
+              total,
+            },
+          ]),
+          subtotal: total,
+          tax: 0,
+          total,
+          // Unpaid until a gateway or an admin confirms the money.
+          status: 'pending',
+          paidAt: null,
+        },
+      })
+    }
 
     await logDomainEvent(domainId, userId, 'transfer', 'success', 'Transfer initiated', {
       domain: domainLower,

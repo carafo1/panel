@@ -44,6 +44,12 @@ export interface ProcessPaymentOptions {
   projectName?: string | null
   framework?: string | null
   subscriptionId?: string | null
+  /**
+   * Extra keys merged into the Payment metadata. Used to carry the
+   * domainOrderId so fulfilment can find the order once the money lands,
+   * whichever gateway confirms it.
+   */
+  extraMetadata?: Record<string, unknown>
 }
 
 export interface ProcessPaymentResult {
@@ -302,6 +308,7 @@ export async function processPayment(
     framework: opts.framework || null,
     method,
     subscriptionId: opts.subscriptionId || null,
+    ...(opts.extraMetadata || {}),
   }
 
   // ── STRIPE ─────────────────────────────────────────────────────

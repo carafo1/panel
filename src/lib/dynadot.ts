@@ -68,6 +68,13 @@ interface DynadotResponse {
     SearchResults?: Array<Record<string, unknown>>
     [k: string]: unknown
   }
+  CreateContactResponse?: {
+    ResponseCode?: string | number
+    Status?: string
+    Error?: string
+    ContactId?: string | number
+    [k: string]: unknown
+  }
   [k: string]: unknown
 }
 
@@ -110,6 +117,7 @@ async function callDynadot(params: Record<string, string>): Promise<DynadotRespo
     json.DomainInfoResponse,
     json.GetNsResponse,
     json.ListDomainInfoResponse,
+    json.CreateContactResponse,
   ].filter(Boolean) as Array<Record<string, unknown>>
   for (const env of envelopes) {
     if (env.Status === 'error' || env.ResponseCode === '-1' || env.ResponseCode === -1) {
@@ -443,18 +451,102 @@ interface RegisterDomainResult {
   registrationPrice?: number
 }
 
+export interface RegistrantContact {
+  firstName: string
+  lastName: string
+  email: string
+  phone?: string
+  organization?: string
+  address1?: string
+  address2?: string
+  city?: string
+  state?: string
+  postalCode?: string
+  country?: string
+}
+
+/**
+ * Create a contact at the registrar and return its Dynadot contact ID.
+ *
+ * The `register` command references contacts by ID; there is no way to pass
+ * contact details inline. Without this, every registration silently inherits
+ * the API account's default contact — i.e. our details on the customer's
+ * domain, which is both wrong and an ICANN accuracy problem.
+ */
+export async function createContact(
+  contact: RegistrantContact
+): Promise<string> {
+  const phone = (contact.phone || '').trim()
+  const intl = phone.startsWith('+')
+    ? phone.slice(1)
+    : phone.startsWith('00')
+    ? phone.slice(2)
+    : null
+  const digits = (intl ?? phone).replace(/\D/g, '')
+  let cc = ''
+  let num = digits
+  if (intl !== null && digits) {
+    let ccLen = 3
+    if (digits.startsWith('1') || digits.startsWith('7')) ccLen = 1
+    else if (/^(2[07]|3[0-46-9]|4[013-9]|5[1-8]|6[0-6]|8[1246]|9[0-58])/.test(digits)) ccLen = 2
+    cc = digits.slice(0, ccLen)
+    num = digits.slice(ccLen)
+  }
+
+  const params: Record<string, string> = {
+    command: 'create_contact',
+    name: `${contact.firstName} ${contact.lastName}`.trim(),
+    email: contact.email,
+    phonecc: cc,
+    phonenum: num,
+    address1: contact.address1 || '',
+    city: contact.city || '',
+    state: contact.state || '',
+    zip: contact.postalCode || '',
+    country: (contact.country || '').toUpperCase(),
+  }
+  if (contact.organization) params.organization = contact.organization
+  if (contact.address2) params.address2 = contact.address2
+
+  const json = await callDynadot(params)
+  const envelope =
+    ((json.CreateContactResponse as Record<string, unknown> | undefined) ??
+      (json.Response as Record<string, unknown> | undefined)) ||
+    {}
+  const contactId = envelope.ContactId as string | number | undefined
+  if (contactId === undefined || contactId === null || contactId === '') {
+    throw new Error('Dynadot create_contact returned no ContactId')
+  }
+  return String(contactId)
+}
+
 /**
  * Register a domain for a given duration (in years).
+ *
+ * When `contact` is supplied it is created at the registrar first and applied
+ * to all four contact roles. Registration is aborted if that fails rather than
+ * falling back to the account default.
  */
 export async function registerDomain(
   domain: string,
-  duration: number
+  duration: number,
+  contact?: RegistrantContact
 ): Promise<RegisterDomainResult> {
-  const json = await callDynadot({
+  const params: Record<string, string> = {
     command: 'register',
     domain,
     duration: String(duration),
-  })
+  }
+
+  if (contact) {
+    const contactId = await createContact(contact)
+    params.registrant_contact = contactId
+    params.admin_contact = contactId
+    params.technical_contact = contactId
+    params.billing_contact = contactId
+  }
+
+  const json = await callDynadot(params)
   const response = json.Response
   const status = response?.Status?.toLowerCase()
   const success = status === 'success' || status === 'register success'

@@ -20,6 +20,7 @@
 import { db } from '@/lib/db'
 import { deployProject } from '@/lib/vps'
 import { startProvisioning } from '@/lib/orchestration'
+import { fulfilDomainOrder } from '@/lib/domain-checkout'
 import { slugify } from '@/lib/utils'
 import { BRAND_DOMAIN } from '@/lib/brand-config'
 
@@ -78,6 +79,31 @@ export async function provisionForPayment(
   })
 
   try {
+    // ── DOMAIN ORDER → checkout fulfilment ──────────────────────────
+    // A domainOrderId means the purchase came through /api/domains/checkout,
+    // which already raised the order and invoice and priced the job. Hand off
+    // to the fulfilment path so register/renew/transfer all settle the same
+    // way, whichever gateway confirmed the money.
+    const domainOrderId =
+      typeof meta.domainOrderId === 'string' && meta.domainOrderId
+        ? meta.domainOrderId
+        : null
+
+    if (domainOrderId) {
+      const result = await fulfilDomainOrder(domainOrderId, {
+        paymentId: payment.id,
+        gateway: payment.method || 'stripe',
+      })
+      return {
+        provisioned: result.success,
+        detail: result.success
+          ? result.alreadyFulfilled
+            ? `domain order ${domainOrderId} already fulfilled`
+            : `domain order ${domainOrderId} fulfilled`
+          : `domain order ${domainOrderId} failed: ${result.error || 'unknown'}`,
+      }
+    }
+
     // ── DOMAIN or BOTH → real domain registration pipeline ──────────
     if ((purchaseType === 'domain' || purchaseType === 'both') && domainName) {
       const result = await startProvisioning({
