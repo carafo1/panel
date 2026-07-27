@@ -174,8 +174,27 @@ export async function POST(request: Request) {
       }, { status: 201 })
     }
 
-    // ─── Branch: Register through Dynadot ────────────────────────
-    // Default flow - register the domain via Dynadot (or demo mode).
+    // ─── Branch: Register through the registrar ──────────────────
+    //
+    // MONEY GUARD: hitting the registrar spends real, non-refundable balance.
+    // Customers must go through POST /api/domains/checkout, which prices the
+    // order, takes payment, and only then registers (see lib/domain-checkout).
+    // This endpoint stays available to operators for manual/recovery work.
+    //
+    // Before this guard existed, any logged-in user could register any domain
+    // here for free.
+    if (!userIsAdmin) {
+      return NextResponse.json(
+        {
+          error:
+            'Domain registration requires payment. Please use the checkout flow to purchase this domain.',
+          code: 'payment_required',
+          checkoutEndpoint: '/api/domains/checkout',
+        },
+        { status: 402 }
+      )
+    }
+
     let dynadotResult: {
       success: boolean
       orderId?: string

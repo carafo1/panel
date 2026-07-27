@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
 import { isAdmin } from '@/lib/security'
+import { domainMode, isRegistrarManaged } from '@/lib/domain-ownership'
 
 export async function GET(request: Request) {
   try {
@@ -38,11 +39,27 @@ export async function GET(request: Request) {
         id: d.id,
         name: d.name,
         status: d.status,
-        // SECURITY: hide the Dynadot brand from non-admin customers —
-        // show "apsamo" as the registrar/provider instead. Admins see
-        // the real registrar/provider for debugging + support.
-        registrar: userIsAdmin ? d.registrar : 'apsamo',
-        provider: userIsAdmin ? d.provider : 'apsamo',
+        // Whether we actually hold this domain at the registrar, or the
+        // customer registered it elsewhere and merely pointed it here. The UI
+        // keys every registrar-only control off this.
+        mode: domainMode(d),
+        // SECURITY: hide the Dynadot brand from non-admin customers — show
+        // "apsamo" as the registrar/provider instead. Admins see the real
+        // values for debugging + support.
+        //
+        // Only claim to be the registrar for domains we genuinely hold.
+        // Labelling an external domain "apsamo" is what made the panel look
+        // like it owned domains registered at other providers.
+        registrar: userIsAdmin
+          ? d.registrar
+          : isRegistrarManaged(d)
+          ? 'apsamo'
+          : 'external',
+        provider: userIsAdmin
+          ? d.provider
+          : isRegistrarManaged(d)
+          ? 'apsamo'
+          : 'external',
         // SECURITY: hide the external/registrar order ID from non-admins
         ...(userIsAdmin ? { externalId: d.externalId } : {}),
         registeredAt: d.registeredAt,

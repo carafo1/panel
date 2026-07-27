@@ -1,4 +1,16 @@
+/**
+ * GET /api/domains/[id]/propagation
+ *
+ * Reports how far each DNS record has propagated by querying a spread of public
+ * resolvers and comparing what they return against what we have on record.
+ *
+ * This used to hash the domain name into a plausible-looking percentage. It
+ * always showed roughly 75% propagated regardless of reality, which is worse
+ * than showing nothing: customers used it to decide whether their DNS was
+ * working.
+ */
 import { NextResponse } from 'next/server'
+import { Resolver } from 'dns/promises'
 import { db } from '@/lib/db'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { NS1_HOSTNAME, NS2_HOSTNAME } from '@/lib/brand-config'
@@ -9,6 +21,8 @@ interface PropagationChecker {
   status: 'propagated' | 'pending' | 'failed'
   checkedAt: string
   latency?: number
+  /** What this resolver actually returned, for debugging a mismatch. */
+  observed?: string[]
 }
 
 interface RecordPropagation {
@@ -22,51 +36,128 @@ interface RecordPropagation {
   }
 }
 
+/**
+ * Geographically spread anycast resolvers. Anycast means "US East" is where
+ * that operator's nearest node is rather than a guaranteed region, but querying
+ * several independent operators is what actually catches partial propagation.
+ */
 const CHECK_LOCATIONS: { location: string; ip: string }[] = [
-  { location: 'US East', ip: '1.1.1.1' },
-  { location: 'US West', ip: '8.8.8.8' },
-  { location: 'EU West', ip: '9.9.9.9' },
-  { location: 'Asia Pacific', ip: '1.0.0.1' },
-  { location: 'South America', ip: '208.67.222.222' },
+  { location: 'Cloudflare', ip: '1.1.1.1' },
+  { location: 'Google', ip: '8.8.8.8' },
+  { location: 'Quad9', ip: '9.9.9.9' },
+  { location: 'Cloudflare (secondary)', ip: '1.0.0.1' },
+  { location: 'OpenDNS', ip: '208.67.222.222' },
 ]
 
-function simulatePropagation(
-  domainName: string,
-  recordType: string,
-  recordName: string,
-  recordIndex: number
-): { overall: number; checkers: PropagationChecker[] } {
-  const hash = domainName.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0)
-  const now = new Date()
+/** Record types we can meaningfully verify over DNS. */
+const RESOLVABLE = new Set(['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SRV', 'CAA'])
 
-  const checkers: PropagationChecker[] = CHECK_LOCATIONS.map((loc, i) => {
-    const seed = (hash * (i + 3 + recordIndex * 7) + recordIndex * 13) % 100
-    // ~75% propagated, ~15% pending, ~10% failed
-    let status: 'propagated' | 'pending' | 'failed'
-    if (seed < 75) {
-      status = 'propagated'
-    } else if (seed < 90) {
-      status = 'pending'
-    } else {
-      status = 'failed'
-    }
+const QUERY_TIMEOUT_MS = 4000
 
-    const checkedAt = new Date(now.getTime() - Math.floor(Math.random() * 300000))
-    const latency = status === 'propagated' ? Math.floor(10 + (seed % 150)) : undefined
+/** Build the FQDN a record lives at: "@" is the zone apex. */
+function fqdn(recordName: string, domain: string): string {
+  const name = recordName.trim()
+  if (!name || name === '@') return domain
+  if (name.endsWith('.')) return name.slice(0, -1)
+  if (name.endsWith(domain)) return name
+  return `${name}.${domain}`
+}
 
-    return {
-      location: loc.location,
-      ip: loc.ip,
-      status,
-      checkedAt: checkedAt.toISOString(),
-      latency,
-    }
-  })
+/** Normalise for comparison — DNS is case-insensitive and trailing dots vary. */
+function norm(value: string): string {
+  return value.trim().toLowerCase().replace(/\.$/, '')
+}
 
-  const propagatedCount = checkers.filter((c) => c.status === 'propagated').length
-  const overall = Math.round((propagatedCount / checkers.length) * 100)
+/**
+ * Query one resolver for one record and flatten the answer to comparable
+ * strings. Node's resolver returns a different shape per record type.
+ */
+async function queryResolver(
+  resolverIp: string,
+  host: string,
+  type: string
+): Promise<string[]> {
+  const resolver = new Resolver({ timeout: QUERY_TIMEOUT_MS, tries: 1 })
+  resolver.setServers([resolverIp])
 
-  return { overall, checkers }
+  switch (type) {
+    case 'A':
+      return await resolver.resolve4(host)
+    case 'AAAA':
+      return await resolver.resolve6(host)
+    case 'CNAME':
+      return await resolver.resolveCname(host)
+    case 'NS':
+      return await resolver.resolveNs(host)
+    case 'TXT':
+      return (await resolver.resolveTxt(host)).map((chunks) => chunks.join(''))
+    case 'MX':
+      return (await resolver.resolveMx(host)).map((r) => r.exchange)
+    case 'SRV':
+      return (await resolver.resolveSrv(host)).map((r) => r.name)
+    case 'CAA':
+      return (await resolver.resolveCaa(host)).map(
+        (r) => (r.issue || r.issuewild || r.iodef || '') as string
+      )
+    default:
+      return []
+  }
+}
+
+/**
+ * Check one record against every resolver, in parallel.
+ *
+ * - propagated: the resolver returned our value
+ * - pending:    the resolver answered, but not with our value yet (or NXDOMAIN,
+ *               which is what you see before a new record has spread)
+ * - failed:     the resolver could not be reached / timed out
+ */
+async function checkRecord(
+  host: string,
+  type: string,
+  expected: string
+): Promise<{ overall: number; checkers: PropagationChecker[] }> {
+  const checkers = await Promise.all(
+    CHECK_LOCATIONS.map(async (loc): Promise<PropagationChecker> => {
+      const startedAt = Date.now()
+      const checkedAt = new Date().toISOString()
+      try {
+        const answers = await queryResolver(loc.ip, host, type)
+        const latency = Date.now() - startedAt
+        const wanted = norm(expected)
+        const matched = answers.some(
+          (a) => norm(a) === wanted || norm(a).includes(wanted)
+        )
+        return {
+          location: loc.location,
+          ip: loc.ip,
+          status: matched ? 'propagated' : 'pending',
+          checkedAt,
+          latency,
+          observed: answers.slice(0, 5),
+        }
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException)?.code || ''
+        // The record simply isn't visible from here yet — that's propagation
+        // in progress, not a broken resolver.
+        const notFound = code === 'ENOTFOUND' || code === 'ENODATA' || code === 'NXDOMAIN'
+        return {
+          location: loc.location,
+          ip: loc.ip,
+          status: notFound ? 'pending' : 'failed',
+          checkedAt,
+          latency: Date.now() - startedAt,
+          observed: [],
+        }
+      }
+    })
+  )
+
+  const propagated = checkers.filter((c) => c.status === 'propagated').length
+  return {
+    overall: Math.round((propagated / checkers.length) * 100),
+    checkers,
+  }
 }
 
 export async function GET(
@@ -104,37 +195,48 @@ export async function GET(
     })
 
     if (!domain) {
-      return NextResponse.json(
-        { error: 'Domain not found' },
-        { status: 404 }
-      )
+      return NextResponse.json({ error: 'Domain not found' }, { status: 404 })
     }
 
     const nameservers: string[] = domain.nameservers
       ? JSON.parse(domain.nameservers)
       : [NS1_HOSTNAME, NS2_HOSTNAME]
 
-    const records: RecordPropagation[] = domain.dnsRecords.map((record, index) => {
-      const propagation = simulatePropagation(
-        domain.name,
-        record.type,
-        record.name,
-        index
-      )
-      return {
-        id: record.id,
-        type: record.type,
-        name: record.name,
-        value: record.value,
-        propagation,
-      }
-    })
+    // Every record against every resolver, all at once — serially this would
+    // take records × resolvers × timeout and blow the request budget.
+    const records: RecordPropagation[] = await Promise.all(
+      domain.dnsRecords.map(async (record) => {
+        if (!RESOLVABLE.has(record.type)) {
+          return {
+            id: record.id,
+            type: record.type,
+            name: record.name,
+            value: record.value,
+            propagation: { overall: 0, checkers: [] },
+          }
+        }
+        const propagation = await checkRecord(
+          fqdn(record.name, domain.name),
+          record.type,
+          record.value
+        )
+        return {
+          id: record.id,
+          type: record.type,
+          name: record.name,
+          value: record.value,
+          propagation,
+        }
+      })
+    )
 
-    // Calculate overall propagation across all records
+    // Average only over records we could actually check, so a CAA record we
+    // don't query can't drag the headline number down.
+    const checked = records.filter((r) => r.propagation.checkers.length > 0)
     const overallPropagation =
-      records.length > 0
+      checked.length > 0
         ? Math.round(
-            records.reduce((sum, r) => sum + r.propagation.overall, 0) / records.length
+            checked.reduce((sum, r) => sum + r.propagation.overall, 0) / checked.length
           )
         : 0
 
@@ -143,12 +245,10 @@ export async function GET(
       nameservers,
       records,
       overallPropagation,
+      checkedAt: new Date().toISOString(),
     })
   } catch (error) {
     console.error('Get propagation error:', error)
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

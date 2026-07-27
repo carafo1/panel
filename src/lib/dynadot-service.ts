@@ -89,6 +89,17 @@ export interface RegisterResult {
   domain?: string
 }
 
+/**
+ * Dynadot contact IDs, keyed by role, as returned by `create_contact`.
+ * The register command takes IDs — not inline contact data.
+ */
+export interface DynadotContactIds {
+  registrant?: string
+  admin?: string
+  tech?: string
+  billing?: string
+}
+
 export interface RenewResult {
   success: boolean
   orderId?: string
@@ -160,6 +171,45 @@ function demoIsPremium(domain: string): boolean {
   // Short single-word .com / .ai treated as premium
   const base = lower.split('.')[0]
   return (base.length <= 4 && (lower.endsWith('.com') || lower.endsWith('.ai')))
+}
+
+/**
+ * Split a free-text phone number into the country code and subscriber number
+ * that Dynadot's `phonecc` / `phonenum` parameters expect.
+ *
+ * Accepts the shapes customers actually type — "+252 61 234 5678",
+ * "00252612345678", "252-61-234-5678" — and falls back to a 1-3 digit prefix
+ * heuristic when there is no explicit "+" marker.
+ */
+export function splitPhone(raw?: string): { cc: string; num: string } {
+  if (!raw) return { cc: '', num: '' }
+
+  const trimmed = raw.trim()
+  // "00" is the ITU international prefix — equivalent to a leading "+".
+  const explicit = trimmed.startsWith('+')
+    ? trimmed.slice(1)
+    : trimmed.startsWith('00')
+    ? trimmed.slice(2)
+    : null
+
+  const digits = (explicit ?? trimmed).replace(/\D/g, '')
+  if (!digits) return { cc: '', num: '' }
+
+  // No international marker: assume the number is already national-format
+  // and leave the country code for the caller/registrar default.
+  if (explicit === null) return { cc: '', num: digits }
+
+  // Country calling codes are 1-3 digits. "1" (NANP) and "7" are the only
+  // single-digit codes; codes starting 2/3/4/5/6/8/9 are 2-3 digits, and the
+  // 3-digit ones all begin with a known 2-digit prefix range.
+  let ccLen = 3
+  if (digits.startsWith('1') || digits.startsWith('7')) {
+    ccLen = 1
+  } else if (/^(2[07]|3[0-46-9]|4[013-9]|5[1-8]|6[0-6]|8[1246]|9[0-58])/.test(digits)) {
+    ccLen = 2
+  }
+
+  return { cc: digits.slice(0, ccLen), num: digits.slice(ccLen) }
 }
 
 // ─── Service class ────────────────────────────────────────────────────────────
@@ -416,6 +466,80 @@ class DynadotService {
 
   // ─── Register ────────────────────────────────────────────────────────────
 
+  /**
+   * Create a contact record at the registrar and return its Dynadot contact ID.
+   *
+   * ICANN requires real registrant data on every gTLD registration, and many
+   * TLDs reject an order outright without it. Dynadot's API3 takes contact
+   * *IDs* on the register command, so contacts must be created first — passing
+   * inline contact JSON (which this client used to do) is silently ignored and
+   * the order falls back to the account's default contact.
+   *
+   * Docs: https://www.dynadot.com/domain/api3.html#create_contact
+   */
+  async createContact(contact: DomainContactInput): Promise<string> {
+    if (this.demoMode) {
+      return `demo-contact-${Date.now()}-${contact.type}`
+    }
+
+    const { cc, num } = splitPhone(contact.phone)
+    const params: Record<string, string> = {
+      command: 'create_contact',
+      name: `${contact.firstName} ${contact.lastName}`.trim(),
+      email: contact.email,
+      phonecc: cc,
+      phonenum: num,
+      address1: contact.address1 || '',
+      city: contact.city || '',
+      state: contact.state || '',
+      zip: contact.postalCode || '',
+      country: (contact.country || '').toUpperCase(),
+    }
+    if (contact.organization) params.organization = contact.organization
+    if (contact.address2) params.address2 = contact.address2
+
+    const json = await this.call(params)
+    const envelope =
+      (json.CreateContactResponse as Record<string, unknown>) ||
+      (json.Response as Record<string, unknown>) ||
+      {}
+    const contactId =
+      (envelope.ContactId as string | number | undefined) ??
+      ((envelope.CreateContact as Record<string, unknown> | undefined)
+        ?.ContactId as string | number | undefined)
+
+    if (contactId === undefined || contactId === null || contactId === '') {
+      throw new Error(
+        `Dynadot create_contact returned no ContactId for ${contact.type}`
+      )
+    }
+    return String(contactId)
+  }
+
+  /**
+   * Create every supplied contact and map them onto the four registrar roles.
+   *
+   * Only the registrant is mandatory; admin/tech/billing fall back to the
+   * registrant's ID, which is what registrars expect when a customer supplies
+   * a single contact.
+   */
+  async createContacts(
+    contacts: DomainContactInput[]
+  ): Promise<DynadotContactIds> {
+    const ids: DynadotContactIds = {}
+    for (const contact of contacts) {
+      ids[contact.type] = await this.createContact(contact)
+    }
+    const fallback = ids.registrant || ids.admin || ids.tech || ids.billing
+    if (!fallback) return ids
+    return {
+      registrant: ids.registrant || fallback,
+      admin: ids.admin || fallback,
+      tech: ids.tech || fallback,
+      billing: ids.billing || fallback,
+    }
+  }
+
   async register(
     domain: string,
     duration: number,
@@ -437,9 +561,18 @@ class DynadotService {
       domain,
       duration: String(duration),
     }
+
+    // Register the contacts first, then reference them by ID. A failure here
+    // must abort the registration: silently falling back to the account's
+    // default contact would put OUR details on the CUSTOMER'S domain.
     if (contacts && contacts.length > 0) {
-      params.contact_info = JSON.stringify(contacts)
+      const ids = await this.createContacts(contacts)
+      if (ids.registrant) params.registrant_contact = ids.registrant
+      if (ids.admin) params.admin_contact = ids.admin
+      if (ids.tech) params.technical_contact = ids.tech
+      if (ids.billing) params.billing_contact = ids.billing
     }
+
     const json = await this.call(params)
     const response = (json.Response as Record<string, unknown>) || {}
     const status = String(response.Status || '').toLowerCase()

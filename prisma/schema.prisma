@@ -263,7 +263,7 @@ model Domain {
   projectId       String?
   name            String   @unique // e.g. example.com
   status          String   @default("pending") // pending, active, expired, transferring, suspended, deleted
-  registrar       String   @default("dynadot")
+  registrar       String   @default("external") // set to "dynadot" only when a real registration exists
   registeredAt    DateTime?
   expiresAt       DateTime?
   autoRenew       Boolean  @default(true)
@@ -280,7 +280,7 @@ model Domain {
   project      Project?      @relation(fields: [projectId], references: [id])
   dnsRecords   DnsRecord[]
   automationLogs AutomationLog[]
-  provider           String   @default("dynadot") // "deployhub", "dynadot"
+  provider           String   @default("external") // "dynadot" = in our registrar account; "external" = registered elsewhere
   externalId         String?  // Dynadot domain ID
   emailHosted        Boolean  @default(false)
   mailcowDomainId    String?

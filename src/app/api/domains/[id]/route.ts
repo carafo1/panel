@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { isAdmin } from '@/lib/security'
+import { domainMode, isRegistrarManaged } from '@/lib/domain-ownership'
 
 export async function GET(
   request: Request,
@@ -61,9 +62,21 @@ export async function GET(
         id: domain.id,
         name: domain.name,
         status: domain.status,
-        // SECURITY: hide Dynadot brand + external ID from non-admin customers
-        registrar: userIsAdmin ? domain.registrar : 'apsamo',
-        provider: userIsAdmin ? domain.provider : 'apsamo',
+        // Whether we hold this at the registrar, or it is registered elsewhere
+        // and merely pointed here. Gates every registrar-only control.
+        mode: domainMode(domain),
+        // SECURITY: hide Dynadot brand + external ID from non-admin customers.
+        // Only claim to be the registrar for domains we genuinely hold.
+        registrar: userIsAdmin
+          ? domain.registrar
+          : isRegistrarManaged(domain)
+          ? 'apsamo'
+          : 'external',
+        provider: userIsAdmin
+          ? domain.provider
+          : isRegistrarManaged(domain)
+          ? 'apsamo'
+          : 'external',
         ...(userIsAdmin ? { externalId: domain.externalId } : {}),
         registeredAt: domain.registeredAt,
         expiresAt: domain.expiresAt,

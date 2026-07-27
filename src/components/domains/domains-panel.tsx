@@ -40,6 +40,232 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 
+// ─── Checkout shared pieces ───────────────────────────────────────────────────
+
+/**
+ * ICANN requires accurate registrant details on every gTLD registration, and
+ * many registries reject an order outright without them — so these are
+ * collected before payment rather than patched in afterwards.
+ */
+interface Registrant {
+  firstName: string
+  lastName: string
+  email: string
+  phone: string
+  organization: string
+  address1: string
+  address2: string
+  city: string
+  state: string
+  postalCode: string
+  country: string
+}
+
+const EMPTY_REGISTRANT: Registrant = {
+  firstName: '', lastName: '', email: '', phone: '', organization: '',
+  address1: '', address2: '', city: '', state: '', postalCode: '', country: '',
+}
+
+interface PaymentMethodOption {
+  method: string
+  displayName: string
+  icon?: string
+}
+
+/** Mirrors the server-side validation so the customer sees errors before paying. */
+function validateRegistrant(r: Registrant): string | null {
+  const required: Array<[keyof Registrant, string]> = [
+    ['firstName', 'First name'], ['lastName', 'Last name'], ['email', 'Email'],
+    ['phone', 'Phone number'], ['address1', 'Street address'], ['city', 'City'],
+    ['postalCode', 'Postal code'], ['country', 'Country'],
+  ]
+  for (const [field, label] of required) {
+    if (!r[field].trim()) return `${label} is required`
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(r.email.trim())) {
+    return 'Enter a valid email address'
+  }
+  if (!/^[A-Za-z]{2}$/.test(r.country.trim())) {
+    return 'Country must be a 2-letter code (e.g. SO, US, GB)'
+  }
+  if (r.phone.replace(/\D/g, '').length < 7) {
+    return 'Enter a valid phone number including country code, e.g. +252612345678'
+  }
+  return null
+}
+
+/** Load the gateways an admin has actually switched on, plus a live quote. */
+function useDomainQuote(domain: string | null, kind: string, years: number) {
+  const [methods, setMethods] = useState<PaymentMethodOption[]>([])
+  const [quote, setQuote] = useState<{ unitPrice: number; total: number } | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!domain) return
+    let cancelled = false
+    setLoading(true)
+    apiFetch(
+      `/domains/checkout?domain=${encodeURIComponent(domain)}&kind=${kind}&years=${years}`
+    )
+      .then((data) => {
+        if (cancelled) return
+        setMethods(data.paymentMethods || [])
+        setQuote(data.quote ? { unitPrice: data.quote.unitPrice, total: data.quote.total } : null)
+      })
+      .catch(() => {
+        if (!cancelled) setMethods([])
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [domain, kind, years])
+
+  return { methods, quote, loading }
+}
+
+function RegistrantFields({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: Registrant
+  onChange: (r: Registrant) => void
+  disabled?: boolean
+}) {
+  const set = (k: keyof Registrant) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    onChange({ ...value, [k]: e.target.value })
+
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label className="text-xs">First name *</Label>
+          <Input value={value.firstName} onChange={set('firstName')} disabled={disabled} />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs">Last name *</Label>
+          <Input value={value.lastName} onChange={set('lastName')} disabled={disabled} />
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label className="text-xs">Email *</Label>
+          <Input type="email" value={value.email} onChange={set('email')} disabled={disabled} />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs">Phone *</Label>
+          <Input
+            placeholder="+252612345678"
+            value={value.phone}
+            onChange={set('phone')}
+            disabled={disabled}
+          />
+        </div>
+      </div>
+      <div className="space-y-1.5">
+        <Label className="text-xs">Organization (optional)</Label>
+        <Input value={value.organization} onChange={set('organization')} disabled={disabled} />
+      </div>
+      <div className="space-y-1.5">
+        <Label className="text-xs">Street address *</Label>
+        <Input value={value.address1} onChange={set('address1')} disabled={disabled} />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label className="text-xs">City *</Label>
+          <Input value={value.city} onChange={set('city')} disabled={disabled} />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs">State / region</Label>
+          <Input value={value.state} onChange={set('state')} disabled={disabled} />
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label className="text-xs">Postal code *</Label>
+          <Input value={value.postalCode} onChange={set('postalCode')} disabled={disabled} />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs">Country code *</Label>
+          <Input
+            placeholder="SO"
+            maxLength={2}
+            value={value.country}
+            onChange={(e) =>
+              onChange({ ...value, country: e.target.value.toUpperCase().slice(0, 2) })
+            }
+            disabled={disabled}
+          />
+        </div>
+      </div>
+      <p className="text-[11px] text-muted-foreground">
+        These details are filed with the domain registry as required by ICANN. WHOIS
+        privacy keeps them off the public record.
+      </p>
+    </div>
+  )
+}
+
+function PaymentMethodPicker({
+  methods,
+  value,
+  onChange,
+  disabled,
+}: {
+  methods: PaymentMethodOption[]
+  value: string
+  onChange: (m: string) => void
+  disabled?: boolean
+}) {
+  if (methods.length === 0) {
+    return (
+      <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-muted-foreground">
+        No payment method is currently available. Please contact support.
+      </div>
+    )
+  }
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-xs">Payment method</Label>
+      <Select value={value} onValueChange={onChange} disabled={disabled}>
+        <SelectTrigger>
+          <SelectValue placeholder="Choose how to pay" />
+        </SelectTrigger>
+        <SelectContent>
+          {methods.map((m) => (
+            <SelectItem key={m.method} value={m.method}>
+              {m.displayName}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  )
+}
+
+/**
+ * Send the customer to the gateway, or explain the next step when the method
+ * settles offline (bank transfer waits on an admin confirming the money).
+ */
+function handleCheckoutResult(
+  data: { redirectUrl?: string; status?: string; invoiceNumber?: string },
+  fallbackMessage: string
+) {
+  if (data.redirectUrl) {
+    toast.success('Redirecting to payment…')
+    window.location.href = data.redirectUrl
+    return
+  }
+  toast.success('Order created', {
+    description: data.invoiceNumber
+      ? `Invoice ${data.invoiceNumber} — ${fallbackMessage}`
+      : fallbackMessage,
+  })
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface SearchResult {
@@ -57,6 +283,16 @@ interface Domain {
   id: string
   name: string
   status: string
+  /**
+   * 'managed'  — registered through us, sitting in our registrar account.
+   *              Full registrar control available.
+   * 'external' — registered at another provider and pointed here for hosting.
+   *              We control DNS and hosting only; no registrar authority.
+   *
+   * Server-supplied: customers can't derive it, because `provider` is
+   * deliberately masked to hide the upstream registrar's brand.
+   */
+  mode?: 'managed' | 'external'
   registrar: string
   provider: string
   registeredAt?: string
@@ -285,20 +521,34 @@ function SearchTab({ onRegistered }: { onRegistered: () => void }) {
     }
   }, [bulkQuery])
 
-  const handleRegister = async (domain: string, duration: number) => {
+  const handleRegister = async (
+    domain: string,
+    duration: number,
+    registrant: Registrant,
+    method: string
+  ) => {
     setRegistering(domain)
     try {
-      await apiFetch('/domains/register', {
+      // Creates the order and starts payment. The registrar is not touched
+      // until the gateway confirms the money.
+      const data = await apiFetch('/domains/checkout', {
         method: 'POST',
-        body: JSON.stringify({ name: domain, duration, provider: 'dynadot' }),
+        body: JSON.stringify({
+          domain,
+          kind: 'register',
+          years: duration,
+          method,
+          registrant,
+        }),
       })
-      toast.success('Domain registered!', {
-        description: `${domain} is now active. Invoice generated.`,
-      })
+      handleCheckoutResult(
+        data,
+        'Your domain is registered as soon as payment is confirmed.'
+      )
       setRegisterDialog(null)
       onRegistered()
     } catch (err) {
-      toast.error('Registration failed', { description: (err as Error).message })
+      toast.error('Could not start checkout', { description: (err as Error).message })
     } finally {
       setRegistering(null)
     }
@@ -433,7 +683,9 @@ function SearchTab({ onRegistered }: { onRegistered: () => void }) {
           price={registerDialog.price}
           loading={registering === registerDialog.domain}
           onClose={() => setRegisterDialog(null)}
-          onConfirm={(duration) => handleRegister(registerDialog.domain, duration)}
+          onConfirm={(duration, registrant, method) =>
+            handleRegister(registerDialog.domain, duration, registrant, method)
+          }
         />
       )}
     </div>
@@ -585,6 +837,14 @@ function SearchResultCard({
   )
 }
 
+/**
+ * Domain purchase checkout.
+ *
+ * Collects the registration period, the ICANN registrant details and a payment
+ * method, then creates an order and sends the customer to the gateway. The
+ * domain is registered only after the payment clears — this dialog never
+ * triggers a registrar call on its own.
+ */
 function RegisterDialog({
   domain, price, loading, onClose, onConfirm,
 }: {
@@ -592,27 +852,62 @@ function RegisterDialog({
   price: number
   loading: boolean
   onClose: () => void
-  onConfirm: (duration: number) => void
+  onConfirm: (duration: number, registrant: Registrant, method: string) => void
 }) {
   const [duration, setDuration] = useState(1)
-  const total = (price * duration).toFixed(2)
+  const [registrant, setRegistrant] = useState<Registrant>(EMPTY_REGISTRANT)
+  const [method, setMethod] = useState('')
+  const { user } = useAuthStore()
+  const { methods, quote } = useDomainQuote(domain, 'register', duration)
+
+  // Prefill from the signed-in account — most customers are registering in
+  // their own name, and retyping an email they already gave us is friction.
+  useEffect(() => {
+    if (user?.email) {
+      setRegistrant((r) => (r.email ? r : { ...r, email: user.email }))
+    }
+  }, [user?.email])
+
+  useEffect(() => {
+    if (!method && methods.length > 0) setMethod(methods[0].method)
+  }, [methods, method])
+
+  const unitPrice = quote?.unitPrice ?? price
+  const total = (quote?.total ?? unitPrice * duration).toFixed(2)
+
+  const submit = () => {
+    const error = validateRegistrant(registrant)
+    if (error) {
+      toast.error('Check your details', { description: error })
+      return
+    }
+    if (!method) {
+      toast.error('Choose a payment method')
+      return
+    }
+    onConfirm(duration, registrant, method)
+  }
 
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent>
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <ShoppingBag className="h-5 w-5 text-indigo-500" />
             Register {domain}
           </DialogTitle>
           <DialogDescription>
-            Register this domain through Apsamo. A paid invoice and activity log will be generated automatically.
+            Your domain is registered as soon as your payment is confirmed.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-2">
           <div className="space-y-2">
-            <Label>Registration Period</Label>
-            <Select value={String(duration)} onValueChange={(v) => setDuration(Number(v))}>
+            <Label>Registration period</Label>
+            <Select
+              value={String(duration)}
+              onValueChange={(v) => setDuration(Number(v))}
+              disabled={loading}
+            >
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
@@ -623,6 +918,7 @@ function RegisterDialog({
               </SelectContent>
             </Select>
           </div>
+
           <div className="rounded-md bg-muted/50 p-4 space-y-2">
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">Domain</span>
@@ -630,7 +926,7 @@ function RegisterDialog({
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">Price / year</span>
-              <span className="font-mono">${price}</span>
+              <span className="font-mono">${unitPrice.toFixed(2)}</span>
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">Duration</span>
@@ -638,20 +934,41 @@ function RegisterDialog({
             </div>
             <Separator />
             <div className="flex justify-between font-semibold">
-              <span>Total</span>
+              <span>Total due now</span>
               <span className="text-indigo-600">${total}</span>
             </div>
           </div>
+
+          <div className="space-y-2">
+            <Label className="flex items-center gap-1.5">
+              <Shield className="h-3.5 w-3.5 text-indigo-500" />
+              Registrant details
+            </Label>
+            <RegistrantFields
+              value={registrant}
+              onChange={setRegistrant}
+              disabled={loading}
+            />
+          </div>
+
+          <PaymentMethodPicker
+            methods={methods}
+            value={method}
+            onChange={setMethod}
+            disabled={loading}
+          />
+
           <div className="rounded-md border border-indigo-500/30 bg-indigo-500/5 p-3 text-xs text-muted-foreground">
-            After payment, the system will: register via Apsamo → configure nameservers →
-            set DNS records → save to database → create invoice → generate audit log → send confirmation email.
+            Once payment clears we register the domain, point it at your nameservers,
+            set up DNS, and email you the confirmation. Domain fees are
+            non-refundable once the registration is placed.
           </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={loading}>Cancel</Button>
-          <Button onClick={() => onConfirm(duration)} disabled={loading}>
+          <Button onClick={submit} disabled={loading || methods.length === 0}>
             {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Zap className="h-4 w-4 mr-2" />}
-            Complete Purchase (${total})
+            Continue to payment (${total})
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -671,25 +988,62 @@ function TransferDomainDialog({
   const [domain, setDomain] = useState('')
   const [authCode, setAuthCode] = useState('')
   const [transferring, setTransferring] = useState(false)
+  const [registrant, setRegistrant] = useState<Registrant>(EMPTY_REGISTRANT)
+  const [method, setMethod] = useState('')
+  const { user } = useAuthStore()
+
+  // Quote only once a plausible domain has been typed, so we aren't firing a
+  // request on every keystroke of "e", "ex", "exa"…
+  const quotable = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(domain.trim().toLowerCase())
+    ? domain.trim().toLowerCase()
+    : null
+  const { methods, quote } = useDomainQuote(quotable, 'transfer', 1)
+
+  useEffect(() => {
+    if (user?.email) {
+      setRegistrant((r) => (r.email ? r : { ...r, email: user.email }))
+    }
+  }, [user?.email])
+
+  useEffect(() => {
+    if (!method && methods.length > 0) setMethod(methods[0].method)
+  }, [methods, method])
 
   const submit = async () => {
     if (!domain.trim() || !authCode.trim()) {
       toast.error('Domain and auth code are required')
       return
     }
+    const error = validateRegistrant(registrant)
+    if (error) {
+      toast.error('Check your details', { description: error })
+      return
+    }
+    if (!method) {
+      toast.error('Choose a payment method')
+      return
+    }
     setTransferring(true)
     try {
+      // Creates the order and starts payment; the transfer is requested at the
+      // registrar only once the money is confirmed.
       const data = await apiFetch('/domains/transfer', {
         method: 'POST',
-        body: JSON.stringify({ domain: domain.trim(), authCode: authCode.trim() }),
+        body: JSON.stringify({
+          domain: domain.trim(),
+          authCode: authCode.trim(),
+          registrant,
+          method,
+        }),
       })
-      toast.success('Transfer initiated!', {
-        description: `${data.data?.domain || domain} — invoice ${data.data?.invoiceNumber || 'created'}`,
-      })
+      handleCheckoutResult(
+        data.data || data,
+        'The transfer starts as soon as payment is confirmed.'
+      )
       onTransferred()
       onClose()
     } catch (err) {
-      toast.error('Transfer failed', { description: (err as Error).message })
+      toast.error('Could not start transfer', { description: (err as Error).message })
     } finally {
       setTransferring(false)
     }
@@ -697,7 +1051,7 @@ function TransferDomainDialog({
 
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent>
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Send className="h-5 w-5 text-indigo-500" />
@@ -729,6 +1083,43 @@ function TransferDomainDialog({
               className="font-mono"
             />
           </div>
+
+          {quote && (
+            <div className="rounded-md bg-muted/50 p-4 space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Transfer fee</span>
+                <span className="font-mono">${quote.unitPrice.toFixed(2)}</span>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Includes one extra year added to the domain&apos;s expiry.
+              </p>
+              <Separator />
+              <div className="flex justify-between font-semibold">
+                <span>Total due now</span>
+                <span className="text-indigo-600">${quote.total.toFixed(2)}</span>
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <Label className="flex items-center gap-1.5">
+              <Shield className="h-3.5 w-3.5 text-indigo-500" />
+              Registrant details
+            </Label>
+            <RegistrantFields
+              value={registrant}
+              onChange={setRegistrant}
+              disabled={transferring}
+            />
+          </div>
+
+          <PaymentMethodPicker
+            methods={methods}
+            value={method}
+            onChange={setMethod}
+            disabled={transferring}
+          />
+
           <div className="rounded-md border border-indigo-500/30 bg-indigo-500/5 p-3 text-xs text-muted-foreground space-y-1">
             <div className="flex items-center gap-1.5 font-medium text-indigo-700 dark:text-indigo-400">
               <AlertTriangle className="h-3.5 w-3.5" />
@@ -746,13 +1137,16 @@ function TransferDomainDialog({
           <Button variant="outline" onClick={onClose} disabled={transferring}>
             Cancel
           </Button>
-          <Button onClick={submit} disabled={transferring || !domain.trim() || !authCode.trim()}>
+          <Button
+            onClick={submit}
+            disabled={transferring || !domain.trim() || !authCode.trim() || methods.length === 0}
+          >
             {transferring ? (
               <Loader2 className="h-4 w-4 animate-spin mr-2" />
             ) : (
               <Send className="h-4 w-4 mr-2" />
             )}
-            Initiate Transfer
+            Continue to payment
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -826,6 +1220,7 @@ function DomainsListTab({ onSelect }: { onSelect: (id: string) => void }) {
                     <Badge className={statusColor(d.status)} variant="outline">
                       {d.status}
                     </Badge>
+                    <ModeBadge mode={d.mode} />
                     {d.premium && (
                       <Badge className="bg-amber-500/15 text-amber-600 border-amber-500/30" variant="outline">
                         <Sparkles className="h-3 w-3 mr-1" />Premium
@@ -875,6 +1270,79 @@ function DomainsListTab({ onSelect }: { onSelect: (id: string) => void }) {
 
 // ─── Domain Detail ────────────────────────────────────────────────────────────
 
+/**
+ * Badge distinguishing a domain we hold at the registrar from one the customer
+ * registered elsewhere and merely pointed at this server.
+ */
+function ModeBadge({ mode }: { mode?: 'managed' | 'external' }) {
+  if (mode === 'managed') {
+    return (
+      <Badge variant="outline" className="bg-indigo-500/15 text-indigo-600 border-indigo-500/30 text-[10px]">
+        Registered with us
+      </Badge>
+    )
+  }
+  if (mode === 'external') {
+    return (
+      <Badge variant="outline" className="bg-sky-500/15 text-sky-700 dark:text-sky-400 border-sky-500/30 text-[10px]">
+        Connected
+      </Badge>
+    )
+  }
+  return null
+}
+
+/**
+ * Shown on an external domain's detail view, in place of the registrar tabs.
+ * States plainly what we can and cannot do, so nobody goes looking for a
+ * renew button that was never going to work.
+ */
+function ExternalDomainNotice({ domain }: { domain: Domain }) {
+  return (
+    <Card className="border-sky-500/30 bg-sky-500/5">
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Globe className="h-4 w-4 text-sky-600" />
+          Connected domain
+        </CardTitle>
+        <CardDescription>
+          {domain.name} is registered with another provider. It&apos;s connected here
+          for hosting, but its registration is managed where you bought it.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-4 sm:grid-cols-2 text-sm">
+        <div>
+          <div className="font-medium mb-1.5 flex items-center gap-1.5">
+            <CheckCircle2 className="h-3.5 w-3.5 text-indigo-500" />
+            You can do here
+          </div>
+          <ul className="list-disc list-inside space-y-0.5 text-muted-foreground text-xs">
+            <li>Point it at a website on this server</li>
+            <li>Manage DNS records (once delegated to our nameservers)</li>
+            <li>Automatic SSL certificates</li>
+          </ul>
+        </div>
+        <div>
+          <div className="font-medium mb-1.5 flex items-center gap-1.5">
+            <ExternalLink className="h-3.5 w-3.5 text-muted-foreground" />
+            Do at your registrar
+          </div>
+          <ul className="list-disc list-inside space-y-0.5 text-muted-foreground text-xs">
+            <li>Renewals and expiry</li>
+            <li>Nameserver changes</li>
+            <li>Transfer lock &amp; WHOIS privacy</li>
+            <li>Auth / EPP codes</li>
+          </ul>
+        </div>
+        <p className="sm:col-span-2 text-xs text-muted-foreground">
+          Want everything in one place? Transfer it in from the Domains page and
+          we&apos;ll manage the registration for you.
+        </p>
+      </CardContent>
+    </Card>
+  )
+}
+
 function DomainDetail({
   domainId, onBack, isAdmin,
 }: {
@@ -904,6 +1372,17 @@ function DomainDetail({
   }, [domainId])
 
   useEffect(() => { load() }, [load])
+
+  // Registrar-only tabs don't exist for an external domain. If one is selected
+  // when we discover the domain is external — from a stale link, or because a
+  // reconcile reclassified it — fall back to Overview rather than rendering a
+  // panel of controls that will all 409.
+  const isExternal = domain ? domain.mode === 'external' : false
+  useEffect(() => {
+    if (isExternal && (section === 'nameservers' || section === 'security' || section === 'renew')) {
+      setSection('overview')
+    }
+  }, [isExternal, section])
 
   if (loading) {
     return (
@@ -947,7 +1426,12 @@ function DomainDetail({
               </CardTitle>
               <div className="flex items-center gap-2 mt-2 flex-wrap">
                 <Badge className={statusColor(domain.status)} variant="outline">{domain.status}</Badge>
-                <Badge variant="outline">{domain.registrar}</Badge>
+                <ModeBadge mode={domain.mode} />
+                {/* The registrar label is only meaningful for domains we hold;
+                    for external ones the mode badge already says it better. */}
+                {domain.mode !== 'external' && (
+                  <Badge variant="outline">{domain.registrar}</Badge>
+                )}
                 {domain.premium && (
                   <Badge className="bg-amber-500/15 text-amber-600 border-amber-500/30" variant="outline">
                     <Sparkles className="h-3 w-3 mr-1" />Premium
@@ -978,13 +1462,27 @@ function DomainDetail({
         </CardHeader>
       </Card>
 
+      {/*
+        External domains are registered somewhere else. Nameservers, transfer
+        lock, WHOIS privacy, auto-renew, auth codes and renewal are all
+        registrar operations we cannot perform on them — the API now refuses
+        with a 409, so showing the controls would only produce dead buttons.
+      */}
+      {isExternal && <ExternalDomainNotice domain={domain} />}
+
       <Tabs value={section} onValueChange={(v) => setSection(v as typeof section)}>
-        <TabsList className="grid w-full grid-cols-3 sm:grid-cols-6 h-auto">
+        <TabsList className={`grid w-full h-auto ${isExternal ? 'grid-cols-3' : 'grid-cols-3 sm:grid-cols-6'}`}>
           <TabsTrigger value="overview" className="text-xs">Overview</TabsTrigger>
-          <TabsTrigger value="nameservers" className="text-xs">Nameservers</TabsTrigger>
+          {!isExternal && (
+            <TabsTrigger value="nameservers" className="text-xs">Nameservers</TabsTrigger>
+          )}
           <TabsTrigger value="dns" className="text-xs">DNS</TabsTrigger>
-          <TabsTrigger value="security" className="text-xs">Security</TabsTrigger>
-          <TabsTrigger value="renew" className="text-xs">Renew/Transfer</TabsTrigger>
+          {!isExternal && (
+            <>
+              <TabsTrigger value="security" className="text-xs">Security</TabsTrigger>
+              <TabsTrigger value="renew" className="text-xs">Renew/Transfer</TabsTrigger>
+            </>
+          )}
           <TabsTrigger value="logs" className="text-xs">Logs</TabsTrigger>
         </TabsList>
 
@@ -1414,50 +1912,42 @@ function SecurityToggle({
 function RenewTransferSection({ domain, onUpdated }: { domain: Domain; onUpdated: () => void }) {
   const [years, setYears] = useState(1)
   const [renewing, setRenewing] = useState(false)
-  const [transferDomain, setTransferDomain] = useState('')
-  const [transferCode, setTransferCode] = useState('')
-  const [transferring, setTransferring] = useState(false)
+  const [renewMethod, setRenewMethod] = useState('')
+  const { methods, quote } = useDomainQuote(domain.name, 'renew', years)
+
+  useEffect(() => {
+    if (!renewMethod && methods.length > 0) setRenewMethod(methods[0].method)
+  }, [methods, renewMethod])
 
   const renew = async () => {
+    if (!renewMethod) {
+      toast.error('Choose a payment method')
+      return
+    }
     setRenewing(true)
     try {
+      // Orders the renewal and starts payment; the registrar is called once
+      // the money is confirmed.
       const data = await apiFetch('/domains/renew', {
         method: 'POST',
-        body: JSON.stringify({ domainId: domain.id, duration: years }),
+        body: JSON.stringify({
+          domainId: domain.id,
+          duration: years,
+          method: renewMethod,
+        }),
       })
-      toast.success('Domain renewed!', {
-        description: `Invoice ${data.data?.invoiceNumber || 'generated'} · ${years} year${years > 1 ? 's' : ''} added`,
-      })
+      handleCheckoutResult(
+        data.data || data,
+        'The renewal applies as soon as payment is confirmed.'
+      )
       onUpdated()
     } catch (err) {
-      toast.error('Renewal failed', { description: (err as Error).message })
+      toast.error('Could not start renewal', { description: (err as Error).message })
     } finally {
       setRenewing(false)
     }
   }
 
-  const transfer = async () => {
-    if (!transferDomain.trim() || !transferCode.trim()) {
-      toast.error('Domain and auth code are required')
-      return
-    }
-    setTransferring(true)
-    try {
-      const data = await apiFetch('/domains/transfer', {
-        method: 'POST',
-        body: JSON.stringify({ domain: transferDomain, authCode: transferCode }),
-      })
-      toast.success('Transfer initiated!', {
-        description: `${data.data?.domain} — invoice ${data.data?.invoiceNumber || 'created'}`,
-      })
-      setTransferDomain('')
-      setTransferCode('')
-    } catch (err) {
-      toast.error('Transfer failed', { description: (err as Error).message })
-    } finally {
-      setTransferring(false)
-    }
-  }
 
   return (
     <div className="grid gap-4 md:grid-cols-2">
@@ -1488,35 +1978,66 @@ function RenewTransferSection({ domain, onUpdated }: { domain: Domain; onUpdated
               </SelectContent>
             </Select>
           </div>
-          <Button onClick={renew} disabled={renewing} className="w-full">
+          {quote && (
+            <div className="rounded-md bg-muted/50 p-3 space-y-1.5 text-sm">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Renewal / year</span>
+                <span className="font-mono">${quote.unitPrice.toFixed(2)}</span>
+              </div>
+              <Separator />
+              <div className="flex justify-between font-semibold">
+                <span>Total due now</span>
+                <span className="text-indigo-600">${quote.total.toFixed(2)}</span>
+              </div>
+            </div>
+          )}
+          <PaymentMethodPicker
+            methods={methods}
+            value={renewMethod}
+            onChange={setRenewMethod}
+            disabled={renewing}
+          />
+          <Button
+            onClick={renew}
+            disabled={renewing || methods.length === 0}
+            className="w-full"
+          >
             {renewing ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <RefreshCw className="h-4 w-4 mr-2" />}
-            Renew {years} Year{years > 1 ? 's' : ''}
+            {quote
+              ? `Continue to payment ($${quote.total.toFixed(2)})`
+              : `Renew ${years} year${years > 1 ? 's' : ''}`}
           </Button>
         </CardContent>
       </Card>
 
+      {/*
+        This panel is scoped to a domain the customer already owns, so the
+        useful transfer action here is the outbound one. Bringing a NEW domain
+        in is a purchase and lives in the Transfer Domain dialog on the main
+        Domains page, where registrant details and payment are collected.
+      */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-lg">
-            <Send className="h-5 w-5 text-indigo-500" /> Transfer Domain
+            <Send className="h-5 w-5 text-indigo-500" /> Transfer Away
           </CardTitle>
-          <CardDescription>Bring a domain from another registrar</CardDescription>
+          <CardDescription>Move {domain.name} to another registrar</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="space-y-2">
-            <Label>Domain to transfer</Label>
-            <Input placeholder="example.com" value={transferDomain} onChange={(e) => setTransferDomain(e.target.value)} className="font-mono" />
+        <CardContent className="space-y-3 text-sm">
+          <ol className="list-decimal list-inside space-y-1.5 text-muted-foreground">
+            <li>Unlock the domain on the <span className="font-medium text-foreground">Security</span> tab.</li>
+            <li>Disable WHOIS privacy there as well.</li>
+            <li>Copy the auth (EPP) code from the Security tab.</li>
+            <li>Start the transfer at your new registrar using that code.</li>
+          </ol>
+          <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-muted-foreground">
+            Registry rules block transfers within 60 days of registration or a
+            previous transfer. Any time left on the registration moves with the
+            domain.
           </div>
-          <div className="space-y-2">
-            <Label>EPP / Auth code</Label>
-            <Input placeholder="Authorization code from current registrar" value={transferCode} onChange={(e) => setTransferCode(e.target.value)} type="password" className="font-mono" />
-          </div>
-          <Button onClick={transfer} disabled={transferring} className="w-full" variant="outline">
-            {transferring ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
-            Initiate Transfer
-          </Button>
           <p className="text-xs text-muted-foreground">
-            Transfers typically take 5–7 days. Ensure the domain is unlocked at the current registrar.
+            Want to bring a different domain <span className="font-medium">in</span>? Use
+            Transfer Domain at the top of the Domains page.
           </p>
         </CardContent>
       </Card>
