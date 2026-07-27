@@ -2718,6 +2718,106 @@ interface SyncInfo {
 
 type StatusFilter = 'all' | 'active' | 'transferring' | 'cancelled' | 'deleted' | 'suspended' | 'expired'
 
+interface ReconcileFinding {
+  id: string
+  name: string
+  verdict: 'confirmed' | 'demoted' | 'subdomain'
+  reason: string
+}
+
+interface ReconcileReport {
+  dryRun: boolean
+  registrarDomainCount: number
+  checked: number
+  confirmed: number
+  reclassified: number
+  repaired: number
+  findings: ReconcileFinding[]
+}
+
+/**
+ * Compares what the panel claims about domain ownership against the registrar's
+ * actual inventory. Always previews first — it rewrites ownership on live
+ * customer records, so "apply" is a second, deliberate click.
+ */
+function ReconcileDialog({
+  report,
+  applying,
+  onApply,
+  onClose,
+}: {
+  report: ReconcileReport
+  applying: boolean
+  onApply: () => void
+  onClose: () => void
+}) {
+  const verdictStyle = (v: ReconcileFinding['verdict']) =>
+    v === 'confirmed'
+      ? 'bg-indigo-500/15 text-indigo-600 border-indigo-500/30'
+      : 'bg-amber-500/15 text-amber-600 border-amber-500/30'
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <ShieldCheck className="h-5 w-5 text-indigo-500" />
+            Ownership reconciliation
+          </DialogTitle>
+          <DialogDescription>
+            {report.dryRun
+              ? `Preview — nothing has been changed. Checked ${report.checked} domain${report.checked === 1 ? '' : 's'} against ${report.registrarDomainCount} in the registrar account.`
+              : `Applied. ${report.reclassified} reclassified as external, ${report.repaired} registrar id${report.repaired === 1 ? '' : 's'} restored.`}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-2 py-2">
+          {report.findings.map((f) => (
+            <div key={f.id} className="rounded-md border p-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-mono text-sm truncate">{f.name}</span>
+                <Badge variant="outline" className={`${verdictStyle(f.verdict)} text-[10px] flex-shrink-0`}>
+                  {f.verdict === 'confirmed'
+                    ? 'ours'
+                    : f.verdict === 'subdomain'
+                    ? 'subdomain'
+                    : 'external'}
+                </Badge>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">{f.reason}</p>
+            </div>
+          ))}
+          {report.findings.length === 0 && (
+            <p className="text-sm text-muted-foreground py-6 text-center">
+              Nothing claims registrar ownership. Nothing to reconcile.
+            </p>
+          )}
+        </div>
+
+        {report.dryRun && report.reclassified > 0 && (
+          <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-muted-foreground">
+            Applying clears the stored expiry and auto-renew on reclassified
+            domains — those values were defaults we never verified, and leaving
+            them drives false renewal reminders. Hosting and DNS are untouched.
+          </div>
+        )}
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={applying}>
+            {report.dryRun ? 'Cancel' : 'Close'}
+          </Button>
+          {report.dryRun && report.findings.length > 0 && (
+            <Button onClick={onApply} disabled={applying}>
+              {applying ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Apply changes
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function AdminTab({ onSelect }: { onSelect: (id: string) => void }) {
   const [domains, setDomains] = useState<AdminDomain[]>([])
   const [breakdown, setBreakdown] = useState<DomainBreakdown | null>(null)
@@ -2727,6 +2827,8 @@ function AdminTab({ onSelect }: { onSelect: (id: string) => void }) {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [suspendId, setSuspendId] = useState<string | null>(null)
   const [deleteId, setDeleteId] = useState<string | null>(null)
+  const [reconciling, setReconciling] = useState(false)
+  const [reconcileReport, setReconcileReport] = useState<ReconcileReport | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -2748,6 +2850,25 @@ function AdminTab({ onSelect }: { onSelect: (id: string) => void }) {
   }, [search, statusFilter])
 
   useEffect(() => { load() }, [load])
+
+  const runReconcile = async (dryRun: boolean) => {
+    setReconciling(true)
+    try {
+      const data = await apiFetch('/admin/domains/reconcile', {
+        method: 'POST',
+        body: JSON.stringify({ dryRun }),
+      })
+      setReconcileReport(data.data as ReconcileReport)
+      if (!dryRun) {
+        toast.success('Ownership reconciled', { description: data.message })
+        load()
+      }
+    } catch (err) {
+      toast.error('Reconcile failed', { description: (err as Error).message })
+    } finally {
+      setReconciling(false)
+    }
+  }
 
   const suspend = async () => {
     if (!suspendId) return
@@ -2814,6 +2935,50 @@ function AdminTab({ onSelect }: { onSelect: (id: string) => void }) {
   return (
     <div className="space-y-4">
       <IntegrationStatusCard />
+
+      {/*
+        Ownership reconciliation. Registrar-backed ownership is decided by
+        `externalId`, and rows predating that — or created by flows that never
+        set it — misreport in both directions: someone else's domain looking
+        like ours, and ours looking external. This compares against the live
+        registrar inventory and repairs both.
+      */}
+      <Card className="p-3">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="min-w-0">
+            <div className="text-sm font-medium flex items-center gap-1.5">
+              <ShieldCheck className="h-4 w-4 text-indigo-500" />
+              Verify domain ownership
+            </div>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Check every domain marked as registered with us against the
+              registrar&apos;s actual account. Previews before changing anything.
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => runReconcile(true)}
+            disabled={reconciling}
+          >
+            {reconciling ? (
+              <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
+            ) : (
+              <ShieldCheck className="h-4 w-4 mr-1.5" />
+            )}
+            Check ownership
+          </Button>
+        </div>
+      </Card>
+
+      {reconcileReport && (
+        <ReconcileDialog
+          report={reconcileReport}
+          applying={reconciling}
+          onApply={() => runReconcile(false)}
+          onClose={() => setReconcileReport(null)}
+        />
+      )}
 
       {/* Sync status banner — shows the result of the last Dynadot API call */}
       {sync && (
