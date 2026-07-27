@@ -96,12 +96,45 @@ export async function POST(request: Request) {
       const name = row.name.toLowerCase().trim()
 
       if (accountDomains.has(name)) {
+        // Backfill the registrar id when it's missing.
+        //
+        // Ownership is decided by `externalId`, so a genuinely-ours domain
+        // whose row predates that field — or was created by a flow that never
+        // set it — classifies as EXTERNAL and silently loses its registrar
+        // controls. Confirming it against the account and leaving the row
+        // unrepaired would keep the panel wrong in the opposite direction.
+        //
+        // Dynadot addresses domains by name; the name IS the registrar's
+        // identifier here, and we only reach this line when the account has
+        // confirmed it.
+        const needsBackfill = !row.externalId || !row.externalId.trim()
+        if (needsBackfill && !dryRun) {
+          await db.domain.update({
+            where: { id: row.id },
+            data: { externalId: name, provider: 'dynadot', registrar: 'dynadot' },
+          })
+          await db.domainLog
+            .create({
+              data: {
+                domainId: row.id,
+                userId: user.userId,
+                action: 'ownership.reconcile',
+                status: 'success',
+                message: 'Confirmed at the registrar; restored registrar id.',
+              },
+            })
+            .catch(() => {})
+        }
         findings.push({
           id: row.id,
           name: row.name,
           claimed: 'dynadot',
           verdict: 'confirmed',
-          reason: 'Present in the registrar account.',
+          reason: needsBackfill
+            ? dryRun
+              ? 'Present in the registrar account — registrar id is missing and would be restored.'
+              : 'Present in the registrar account — registrar id was missing and has been restored.'
+            : 'Present in the registrar account.',
         })
         continue
       }
@@ -168,6 +201,10 @@ export async function POST(request: Request) {
       })
     }
 
+    const repaired = findings.filter(
+      (f) => f.verdict === 'confirmed' && f.reason.includes('registrar id')
+    ).length
+
     return ok(
       {
         dryRun,
@@ -175,11 +212,14 @@ export async function POST(request: Request) {
         checked: findings.length,
         confirmed: findings.length - demoted.length,
         reclassified: demoted.length,
+        repaired,
         findings,
       },
       dryRun
         ? `Dry run: ${demoted.length} of ${findings.length} would be reclassified as external. Re-run with {"dryRun": false} to apply.`
-        : `Reclassified ${demoted.length} of ${findings.length} domains as external.`
+        : `Reclassified ${demoted.length} as external${
+            repaired > 0 ? `, restored the registrar id on ${repaired}` : ''
+          }.`
     )
   } catch (error) {
     console.error('[admin/domains/reconcile] error:', error)
