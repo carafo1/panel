@@ -60,6 +60,7 @@ model User {
   submittedTemplates  Template[]       @relation("SubmittedTemplates")
   templateRatings     TemplateRating[]
   templateReviews     TemplateReview[]
+  emailServices      EmailService[]
 }
 
 model Plan {
@@ -145,7 +146,20 @@ model Plan {
   cdnIntegration      Boolean  @default(true)
   freeMigrations      Int?     // free website migrations; null = unlimited
 
+  // ── Product type ───────────────────────────────────────────────────
+  // Plans are no longer all web hosting: "email" plans sell mailboxes on a
+  // domain with no website attached. Defaults to "hosting" so every existing
+  // row keeps its current meaning.
+  /// hosting | email | domain
+  planType String @default("hosting")
+
+  // ── Email-hosting resources (planType = "email") ───────────────────
+  emailMailboxes           Int?
+  emailStoragePerMailboxGB Int?
+  emailTotalStorageGB      Int?
+
   subscriptions Subscription[]
+  emailServices EmailService[]
 }
 
 model Subscription {
@@ -178,6 +192,7 @@ model Subscription {
   plan Plan  @relation(fields: [planId], references: [id])
   payments Payment[]
   invoices Invoice[]
+  emailServices EmailService[]
 }
 
 model Payment {
@@ -1560,4 +1575,47 @@ model MigrationStage {
   migration SiteMigration @relation(fields: [migrationId], references: [id], onDelete: Cascade)
 
   @@index([migrationId])
+}
+
+
+/// A standalone email-hosting service: one customer's mail domain, its plan
+/// limits, and the Mailcow state backing it. Deliberately separate from
+/// `Project` — email hosting is sold on its own and must not require a website.
+model EmailService {
+  id     String @id @default(cuid())
+  userId String
+  planId String
+  /// The subscription that pays for this service (null for admin-granted/free).
+  subscriptionId String?
+
+  /// The mail domain. One service per domain, globally.
+  domain String @unique
+
+  /// active | suspended | pending | cancelled
+  status String @default("pending")
+
+  // Copied from the plan at purchase time, plus add-ons, so an upgrade or a
+  // grandfathered allowance stays with the service.
+  mailboxLimit        Int @default(1)
+  storagePerMailboxGB Int @default(1)
+  totalStorageGB      Int @default(1)
+  extraMailboxes      Int @default(0)
+  extraStorageGB      Int @default(0)
+
+  // ── Mailcow provisioning state ─────────────────────────────────────
+  mailcowDomainCreated Boolean   @default(false)
+  dkimGenerated        Boolean   @default(false)
+  provisionedAt        DateTime?
+  lastError            String?
+
+  suspendedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan         Plan          @relation(fields: [planId], references: [id])
+  subscription Subscription? @relation(fields: [subscriptionId], references: [id])
+
+  @@index([userId])
+  @@index([status])
 }

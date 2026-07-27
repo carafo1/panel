@@ -521,7 +521,10 @@ export async function deleteMailbox(
   try {
     const env = await mailcowFetch<MailcowEnvelope>('/delete/mailbox', {
       method: 'POST',
-      body: JSON.stringify({ items: [address] }),
+      // Mailcow's delete endpoints take a BARE ARRAY of identifiers. Sending
+      // { items: [...] } comes back "access_denied" while the HTTP call still
+      // looks fine, so the delete silently never happened.
+      body: JSON.stringify([address]),
     })
     const result = envelopeResult(env)
     return { success: result.success, error: result.error }
@@ -550,7 +553,8 @@ export async function removeDomain(
   try {
     const env = await mailcowFetch<MailcowEnvelope>('/delete/domain', {
       method: 'POST',
-      body: JSON.stringify({ items: [domain] }),
+      // Bare array, not { items: [...] } — see deleteMailbox above.
+      body: JSON.stringify([domain]),
     })
     const result = envelopeResult(env)
     return { success: result.success, error: result.error }
