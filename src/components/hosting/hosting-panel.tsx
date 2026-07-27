@@ -97,6 +97,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import {
+import { EmailManagement } from '@/components/hosting/email-management'
   Select,
   SelectContent,
   SelectItem,
@@ -2779,7 +2780,12 @@ function ProjectDetailView({
           Each is wrapped in a <section> with an id so the sticky sub-tab bar
           can scroll the user straight to it. */}
       <section id="databases" className="scroll-mt-32"><DatabaseTab projectId={project.id} /></section>
-      <section id="email" className="scroll-mt-32"><EmailTab projectId={project.id} /></section>
+      <section id="email" className="scroll-mt-32 space-y-4">
+        <EmailTab projectId={project.id} />
+        {/* Native management over Mailcow: aliases, forwarding, catch-all,
+            spam policy, quarantine and activity logs. */}
+        <EmailManagement projectId={project.id} />
+      </section>
       <section id="backups" className="scroll-mt-32"><BackupsTab projectId={project.id} /></section>
       {/* Importing into an existing website replaces its files and database,
           so it lives beside Backups rather than in the creation flow — the
