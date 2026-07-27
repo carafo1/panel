@@ -26,12 +26,16 @@ export async function GET(request: Request) {
   if (!payload) {
     // No valid session: send the customer back to the panel rather than
     // showing pgAdmin's own login form (which they have no credentials for).
-    const panel = process.env.APP_URL || 'https://panel.apsamo.com'
+    //
+    // Target the panel ROOT, not a sub-path: the panel is a single-page app
+    // that only serves "/", so a deeper URL (e.g. /dashboard) returns a 404
+    // and the customer lands on an error page instead of their account.
+    const panel = (process.env.APP_URL || 'https://panel.apsamo.com').replace(/\/+$/, '')
     return NextResponse.json(
       { error: 'pgAdmin session expired' },
       {
         status: 302,
-        headers: { Location: `${panel}/dashboard`, 'Cache-Control': 'no-store' },
+        headers: { Location: `${panel}/`, 'Cache-Control': 'no-store' },
       }
     )
   }
