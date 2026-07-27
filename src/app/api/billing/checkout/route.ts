@@ -53,14 +53,14 @@ export async function POST(request: Request) {
 
     if (!planId || !type) {
       return NextResponse.json(
-        { error: 'planId and type (hosting/domain/both) are required' },
+        { error: 'planId and type (hosting/email/domain/both) are required' },
         { status: 400 }
       )
     }
 
-    if (!['hosting', 'domain', 'both'].includes(type)) {
+    if (!['hosting', 'email', 'domain', 'both'].includes(type)) {
       return NextResponse.json(
-        { error: 'Type must be hosting, domain, or both' },
+        { error: 'Type must be hosting, email, domain, or both' },
         { status: 400 }
       )
     }
@@ -75,6 +75,62 @@ export async function POST(request: Request) {
         { error: 'Plan not found' },
         { status: 404 }
       )
+    }
+
+    // Standalone email hosting: the customer already owns the domain, so no
+    // Project and no Domain registration is created — only the mail service,
+    // which provisionForPayment raises once the money is confirmed. The domain
+    // is therefore required, and the plan must actually be an email plan (a
+    // hosting plan carries no mailbox allowance, so it would provision a
+    // service with nothing in it).
+    const emailDomain =
+      typeof domainName === 'string' ? domainName.toLowerCase().trim() : ''
+    if (type === 'email') {
+      if (!emailDomain) {
+        return NextResponse.json(
+          { error: 'Enter the domain you want email on' },
+          { status: 400 }
+        )
+      }
+      if (!/^([a-z0-9-]+\.)+[a-z]{2,}$/i.test(emailDomain)) {
+        return NextResponse.json(
+          { error: 'That does not look like a valid domain name' },
+          { status: 400 }
+        )
+      }
+      if (plan.planType !== 'email') {
+        return NextResponse.json(
+          { error: 'That plan is not an email hosting plan' },
+          { status: 400 }
+        )
+      }
+
+      // Refuse at checkout rather than taking the money and failing to
+      // provision: the same two rules provisionEmailService enforces.
+      const takenByService = await db.emailService.findUnique({
+        where: { domain: emailDomain },
+        select: { userId: true, status: true },
+      })
+      if (
+        takenByService &&
+        takenByService.userId !== decoded.userId &&
+        takenByService.status !== 'cancelled'
+      ) {
+        return NextResponse.json(
+          { error: 'Email hosting for this domain already exists' },
+          { status: 409 }
+        )
+      }
+      const ownedByAnother = await db.domain.findFirst({
+        where: { name: emailDomain, userId: { not: decoded.userId } },
+        select: { id: true },
+      })
+      if (ownedByAnother) {
+        return NextResponse.json(
+          { error: 'This domain is already registered to another account' },
+          { status: 409 }
+        )
+      }
     }
 
     // Get the user (for email)

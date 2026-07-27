@@ -14,6 +14,7 @@ import SettingsPanel from '@/components/settings/settings-panel'
 import TeamsPanel from '@/components/teams/teams-panel'
 import AnalyticsPanel from '@/components/analytics/analytics-panel'
 import OverviewPanel from '@/components/dashboard/overview-panel'
+import EmailHostingPanel from '@/components/email-hosting/email-hosting-panel'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -34,6 +35,7 @@ import {
   Github,
   Sparkles,
   Activity,
+  Mail,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { NotificationCenter } from '@/components/notifications/notification-center'
@@ -57,6 +59,7 @@ const NAV_ITEMS: { id: DashboardTab; label: string; icon: React.ElementType; adm
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
   { id: 'provisioning', label: 'Provisioning', icon: Zap, adminOnly: true },
   { id: 'hosting', label: 'Hosting', icon: Server },
+  { id: 'email', label: 'Email Hosting', icon: Mail },
   { id: 'domains', label: 'Domains', icon: Globe },
   { id: 'deployments', label: 'Deployments', icon: Rocket },
   { id: 'github', label: 'GitHub', icon: Github },
@@ -132,6 +135,8 @@ function Dashboard() {
               )
             case 'hosting':
               return <HostingPanel />
+            case 'email':
+              return <EmailHostingPanel />
             case 'domains':
               return <DomainsPanel />
             case 'deployments':
@@ -541,8 +546,8 @@ export default function HomeClient({
             const signedIn = useAuthStore.getState().isAuthenticated
             if (isPanelHostView && !signedIn) {
               // The panel host (panel.<brand>) has no marketing content behind
-              // the login, so closing must take the user to the brand site
-              // rather than leave them on a blank screen.
+              // the login, so dismissing it must take the user to the brand
+              // site rather than leave them on a blank screen.
               const host = window.location.hostname
               const marketingHost = host.replace(/^(panel|www|app|dashboard)\./i, '')
               if (marketingHost && marketingHost !== host) {
