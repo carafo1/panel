@@ -858,19 +858,25 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
+                        {/* Database Studio speaks MySQL/MariaDB and PostgreSQL;
+                            only SQLite is unsupported. */}
+                        {['mysql', 'mariadb', 'postgres', 'postgresql'].includes(
+                          (db.type || '').toLowerCase()
+                        ) && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className={`h-7 text-xs ${primaryText}`}
+                            onClick={() =>
+                              window.open(`/db-studio/${projectId}/${db.id}`, '_blank')
+                            }
+                          >
+                            <DatabaseIcon className="size-3 mr-1" />
+                            Studio
+                          </Button>
+                        )}
                         {['mysql', 'mariadb'].includes((db.type || '').toLowerCase()) && (
                           <>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className={`h-7 text-xs ${primaryText}`}
-                              onClick={() =>
-                                window.open(`/db-studio/${projectId}/${db.id}`, '_blank')
-                              }
-                            >
-                              <DatabaseIcon className="size-3 mr-1" />
-                              Studio
-                            </Button>
                             <Button
                               variant="ghost"
                               size="sm"
