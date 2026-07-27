@@ -67,6 +67,10 @@ interface Plan {
   slug: string
   description: string
   price: number
+  /** Discounted 12-month price. Null when the plan is monthly-only. */
+  annualPrice?: number | null
+  tagline?: string | null
+  badge?: string | null
   ram: string
   cpu: string
   storage: string
@@ -75,6 +79,8 @@ interface Plan {
   ssl: boolean
   customDomain: boolean
   popular: boolean
+  /** Card bullets, authored in Admin → Plans. */
+  highlights?: string[]
 }
 
 interface Subscription {
@@ -172,38 +178,30 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json()
 }
 
-// ── Static plan definitions (fallback when API has different names) ────
-const PLAN_DEFINITIONS: {
-  slug: string
-  name: string
-  price: number
-  icon: React.ElementType
-  features: string[]
-  highlight?: boolean
-}[] = [
-  {
-    slug: 'starter',
-    name: 'Starter',
-    price: 9,
-    icon: Zap,
-    features: ['1 GB RAM', '1 vCPU', '10 GB Storage', '100 GB Bandwidth', '1 Project', 'Free SSL'],
-  },
-  {
-    slug: 'pro',
-    name: 'Pro',
-    price: 29,
-    icon: Crown,
-    features: ['4 GB RAM', '2 vCPU', '50 GB Storage', '500 GB Bandwidth', '5 Projects', 'Free SSL', 'Custom Domains'],
-    highlight: true,
-  },
-  {
-    slug: 'business',
-    name: 'Business',
-    price: 79,
-    icon: Building2,
-    features: ['16 GB RAM', '4 vCPU', '200 GB Storage', 'Unlimited Bandwidth', 'Unlimited Projects', 'Free SSL', 'Custom Domains', 'Priority Support'],
-  },
-]
+/**
+ * Presentation only — icon and emphasis for a plan card.
+ *
+ * There used to be a hardcoded PLAN_DEFINITIONS catalogue here (Starter $9,
+ * Pro $29, Business $79) that the tab rendered and then tried to match against
+ * the real plans by slug. Once the catalogue was renamed to
+ * starter/professional/enterprise, two of the three cards matched nothing:
+ * they advertised invented prices and, on click, fabricated a Plan with a fake
+ * id like "plan-pro" that checkout rejected as not found.
+ *
+ * Cards are now rendered straight from /api/billing/plans. This only decides
+ * which icon to draw.
+ */
+const PLAN_ICONS: React.ElementType[] = [Zap, Crown, Building2]
+
+function planIcon(index: number): React.ElementType {
+  return PLAN_ICONS[index] ?? Building2
+}
+
+/** Card bullets: authored in Admin → Plans, with a spec-derived fallback. */
+function planFeatures(plan: Plan): string[] {
+  if (plan.highlights && plan.highlights.length > 0) return plan.highlights
+  return [plan.ram, plan.cpu, plan.storage, plan.bandwidth].filter(Boolean)
+}
 
 const FRAMEWORKS = [
   { value: 'nextjs', label: 'Next.js' },
@@ -268,13 +266,13 @@ function CheckoutDialog({
   open,
   onOpenChange,
   plan,
-  planDefinition,
+  planIndex,
   onSuccess,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   plan: Plan
-  planDefinition: typeof PLAN_DEFINITIONS[number]
+  planIndex: number
   onSuccess: (result: CheckoutResult) => void
 }) {
   const [purchaseType, setPurchaseType] = useState<PurchaseType>('hosting')
@@ -327,10 +325,55 @@ function CheckoutDialog({
   const showDomain = purchaseType === 'domain' || purchaseType === 'both'
   const showProject = purchaseType === 'hosting' || purchaseType === 'both'
 
-  const calculateTotal = () => {
-    if (purchaseType === 'domain') return 12.99
-    if (purchaseType === 'both') return plan.price + 12.99
-    return plan.price
+  /**
+   * Real registration price for the typed domain.
+   *
+   * This dialog used to display a flat $12.99 for every domain while checkout
+   * charged the per-TLD price from the catalogue — so a customer buying a .ai
+   * was shown $12.99 and billed $95.60. Quote the same source checkout bills
+   * from, and show nothing rather than a guess until we have it.
+   */
+  const [domainQuote, setDomainQuote] = useState<number | null>(null)
+  const [quoting, setQuoting] = useState(false)
+
+  useEffect(() => {
+    const candidate = domainName.trim().toLowerCase()
+    if (!showDomain || !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(candidate)) {
+      setDomainQuote(null)
+      return
+    }
+    let cancelled = false
+    setQuoting(true)
+    // Debounced: the customer is still typing, and each call prices a TLD.
+    const timer = setTimeout(() => {
+      apiFetch<{ quote?: { total: number } }>(
+        `/domains/checkout?domain=${encodeURIComponent(candidate)}&kind=register&years=1`
+      )
+        .then((data) => {
+          if (!cancelled) setDomainQuote(data.quote?.total ?? null)
+        })
+        .catch(() => {
+          if (!cancelled) setDomainQuote(null)
+        })
+        .finally(() => {
+          if (!cancelled) setQuoting(false)
+        })
+    }, 500)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [domainName, showDomain])
+
+  /**
+   * Total for the current selection, or null while the domain price is unknown.
+   * Callers must render "—" for null rather than substituting a placeholder
+   * number — that substitution is what produced the mismatch above.
+   */
+  const calculateTotal = (): number | null => {
+    if (purchaseType === 'hosting') return plan.price
+    if (domainQuote === null) return null
+    return purchaseType === 'domain' ? domainQuote : plan.price + domainQuote
   }
 
   const handlePurchase = async () => {
@@ -413,7 +456,7 @@ function CheckoutDialog({
     onOpenChange(false)
   }
 
-  const Icon = planDefinition.icon
+  const Icon = planIcon(planIndex)
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -455,8 +498,11 @@ function CheckoutDialog({
                     <div>
                       <p className="font-medium text-sm">Amount Due</p>
                       <p className="text-sm text-amber-700 mt-0.5">
-                        ${calculateTotal().toFixed(2)}{' '}
-                        {purchaseType !== 'domain' ? '/mo' : '/yr'}
+                        {calculateTotal() === null
+                          ? '—'
+                          : `$${calculateTotal()!.toFixed(2)}`}{' '}
+                        {calculateTotal() !== null &&
+                          (purchaseType !== 'domain' ? '/mo' : '/yr')}
                       </p>
                     </div>
                   </div>
@@ -623,7 +669,7 @@ function CheckoutDialog({
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Icon className="size-5 text-indigo-600" />
-                {planDefinition.name} Plan Checkout
+                {plan.name} Plan Checkout
               </DialogTitle>
               <DialogDescription>
                 Configure your purchase and complete checkout.
@@ -633,11 +679,11 @@ function CheckoutDialog({
             {/* Plan summary */}
             <div className="rounded-lg border bg-muted/30 p-3 space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-sm font-medium">{planDefinition.name} Plan</span>
-                <span className="text-sm font-bold">${planDefinition.price}/mo</span>
+                <span className="text-sm font-medium">{plan.name} Plan</span>
+                <span className="text-sm font-bold">${plan.price.toFixed(2)}/mo</span>
               </div>
               <div className="flex flex-wrap gap-1">
-                {planDefinition.features.slice(0, 4).map((f) => (
+                {planFeatures(plan).slice(0, 4).map((f) => (
                   <span key={f} className="text-xs bg-background border rounded px-1.5 py-0.5">
                     {f}
                   </span>
@@ -673,7 +719,7 @@ function CheckoutDialog({
                   <RadioGroupItem value="domain" id="type-domain" className="sr-only" />
                   <Globe className="size-5 text-indigo-600" />
                   <span className="text-xs font-medium text-center">Domain Only</span>
-                  <span className="text-xs text-muted-foreground">$12.99/yr</span>
+                  <span className="text-xs text-muted-foreground">price by extension</span>
                 </Label>
                 <Label
                   htmlFor="type-both"
@@ -684,7 +730,9 @@ function CheckoutDialog({
                   <RadioGroupItem value="both" id="type-both" className="sr-only" />
                   <Package className="size-5 text-indigo-600" />
                   <span className="text-xs font-medium text-center">Hosting + Domain</span>
-                  <span className="text-xs text-muted-foreground">${(plan.price + 12.99).toFixed(2)}</span>
+                  <span className="text-xs text-muted-foreground">
+                    ${plan.price.toFixed(2)} + domain
+                  </span>
                 </Label>
               </RadioGroup>
             </div>
@@ -814,8 +862,13 @@ function CheckoutDialog({
             <div className="flex items-center justify-between rounded-lg border border-indigo-200 bg-indigo-50/50 p-3">
               <span className="text-sm font-medium">Total</span>
               <span className="text-lg font-bold text-indigo-700">
-                ${calculateTotal().toFixed(2)}
-                {purchaseType !== 'domain' ? '/mo' : '/yr'}
+                {quoting
+                  ? 'pricing…'
+                  : calculateTotal() === null
+                  ? 'enter a domain'
+                  : `$${calculateTotal()!.toFixed(2)}${
+                      purchaseType !== 'domain' ? '/mo' : '/yr'
+                    }`}
               </span>
             </div>
 
@@ -867,7 +920,7 @@ export function BillingPanel() {
   // Checkout dialog state
   const [checkoutOpen, setCheckoutOpen] = useState(false)
   const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null)
-  const [selectedPlanDef, setSelectedPlanDef] = useState<typeof PLAN_DEFINITIONS[number] | null>(null)
+  const [selectedPlanIndex, setSelectedPlanIndex] = useState(0)
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -904,16 +957,16 @@ export function BillingPanel() {
     }
   }, [fetchData])
 
-  const handleSelectPlan = (plan: Plan, planDef: typeof PLAN_DEFINITIONS[number]) => {
+  const handleSelectPlan = (plan: Plan, index: number) => {
     setSelectedPlan(plan)
-    setSelectedPlanDef(planDef)
+    setSelectedPlanIndex(index)
     setCheckoutOpen(true)
   }
 
   const handleCheckoutSuccess = (_result: CheckoutResult) => {
     setCheckoutOpen(false)
     setSelectedPlan(null)
-    setSelectedPlanDef(null)
+    setSelectedPlanIndex(0)
     fetchData() // Refresh all data
   }
 
@@ -1124,26 +1177,26 @@ export function BillingPanel() {
       <div id="plan-comparison">
         <h2 className="text-xl font-semibold mb-4">Plan Comparison</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {PLAN_DEFINITIONS.map((def) => {
-            const matchedPlan = plans.find(
-              (p) => p.slug === def.slug || p.name.toLowerCase() === def.slug
-            )
-            const isCurrent = currentPlanSlug === def.slug
-            const Icon = def.icon
+          {plans.map((plan, index) => {
+            const isCurrent = currentPlanSlug === plan.slug
+            const Icon = planIcon(index)
+            const featured = plan.popular || Boolean(plan.badge)
+            const yearlySaving =
+              plan.annualPrice && plan.price * 12 > plan.annualPrice
+                ? Math.round(((plan.price * 12 - plan.annualPrice) / (plan.price * 12)) * 100)
+                : null
 
             return (
               <Card
-                key={def.slug}
+                key={plan.id}
                 className={`relative flex flex-col ${
-                  def.highlight
-                    ? 'border-2 border-indigo-500 shadow-indigo-100 shadow-lg'
-                    : ''
+                  featured ? 'border-2 border-indigo-500 shadow-indigo-100 shadow-lg' : ''
                 }`}
               >
-                {def.highlight && (
-                  <div className="absolute -top-3 left-1/2 -translate-x-1/2">
+                {featured && (
+                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap">
                     <Badge className="bg-indigo-600 text-white border-indigo-600 px-3 py-1 text-xs">
-                      POPULAR
+                      {plan.badge || 'POPULAR'}
                     </Badge>
                   </div>
                 )}
@@ -1151,24 +1204,32 @@ export function BillingPanel() {
                   <div className="flex items-center gap-2">
                     <div
                       className={`size-9 rounded-lg flex items-center justify-center ${
-                        def.highlight ? 'bg-indigo-100 text-indigo-600' : 'bg-muted text-muted-foreground'
+                        featured ? 'bg-indigo-100 text-indigo-600' : 'bg-muted text-muted-foreground'
                       }`}
                     >
                       <Icon className="size-5" />
                     </div>
                     <div>
-                      <CardTitle className="text-lg">{def.name}</CardTitle>
-                      <CardDescription>{matchedPlan?.description || `${def.name} plan`}</CardDescription>
+                      <CardTitle className="text-lg">{plan.name}</CardTitle>
+                      <CardDescription>{plan.tagline || plan.description}</CardDescription>
                     </div>
                   </div>
                 </CardHeader>
                 <CardContent className="flex-1 space-y-4">
-                  <div className="flex items-baseline gap-1">
-                    <span className="text-3xl font-bold">${def.price}</span>
-                    <span className="text-sm text-muted-foreground">/month</span>
+                  <div>
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-3xl font-bold">${plan.price.toFixed(2)}</span>
+                      <span className="text-sm text-muted-foreground">/month</span>
+                    </div>
+                    {plan.annualPrice ? (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        or ${plan.annualPrice.toFixed(2)}/year
+                        {yearlySaving ? ` · save ${yearlySaving}%` : ''}
+                      </p>
+                    ) : null}
                   </div>
                   <ul className="space-y-2">
-                    {def.features.map((f) => (
+                    {planFeatures(plan).map((f) => (
                       <li key={f} className="flex items-center gap-2 text-sm">
                         <Check className="size-4 text-indigo-500 shrink-0" />
                         {f}
@@ -1184,37 +1245,13 @@ export function BillingPanel() {
                   ) : (
                     <Button
                       className={`w-full ${
-                        def.highlight
-                          ? 'bg-indigo-600 hover:bg-indigo-700 text-white'
-                          : ''
+                        featured ? 'bg-indigo-600 hover:bg-indigo-700 text-white' : ''
                       }`}
-                      variant={def.highlight ? 'default' : 'outline'}
+                      variant={featured ? 'default' : 'outline'}
                       disabled={checkoutLoading !== null}
-                      onClick={() => {
-                        if (matchedPlan) {
-                          handleSelectPlan(matchedPlan, def)
-                        } else {
-                          // Fallback: create a plan object from the definition
-                          const fallbackPlan: Plan = {
-                            id: `plan-${def.slug}`,
-                            name: def.name,
-                            slug: def.slug,
-                            description: `${def.name} plan`,
-                            price: def.price,
-                            ram: def.features[0] || '1GB',
-                            cpu: def.features[1] || '1 vCPU',
-                            storage: def.features[2] || '10GB',
-                            bandwidth: def.features[3] || '100GB',
-                            projects: 1,
-                            ssl: true,
-                            customDomain: def.slug !== 'starter',
-                            popular: def.slug === 'pro',
-                          }
-                          handleSelectPlan(fallbackPlan, def)
-                        }
-                      }}
+                      onClick={() => handleSelectPlan(plan, index)}
                     >
-                      {checkoutLoading === matchedPlan?.id ? (
+                      {checkoutLoading === plan.id ? (
                         <span className="flex items-center gap-2">
                           <span className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
                           Processing…
@@ -1298,12 +1335,12 @@ export function BillingPanel() {
       </Card>
 
       {/* ── Checkout Dialog ───────────────────────────────────────── */}
-      {selectedPlan && selectedPlanDef && (
+      {selectedPlan && (
         <CheckoutDialog
           open={checkoutOpen}
           onOpenChange={setCheckoutOpen}
           plan={selectedPlan}
-          planDefinition={selectedPlanDef}
+          planIndex={selectedPlanIndex}
           onSuccess={handleCheckoutSuccess}
         />
       )}
