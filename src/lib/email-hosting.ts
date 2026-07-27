@@ -95,6 +95,53 @@ export const EMAIL_ADDONS = {
   migration: { label: 'Email migration service', priceFrom: 10, priceTo: 25, oneTime: true },
 } as const
 
+/** Storage add-ons are sold in blocks of this many GB. */
+export const STORAGE_BLOCK_GB = 10
+
+/**
+ * What a service's purchased add-ons cost per month.
+ *
+ * Add-ons are recurring, so this has to be reflected in renewal invoices too —
+ * billing only `plan.price` on renewal would charge for them once and then
+ * give them away for the life of the subscription.
+ */
+export function addonMonthlyCost(service: {
+  extraMailboxes: number
+  extraStorageGB: number
+}): number {
+  const mailboxes = (service.extraMailboxes || 0) * EMAIL_ADDONS.extraMailbox.price
+  const blocks = Math.ceil((service.extraStorageGB || 0) / STORAGE_BLOCK_GB)
+  const storage = blocks * EMAIL_ADDONS.extraStorage10GB.price
+  return Math.round((mailboxes + storage) * 100) / 100
+}
+
+/** Add-on cost across every email service paid for by one subscription. */
+export async function emailAddonCostForSubscription(
+  subscriptionId: string
+): Promise<{ total: number; lines: string[] }> {
+  const services = await db.emailService.findMany({
+    where: { subscriptionId, status: { in: ['active', 'suspended'] } },
+    select: {
+      domain: true,
+      extraMailboxes: true,
+      extraStorageGB: true,
+    },
+  })
+
+  let total = 0
+  const lines: string[] = []
+  for (const s of services) {
+    const cost = addonMonthlyCost(s)
+    if (cost <= 0) continue
+    total += cost
+    const parts: string[] = []
+    if (s.extraMailboxes > 0) parts.push(`${s.extraMailboxes} extra mailbox(es)`)
+    if (s.extraStorageGB > 0) parts.push(`${s.extraStorageGB} GB extra storage`)
+    lines.push(`${s.domain}: ${parts.join(', ')}`)
+  }
+  return { total: Math.round(total * 100) / 100, lines }
+}
+
 /**
  * Create or refresh the email plans. Existing rows keep their price and
  * marketing copy — an admin may have tuned them — while the resource limits

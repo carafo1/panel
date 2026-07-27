@@ -182,6 +182,23 @@ interface VerificationRecord {
   value: string
 }
 
+interface AddonInfo {
+  pricing: {
+    extraMailbox: { label: string; price: number; unit: string }
+    extraStorage: { label: string; price: number; blockGB: number }
+  }
+  current: { extraMailboxes: number; extraStorageGB: number; monthlyCost: number }
+}
+
+interface AddonOrder {
+  amount: number
+  addMailboxes: number
+  addStorageGB: number
+  message?: string
+  redirectUrl?: string | null
+  status?: string
+}
+
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
 function authHeaders(): HeadersInit {
@@ -663,6 +680,12 @@ function ServiceDetailView({
   const [upgradePlanId, setUpgradePlanId] = useState('')
   const [upgradeResult, setUpgradeResult] = useState<CheckoutResult | null>(null)
 
+  const [addonOpen, setAddonOpen] = useState(false)
+  const [addonInfo, setAddonInfo] = useState<AddonInfo | null>(null)
+  const [addBoxes, setAddBoxes] = useState(0)
+  const [addBlocks, setAddBlocks] = useState(0)
+  const [addonResult, setAddonResult] = useState<AddonOrder | null>(null)
+
   const load = useCallback(async () => {
     setRefreshing(true)
     try {
@@ -689,6 +712,44 @@ function ServiceDetailView({
       .then((d) => setUpgradePlans(d.plans || []))
       .catch(() => setUpgradePlans([]))
   }, [upgradeOpen, upgradePlans.length])
+
+  useEffect(() => {
+    if (!addonOpen) return
+    api<AddonInfo>(`/api/email-hosting/${serviceId}/addons`)
+      .then(setAddonInfo)
+      .catch(() => setAddonInfo(null))
+  }, [addonOpen, serviceId])
+
+  const addonPrice = addonInfo
+    ? Math.round(
+        (addBoxes * addonInfo.pricing.extraMailbox.price +
+          addBlocks * addonInfo.pricing.extraStorage.price) *
+          100
+      ) / 100
+    : 0
+
+  const orderAddons = async () => {
+    setBusy(true)
+    try {
+      const res = await api<AddonOrder>(`/api/email-hosting/${serviceId}/addons`, {
+        method: 'POST',
+        body: JSON.stringify({
+          extraMailboxes: addBoxes,
+          extraStorageBlocks: addBlocks,
+          method: 'manual',
+        }),
+      })
+      if (res.status === 'redirect_required' && res.redirectUrl) {
+        window.location.href = res.redirectUrl
+        return
+      }
+      setAddonResult(res)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not order add-ons')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const usage = detail?.usage
   const atLimit = usage?.atMailboxLimit ?? false
@@ -914,18 +975,35 @@ function ServiceDetailView({
           <div className="flex items-center justify-between gap-3">
             <p className="text-sm text-muted-foreground">
               {atLimit
-                ? 'Every mailbox in your plan is in use. Upgrade to add more.'
+                ? 'Every mailbox in your plan is in use — buy an extra one or change plan.'
                 : `You can create ${detail.limits.mailboxLimit - (usage?.mailboxes ?? 0)} more mailbox(es).`}
             </p>
-            <Button
-              size="sm"
-              className="gap-1"
-              disabled={atLimit || detail.service.status !== 'active'}
-              onClick={() => setCreateOpen(true)}
-            >
-              <Plus className="h-4 w-4" />
-              New mailbox
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1"
+                disabled={detail.service.status !== 'active'}
+                onClick={() => {
+                  setAddonOpen(true)
+                  setAddonResult(null)
+                  setAddBoxes(atLimit ? 1 : 0)
+                  setAddBlocks(0)
+                }}
+              >
+                <Plus className="h-4 w-4" />
+                Buy add-ons
+              </Button>
+              <Button
+                size="sm"
+                className="gap-1"
+                disabled={atLimit || detail.service.status !== 'active'}
+                onClick={() => setCreateOpen(true)}
+              >
+                <Plus className="h-4 w-4" />
+                New mailbox
+              </Button>
+            </div>
           </div>
 
           <Card>
@@ -1152,6 +1230,121 @@ function ServiceDetailView({
               Update password
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Add-ons dialog ── */}
+      <Dialog
+        open={addonOpen}
+        onOpenChange={(o) => {
+          setAddonOpen(o)
+          if (!o) setAddonResult(null)
+        }}
+      >
+        <DialogContent>
+          {addonResult ? (
+            <>
+              <DialogHeader>
+                <DialogTitle>Add-ons ordered</DialogTitle>
+                <DialogDescription>{addonResult.message}</DialogDescription>
+              </DialogHeader>
+              <div className="rounded-md border p-3 text-sm space-y-1">
+                {addonResult.addMailboxes > 0 && (
+                  <p>{addonResult.addMailboxes} extra mailbox(es)</p>
+                )}
+                {addonResult.addStorageGB > 0 && (
+                  <p>{addonResult.addStorageGB} GB extra storage</p>
+                )}
+                <p className="font-medium pt-1">
+                  ${addonResult.amount.toFixed(2)} per month
+                </p>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Pay using the reference on your invoice in Billing. The extra
+                allowance is applied automatically once it clears.
+              </p>
+              <DialogFooter>
+                <Button
+                  onClick={() => {
+                    setAddonOpen(false)
+                    setAddonResult(null)
+                  }}
+                >
+                  Done
+                </Button>
+              </DialogFooter>
+            </>
+          ) : (
+            <>
+              <DialogHeader>
+                <DialogTitle>Buy add-ons</DialogTitle>
+                <DialogDescription>
+                  Extra capacity on top of your plan, billed monthly alongside it.
+                </DialogDescription>
+              </DialogHeader>
+              {!addonInfo ? (
+                <Skeleton className="h-32 w-full" />
+              ) : (
+                <div className="space-y-4">
+                  {(addonInfo.current.extraMailboxes > 0 ||
+                    addonInfo.current.extraStorageGB > 0) && (
+                    <p className="text-sm text-muted-foreground">
+                      You already have {addonInfo.current.extraMailboxes} extra
+                      mailbox(es) and {addonInfo.current.extraStorageGB} GB extra
+                      storage (${addonInfo.current.monthlyCost.toFixed(2)}/mo).
+                    </p>
+                  )}
+                  <div className="space-y-2">
+                    <Label htmlFor="ao-boxes">
+                      Extra mailboxes — ${addonInfo.pricing.extraMailbox.price.toFixed(2)} each
+                      per month
+                    </Label>
+                    <Input
+                      id="ao-boxes"
+                      type="number"
+                      min={0}
+                      value={addBoxes}
+                      onChange={(e) => setAddBoxes(Math.max(0, Number(e.target.value) || 0))}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="ao-storage">
+                      Extra storage — ${addonInfo.pricing.extraStorage.price.toFixed(2)} per{' '}
+                      {addonInfo.pricing.extraStorage.blockGB} GB per month
+                    </Label>
+                    <Input
+                      id="ao-storage"
+                      type="number"
+                      min={0}
+                      value={addBlocks}
+                      onChange={(e) => setAddBlocks(Math.max(0, Number(e.target.value) || 0))}
+                    />
+                    {addBlocks > 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        = {addBlocks * addonInfo.pricing.extraStorage.blockGB} GB
+                      </p>
+                    )}
+                  </div>
+                  <div className="rounded-md border p-3 flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">Added to your bill</span>
+                    <span className="font-semibold">${addonPrice.toFixed(2)}/mo</span>
+                  </div>
+                </div>
+              )}
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setAddonOpen(false)} disabled={busy}>
+                  Cancel
+                </Button>
+                <Button
+                  onClick={() => void orderAddons()}
+                  disabled={busy || addonPrice <= 0}
+                >
+                  {busy && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+                  Order
+                </Button>
+              </DialogFooter>
+            </>
+          )}
         </DialogContent>
       </Dialog>
 

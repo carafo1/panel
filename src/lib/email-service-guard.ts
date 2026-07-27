@@ -28,6 +28,8 @@ export interface ResolvedEmailService {
     id: string
     userId: string
     planId: string
+    /** The subscription paying for this service; null for admin-granted. */
+    subscriptionId: string | null
     domain: string
     status: string
     mailboxLimit: number
