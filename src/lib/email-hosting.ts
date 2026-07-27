@@ -12,7 +12,13 @@
  * (domain/mailbox lifecycle) and `mailcow-manage.ts` (aliases, spam, logs).
  */
 import { db } from '@/lib/db'
-import { addDomain, generateDkim, removeDomain } from '@/lib/mailcow'
+import {
+  addDomain,
+  deleteMailbox,
+  editDomain,
+  generateDkim,
+  removeDomain,
+} from '@/lib/mailcow'
 import { listMailboxes } from '@/lib/mailcow'
 
 // ─── Plan catalogue ────────────────────────────────────────────────────────
@@ -224,7 +230,9 @@ export function emailDnsRecords(
 ): EmailDnsRecord[] {
   const host = process.env.MAIL_SERVER_HOSTNAME || 'mail.apsamo.com'
   const ip = opts.serverIp || process.env.MAIL_SERVER_IP || ''
-  const selector = opts.dkimSelector || 'dkim'
+  // Fallback matches the selector addDomain registers with Mailcow ('mail'),
+  // so the record is right even if the selector lookup came back empty.
+  const selector = opts.dkimSelector || 'mail'
   const records: EmailDnsRecord[] = [
     {
       type: 'MX',
@@ -318,6 +326,32 @@ export async function provisionEmailService(opts: {
     return { success: false, error: 'Email hosting for this domain already exists' }
   }
 
+  // If the domain is already known to the panel under a different account, it
+  // is not the buyer's to take — checked before touching Mailcow, so it holds
+  // whether the mail domain is being created fresh or adopted.
+  const ownedByAnother = await db.domain.findFirst({
+    where: { name: domain, userId: { not: opts.userId } },
+    select: { id: true },
+  })
+  if (ownedByAnother) {
+    return {
+      success: false,
+      error: 'This domain is already registered to another account',
+    }
+  }
+
+  /**
+   * `domain` is globally unique, so a row left behind by a FAILED attempt would
+   * block the rightful owner from ever buying email for that domain. Anything
+   * this call created must therefore be removed if provisioning does not
+   * complete. A pre-existing row (`clash`) is kept — it is a real service.
+   */
+  const discardOnFailure = async () => {
+    if (!clash) {
+      await db.emailService.deleteMany({ where: { domain, userId: opts.userId } })
+    }
+  }
+
   const service = clash
     ? await db.emailService.update({
         where: { id: clash.id },
@@ -352,15 +386,29 @@ export async function provisionEmailService(opts: {
         description: `Apsamo email hosting — ${plan.name}`,
         mailboxes,
         aliases: Math.max(mailboxes * 4, 20),
-        quota: total * 1024, // Mailcow takes MB
+        // addDomain's `quota` is the PER-MAILBOX ceiling in MB; it derives the
+        // domain total itself. Passing the plan total here would hand every
+        // mailbox the whole allowance.
+        quota: perBox * 1024,
       })
       if (!res.success) {
-        await db.emailService.update({
-          where: { id: service.id },
-          data: { lastError: res.error || 'Could not create the mail domain' },
-        })
-        return { success: false, serviceId: service.id, error: res.error }
+        // "domain_exists" is normal, not an error: the domain may be left over
+        // from a cancelled service, or already carried by this customer's web
+        // hosting. Ownership was proven above, so adopt it.
+        if (!/domain_exists/i.test(res.error || '')) {
+          const message = res.error || 'Could not create the mail domain'
+          await db.emailService.update({
+            where: { id: service.id },
+            data: { lastError: message },
+          })
+          await discardOnFailure()
+          return { success: false, error: message }
+        }
       }
+      // addDomain multiplies per-mailbox × mailboxes for the domain total,
+      // which only matches when the plan's total is exactly that product.
+      // Set the exact figures so plans like 10 × 5GB capped at 50GB hold.
+      await syncMailcowLimits(service)
     }
 
     let dkimOk = service.dkimGenerated
@@ -382,29 +430,70 @@ export async function provisionEmailService(opts: {
     return { success: true, serviceId: service.id }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Provisioning failed'
-    await db.emailService.update({
-      where: { id: service.id },
-      data: { lastError: message },
-    })
-    return { success: false, serviceId: service.id, error: message }
+    await db.emailService
+      .update({ where: { id: service.id }, data: { lastError: message } })
+      .catch(() => {})
+    await discardOnFailure()
+    return { success: false, error: message }
   }
 }
 
 /**
- * Suspend a service (non-payment, abuse). Mailboxes are left in place so a
- * paying customer gets their mail back untouched on resume — only access is
- * withdrawn, by marking the service and disabling the domain in Mailcow.
+ * Push a service's *effective* allowance (plan + purchased add-ons) onto the
+ * Mailcow domain.
+ *
+ * Both ceilings have to agree. Ours decides what the panel offers; Mailcow's
+ * decides what actually gets created — so a customer who buys an extra mailbox
+ * would otherwise pass our check and then be refused by Mailcow with
+ * "max_mailbox_exceeded". Call this after anything that changes an allowance.
+ */
+export async function syncMailcowLimits(service: {
+  id: string
+  domain: string
+  mailboxLimit: number
+  storagePerMailboxGB: number
+  totalStorageGB: number
+  extraMailboxes: number
+  extraStorageGB: number
+}): Promise<{ success: boolean; error?: string }> {
+  const limits = effectiveLimits(service)
+  const res = await editDomain({
+    domain: service.domain,
+    mailboxes: limits.mailboxLimit,
+    maxQuotaMB: limits.storagePerMailboxGB * 1024,
+    totalQuotaMB: limits.totalStorageGB * 1024,
+  })
+  // Record the failure rather than swallowing it: a silent mismatch here shows
+  // up much later as an unexplained refusal to create a mailbox.
+  await db.emailService
+    .update({
+      where: { id: service.id },
+      data: { lastError: res.success ? null : `limit sync: ${res.error}` },
+    })
+    .catch(() => {})
+  return res
+}
+
+/**
+ * Suspend for non-payment. Deactivating the domain in Mailcow is what makes
+ * this real — incoming mail is refused and logins stop. Nothing is deleted, so
+ * `resumeEmailService` restores the account intact once the invoice is paid.
  */
 export async function suspendEmailService(
   serviceId: string
 ): Promise<{ success: boolean; error?: string }> {
   const service = await db.emailService.findUnique({ where: { id: serviceId } })
   if (!service) return { success: false, error: 'Service not found' }
+  const res = await editDomain({ domain: service.domain, active: false })
   await db.emailService.update({
     where: { id: serviceId },
-    data: { status: 'suspended', suspendedAt: new Date() },
+    data: {
+      status: 'suspended',
+      suspendedAt: new Date(),
+      lastError: res.success ? null : `suspend: ${res.error}`,
+    },
   })
-  return { success: true }
+  return res
 }
 
 export async function resumeEmailService(
@@ -412,11 +501,16 @@ export async function resumeEmailService(
 ): Promise<{ success: boolean; error?: string }> {
   const service = await db.emailService.findUnique({ where: { id: serviceId } })
   if (!service) return { success: false, error: 'Service not found' }
+  const res = await editDomain({ domain: service.domain, active: true })
   await db.emailService.update({
     where: { id: serviceId },
-    data: { status: 'active', suspendedAt: null },
+    data: {
+      status: 'active',
+      suspendedAt: null,
+      lastError: res.success ? null : `resume: ${res.error}`,
+    },
   })
-  return { success: true }
+  return res
 }
 
 /**
@@ -429,12 +523,21 @@ export async function terminateEmailService(
 ): Promise<{ success: boolean; error?: string }> {
   const service = await db.emailService.findUnique({ where: { id: serviceId } })
   if (!service) return { success: false, error: 'Service not found' }
+
+  // Mailcow refuses to drop a domain that still holds mailboxes
+  // ("domain_not_empty"), so empty it first — otherwise termination reports
+  // success in our DB while the domain quietly keeps receiving mail.
+  const existing = await listMailboxes(service.domain).catch(() => null)
+  for (const box of existing?.mailboxes || []) {
+    if (box.address) await deleteMailbox(box.address).catch(() => undefined)
+  }
+
   const res = await removeDomain(service.domain)
   await db.emailService.update({
     where: { id: serviceId },
     data: {
       status: 'cancelled',
-      mailcowDomainCreated: false,
+      mailcowDomainCreated: !res.success,
       lastError: res.success ? null : res.error || null,
     },
   })
@@ -454,7 +557,20 @@ export async function applyPlanToService(
   const mailboxes = plan.emailMailboxes ?? plan.maxEmailAccounts ?? service.mailboxLimit
   const perBox = plan.emailStoragePerMailboxGB ?? service.storagePerMailboxGB
   const total = plan.emailTotalStorageGB ?? service.totalStorageGB
-  await db.emailService.update({
+
+  // A downgrade that would strand existing mailboxes is refused up front —
+  // better a clear error at the point of change than mailboxes silently over
+  // an allowance Mailcow will not honour.
+  const usage = await getEmailUsage(service).catch(() => null)
+  const newLimit = mailboxes + (service.extraMailboxes || 0)
+  if (usage && usage.mailboxes > newLimit) {
+    return {
+      success: false,
+      error: `This plan allows ${newLimit} mailboxes but ${usage.mailboxes} exist. Delete ${usage.mailboxes - newLimit} mailbox(es) first.`,
+    }
+  }
+
+  const updated = await db.emailService.update({
     where: { id: serviceId },
     data: {
       planId: plan.id,
@@ -463,13 +579,8 @@ export async function applyPlanToService(
       totalStorageGB: total,
     },
   })
-  // Raise the domain's ceiling in Mailcow so the new allowance is real.
-  await addDomain({
-    domain: service.domain,
-    mailboxes,
-    quota: total * 1024,
-  }).catch(() => undefined)
-  return { success: true }
+  // Make the new allowance real in the mail engine too.
+  return syncMailcowLimits(updated)
 }
 
 /** Webmail entry point shown to customers. */

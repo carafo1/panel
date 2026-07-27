@@ -23,6 +23,7 @@ import { startProvisioning } from '@/lib/orchestration'
 import { fulfilDomainOrder } from '@/lib/domain-checkout'
 import { slugify } from '@/lib/utils'
 import { BRAND_DOMAIN } from '@/lib/brand-config'
+import { provisionEmailService } from '@/lib/email-hosting'
 
 export interface ProvisionResult {
   provisioned: boolean
@@ -200,6 +201,38 @@ export async function provisionForPayment(
         provisioned: true,
         detail: `deploying project ${projectId}`,
         projectId,
+      }
+    }
+
+    // ── EMAIL HOSTING → mail domain on Mailcow, no website ──────────
+    // A standalone email purchase: the customer bought mailboxes on a domain
+    // they already control, so there is no container and no project to build.
+    if (purchaseType === 'email') {
+      if (!domainName) {
+        return { provisioned: false, detail: 'email purchase has no domain' }
+      }
+      const planId = typeof meta.planId === 'string' ? meta.planId : ''
+      if (!planId) {
+        return { provisioned: false, detail: 'email purchase has no plan' }
+      }
+      const subscriptionId =
+        typeof meta.subscriptionId === 'string' ? meta.subscriptionId : null
+
+      const res = await provisionEmailService({
+        userId: payment.userId,
+        planId,
+        domain: domainName,
+        subscriptionId,
+      })
+      if (!res.success) {
+        return {
+          provisioned: false,
+          detail: `email provisioning failed: ${res.error || 'unknown error'}`,
+        }
+      }
+      return {
+        provisioned: true,
+        detail: `email hosting ready for ${domainName}`,
       }
     }
 

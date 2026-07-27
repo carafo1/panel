@@ -107,6 +107,41 @@ function envelopeResult(env: MailcowEnvelope | MailcowEnvelope[]): {
   return { success: false, error: messages || 'Mailcow request failed' }
 }
 
+/**
+ * Read Mailcow's DKIM response.
+ *
+ * `/get/dkim/{domain}` returns a bare OBJECT (not an array, and not the
+ * `{public, selector}` shape used elsewhere): `pubkey` is raw base64,
+ * `dkim_txt` is the assembled record, `dkim_selector` is the selector.
+ * Parsing it as an array silently yields "no key", which then looks like
+ * DKIM was never generated.
+ *
+ * The same payload also carries `privkey`. Only the fields below are ever
+ * lifted out of it, so the private key cannot leak into a response.
+ */
+function parseDkim(raw: unknown): InfoDomainDkim | undefined {
+  const d = (Array.isArray(raw) ? raw[0] : raw) as
+    | Record<string, unknown>
+    | undefined
+  if (!d || typeof d !== 'object') return undefined
+
+  const txt = typeof d.dkim_txt === 'string' ? d.dkim_txt : ''
+  const pub = typeof d.pubkey === 'string' ? d.pubkey : ''
+  // Older shape used `public`; keep accepting it.
+  const legacy = typeof d.public === 'string' ? d.public : ''
+  const value = txt || legacy || (pub ? `v=DKIM1;k=rsa;t=s;s=email;p=${pub}` : '')
+  if (!value) return undefined
+
+  return {
+    length: Number(d.length) || 2048,
+    public: value,
+    selector:
+      (typeof d.dkim_selector === 'string' && d.dkim_selector) ||
+      (typeof d.selector === 'string' && d.selector) ||
+      'mail',
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Demo-mode helpers
 // ---------------------------------------------------------------------------
@@ -197,15 +232,82 @@ export async function addDomain(
   }
 }
 
+export interface EditDomainOptions {
+  domain: string
+  /** How many mailboxes the domain may hold. */
+  mailboxes?: number
+  /** Per-mailbox quota ceiling, MB. */
+  maxQuotaMB?: number
+  /** Whole-domain quota, MB. Must be >= maxQuotaMB. */
+  totalQuotaMB?: number
+  /** false parks the domain: mail stops being accepted and logins fail. */
+  active?: boolean
+}
+
+/**
+ * Change an EXISTING domain's limits or activation.
+ * POST /api/v1/edit/domain
+ *
+ * `add/domain` cannot be reused for this — Mailcow rejects it with
+ * "domain_exists" — so upgrades, add-ons and suspension all come through here.
+ * Unlike the delete endpoints (which take a bare array), edit really does take
+ * the `{ items, attr }` envelope.
+ */
+export async function editDomain(
+  opts: EditDomainOptions
+): Promise<{ success: boolean; error?: string }> {
+  if (!isMailcowConfigured()) {
+    console.log('[mailcow] DEMO MODE: editDomain', opts.domain, opts)
+    return { success: true }
+  }
+
+  const attr: Record<string, unknown> = {}
+  if (opts.mailboxes !== undefined) attr.mailboxes = opts.mailboxes
+  if (opts.maxQuotaMB !== undefined) {
+    // defquota <= maxquota is enforced by Mailcow; keep them in step so a
+    // raise never trips defquota_exceeds_maxquota.
+    attr.maxquota = opts.maxQuotaMB
+    attr.defquota = opts.maxQuotaMB
+  }
+  if (opts.totalQuotaMB !== undefined) {
+    attr.quota = Math.max(opts.totalQuotaMB, opts.maxQuotaMB ?? 0)
+  }
+  if (opts.active !== undefined) attr.active = opts.active ? '1' : '0'
+  if (Object.keys(attr).length === 0) return { success: true }
+
+  try {
+    const env = await mailcowFetch<MailcowEnvelope | MailcowEnvelope[]>(
+      '/edit/domain',
+      {
+        method: 'POST',
+        body: JSON.stringify({ items: [opts.domain], attr }),
+      }
+    )
+    return envelopeResult(env)
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    }
+  }
+}
+
 interface DomainInfo {
   domainName: string
   active: boolean
   backupmx: boolean
   relays: number
+  /** Mailbox ceiling for the domain. */
   mailboxes: number
+  /** Mailboxes that actually exist right now. */
+  mailboxesUsed: number
   aliases: number
+  /** Per-mailbox quota ceiling, BYTES (Mailcow reports bytes here). */
   quota: number
+  /** Whole-domain quota ceiling, BYTES. */
   maxQuotaForDomain: number
+  /** Quota allocated across the domain's mailboxes, BYTES. */
+  quotaUsed: number
   dkim?: { length: number; public: string; selector: string }
 }
 
@@ -232,9 +334,11 @@ export async function getDomain(domain: string): Promise<GetDomainResult> {
         backupmx: false,
         relays: 0,
         mailboxes: 10,
+        mailboxesUsed: 1,
         aliases: 20,
-        quota: 1024,
-        maxQuotaForDomain: 10240,
+        quota: 1024 * 1024 ** 2,
+        maxQuotaForDomain: 10240 * 1024 ** 2,
+        quotaUsed: 1024 * 1024 ** 2,
       },
     }
   }
@@ -249,17 +353,9 @@ export async function getDomain(domain: string): Promise<GetDomainResult> {
 
     let dkim: InfoDomainDkim | undefined
     try {
-      const dkimArr = await mailcowFetch<
-        Array<{ length?: number; public?: string; selector?: string }>
-      >(`/get/dkim/${encodeURIComponent(domain)}`)
-      const dkimRaw = Array.isArray(dkimArr) ? dkimArr[0] : undefined
-      if (dkimRaw && dkimRaw.public) {
-        dkim = {
-          length: dkimRaw.length || 2048,
-          public: dkimRaw.public,
-          selector: dkimRaw.selector || 'mail',
-        }
-      }
+      dkim = parseDkim(
+        await mailcowFetch<unknown>(`/get/dkim/${encodeURIComponent(domain)}`)
+      )
     } catch {
       // DKIM lookup is best-effort; ignore failures.
     }
@@ -271,10 +367,15 @@ export async function getDomain(domain: string): Promise<GetDomainResult> {
         active: String(d.active) === '1' || d.active === true,
         backupmx: String(d.backupmx) === '1' || d.backupmx === true,
         relays: Number(d.relay_unknown_recipients || d.relays || 0),
-        mailboxes: Number(d.mailboxes || 0),
-        aliases: Number(d.aliases || 0),
-        quota: Number(d.quota || 0),
-        maxQuotaForDomain: Number(d.maxquota || d.max_quota || 0),
+        // Mailcow's GET shape uses none of the names its POST bodies take:
+        // reads are max_num_mboxes_for_domain / max_quota_for_* (in bytes),
+        // writes are mailboxes / maxquota / quota (in MB). Don't unify them.
+        mailboxes: Number(d.max_num_mboxes_for_domain ?? d.mailboxes ?? 0),
+        mailboxesUsed: Number(d.mboxes_in_domain ?? 0),
+        aliases: Number(d.max_num_aliases_for_domain ?? d.aliases ?? 0),
+        quota: Number(d.max_quota_for_mbox ?? d.quota ?? 0),
+        maxQuotaForDomain: Number(d.max_quota_for_domain ?? d.maxquota ?? 0),
+        quotaUsed: Number(d.quota_used_in_domain ?? 0),
         dkim,
       },
     }
@@ -315,27 +416,29 @@ export async function generateDkim(
   }
 
   try {
-    // Try to fetch an existing key first.
+    // Try to fetch an existing key first. add/domain already generates one from
+    // its dkim_selector/dkim_length fields, so for a freshly-provisioned domain
+    // this normally hits and no /add/dkim call is needed.
     let publicKey: string | undefined
     try {
-      const existing = await mailcowFetch<
-        Array<{ public?: string; selector?: string; length?: number }>
-      >(`/get/dkim/${encodeURIComponent(domain)}`)
-      const first = Array.isArray(existing) ? existing[0] : undefined
-      if (first?.public) {
-        publicKey = first.public
-        selector = first.selector || selector
+      const existing = parseDkim(
+        await mailcowFetch<unknown>(`/get/dkim/${encodeURIComponent(domain)}`)
+      )
+      if (existing) {
+        publicKey = existing.public
+        selector = existing.selector || selector
       }
     } catch {
       // No existing key — generate below.
     }
 
     if (!publicKey) {
+      // add/dkim takes `domains` (plural) and `key_size`; the add/domain field
+      // names are rejected with dkim_domain_or_sel_invalid.
       const body = {
-        domain,
+        domains: domain,
         dkim_selector: selector,
-        dkim_length: 2048,
-        key_description: 'Apsamo Panel auto DKIM',
+        key_size: 2048,
       }
       const env = await mailcowFetch<MailcowEnvelope>('/add/dkim', {
         method: 'POST',
@@ -346,12 +449,11 @@ export async function generateDkim(
         return { success: false, error: result.error }
       }
       // Re-fetch to get the freshly-generated public key.
-      const fresh = await mailcowFetch<
-        Array<{ public?: string; selector?: string; length?: number }>
-      >(`/get/dkim/${encodeURIComponent(domain)}`)
-      const first = Array.isArray(fresh) ? fresh[0] : undefined
-      publicKey = first?.public
-      selector = first?.selector || selector
+      const fresh = parseDkim(
+        await mailcowFetch<unknown>(`/get/dkim/${encodeURIComponent(domain)}`)
+      )
+      publicKey = fresh?.public
+      selector = fresh?.selector || selector
     }
 
     if (!publicKey) {
@@ -478,9 +580,12 @@ export async function listMailboxes(
   }
 
   try {
+    // MUST be /get/mailbox/all/{domain}. Mailcow reads /get/mailbox/{x} as a
+    // single mailbox ADDRESS lookup, so passing a domain there matches nothing
+    // and comes back {} — a silent empty list, not an error.
     const arr = await mailcowFetch<
       Array<Record<string, unknown>>
-    >(`/get/mailbox/${encodeURIComponent(domain)}`)
+    >(`/get/mailbox/all/${encodeURIComponent(domain)}`)
     // Mailcow returns {} (not []) for a domain with no mailboxes — guard so we
     // never call .map on a non-array.
     const mailboxes: MailboxInfo[] = (Array.isArray(arr) ? arr : []).map((m) => ({
