@@ -30,6 +30,21 @@ export function useCountUp<T extends HTMLElement = HTMLSpanElement>(
   useEffect(() => {
     const node = ref.current
     if (!node) return
+
+    // Targets arrive asynchronously: site content is fetched after mount, so
+    // the first render passes 0 for every stat. Arming the observer on that
+    // placeholder latched `started` and animated 0 → 0; when the real value
+    // landed the effect re-ran, but `started` was still true, so nothing ever
+    // animated. The stats row sat permanently at "0+ Developers" and
+    // "0% Uptime SLA" on the live home page.
+    //
+    // Two changes fix it: ignore a zero target, and re-arm whenever the target
+    // actually changes. IntersectionObserver fires immediately on observe()
+    // for an element already in view, so a late-arriving value animates rather
+    // than waiting for another scroll.
+    if (!target) return
+    started.current = false
+
     const observer = new IntersectionObserver(
       (entries) => {
         const entry = entries[0]
