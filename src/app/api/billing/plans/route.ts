@@ -28,9 +28,19 @@ function parseJsonArray(raw: string | null): string[] {
   }
 }
 
-export async function GET() {
+/** Product families sold as plans. `hosting` is the web-hosting catalogue. */
+const PLAN_TYPES = ['hosting', 'email', 'domain']
+
+export async function GET(request: Request) {
   try {
-    const where = { active: true, hidden: false, archived: false }
+    // Filter by product type. Email plans live in the same table but describe
+    // mailboxes, not websites — served alongside hosting they rendered in the
+    // hosting comparison table with every limit blank, which the "null means
+    // unlimited" rule then displayed as unlimited RAM and storage.
+    const requested = new URL(request.url).searchParams.get('type')
+    const planType = requested && PLAN_TYPES.includes(requested) ? requested : 'hosting'
+
+    const where = { active: true, hidden: false, archived: false, planType }
 
     let plans = await db.plan.findMany({ where, orderBy: { priority: 'asc' } })
 
@@ -47,6 +57,7 @@ export async function GET() {
         id: p.id,
         slug: p.slug,
         name: p.name,
+        planType: p.planType,
         description: p.description,
         tagline: p.tagline,
         idealFor: p.idealFor,
@@ -103,6 +114,11 @@ export async function GET() {
         freeMigrations: p.freeMigrations,
 
         highlights: parseJsonArray(p.highlights),
+
+        // Email-product fields — null on hosting plans.
+        emailMailboxes: p.emailMailboxes,
+        emailStoragePerMailboxGB: p.emailStoragePerMailboxGB,
+        emailTotalStorageGB: p.emailTotalStorageGB,
       })),
     })
   } catch (error) {
