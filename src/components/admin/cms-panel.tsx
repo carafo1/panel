@@ -25,7 +25,7 @@ import { toast } from 'sonner'
 import {
   Plus, Pencil, Trash2, Eye, EyeOff, GripVertical, Save, Loader2,
   FileText, LayoutGrid, RefreshCw, X, ChevronUp, ChevronDown, Save as SaveIcon,
-  ChevronRight,
+  ChevronRight, Sparkles,
 } from 'lucide-react'
 import { useAuthStore } from '@/store/auth-store'
 import { ICON_NAMES, resolveIcon } from '@/components/landing/icon-registry'
@@ -653,6 +653,10 @@ function ServiceEditorDialog({ open, onOpenChange, service, onChange, onSave, sa
 
   const update = (patch: Partial<CmsService>) => onChange({ ...service, ...patch })
 
+  // Web hosting is sold as a subscription, so its plans belong to the billing
+  // catalogue rather than to CMS copy.
+  const isBilledHostingService = service.slug === 'web-hosting'
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
@@ -743,7 +747,30 @@ function ServiceEditorDialog({ open, onOpenChange, service, onChange, onSave, sa
             <Label htmlFor="visible">Visible on public site</Label>
           </div>
 
-          {/* Plans */}
+          {/*
+            Hosting prices are NOT edited here.
+
+            They live in the billing catalogue (Admin → Plans) because that is
+            what checkout charges from. When this editor also owned them there
+            were two sources of truth, and they drifted: the site advertised
+            $9/$29/$99 while customers were billed $4.99/$8.99/$17.99. Editing
+            them here would silently do nothing now that the public pages read
+            the catalogue, which is worse than not offering the field.
+          */}
+          {isBilledHostingService ? (
+            <div className="rounded-md border border-indigo-500/30 bg-indigo-500/5 p-4">
+              <p className="text-sm font-medium flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-indigo-500" />
+                Pricing plans are managed in Admin → Plans
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Hosting is sold as a subscription, so its prices, limits and
+                features come from the billing catalogue — the same record
+                checkout charges from. Editing them in one place keeps the
+                advertised price and the charged price identical.
+              </p>
+            </div>
+          ) : (
           <SubSection
             title="Pricing Plans"
             count={service.plans?.length ?? 0}
@@ -765,6 +792,7 @@ function ServiceEditorDialog({ open, onOpenChange, service, onChange, onSave, sa
               </NestedCard>
             ))}
           </SubSection>
+          )}
 
           {/* Highlights */}
           <SubSection
