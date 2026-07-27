@@ -5,6 +5,8 @@ import { processEvent } from '@/lib/automation'
 import { isStripeDemoMode } from '@/lib/stripe'
 import { BRAND_DOMAIN, NS1_HOSTNAME, NS2_HOSTNAME } from '@/lib/brand-config'
 import { getPriceForDomain } from '@/lib/pricing'
+import { assertDomainControl } from '@/lib/domain-verification'
+import { provisionForPayment } from '@/lib/provision-on-payment'
 import { createNotification } from '@/lib/notifications'
 import { createSubscriptionInvoice, cycleDays } from '@/lib/invoices'
 import {
@@ -129,6 +131,22 @@ export async function POST(request: Request) {
         return NextResponse.json(
           { error: 'This domain is already registered to another account' },
           { status: 409 }
+        )
+      }
+
+      // Prove control before taking money. Without this anyone could buy email
+      // for a domain they do not own — they could not read its mail without
+      // also controlling the MX, but they would take the domain in our system
+      // and lock the real owner out, since EmailService.domain is unique.
+      const control = await assertDomainControl(decoded.userId, emailDomain)
+      if (!control.verified) {
+        return NextResponse.json(
+          {
+            error: control.reason || 'Verify that you control this domain first',
+            code: 'DOMAIN_UNVERIFIED',
+            verification: control.record,
+          },
+          { status: 428 }
         )
       }
     }
@@ -363,13 +381,31 @@ export async function POST(request: Request) {
         )
       }
 
-      // Mark the demo payment as completed
+      // Mark the demo payment as completed.
+      //
+      // The projectId is written into the metadata so provisionForPayment
+      // reuses the Project created above instead of building a second one.
+      let demoMeta: Record<string, unknown> = {}
+      try {
+        const existing = await db.payment.findUnique({
+          where: { id: result.paymentId },
+          select: { metadata: true },
+        })
+        demoMeta = existing?.metadata ? JSON.parse(existing.metadata) : {}
+      } catch {
+        demoMeta = {}
+      }
+
       const payment = await db.payment.update({
         where: { id: result.paymentId },
         data: {
           status: 'completed',
           stripePaymentId: result.transactionId,
           stripeInvoiceId: `in_demo_${Date.now()}`,
+          metadata: JSON.stringify({
+            ...demoMeta,
+            ...(project ? { projectId: project.id } : {}),
+          }),
         },
       })
 
@@ -381,21 +417,22 @@ export async function POST(request: Request) {
         })
       }
 
-      // Process automation event
-      const automationResult = await processEvent({
-        type: 'payment_success',
-        userId: decoded.userId,
-        payload: {
-          paymentId: payment.id,
-          planId: plan.id,
-          purchaseType: type,
-          domainName: domainName || null,
-          subscriptionId: subscription?.id || null,
-          projectId: project?.id || null,
-          domainId: domain?.id || null,
-          projectName: project?.name || null,
-        },
-      })
+      // REAL provisioning — every other payment path (Stripe webhook, Stripe
+      // return, Waafi callback, offline confirmation) calls this. Only the
+      // demo path called the simulated processEvent('payment_success'), whose
+      // actions just send notifications: a demo purchase reported success and
+      // built nothing — no container deployed, and for email no mail domain
+      // at all. Idempotent, so it cannot double-provision.
+      const provision = await provisionForPayment(payment.id).catch(
+        (err: unknown) => {
+          console.error('[checkout/demo] provisioning failed:', err)
+          return { provisioned: false, detail: 'provisioning error' }
+        }
+      )
+      console.log(
+        `[checkout/demo] provisioning for ${payment.id}: ${provision.detail}`
+      )
+      const automationResult = provision
 
       await createNotification({
         userId: decoded.userId,

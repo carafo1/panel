@@ -4,6 +4,10 @@ import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { createNotification } from '@/lib/notifications'
 import { sendEmail } from '@/lib/email'
 import { runAutoRenewals, NOT_STRIPE_MANAGED } from '@/lib/renewals'
+import {
+  suspendEmailForSubscription,
+  runEmailLifecycle,
+} from '@/lib/email-lifecycle'
 import { collectAllUsage } from '@/lib/usage'
 import { recordHeartbeat } from '@/lib/health'
 
@@ -87,6 +91,7 @@ export async function POST(request: Request) {
     const reminded: string[] = []
     const pastDue: string[] = []
     const suspended: string[] = []
+    const emailSuspended: string[] = []
 
     // Only non-Stripe subscriptions — Stripe drives its own lifecycle.
     const subs = await db.subscription.findMany({
@@ -188,8 +193,24 @@ export async function POST(request: Request) {
           link: '/?tab=billing',
         }).catch(() => {})
         suspended.push(sub.id)
+
+        // Marking the subscription suspended does nothing to the mail server
+        // on its own — without this the customer keeps sending and receiving
+        // mail indefinitely after they stop paying.
+        const stopped = await suspendEmailForSubscription(sub.id).catch(
+          (err) => {
+            console.error('[billing-sweep] email suspend failed:', err)
+            return [] as string[]
+          }
+        )
+        emailSuspended.push(...stopped)
       }
     }
+
+    // ── 4. Email retention ──────────────────────────────────────────
+    // Suspended past the retention window → mailboxes destroyed; cancelled
+    // subscriptions → suspended so the same window applies from cancellation.
+    const emailLifecycle = await runEmailLifecycle()
 
     const summary = {
       scanned: subs.length,
@@ -200,9 +221,21 @@ export async function POST(request: Request) {
       reminded: reminded.length,
       pastDue: pastDue.length,
       suspended: suspended.length,
+      emailSuspended: emailSuspended.length,
+      emailWarned: emailLifecycle.warned.length,
+      emailTerminated: emailLifecycle.terminated.length,
       at: now.toISOString(),
     }
-    if (renewals.renewed || renewals.failed || reminded.length || pastDue.length || suspended.length) {
+    if (
+      renewals.renewed ||
+      renewals.failed ||
+      reminded.length ||
+      pastDue.length ||
+      suspended.length ||
+      emailSuspended.length ||
+      emailLifecycle.warned.length ||
+      emailLifecycle.terminated.length
+    ) {
       console.log('[billing-sweep]', JSON.stringify(summary))
     }
 

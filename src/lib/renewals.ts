@@ -17,6 +17,7 @@
 import { db } from '@/lib/db'
 import { createSubscriptionInvoice, cycleDays } from '@/lib/invoices'
 import { applyCreditToInvoice } from '@/lib/credit'
+import { resumeEmailForSubscription } from '@/lib/email-lifecycle'
 import {
   notifySubscriptionRenewed,
   notifyRenewalFailed,
@@ -128,6 +129,13 @@ export async function renewSubscription(opts: {
         lastRenewalError: null,
       },
     })
+
+    // Renewal reactivates the subscription directly rather than going through
+    // activatePayment, so email has to be restored here too — otherwise a
+    // renewed customer stays cut off at the mail server.
+    await resumeEmailForSubscription(sub.id).catch((err) =>
+      console.error('[renewals] email resume failed:', err)
+    )
 
     // 3. Auto-settle from wallet credit when they have the balance.
     let paidFromCredit = false

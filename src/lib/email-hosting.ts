@@ -16,10 +16,16 @@ import {
   addDomain,
   deleteMailbox,
   editDomain,
+  flushDovecotAuthCache,
   generateDkim,
+  getDomain,
+  reloadPostfix,
   removeDomain,
+  updateMailbox,
 } from '@/lib/mailcow'
 import { listMailboxes } from '@/lib/mailcow'
+import { sendEmail } from '@/lib/email'
+import { createNotification } from '@/lib/notifications'
 
 // ─── Plan catalogue ────────────────────────────────────────────────────────
 
@@ -405,11 +411,15 @@ export async function provisionEmailService(opts: {
           return { success: false, error: message }
         }
       }
-      // addDomain multiplies per-mailbox × mailboxes for the domain total,
-      // which only matches when the plan's total is exactly that product.
-      // Set the exact figures so plans like 10 × 5GB capped at 50GB hold.
-      await syncMailcowLimits(service)
     }
+
+    // Sync unconditionally, not just on first creation. Buying a bigger plan
+    // for a domain that already has service comes back through here with
+    // mailcowDomainCreated already true — skipping the sync meant the upgrade
+    // landed in our database while Mailcow kept refusing at the old ceiling.
+    // (On first creation this also corrects addDomain, which derives the
+    // domain total as per-mailbox × mailboxes rather than the plan's total.)
+    await syncMailcowLimits(service)
 
     let dkimOk = service.dkimGenerated
     if (!dkimOk) {
@@ -417,16 +427,26 @@ export async function provisionEmailService(opts: {
       dkimOk = dk.success
     }
 
+    // Capture this BEFORE the update below sets it — an upgrade comes back
+    // through here and must not send a second welcome email.
+    const isFirstProvision = !service.provisionedAt
+
     await db.emailService.update({
       where: { id: service.id },
       data: {
         mailcowDomainCreated: true,
         dkimGenerated: dkimOk,
         status: 'active',
-        provisionedAt: new Date(),
+        provisionedAt: service.provisionedAt ?? new Date(),
         lastError: null,
       },
     })
+
+    if (isFirstProvision) {
+      await sendWelcomeEmail(service.id).catch((err) =>
+        console.error('[email-hosting] welcome email failed:', err)
+      )
+    }
     return { success: true, serviceId: service.id }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Provisioning failed'
@@ -485,11 +505,40 @@ export async function suspendEmailService(
   const service = await db.emailService.findUnique({ where: { id: serviceId } })
   if (!service) return { success: false, error: 'Service not found' }
   const res = await editDomain({ domain: service.domain, active: false })
+
+  // Deactivating the DOMAIN stops logins but not delivery: verified against
+  // the live server, Postfix still answered 250 for a suspended domain and
+  // only rejected (550 5.1.1) once the MAILBOX itself was inactive. So each
+  // mailbox is disabled too — and remembered, so resume restores exactly
+  // these and not one the customer had switched off themselves.
+  //
+  // Dovecot also caches credentials for 5 minutes, so without flushing, a
+  // suspended customer keeps signing in until the entry expires (confirmed by
+  // IMAP: cached login succeeded, then failed immediately once flushed).
+  const disabled: string[] = []
+  if (res.success) {
+    const boxes = await listMailboxes(service.domain).catch(() => null)
+    for (const b of boxes?.mailboxes || []) {
+      if (!b.address) continue
+      if (b.active) {
+        const off = await updateMailbox({ address: b.address, active: false }).catch(
+          () => ({ success: false })
+        )
+        if (off.success) disabled.push(b.address)
+      }
+      await flushDovecotAuthCache(b.address).catch(() => undefined)
+    }
+    // Postfix caches the domain lookup; without this it keeps accepting mail
+    // for a suspended domain until the cache turns over.
+    await reloadPostfix().catch(() => undefined)
+  }
+
   await db.emailService.update({
     where: { id: serviceId },
     data: {
       status: 'suspended',
       suspendedAt: new Date(),
+      suspendedMailboxes: disabled.length ? JSON.stringify(disabled) : null,
       lastError: res.success ? null : `suspend: ${res.error}`,
     },
   })
@@ -502,11 +551,50 @@ export async function resumeEmailService(
   const service = await db.emailService.findUnique({ where: { id: serviceId } })
   if (!service) return { success: false, error: 'Service not found' }
   const res = await editDomain({ domain: service.domain, active: true })
+
+  // Re-enable the mailboxes this suspension turned off.
+  //
+  // Mailcow is changed before our record is written, so a crash in between
+  // leaves mailboxes disabled with no list to restore from. When the list is
+  // missing or unreadable, fall back to re-enabling every mailbox on the
+  // domain: re-enabling one the customer had deliberately switched off is a
+  // far smaller harm than leaving a paying customer's mail dead with no way
+  // back. This also self-heals services stranded by an earlier failure.
+  if (res.success) {
+    let addresses: string[] | null = null
+    if (service.suspendedMailboxes) {
+      try {
+        const parsed = JSON.parse(service.suspendedMailboxes)
+        if (Array.isArray(parsed)) {
+          addresses = parsed.filter((a): a is string => typeof a === 'string')
+        }
+      } catch {
+        addresses = null
+      }
+    }
+
+    if (!addresses) {
+      const boxes = await listMailboxes(service.domain).catch(() => null)
+      addresses = (boxes?.mailboxes || [])
+        .filter((b) => b.address && !b.active)
+        .map((b) => b.address)
+    }
+
+    for (const address of addresses) {
+      await updateMailbox({ address, active: true }).catch(() => undefined)
+      await flushDovecotAuthCache(address).catch(() => undefined)
+    }
+    // Otherwise a paying customer's mail keeps bouncing (454) until Postfix's
+    // cached lookup expires.
+    await reloadPostfix().catch(() => undefined)
+  }
+
   await db.emailService.update({
     where: { id: serviceId },
     data: {
       status: 'active',
       suspendedAt: null,
+      suspendedMailboxes: null,
       lastError: res.success ? null : `resume: ${res.error}`,
     },
   })
@@ -581,6 +669,95 @@ export async function applyPlanToService(
   })
   // Make the new allowance real in the mail engine too.
   return syncMailcowLimits(updated)
+}
+
+/**
+ * Tell the customer their email hosting is live, and — the part that actually
+ * matters — give them the DNS records to publish. Until the MX record points
+ * here nothing is delivered, so a "your service is ready" message without
+ * these is the most common reason a new mail account looks broken.
+ */
+export async function sendWelcomeEmail(
+  serviceId: string
+): Promise<{ success: boolean; error?: string }> {
+  const service = await db.emailService.findUnique({
+    where: { id: serviceId },
+    include: {
+      user: { select: { email: true, name: true } },
+      plan: { select: { name: true } },
+    },
+  })
+  if (!service) return { success: false, error: 'Service not found' }
+  if (!service.user?.email) return { success: false, error: 'No recipient' }
+
+  // Read DKIM live so the record shown is the real one.
+  let dkimValue: string | undefined
+  let dkimSelector: string | undefined
+  try {
+    const d = await getDomain(service.domain)
+    if (d.success && d.domain?.dkim?.public) {
+      dkimValue = d.domain.dkim.public
+      dkimSelector = d.domain.dkim.selector
+    }
+  } catch {
+    /* the rest of the email is still worth sending */
+  }
+
+  const records = emailDnsRecords(service.domain, { dkimValue, dkimSelector })
+  const limits = effectiveLimits(service)
+  const rows = records
+    .map(
+      (r) => `<tr>
+<td style="padding:6px 10px;border:1px solid #ddd;font-family:monospace">${r.type}</td>
+<td style="padding:6px 10px;border:1px solid #ddd;font-family:monospace">${r.host}</td>
+<td style="padding:6px 10px;border:1px solid #ddd;font-family:monospace;word-break:break-all">${
+        r.priority !== undefined ? `${r.priority} ` : ''
+      }${r.value}</td>
+</tr>`
+    )
+    .join('')
+
+  await sendEmail({
+    to: service.user.email,
+    subject: `Email hosting for ${service.domain} is ready`,
+    html: `<p>Hi ${service.user.name || 'there'},</p>
+<p>Your <strong>${service.plan?.name || 'email hosting'}</strong> service for
+<strong>${service.domain}</strong> is active — ${limits.mailboxLimit} mailboxes,
+${limits.storagePerMailboxGB} GB each.</p>
+
+<p><strong>One step left:</strong> add these records at whoever manages DNS for
+${service.domain}. Mail cannot be delivered until the MX record is in place, and
+the SPF, DKIM and DMARC records are what keep your messages out of spam folders.</p>
+
+<table style="border-collapse:collapse;font-size:13px">
+<tr>
+<th style="padding:6px 10px;border:1px solid #ddd;text-align:left">Type</th>
+<th style="padding:6px 10px;border:1px solid #ddd;text-align:left">Host</th>
+<th style="padding:6px 10px;border:1px solid #ddd;text-align:left">Value</th>
+</tr>
+${rows}
+</table>
+
+<p>Create your mailboxes in the panel under <strong>Email Hosting</strong>, then
+sign in to webmail at <a href="${webmailUrl()}">${webmailUrl()}</a>.</p>
+
+<p>Mail server settings for Outlook, Apple Mail or your phone:<br>
+IMAP: <strong>${process.env.MAIL_SERVER_HOSTNAME || 'mail.apsamo.com'}</strong>, port 993 (SSL/TLS)<br>
+SMTP: <strong>${process.env.MAIL_SERVER_HOSTNAME || 'mail.apsamo.com'}</strong>, port 587 (STARTTLS)<br>
+Username is the full email address.</p>
+
+<p>— Apsamo Technology</p>`,
+  })
+
+  await createNotification({
+    userId: service.userId,
+    title: 'Email hosting is ready',
+    message: `${service.domain} is active. Publish the DNS records shown in Email Hosting to start receiving mail.`,
+    type: 'success',
+    link: '/?tab=email',
+  }).catch(() => {})
+
+  return { success: true }
 }
 
 /** Webmail entry point shown to customers. */
