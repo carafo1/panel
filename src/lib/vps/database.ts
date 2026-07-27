@@ -122,6 +122,30 @@ function shellQuote(s: string): string {
   return "'" + s.replace(/'/g, "'\\''") + "'"
 }
 
+// ─── MySQL / MariaDB liveness probe ────────────────────────────────────────
+//
+// Two gotchas this handles:
+//   1. mariadb:11 renamed the `mysqladmin` client to `mariadb-admin` and dropped
+//      the old name entirely, so a hard-coded `mysqladmin` fails on MariaDB with
+//      "executable file not found". We try `mariadb-admin` first, then fall back
+//      to `mysqladmin` (which MySQL images still ship).
+//   2. `… ping` exits 0 whenever the daemon answers — even when it replies
+//      "Access denied" because we send no credentials. That access-denied reply
+//      is itself proof the server is up and speaking the protocol, which is all
+//      a readiness/health check needs. So we accept an "is alive" banner, an
+//      "access denied" reply, or a clean exit code as reachable, and treat only
+//      a hard connection failure as down.
+function mysqlPingCmd(container: string): string {
+  return `docker exec ${shellQuote(container)} sh -c 'mariadb-admin ping 2>&1 || mysqladmin ping 2>&1'`
+}
+
+function mysqlPingIsAlive(r: { exitCode: number | null; stdout: string; stderr: string }): boolean {
+  const out = `${r.stdout}\n${r.stderr}`.toLowerCase()
+  if (out.includes('is alive')) return true
+  if (out.includes('access denied')) return true // server responded → it is up
+  return r.exitCode === 0
+}
+
 function toRow(
   row: {
     id: string
@@ -270,12 +294,25 @@ export async function provisionProjectDatabase(
         log(`Pulling ${image}…`)
         await exec(client, `docker pull ${image}`, { timeoutMs: 300000 })
 
+        // Ensure the shared `deployhub` network exists before attaching to it.
+        // It is normally created during server provisioning, but a database can
+        // be requested on a host where that step never ran (e.g. a tarball-synced
+        // box), and `docker run --network deployhub` hard-fails when the network
+        // is missing. Idempotent — a no-op when it already exists.
+        await exec(client, 'docker network create deployhub 2>/dev/null || true', {
+          timeoutMs: 15000,
+        })
+
         // Run the container. Env vars differ between MySQL/MariaDB (MYSQL_*)
         // and PostgreSQL (POSTGRES_*).
         log(`Starting container ${containerName}…`)
         const envFlags = isPostgres
           ? [
-              `-e POSTGRES_PASSWORD=${shellQuote(rootPass)}`,
+              // PostgreSQL has no separate root account: POSTGRES_USER/PASSWORD IS
+              // the account we hand to the tenant, so it must be the password we
+              // persist (dbPass). Using rootPass here stored a credential that
+              // never worked for real network connections.
+              `-e POSTGRES_PASSWORD=${shellQuote(dbPass)}`,
               `-e POSTGRES_DB=${shellQuote(dbName)}`,
               `-e POSTGRES_USER=${shellQuote(dbUser)}`,
             ]
@@ -298,17 +335,24 @@ export async function provisionProjectDatabase(
           throw new Error(`docker run failed: ${run.stderr || run.stdout}`)
         }
 
-        // Wait for the DB to be ready. mysqladmin ping for MySQL/MariaDB,
-        // pg_isready for PostgreSQL. Up to 30 retries (60s).
+        // Wait for the DB to be READY FOR THE APP USER, not merely answering
+        // pings. MySQL/MariaDB entrypoints run a temporary init server first —
+        // it answers `ping` (with "access denied") several seconds BEFORE the
+        // MYSQL_USER account exists, so a ping-based gate can declare victory
+        // while the first real connection would still fail. Authenticating a
+        // `SELECT 1` as the provisioned user is the only probe that proves the
+        // database is actually usable. Up to 30 retries (60s).
+        // (dbUser/dbName/dbPass are generated alphanumeric — safe to inline.)
         log('Waiting for database to accept connections…')
+        const mysqlAuthProbe = `mariadb -u${dbUser} -p${dbPass} -e 'SELECT 1' ${dbName} 2>/dev/null || mysql -u${dbUser} -p${dbPass} -e 'SELECT 1' ${dbName} 2>/dev/null`
         const readyCmd = isPostgres
           ? `docker exec ${containerName} pg_isready -U ${shellQuote(dbUser)} -d ${shellQuote(dbName)}`
-          : `docker exec ${containerName} mysqladmin ping -h localhost --silent 2>/dev/null`
+          : `docker exec ${containerName} sh -c ${shellQuote(mysqlAuthProbe)}`
         for (let i = 0; i < 30; i++) {
           const ping = await exec(client, readyCmd, { timeoutMs: 10000 })
           const ready = isPostgres
             ? ping.exitCode === 0 && /accepting connections/i.test(ping.stdout)
-            : ping.exitCode === 0 && ping.stdout.trim() === 'mysqld is alive'
+            : ping.exitCode === 0
           if (ready) {
             log('Database is ready.')
             break
@@ -520,19 +564,17 @@ export async function testDatabaseConnection(
     return await withConnection(creds, async (client) => {
       const cmd = isPostgres
         ? `docker exec ${shellQuote(container)} pg_isready -U ${shellQuote(row.username)} -d ${shellQuote(row.name)} 2>&1`
-        : `docker exec ${shellQuote(container)} mysqladmin ping -h localhost --silent 2>&1`
+        : mysqlPingCmd(container)
       const r = await exec(client, cmd, { timeoutMs: 15000 })
-      if (
-        r.exitCode === 0 &&
-        (isPostgres
-          ? /accepting connections/i.test(r.stdout)
-          : r.stdout.trim() === 'mysqld is alive')
-      ) {
+      const reachable = isPostgres
+        ? r.exitCode === 0 && /accepting connections/i.test(r.stdout)
+        : mysqlPingIsAlive(r)
+      if (reachable) {
         return { ok: true, message: 'Database is reachable.' }
       }
       return {
         ok: false,
-        message: `${isPostgres ? 'pg_isready' : 'mysqladmin ping'} failed: ${(
+        message: `${isPostgres ? 'pg_isready' : 'mariadb-admin/mysqladmin ping'} failed: ${(
           r.stderr || r.stdout
         )
           .trim()
