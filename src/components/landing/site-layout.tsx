@@ -298,18 +298,13 @@ export function SiteLayout({ children, onGetStarted }: SiteLayoutProps) {
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-14">
           <div className="grid grid-cols-2 md:grid-cols-5 gap-8">
             <div className="col-span-2">
-              <div className="flex items-center gap-2">
-                <div className="flex size-9 items-center justify-center rounded-lg bg-white/10 ring-1 ring-white/15">
-                  <svg viewBox="0 0 48 48" fill="none" className="size-6">
-                    <path d="M24 6 L40 40 L8 40 Z" fill="white" />
-                    <path d="M14 40 Q24 18 34 40" stroke="#8888FF" strokeWidth="4" strokeLinecap="round" fill="none" />
-                  </svg>
-                </div>
-                <div className="leading-none">
-                  <span className="text-lg font-extrabold text-white">Apsamo Technology</span>
-                  <span className="block text-[10px] font-medium uppercase tracking-[0.18em] text-indigo-300/80 mt-0.5">Technology</span>
-                </div>
-              </div>
+              {/*
+                The real brand artwork, not the hand-drawn triangle that used to
+                stand in for it here. `onDark` reverses it to white: the footer
+                is always #1E1A47 regardless of theme, and the logo's navy
+                wordmark is invisible against that.
+              */}
+              <Logo onDark className="h-10" />
               <p className="mt-4 text-sm text-zinc-400 max-w-xs leading-relaxed">
                 {getContent('footer.tagline')}
               </p>
