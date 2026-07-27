@@ -6,13 +6,28 @@ import { Badge } from '@/components/ui/badge'
 import { Check } from 'lucide-react'
 import { PageHero, ScrollReveal, StaggerCard } from '../ui-helpers'
 import { useSiteContent, resolveIcon } from '../site-data-context'
+import { HostingPlansSection } from '../plan-pricing'
 
 interface PricingPageProps {
   onGetStarted: () => void
 }
 
+/**
+ * Hosting prices come from the billing catalogue, not the CMS.
+ *
+ * The CMS `ServicePlan` rows for web-hosting had drifted from the plans
+ * checkout actually charges (advertising $9/$29/$99 against real prices of
+ * $4.99/$8.99/$17.99). Rendering hosting from /api/billing/plans makes the
+ * advertised price the charged price by construction, so they cannot drift
+ * again. Other services keep their CMS-managed plans — they are quotes for
+ * bespoke work, not subscribable products.
+ */
+const BILLED_SERVICE_SLUG = 'web-hosting'
+
 export function PricingPage({ onGetStarted }: PricingPageProps) {
   const { services, getContent } = useSiteContent()
+  const hostingService = services.find((s) => s.slug === BILLED_SERVICE_SLUG)
+
   return (
     <>
       <PageHero
@@ -21,7 +36,22 @@ export function PricingPage({ onGetStarted }: PricingPageProps) {
         subtitle={getContent('pricing.hero.subtitle')}
       />
 
-      {services.map((service) => {
+      <section className="py-16 bg-background">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <HostingPlansSection
+            onGetStarted={() => onGetStarted()}
+            title={hostingService?.name || 'Web Hosting'}
+            subtitle={
+              hostingService?.tagline ||
+              'Everything you need to launch and grow, with no hidden fees.'
+            }
+          />
+        </div>
+      </section>
+
+      {services
+        .filter((service) => service.slug !== BILLED_SERVICE_SLUG)
+        .map((service) => {
         const Icon = resolveIcon(service.iconName)
         return (
           <section key={service.slug} className="py-16 bg-background even:bg-muted/30">

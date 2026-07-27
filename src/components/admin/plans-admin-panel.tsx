@@ -64,6 +64,33 @@ interface Plan {
   maxDomains: number | null
   maxSubdomains: number | null
   allowedApps: string[] | null
+
+  // Yearly price behind the pricing-page toggle. Null = monthly only.
+  annualPrice: number | null
+
+  // Marketing copy rendered on the public pricing cards
+  tagline: string | null
+  idealFor: string | null
+  badge: string | null
+  highlights: string[] | null
+
+  // Comparison-table attributes
+  inodes: number | null
+  maxDnsZones: number | null
+  maxSslCerts: number | null
+  backupRetentionDays: number | null
+  freeMigrations: number | null
+  uptimeSla: string | null
+  supportLevel: string | null
+  malwareScanner: string | null
+  wafLevel: string | null
+  ddosLevel: string | null
+  dockerSupport: string | null
+  sshAccess: boolean
+  stagingEnvironment: boolean
+  gitDeployment: boolean
+  cdnIntegration: boolean
+
   _count?: { subscriptions: number }
 }
 
@@ -94,7 +121,35 @@ const LIMIT_FIELDS: Array<{ key: keyof Plan; label: string }> = [
   { key: 'maxBackups', label: 'Backups' },
   { key: 'maxDomains', label: 'Domains' },
   { key: 'maxSubdomains', label: 'Subdomains' },
+  { key: 'inodes', label: 'Inodes' },
+  { key: 'maxDnsZones', label: 'DNS zones' },
+  { key: 'maxSslCerts', label: 'SSL certificates' },
+  { key: 'backupRetentionDays', label: 'Backup retention (days)' },
+  { key: 'freeMigrations', label: 'Free migrations' },
 ]
+
+/**
+ * Service tiers shown in the comparison table. Free text rather than enums —
+ * these are marketing labels, and the operator should be able to invent a tier
+ * name without a code change.
+ */
+const TIER_FIELDS: Array<{ key: keyof Plan; label: string; placeholder: string }> = [
+  { key: 'uptimeSla', label: 'Uptime SLA', placeholder: '99.9%' },
+  { key: 'supportLevel', label: 'Support level', placeholder: 'Standard' },
+  { key: 'malwareScanner', label: 'Malware scanner', placeholder: 'Basic' },
+  { key: 'wafLevel', label: 'WAF protection', placeholder: 'Standard' },
+  { key: 'ddosLevel', label: 'DDoS protection', placeholder: 'Standard' },
+]
+
+/** Capability switches that drive both provisioning and the comparison table. */
+const CAPABILITY_FIELDS: Array<{ key: keyof Plan; label: string }> = [
+  { key: 'sshAccess', label: 'SSH access' },
+  { key: 'stagingEnvironment', label: 'Staging environment' },
+  { key: 'gitDeployment', label: 'Git deployment' },
+  { key: 'cdnIntegration', label: 'CDN integration' },
+]
+
+const DOCKER_LEVELS = ['none', 'optional', 'included']
 
 function money(p: Plan) {
   return `${p.currency || 'USD'} ${Number(p.price || 0).toFixed(2)}`
@@ -126,6 +181,7 @@ function PlanDialog({
         name: '',
         description: '',
         price: 0,
+        annualPrice: null,
         currency: 'USD',
         billingCycle: 'monthly',
         trialDays: 0,
@@ -133,6 +189,14 @@ function PlanDialog({
         projects: 1,
         active: true,
         hidden: false,
+        // Capabilities default to the conservative set: a new plan grants
+        // nothing privileged until someone deliberately enables it.
+        sshAccess: false,
+        stagingEnvironment: false,
+        dockerSupport: 'none',
+        gitDeployment: true,
+        cdnIntegration: true,
+        highlights: [],
       })
       setApps([])
     }
@@ -206,6 +270,31 @@ function PlanDialog({
                 onChange={(e) => set('price', e.target.value)}
               />
             </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="p-annual">Yearly price</Label>
+            <Input
+              id="p-annual"
+              type="number"
+              step="0.01"
+              min={0}
+              placeholder="leave blank for monthly only"
+              value={
+                form.annualPrice === null || form.annualPrice === undefined
+                  ? ''
+                  : String(form.annualPrice)
+              }
+              onChange={(e) =>
+                set('annualPrice', e.target.value === '' ? null : e.target.value)
+              }
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Total charged for 12 months. The pricing page shows this divided by
+              12 alongside the saving, so it should be less than{' '}
+              {`$${(Number(form.price || 0) * 12).toFixed(2)}`} to be worth
+              offering.
+            </p>
           </div>
 
           <div className="space-y-1.5">
@@ -328,6 +417,120 @@ function PlanDialog({
                   </Button>
                 )
               })}
+            </div>
+          </div>
+
+          {/* Marketing copy — everything the public pricing card renders */}
+          <div>
+            <p className="text-sm font-medium mb-2">Pricing page copy</p>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="p-tagline" className="text-xs">Tagline</Label>
+                <Input
+                  id="p-tagline"
+                  placeholder="Best value for growing businesses"
+                  value={String(form.tagline ?? '')}
+                  onChange={(e) => set('tagline', e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="p-idealfor" className="text-xs">Ideal for</Label>
+                <Input
+                  id="p-idealfor"
+                  placeholder="Business Websites"
+                  value={String(form.idealFor ?? '')}
+                  onChange={(e) => set('idealFor', e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="p-badge" className="text-xs">Ribbon</Label>
+                <Input
+                  id="p-badge"
+                  placeholder="Most Popular"
+                  value={String(form.badge ?? '')}
+                  onChange={(e) => set('badge', e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5 mt-3">
+              <Label htmlFor="p-highlights" className="text-xs">
+                Card bullets — one per line
+              </Label>
+              <Textarea
+                id="p-highlights"
+                className="min-h-[110px] font-mono text-xs"
+                placeholder={'1 Website\n20 GB SSD\nFree SSL'}
+                value={
+                  Array.isArray(form.highlights)
+                    ? (form.highlights as string[]).join('\n')
+                    : ''
+                }
+                onChange={(e) =>
+                  set(
+                    'highlights',
+                    e.target.value
+                      .split('\n')
+                      .map((l) => l.trim())
+                      .filter(Boolean)
+                  )
+                }
+              />
+            </div>
+          </div>
+
+          {/* Service tiers shown in the comparison table */}
+          <div>
+            <p className="text-sm font-medium mb-2">Service tiers</p>
+            <div className="grid gap-3 sm:grid-cols-3">
+              {TIER_FIELDS.map((f) => (
+                <div className="space-y-1.5" key={String(f.key)}>
+                  <Label htmlFor={`p-${String(f.key)}`} className="text-xs">
+                    {f.label}
+                  </Label>
+                  <Input
+                    id={`p-${String(f.key)}`}
+                    placeholder={f.placeholder}
+                    value={String(form[f.key as string] ?? '')}
+                    onChange={(e) => set(String(f.key), e.target.value)}
+                  />
+                </div>
+              ))}
+              <div className="space-y-1.5">
+                <Label htmlFor="p-docker" className="text-xs">Docker</Label>
+                <select
+                  id="p-docker"
+                  className="w-full h-9 rounded-md border bg-background px-3 text-sm"
+                  value={String(form.dockerSupport ?? 'none')}
+                  onChange={(e) => set('dockerSupport', e.target.value)}
+                >
+                  {DOCKER_LEVELS.map((lvl) => (
+                    <option key={lvl} value={lvl}>
+                      {lvl === 'none'
+                        ? 'Not available'
+                        : lvl === 'optional'
+                        ? 'Optional'
+                        : 'Included'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Capabilities */}
+          <div>
+            <p className="text-sm font-medium mb-2">Capabilities</p>
+            <div className="flex flex-wrap gap-4">
+              {CAPABILITY_FIELDS.map((f) => (
+                <label className="flex items-center gap-2 text-sm" key={String(f.key)}>
+                  <input
+                    type="checkbox"
+                    checked={form[f.key as string] === true}
+                    onChange={(e) => set(String(f.key), e.target.checked)}
+                  />
+                  {f.label}
+                </label>
+              ))}
             </div>
           </div>
 

@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { PageHero, ScrollReveal, StaggerCard, useCountUp } from '../ui-helpers'
 import { useAppStore } from '@/store/app-store'
+import { HostingPlansSection } from '../plan-pricing'
 import { useSiteContent, useServiceBySlug } from '../site-data-context'
 
 const STATS = [
@@ -62,55 +63,6 @@ const BENCHMARKS = [
   { label: 'Rollback', us: '1 click', them: 'manual', win: true },
 ]
 
-const FALLBACK_PLANS = [
-  {
-    name: 'Hobby',
-    price: 9,
-    period: '/mo',
-    description: 'Personal projects and side hustles.',
-    features: [
-      '1 project',
-      '1 GB RAM / 1 vCPU',
-      '10 GB SSD storage',
-      '100 GB bandwidth',
-      'Automatic SSL',
-      'Community support',
-    ],
-  },
-  {
-    name: 'Pro',
-    price: 29,
-    period: '/mo',
-    description: 'Production apps that need to scale.',
-    features: [
-      '10 projects',
-      '4 GB RAM / 2 vCPU',
-      '50 GB SSD storage',
-      '500 GB bandwidth',
-      'Custom domains',
-      'Cron jobs & workers',
-      'Priority support',
-    ],
-    popular: true,
-  },
-  {
-    name: 'Business',
-    price: 99,
-    period: '/mo',
-    description: 'Mission-critical workloads.',
-    features: [
-      'Unlimited projects',
-      '16 GB RAM / 8 vCPU',
-      '250 GB SSD storage',
-      '2 TB bandwidth',
-      'Team collaboration',
-      'Dedicated IPs',
-      '24/7 priority support',
-      '99.9% uptime SLA',
-    ],
-  },
-]
-
 const FALLBACK_FAQS = [
   {
     q: 'Can I host any Dockerized app?',
@@ -138,7 +90,6 @@ export function HostingPage({ onGetStarted }: HostingPageProps) {
   const { setPublicPage } = useAppStore()
   const { getContent } = useSiteContent()
   const service = useServiceBySlug('web-hosting')
-  const plans = service?.plans?.length ? service.plans : FALLBACK_PLANS
   const faqs = service?.faqs?.length ? service.faqs : FALLBACK_FAQS
   const stat0 = useCountUp<HTMLParagraphElement>(STATS[0].value, 1800)
   const stat1 = useCountUp<HTMLParagraphElement>(STATS[1].value, 1800)
@@ -304,48 +255,18 @@ export function HostingPage({ onGetStarted }: HostingPageProps) {
         </div>
       </section>
 
-      {/* Pricing */}
+      {/* Pricing — rendered from the billing catalogue, never from hardcoded
+          arrays or CMS copy, so the advertised price is the charged price. */}
       <section className="py-24 bg-muted/30">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <ScrollReveal>
-            <div className="text-center mb-14">
+            <div className="text-center mb-10">
               <Badge variant="outline" className="mb-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400">Pricing</Badge>
               <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight"><span className="text-gradient-brand">{getContent('svc.web-hosting.pricing.title')}</span></h2>
-              <p className="mt-3 text-muted-foreground">Start on Hobby, upgrade in one click. No downtime, no migration.</p>
+              <p className="mt-3 text-muted-foreground">Start small and upgrade in one click. No downtime, no migration.</p>
             </div>
           </ScrollReveal>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
-            {plans.map((plan, i) => (
-              <StaggerCard key={plan.name} index={i}>
-                <Card className={`relative flex flex-col h-full transition-all duration-500 bg-card/80 backdrop-blur-sm ${plan.popular ? 'border-indigo-500 shadow-glow-indigo scale-[1.03] shimmer-border' : 'hover:border-indigo-500/30 hover:shadow-modern-lg'}`}>
-                  {plan.popular && (
-                    <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                      <Badge className="bg-gradient-to-r from-indigo-400 to-indigo-600 text-white border-0 px-4 py-0.5 shadow-glow-indigo">POPULAR</Badge>
-                    </div>
-                  )}
-                  <CardContent className="p-6 flex flex-col flex-1">
-                    <h3 className="text-lg font-bold mb-1">{plan.name}</h3>
-                    <p className="text-xs text-muted-foreground mb-4">{plan.description}</p>
-                    <div className="flex items-baseline gap-1 mb-6">
-                      <span className="text-4xl font-extrabold">${plan.price}</span>
-                      <span className="text-sm text-muted-foreground">{plan.period}</span>
-                    </div>
-                    <ul className="space-y-2.5 mb-6 flex-1">
-                      {plan.features.map((feat) => (
-                        <li key={feat} className="flex items-start gap-2 text-sm">
-                          <Check className="size-4 text-indigo-500 shrink-0 mt-0.5" />
-                          <span className="text-muted-foreground">{feat}</span>
-                        </li>
-                      ))}
-                    </ul>
-                    <Button onClick={onGetStarted} className={plan.popular ? 'btn-shimmer w-full bg-indigo-500 hover:bg-indigo-600 text-white border-0 shadow-glow-indigo' : 'w-full'} variant={plan.popular ? 'default' : 'outline'}>
-                      Get Started
-                    </Button>
-                  </CardContent>
-                </Card>
-              </StaggerCard>
-            ))}
-          </div>
+          <HostingPlansSection onGetStarted={() => onGetStarted()} />
         </div>
       </section>
 
