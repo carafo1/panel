@@ -115,8 +115,47 @@ export async function PATCH(
       'hidden',
       'archived',
       'promotional',
+      'sshAccess',
+      'stagingEnvironment',
+      'gitDeployment',
+      'cdnIntegration',
     ] as const) {
       if (body[k] !== undefined) data[k] = body[k] === true
+    }
+
+    // Free text shown on the pricing page. Blank clears the field rather than
+    // storing "", so the UI renders nothing instead of an empty line.
+    for (const k of [
+      'tagline',
+      'idealFor',
+      'badge',
+      'uptimeSla',
+      'supportLevel',
+      'malwareScanner',
+      'wafLevel',
+      'ddosLevel',
+    ] as const) {
+      if (body[k] !== undefined) {
+        const trimmed = typeof body[k] === 'string' ? String(body[k]).trim() : ''
+        data[k] = trimmed || null
+      }
+    }
+
+    if (body.dockerSupport !== undefined) {
+      const level = String(body.dockerSupport)
+      data.dockerSupport = ['none', 'optional', 'included'].includes(level)
+        ? level
+        : 'none'
+    }
+
+    if (body.annualPrice !== undefined) {
+      data.annualPrice = toFloatLimit(body.annualPrice)
+    }
+
+    if (body.highlights !== undefined) {
+      data.highlights = Array.isArray(body.highlights)
+        ? JSON.stringify(body.highlights.map(String).filter(Boolean))
+        : null
     }
 
     // Numeric limits (null = unlimited)
@@ -138,6 +177,8 @@ export async function PATCH(
       'maxParkedDomains',
       'maxAddonDomains',
       'maxSslCerts',
+      'backupRetentionDays',
+      'freeMigrations',
     ] as const) {
       if (body[k] !== undefined) data[k] = toLimit(body[k])
     }
@@ -160,7 +201,27 @@ export async function PATCH(
       metadata: { fields: Object.keys(data) },
     }).catch(() => {})
 
-    return NextResponse.json({ success: true, plan: updated })
+    // Return the same shape the list endpoint does — allowedApps and
+    // highlights parsed, not raw JSON strings — so the admin UI doesn't have
+    // to handle two different representations of the same plan.
+    const parseArray = (raw: unknown): string[] | null => {
+      if (typeof raw !== 'string' || !raw) return null
+      try {
+        const parsed = JSON.parse(raw)
+        return Array.isArray(parsed) ? parsed.map(String) : null
+      } catch {
+        return null
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      plan: {
+        ...updated,
+        allowedApps: parseArray(updated.allowedApps),
+        highlights: parseArray(updated.highlights),
+      },
+    })
   } catch (error) {
     console.error('[admin/plans/:id] PATCH failed:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

@@ -118,6 +118,33 @@ model Plan {
   // null/empty = allow all.
   allowedApps String?
 
+  // ── Yearly billing ─────────────────────────────────────────────────
+  // `price` buys one `billingCycle`. `annualPrice` is the discounted
+  // 12-month price behind the monthly/yearly toggle on the pricing page.
+  // Null = this plan is not offered yearly.
+  annualPrice Float?
+
+  // ── Marketing copy (public pricing page) ───────────────────────────
+  tagline    String?  // "Best value for growing businesses"
+  idealFor   String?  // "Business Websites" — first row of the comparison table
+  badge      String?  // "Most Popular" ribbon; null = no ribbon
+  highlights String?  // JSON array of card bullets, in display order
+
+  // ── Comparison-table attributes ────────────────────────────────────
+  // Qualitative tiers that the numeric limit columns above cannot express.
+  backupRetentionDays Int?
+  uptimeSla           String?  // "99.9%"
+  supportLevel        String?  // "Standard" | "High" | "VIP 24/7"
+  malwareScanner      String?  // "Basic" | "Advanced" | "Premium"
+  wafLevel            String?  // "Standard" | "Advanced" | "Enterprise"
+  ddosLevel           String?  // "Standard" | "Advanced" | "Premium"
+  dockerSupport       String?  @default("none") // "none" | "optional" | "included"
+  sshAccess           Boolean  @default(false)
+  stagingEnvironment  Boolean  @default(false)
+  gitDeployment       Boolean  @default(true)
+  cdnIntegration      Boolean  @default(true)
+  freeMigrations      Int?     // free website migrations; null = unlimited
+
   subscriptions Subscription[]
 }
 

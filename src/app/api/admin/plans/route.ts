@@ -50,17 +50,37 @@ function toFloatLimit(v: unknown): number | null {
 }
 
 /** Shape a Plan row for the admin UI (parses allowedApps JSON). */
-function shape(p: Record<string, unknown>) {
-  let allowedApps: string[] | null = null
-  if (typeof p.allowedApps === 'string' && p.allowedApps) {
-    try {
-      const parsed = JSON.parse(p.allowedApps)
-      if (Array.isArray(parsed)) allowedApps = parsed.map(String)
-    } catch {
-      allowedApps = null
-    }
+/** How Docker is offered on a plan. Anything else falls back to "none". */
+const DOCKER_LEVELS = ['none', 'optional', 'included']
+
+/**
+ * Trim a free-text field, treating blank as "not set".
+ *
+ * These columns are nullable on purpose: an empty tagline should render
+ * nothing, not an empty string that still occupies layout.
+ */
+function optionalText(v: unknown): string | null {
+  if (typeof v !== 'string') return null
+  const trimmed = v.trim()
+  return trimmed ? trimmed : null
+}
+
+function parseStringArray(raw: unknown): string[] | null {
+  if (typeof raw !== 'string' || !raw) return null
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed.map(String) : null
+  } catch {
+    return null
   }
-  return { ...p, allowedApps }
+}
+
+function shape(p: Record<string, unknown>) {
+  return {
+    ...p,
+    allowedApps: parseStringArray(p.allowedApps),
+    highlights: parseStringArray(p.highlights),
+  }
 }
 
 /** GET /api/admin/plans?includeArchived=1 */
@@ -222,6 +242,33 @@ export async function POST(request: Request) {
         allowedApps: Array.isArray(body.allowedApps)
           ? JSON.stringify(body.allowedApps.map(String))
           : null,
+
+        // Yearly price behind the pricing-page toggle. Null = monthly only.
+        annualPrice: toFloatLimit(body.annualPrice),
+
+        // Marketing copy
+        tagline: optionalText(body.tagline),
+        idealFor: optionalText(body.idealFor),
+        badge: optionalText(body.badge),
+        highlights: Array.isArray(body.highlights)
+          ? JSON.stringify(body.highlights.map(String).filter(Boolean))
+          : null,
+
+        // Comparison-table attributes
+        backupRetentionDays: toLimit(body.backupRetentionDays),
+        uptimeSla: optionalText(body.uptimeSla),
+        supportLevel: optionalText(body.supportLevel),
+        malwareScanner: optionalText(body.malwareScanner),
+        wafLevel: optionalText(body.wafLevel),
+        ddosLevel: optionalText(body.ddosLevel),
+        dockerSupport: DOCKER_LEVELS.includes(String(body.dockerSupport))
+          ? String(body.dockerSupport)
+          : 'none',
+        sshAccess: body.sshAccess === true,
+        stagingEnvironment: body.stagingEnvironment === true,
+        gitDeployment: body.gitDeployment !== false,
+        cdnIntegration: body.cdnIntegration !== false,
+        freeMigrations: toLimit(body.freeMigrations),
       },
     })
 
