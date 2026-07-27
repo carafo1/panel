@@ -57,31 +57,59 @@ export async function GET(
       )
     }
 
+    const managed = isRegistrarManaged(domain)
+
+    // The real connection state, observed by the worker from live DNS. For an
+    // external domain this is the only trustworthy status we have — the stored
+    // `status` column was written once at creation and never revalidated.
+    const conn = await db.websiteDomain.findUnique({
+      where: { domain: domain.name },
+      select: {
+        verified: true,
+        sslStatus: true,
+        zoneCreated: true,
+        connectionMethod: true,
+        lastCheckError: true,
+        lastCheckedAt: true,
+      },
+    })
+
     return NextResponse.json({
       domain: {
         id: domain.id,
         name: domain.name,
-        status: domain.status,
+        status: managed
+          ? domain.status
+          : conn?.verified
+          ? 'connected'
+          : conn
+          ? 'pending_dns'
+          : 'not_connected',
+        connection: conn
+          ? {
+              verified: conn.verified,
+              sslStatus: conn.sslStatus,
+              zoneCreated: conn.zoneCreated,
+              method: conn.connectionMethod,
+              lastError: conn.lastCheckError,
+              lastCheckedAt: conn.lastCheckedAt,
+            }
+          : null,
         // Whether we hold this at the registrar, or it is registered elsewhere
         // and merely pointed here. Gates every registrar-only control.
         mode: domainMode(domain),
         // SECURITY: hide Dynadot brand + external ID from non-admin customers.
         // Only claim to be the registrar for domains we genuinely hold.
-        registrar: userIsAdmin
-          ? domain.registrar
-          : isRegistrarManaged(domain)
-          ? 'apsamo'
-          : 'external',
-        provider: userIsAdmin
-          ? domain.provider
-          : isRegistrarManaged(domain)
-          ? 'apsamo'
-          : 'external',
+        registrar: userIsAdmin ? domain.registrar : managed ? 'apsamo' : 'external',
+        provider: userIsAdmin ? domain.provider : managed ? 'apsamo' : 'external',
         ...(userIsAdmin ? { externalId: domain.externalId } : {}),
         registeredAt: domain.registeredAt,
-        expiresAt: domain.expiresAt,
-        autoRenew: domain.autoRenew,
-        whoisPrivacy: domain.whoisPrivacy,
+        // Registrar-held facts — null for external domains, where these columns
+        // are schema defaults rather than anything we observed.
+        expiresAt: managed ? domain.expiresAt : null,
+        autoRenew: managed ? domain.autoRenew : null,
+        whoisPrivacy: managed ? domain.whoisPrivacy : null,
+        locked: managed ? domain.locked : null,
         nameservers: domain.nameservers ? JSON.parse(domain.nameservers) : [],
         project: domain.project,
         dnsRecords: domain.dnsRecords,
