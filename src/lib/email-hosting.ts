@@ -268,6 +268,8 @@ export interface EmailDnsRecord {
   priority?: number
   label: string
   required: boolean
+  /** Extra step the customer must take for this record to do anything. */
+  note?: string
 }
 
 /**
@@ -277,6 +279,18 @@ export interface EmailDnsRecord {
  * it has to match the mail server's TLS certificate, so it is deployment
  * configuration, not a constant.
  */
+/**
+ * MTA-STS policy id. Senders re-fetch the policy when this changes, so it is
+ * derived from the date rather than being random — a stable value per day
+ * means republishing the record does not invalidate a working policy.
+ */
+function mtaStsId(): string {
+  const d = new Date()
+  return `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(
+    d.getUTCDate()
+  ).padStart(2, '0')}`
+}
+
 export function emailDnsRecords(
   domain: string,
   opts: { dkimSelector?: string; dkimValue?: string; serverIp?: string } = {}
@@ -322,6 +336,42 @@ export function emailDnsRecords(
       value: host,
       label: 'Autoconfig — Thunderbird setup',
       required: false,
+    },
+    // ── Optional hardening ──
+    // TLS-RPT is DNS-only and works the moment it is published: reporting
+    // senders will email TLS negotiation failures to the address below.
+    {
+      type: 'TXT',
+      host: '_smtp._tls',
+      value: `v=TLSRPTv1; rua=mailto:postmaster@${domain}`,
+      label: 'TLS-RPT — reports of encryption failures',
+      required: false,
+    },
+    // MTA-STS is deliberately last and flagged: the TXT record alone does
+    // nothing. It only takes effect once a policy file is reachable over
+    // HTTPS on a subdomain the customer controls, so publishing just this
+    // would give a false sense of protection.
+    {
+      type: 'TXT',
+      host: '_mta-sts',
+      value: `v=STSv1; id=${mtaStsId()}`,
+      label: 'MTA-STS — enforce encrypted delivery',
+      required: false,
+      note:
+        `Needs a policy file served at https://mta-sts.${domain}/.well-known/mta-sts.txt ` +
+        `containing: version: STSv1 / mode: enforce / mx: ${host} / max_age: 604800. ` +
+        `Without that file this record has no effect.`,
+    },
+    {
+      type: 'TXT',
+      host: 'default._bimi',
+      value: `v=BIMI1; l=https://${domain}/logo.svg`,
+      label: 'BIMI — show your logo in inboxes',
+      required: false,
+      note:
+        'Replace the URL with your own square SVG logo (SVG Tiny PS). Most ' +
+        'providers also require a paid Verified Mark Certificate, and DMARC ' +
+        'must be at quarantine or reject — which the record above already is.',
     },
   ]
   if (opts.dkimValue) {
@@ -543,8 +593,14 @@ export async function syncMailcowLimits(service: {
 
 /**
  * Suspend for non-payment. Deactivating the domain in Mailcow is what makes
- * this real — incoming mail is refused and logins stop. Nothing is deleted, so
- * `resumeEmailService` restores the account intact once the invoice is paid.
+ * this real: sign-in and sending stop.
+ *
+ * Incoming mail keeps being accepted — confirmed against the live server that
+ * Postfix answers 250 for a deactivated domain, and only `mailbox.active = 0`
+ * makes it reject with 550. That is deliberate: bouncing a customer's mail
+ * over an unpaid invoice loses it permanently, whereas this way everything is
+ * waiting once `resumeEmailService` runs. Nothing is deleted until the
+ * retention window expires.
  */
 export async function suspendEmailService(
   serviceId: string

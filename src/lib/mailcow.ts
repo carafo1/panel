@@ -241,7 +241,11 @@ export interface EditDomainOptions {
   maxQuotaMB?: number
   /** Whole-domain quota, MB. Must be >= maxQuotaMB. */
   totalQuotaMB?: number
-  /** false parks the domain: mail stops being accepted and logins fail. */
+  /**
+   * false parks the domain: sign-in and sending stop, but Postfix still
+   * ACCEPTS incoming mail (verified — it answers 250; only setting a mailbox
+   * to active=0 makes it reject with 550).
+   */
   active?: boolean
 }
 

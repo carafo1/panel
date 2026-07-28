@@ -42,11 +42,18 @@ function emptyResult(): LifecycleResult {
 }
 
 /**
- * Stop mail for every service paid for by this subscription.
+ * Cut off access to every service paid for by this subscription.
  *
- * Deactivates the domain in Mailcow — incoming mail is refused and logins
- * stop, but nothing is deleted, so `resumeEmailForSubscription` restores the
- * account intact.
+ * Deactivating the domain in Mailcow stops sign-in and sending. Verified
+ * against the live server: incoming mail is still ACCEPTED and delivered
+ * (Postfix answers 250 for a deactivated domain — only `mailbox.active = 0`
+ * makes it reject with 550).
+ *
+ * That is the behaviour we want. Bouncing mail during a billing dispute means
+ * senders get permanent failures and the customer loses messages they would
+ * otherwise find waiting; this way the mailbox keeps filling and everything is
+ * there the moment they pay. Nothing is deleted until the retention window
+ * expires.
  */
 export async function suspendEmailForSubscription(
   subscriptionId: string
@@ -71,7 +78,7 @@ export async function suspendEmailForSubscription(
     await createNotification({
       userId: s.userId,
       title: 'Email hosting suspended',
-      message: `Mail for ${s.domain} has been suspended for non-payment. Your mailboxes and messages are safe and will be restored the moment payment is confirmed — they are kept for ${RETENTION_DAYS} days.`,
+      message: `Sign-in for ${s.domain} has been suspended for non-payment. Incoming mail is still being received and will be waiting for you — access is restored the moment payment is confirmed. Mailboxes are kept for ${RETENTION_DAYS} days.`,
       type: 'error',
       link: '/?tab=email',
     }).catch(() => {})
@@ -84,8 +91,8 @@ export async function suspendEmailForSubscription(
         to: user.email,
         subject: `Email for ${s.domain} has been suspended`,
         html: `<p>Hi ${user.name || 'there'},</p>
-<p>Mail for <strong>${s.domain}</strong> has been suspended because the subscription is unpaid. Incoming messages are currently being refused and sign-in is disabled.</p>
-<p><strong>Nothing has been deleted.</strong> Your mailboxes and all stored mail are kept for <strong>${RETENTION_DAYS} days</strong> and are restored as soon as your payment is confirmed.</p>
+<p>Access to email for <strong>${s.domain}</strong> has been suspended because the subscription is unpaid. Sign-in and sending are disabled.</p>
+<p><strong>You are not losing mail.</strong> Incoming messages are still being received and will be waiting in your mailboxes. Nothing has been deleted, and everything is kept for <strong>${RETENTION_DAYS} days</strong> — access is restored as soon as your payment is confirmed.</p>
 <p>— Apsamo Technology</p>`,
       }).catch(() => {})
     }
@@ -116,7 +123,7 @@ export async function resumeEmailForSubscription(
     await createNotification({
       userId: s.userId,
       title: 'Email hosting restored',
-      message: `Mail for ${s.domain} is active again. Any messages sent while it was suspended were not accepted, so ask senders to retry.`,
+      message: `Mail for ${s.domain} is active again. Anything that arrived while it was suspended is waiting in your mailboxes.`,
       type: 'success',
       link: '/?tab=email',
     }).catch(() => {})

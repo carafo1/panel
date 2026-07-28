@@ -26,6 +26,8 @@ import {
   Copy,
   Check,
   KeyRound,
+  AtSign,
+  Download,
   ExternalLink,
   AlertTriangle,
   ArrowLeft,
@@ -109,6 +111,7 @@ interface DnsRecord {
   priority?: number
   label: string
   required: boolean
+  note?: string
 }
 
 interface ServiceDetail {
@@ -207,6 +210,13 @@ interface AppPasswordRow {
   name: string
   active: boolean
   createdAt?: string
+}
+
+interface MailAliasRow {
+  id: number
+  address: string
+  destinations: string[]
+  active: boolean
 }
 
 interface AddonOrder {
@@ -689,6 +699,12 @@ function ServiceDetailView({
   const [password, setPassword] = useState('')
   const [displayName, setDisplayName] = useState('')
 
+  const [aliases, setAliases] = useState<MailAliasRow[] | null>(null)
+  const [aliasOpen, setAliasOpen] = useState(false)
+  const [aliasLocal, setAliasLocal] = useState('')
+  const [aliasDests, setAliasDests] = useState('')
+  const [catchAll, setCatchAll] = useState('')
+
   const [pwTarget, setPwTarget] = useState<string | null>(null)
   const [newPassword, setNewPassword] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
@@ -727,6 +743,127 @@ function ServiceDetailView({
       setRefreshing(false)
     }
   }, [serviceId])
+
+  const loadAliases = useCallback(async () => {
+    try {
+      const [a, c] = await Promise.all([
+        api<{ aliases: MailAliasRow[] }>(`/api/email-hosting/${serviceId}/aliases`),
+        api<{ catchAll: { destinations: string[] } | null }>(
+          `/api/email-hosting/${serviceId}/catch-all`
+        ),
+      ])
+      setAliases(a.aliases || [])
+      setCatchAll(c.catchAll?.destinations?.[0] || '')
+    } catch {
+      setAliases([])
+    }
+  }, [serviceId])
+
+  useEffect(() => {
+    void loadAliases()
+  }, [loadAliases])
+
+  const createAliasRow = async () => {
+    setBusy(true)
+    try {
+      // One address per line or comma-separated — people paste both.
+      const destinations = aliasDests
+        .split(/[\n,]/)
+        .map((s) => s.trim())
+        .filter(Boolean)
+      await api(`/api/email-hosting/${serviceId}/aliases`, {
+        method: 'POST',
+        body: JSON.stringify({ localPart: aliasLocal.trim(), destinations }),
+      })
+      toast.success(`${aliasLocal}@${detail?.service.domain} created`)
+      setAliasOpen(false)
+      setAliasLocal('')
+      setAliasDests('')
+      await loadAliases()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not create the alias')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const toggleAlias = async (a: MailAliasRow) => {
+    setBusy(true)
+    try {
+      await api(`/api/email-hosting/${serviceId}/aliases`, {
+        method: 'PATCH',
+        body: JSON.stringify({ id: a.id, active: !a.active }),
+      })
+      await loadAliases()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not update the alias')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const removeAlias = async (a: MailAliasRow) => {
+    setBusy(true)
+    try {
+      await api(`/api/email-hosting/${serviceId}/aliases`, {
+        method: 'DELETE',
+        body: JSON.stringify({ id: a.id }),
+      })
+      toast.success(`${a.address} deleted`)
+      await loadAliases()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not delete the alias')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /**
+   * Download the configuration snapshot. Fetched rather than linked so the
+   * Authorization header is sent — a plain <a> would hit the endpoint
+   * unauthenticated and get a 401 JSON file.
+   */
+  const exportConfig = async () => {
+    setBusy(true)
+    try {
+      const res = await fetch(`/api/email-hosting/${serviceId}/export`, {
+        headers: authHeaders(),
+        cache: 'no-store',
+      })
+      if (!res.ok) throw new Error('Export failed')
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `apsamo-email-${detail?.service.domain || 'export'}.json`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+      toast.success('Configuration exported')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Export failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const saveCatchAll = async (destination: string | null) => {
+    setBusy(true)
+    try {
+      await api(`/api/email-hosting/${serviceId}/catch-all`, {
+        method: 'PUT',
+        body: JSON.stringify({ destination }),
+      })
+      toast.success(destination ? 'Catch-all saved' : 'Catch-all turned off')
+      if (!destination) setCatchAll('')
+      await loadAliases()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not save the catch-all')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   useEffect(() => {
     void load()
@@ -981,6 +1118,16 @@ function ServiceDetailView({
           <Button size="sm" variant="outline" onClick={() => setUpgradeOpen(true)}>
             Change plan
           </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1"
+            onClick={() => void exportConfig()}
+            disabled={busy}
+          >
+            <Download className="h-4 w-4" />
+            Export
+          </Button>
           <Button asChild size="sm" variant="outline">
             <a href={detail.webmail} target="_blank" rel="noopener noreferrer" className="gap-1">
               Open webmail
@@ -997,8 +1144,9 @@ function ServiceDetailView({
             <div className="text-sm">
               <p className="font-medium">This service is suspended</p>
               <p className="text-muted-foreground">
-                Incoming mail is being refused and sign-in is disabled. Settle the outstanding
-                invoice in Billing to restore service — nothing has been deleted.
+                Sign-in and sending are disabled. Incoming mail is still being received and
+                will be waiting for you — settle the outstanding invoice in Billing to
+                restore access. Nothing has been deleted.
               </p>
             </div>
           </CardContent>
@@ -1069,6 +1217,7 @@ function ServiceDetailView({
       <Tabs defaultValue="mailboxes">
         <TabsList>
           <TabsTrigger value="mailboxes">Mailboxes</TabsTrigger>
+          <TabsTrigger value="aliases">Aliases &amp; lists</TabsTrigger>
           <TabsTrigger value="dns">DNS setup</TabsTrigger>
         </TabsList>
 
@@ -1196,6 +1345,144 @@ function ServiceDetailView({
           </Card>
         </TabsContent>
 
+        {/* ── Aliases & distribution lists ── */}
+        <TabsContent value="aliases" className="space-y-4 pt-4">
+          <div className="flex items-start justify-between gap-3">
+            <p className="text-sm text-muted-foreground max-w-xl">
+              An alias delivers to somewhere else without using up a mailbox. Give it
+              one destination to forward, or several to make a distribution list —
+              mail to <span className="font-mono text-xs">team@{detail.service.domain}</span>{' '}
+              reaching everyone on it.
+            </p>
+            <Button
+              size="sm"
+              className="gap-1 shrink-0"
+              disabled={detail.service.status !== 'active'}
+              onClick={() => {
+                setAliasOpen(true)
+                setAliasLocal('')
+                setAliasDests('')
+              }}
+            >
+              <Plus className="h-4 w-4" />
+              New alias
+            </Button>
+          </div>
+
+          <Card>
+            <CardContent className="p-0">
+              {aliases === null ? (
+                <div className="p-6 space-y-2">
+                  <Skeleton className="h-8 w-full" />
+                  <Skeleton className="h-8 w-full" />
+                </div>
+              ) : aliases.length === 0 ? (
+                <div className="py-12 text-center">
+                  <AtSign className="h-8 w-8 mx-auto text-muted-foreground/50 mb-3" />
+                  <p className="font-medium">No aliases yet</p>
+                  <p className="text-sm text-muted-foreground">
+                    Try sales@{detail.service.domain} forwarding to your own inbox.
+                  </p>
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Address</TableHead>
+                      <TableHead>Delivers to</TableHead>
+                      <TableHead className="w-[1%]" />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {aliases.map((a) => (
+                      <TableRow key={a.id}>
+                        <TableCell className="font-medium">
+                          <div className="flex items-center gap-2">
+                            {a.address}
+                            {!a.active && (
+                              <Badge variant="outline" className="text-xs">
+                                Disabled
+                              </Badge>
+                            )}
+                            {a.destinations.length > 1 && (
+                              <Badge variant="secondary" className="text-xs">
+                                list · {a.destinations.length}
+                              </Badge>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-muted-foreground text-sm">
+                          {a.destinations.join(', ')}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center justify-end gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8"
+                              disabled={busy}
+                              onClick={() => void toggleAlias(a)}
+                            >
+                              {a.active ? 'Disable' : 'Enable'}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+                              disabled={busy}
+                              onClick={() => void removeAlias(a)}
+                              aria-label={`Delete ${a.address}`}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Catch-all */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Catch-all</CardTitle>
+              <CardDescription>
+                Where mail to any address that doesn&apos;t exist should go. Leave it
+                off unless you need it — it accepts everything, so spam usually rises
+                sharply.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-wrap items-center gap-2">
+              <Input
+                value={catchAll}
+                onChange={(e) => setCatchAll(e.target.value)}
+                placeholder={`owner@${detail.service.domain}`}
+                className="max-w-xs"
+              />
+              <Button
+                size="sm"
+                disabled={busy || detail.service.status !== 'active'}
+                onClick={() => void saveCatchAll(catchAll.trim() || null)}
+              >
+                Save
+              </Button>
+              {catchAll && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => void saveCatchAll(null)}
+                >
+                  Turn off
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
         {/* ── DNS ── */}
         <TabsContent value="dns" className="space-y-4 pt-4">
           <Card>
@@ -1238,6 +1525,12 @@ function ServiceDetailView({
                             value={r.priority !== undefined ? `${r.priority} ${r.value}` : r.value}
                           />
                         </div>
+                        {r.note && (
+                          <p className="text-[11px] text-amber-600 mt-1 flex items-start gap-1">
+                            <AlertTriangle className="h-3 w-3 shrink-0 mt-0.5" />
+                            {r.note}
+                          </p>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -1544,6 +1837,63 @@ function ServiceDetailView({
               )}
             </TabsContent>
           </Tabs>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── New alias dialog ── */}
+      <Dialog open={aliasOpen} onOpenChange={setAliasOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>New alias</DialogTitle>
+            <DialogDescription>
+              Mail sent to this address is delivered to the destinations below. It
+              does not use up one of your mailboxes.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="al-local">Address</Label>
+              <div className="flex items-center">
+                <Input
+                  id="al-local"
+                  value={aliasLocal}
+                  onChange={(e) => setAliasLocal(e.target.value)}
+                  placeholder="sales"
+                  className="rounded-r-none"
+                  autoComplete="off"
+                />
+                <span className="border border-l-0 rounded-r-md px-3 h-9 flex items-center text-sm text-muted-foreground bg-muted whitespace-nowrap">
+                  @{detail.service.domain}
+                </span>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="al-dest">Deliver to</Label>
+              <textarea
+                id="al-dest"
+                value={aliasDests}
+                onChange={(e) => setAliasDests(e.target.value)}
+                placeholder={`you@${detail.service.domain}\ncolleague@example.com`}
+                rows={4}
+                className="w-full rounded-md border bg-background px-3 py-2 text-sm font-mono"
+              />
+              <p className="text-xs text-muted-foreground">
+                One address per line. Add several to make it a distribution list.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAliasOpen(false)} disabled={busy}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => void createAliasRow()}
+              disabled={busy || !aliasLocal.trim() || !aliasDests.trim()}
+            >
+              {busy && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+              Create alias
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
