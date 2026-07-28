@@ -25,6 +25,8 @@ import {
   getEmailUsage,
   emailDnsRecords,
   addonMonthlyCost,
+  mailClientSettings,
+  webmailUrl,
 } from '@/lib/email-hosting'
 import { listMailboxes, getDomain } from '@/lib/mailcow'
 import { listAliases } from '@/lib/mailcow-manage'
@@ -106,6 +108,8 @@ export async function GET(
         dkimValue: dkim?.public,
         dkimSelector: dkim?.selector,
       }),
+      mailClient: mailClientSettings(),
+      webmail: webmailUrl(),
     }
 
     await logAudit({

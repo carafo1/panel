@@ -808,6 +808,9 @@ export async function sendWelcomeEmail(
 
   const records = emailDnsRecords(service.domain, { dkimValue, dkimSelector })
   const limits = effectiveLimits(service)
+  const settings = mailClientSettings()
+  const imap = settings.servers.find((s) => s.protocol === 'IMAP' && s.recommended)
+  const smtp = settings.servers.find((s) => s.protocol === 'SMTP' && s.recommended)
   const rows = records
     .map(
       (r) => `<tr>
@@ -844,10 +847,11 @@ ${rows}
 <p>Create your mailboxes in the panel under <strong>Email Hosting</strong>, then
 sign in to webmail at <a href="${webmailUrl()}">${webmailUrl()}</a>.</p>
 
-<p>Mail server settings for Outlook, Apple Mail or your phone:<br>
-IMAP: <strong>${process.env.MAIL_SERVER_HOSTNAME || 'mail.apsamo.com'}</strong>, port 993 (SSL/TLS)<br>
-SMTP: <strong>${process.env.MAIL_SERVER_HOSTNAME || 'mail.apsamo.com'}</strong>, port 587 (STARTTLS)<br>
-Username is the full email address.</p>
+<p><strong>Mail settings for Outlook, Apple Mail or your phone</strong><br>
+Server (incoming &amp; outgoing): <strong>${settings.host}</strong> — not your own domain.<br>
+IMAP: port <strong>${imap?.port}</strong> (${imap?.security}) ·
+SMTP: port <strong>${smtp?.port}</strong> (${smtp?.security})<br>
+Username is your full email address.</p>
 
 <p>— Apsamo Technology</p>`,
   })
@@ -869,4 +873,55 @@ export function webmailUrl(): string {
   if (configured) return configured.replace(/\/+$/, '')
   const host = process.env.MAIL_SERVER_HOSTNAME || 'mail.apsamo.com'
   return `https://${host}/SOGo/`
+}
+
+/** Hostname of the mail server itself — where clients connect. */
+export function mailServerHost(): string {
+  return process.env.MAIL_SERVER_HOSTNAME || 'mail.apsamo.com'
+}
+
+export interface MailClientServer {
+  protocol: 'IMAP' | 'POP3' | 'SMTP'
+  host: string
+  port: number
+  security: 'SSL/TLS' | 'STARTTLS'
+  /** True for the setting we advise customers to use. */
+  recommended: boolean
+}
+
+export interface MailClientSettings {
+  host: string
+  /** Always the full email address, per Mailcow. */
+  usernameHint: string
+  servers: MailClientServer[]
+  /** Why the host is the mail server, not the customer's own domain. */
+  note: string
+}
+
+/**
+ * The settings a customer types into Outlook, Apple Mail or their phone.
+ *
+ * The host is the mail SERVER (mail.apsamo.com), never the customer's own
+ * domain: the TLS certificate on the mail server covers only that name
+ * (verified — the cert's SAN is a single DNS entry), so a client told to use
+ * `mail.theirdomain.com` would hit a certificate-mismatch error. All six
+ * ports were confirmed open on the live server before these were published.
+ */
+export function mailClientSettings(mailbox?: string): MailClientSettings {
+  const host = mailServerHost()
+  return {
+    host,
+    usernameHint: mailbox || 'your full email address',
+    note:
+      `Use ${host} as the server name for both incoming and outgoing mail — ` +
+      `not your own domain. Sign in with your full email address as the username.`,
+    servers: [
+      { protocol: 'IMAP', host, port: 993, security: 'SSL/TLS', recommended: true },
+      { protocol: 'IMAP', host, port: 143, security: 'STARTTLS', recommended: false },
+      { protocol: 'POP3', host, port: 995, security: 'SSL/TLS', recommended: false },
+      { protocol: 'POP3', host, port: 110, security: 'STARTTLS', recommended: false },
+      { protocol: 'SMTP', host, port: 465, security: 'SSL/TLS', recommended: true },
+      { protocol: 'SMTP', host, port: 587, security: 'STARTTLS', recommended: false },
+    ],
+  }
 }

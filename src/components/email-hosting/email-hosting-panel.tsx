@@ -114,6 +114,21 @@ interface DnsRecord {
   note?: string
 }
 
+interface MailClientServer {
+  protocol: 'IMAP' | 'POP3' | 'SMTP'
+  host: string
+  port: number
+  security: 'SSL/TLS' | 'STARTTLS'
+  recommended: boolean
+}
+
+interface MailClientSettings {
+  host: string
+  usernameHint: string
+  servers: MailClientServer[]
+  note: string
+}
+
 interface ServiceDetail {
   service: {
     id: string
@@ -128,6 +143,7 @@ interface ServiceDetail {
   usage: Usage | null
   dns: DnsRecord[]
   webmail: string
+  mailClient?: MailClientSettings
 }
 
 interface MailboxRow {
@@ -1218,6 +1234,7 @@ function ServiceDetailView({
         <TabsList>
           <TabsTrigger value="mailboxes">Mailboxes</TabsTrigger>
           <TabsTrigger value="aliases">Aliases &amp; lists</TabsTrigger>
+          <TabsTrigger value="connect">Connect a device</TabsTrigger>
           <TabsTrigger value="dns">DNS setup</TabsTrigger>
         </TabsList>
 
@@ -1479,6 +1496,82 @@ function ServiceDetailView({
                   Turn off
                 </Button>
               )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Connect a device ── */}
+        <TabsContent value="connect" className="space-y-4 pt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Set up Outlook, Apple Mail or your phone</CardTitle>
+              <CardDescription>
+                {detail.mailClient?.note ||
+                  'Use these settings in any mail app. Sign in with your full email address.'}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex flex-wrap gap-3">
+                <div className="rounded-md border px-3 py-2 flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">Server</span>
+                  <code className="text-sm">{detail.mailClient?.host || 'mail.apsamo.com'}</code>
+                  <CopyButton value={detail.mailClient?.host || 'mail.apsamo.com'} />
+                </div>
+                <div className="rounded-md border px-3 py-2 flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">Username</span>
+                  <code className="text-sm">full email address</code>
+                </div>
+                <div className="rounded-md border px-3 py-2 flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">Password</span>
+                  <code className="text-sm">the mailbox&apos;s password</code>
+                </div>
+              </div>
+
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Purpose</TableHead>
+                    <TableHead>Server</TableHead>
+                    <TableHead className="w-[90px]">Port</TableHead>
+                    <TableHead>Security</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(detail.mailClient?.servers || []).map((s, i) => (
+                    <TableRow key={`${s.protocol}-${s.port}`} className={i > 0 && !s.recommended ? 'opacity-70' : ''}>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">
+                            {s.protocol === 'SMTP' ? 'Outgoing (SMTP)' : `Incoming (${s.protocol})`}
+                          </span>
+                          {s.recommended && (
+                            <Badge variant="secondary" className="text-[10px]">
+                              recommended
+                            </Badge>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="font-mono text-xs">{s.host}</TableCell>
+                      <TableCell className="font-mono text-xs">{s.port}</TableCell>
+                      <TableCell className="text-sm">{s.security}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+
+              <p className="text-xs text-muted-foreground">
+                IMAP keeps mail on the server and in sync across devices — use it unless you
+                specifically want POP3. Prefer webmail?{' '}
+                <a
+                  href={detail.webmail}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline"
+                >
+                  Open it here
+                </a>
+                .
+              </p>
             </CardContent>
           </Card>
         </TabsContent>

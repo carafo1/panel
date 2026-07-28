@@ -14,6 +14,7 @@ import {
   getEmailUsage,
   emailDnsRecords,
   webmailUrl,
+  mailClientSettings,
 } from '@/lib/email-hosting'
 import { getDomain } from '@/lib/mailcow'
 
@@ -64,6 +65,7 @@ export async function GET(
       usage,
       dns: emailDnsRecords(service.domain, { dkimValue, dkimSelector }),
       webmail: webmailUrl(),
+      mailClient: mailClientSettings(),
     })
   } catch (err) {
     const { error, status } = emailServiceErrorResponse(err)

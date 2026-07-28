@@ -15,7 +15,7 @@ import {
   emailServiceErrorResponse,
 } from '@/lib/email-service-guard'
 import { effectiveLimits, getEmailUsage } from '@/lib/email-hosting'
-import { listMailboxes, createMailbox } from '@/lib/mailcow'
+import { listMailboxes, createMailbox, friendlyMailcowError } from '@/lib/mailcow'
 
 const createSchema = z.object({
   localPart: z
@@ -110,7 +110,10 @@ export async function POST(
     })
 
     if (!result.success) {
-      return NextResponse.json({ error: result.error }, { status: 422 })
+      return NextResponse.json(
+        { error: friendlyMailcowError(result.error) },
+        { status: 422 }
+      )
     }
     return NextResponse.json({ ok: true, address, quotaGB })
   } catch (err) {
