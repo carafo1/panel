@@ -593,8 +593,14 @@ export async function syncMailcowLimits(service: {
 
 /**
  * Suspend for non-payment. Deactivating the domain in Mailcow is what makes
- * this real — incoming mail is refused and logins stop. Nothing is deleted, so
- * `resumeEmailService` restores the account intact once the invoice is paid.
+ * this real: sign-in and sending stop.
+ *
+ * Incoming mail keeps being accepted — confirmed against the live server that
+ * Postfix answers 250 for a deactivated domain, and only `mailbox.active = 0`
+ * makes it reject with 550. That is deliberate: bouncing a customer's mail
+ * over an unpaid invoice loses it permanently, whereas this way everything is
+ * waiting once `resumeEmailService` runs. Nothing is deleted until the
+ * retention window expires.
  */
 export async function suspendEmailService(
   serviceId: string

@@ -1144,8 +1144,9 @@ function ServiceDetailView({
             <div className="text-sm">
               <p className="font-medium">This service is suspended</p>
               <p className="text-muted-foreground">
-                Incoming mail is being refused and sign-in is disabled. Settle the outstanding
-                invoice in Billing to restore service — nothing has been deleted.
+                Sign-in and sending are disabled. Incoming mail is still being received and
+                will be waiting for you — settle the outstanding invoice in Billing to
+                restore access. Nothing has been deleted.
               </p>
             </div>
           </CardContent>
