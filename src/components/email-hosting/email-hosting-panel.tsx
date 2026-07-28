@@ -31,6 +31,7 @@ import {
   ArrowLeft,
   ShieldCheck,
   Sparkles,
+  Settings2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -38,6 +39,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Switch } from '@/components/ui/switch'
+import { Textarea } from '@/components/ui/textarea'
 import {
   Card,
   CardContent,
@@ -188,6 +191,22 @@ interface AddonInfo {
     extraStorage: { label: string; price: number; blockGB: number }
   }
   current: { extraMailboxes: number; extraStorageGB: number; monthlyCost: number }
+}
+
+interface AutoReplyState {
+  enabled: boolean
+  subject: string
+  message: string
+  startDate: string | null
+  endDate: string | null
+  intervalDays: number
+}
+
+interface AppPasswordRow {
+  id: number
+  name: string
+  active: boolean
+  createdAt?: string
 }
 
 interface AddonOrder {
@@ -680,6 +699,13 @@ function ServiceDetailView({
   const [upgradePlanId, setUpgradePlanId] = useState('')
   const [upgradeResult, setUpgradeResult] = useState<CheckoutResult | null>(null)
 
+  // Per-mailbox settings (auto-reply + app passwords)
+  const [settingsFor, setSettingsFor] = useState<string | null>(null)
+  const [autoReply, setAutoReply] = useState<AutoReplyState | null>(null)
+  const [appPasswords, setAppPasswords] = useState<AppPasswordRow[] | null>(null)
+  const [newAppName, setNewAppName] = useState('')
+  const [newAppSecret, setNewAppSecret] = useState('')
+
   const [addonOpen, setAddonOpen] = useState(false)
   const [addonInfo, setAddonInfo] = useState<AddonInfo | null>(null)
   const [addBoxes, setAddBoxes] = useState(0)
@@ -719,6 +745,82 @@ function ServiceDetailView({
       .then(setAddonInfo)
       .catch(() => setAddonInfo(null))
   }, [addonOpen, serviceId])
+
+  useEffect(() => {
+    if (!settingsFor) return
+    const enc = encodeURIComponent(settingsFor)
+    setAutoReply(null)
+    setAppPasswords(null)
+    api<{ autoReply: AutoReplyState }>(
+      `/api/email-hosting/${serviceId}/mailboxes/${enc}/autoreply`
+    )
+      .then((d) => setAutoReply(d.autoReply))
+      .catch(() => setAutoReply(null))
+    api<{ appPasswords: AppPasswordRow[] }>(
+      `/api/email-hosting/${serviceId}/mailboxes/${enc}/app-passwords`
+    )
+      .then((d) => setAppPasswords(d.appPasswords || []))
+      .catch(() => setAppPasswords([]))
+  }, [settingsFor, serviceId])
+
+  const saveAutoReply = async () => {
+    if (!settingsFor || !autoReply) return
+    setBusy(true)
+    try {
+      const d = await api<{ autoReply: AutoReplyState }>(
+        `/api/email-hosting/${serviceId}/mailboxes/${encodeURIComponent(settingsFor)}/autoreply`,
+        { method: 'PUT', body: JSON.stringify(autoReply) }
+      )
+      setAutoReply(d.autoReply)
+      toast.success(autoReply.enabled ? 'Auto-reply is on' : 'Auto-reply turned off')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not save the auto-reply')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const addAppPassword = async () => {
+    if (!settingsFor) return
+    setBusy(true)
+    try {
+      await api(
+        `/api/email-hosting/${serviceId}/mailboxes/${encodeURIComponent(settingsFor)}/app-passwords`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ name: newAppName.trim(), password: newAppSecret }),
+        }
+      )
+      toast.success(`"${newAppName.trim()}" created — save the password now, it is not shown again`)
+      setNewAppName('')
+      setNewAppSecret('')
+      const d = await api<{ appPasswords: AppPasswordRow[] }>(
+        `/api/email-hosting/${serviceId}/mailboxes/${encodeURIComponent(settingsFor)}/app-passwords`
+      )
+      setAppPasswords(d.appPasswords || [])
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not create the app password')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const revokeAppPassword = async (id: number) => {
+    if (!settingsFor) return
+    setBusy(true)
+    try {
+      await api(
+        `/api/email-hosting/${serviceId}/mailboxes/${encodeURIComponent(settingsFor)}/app-passwords`,
+        { method: 'DELETE', body: JSON.stringify({ id }) }
+      )
+      setAppPasswords((prev) => (prev || []).filter((p) => p.id !== id))
+      toast.success('App password revoked')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not revoke it')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const addonPrice = addonInfo
     ? Math.round(
@@ -1054,6 +1156,15 @@ function ServiceDetailView({
                               variant="ghost"
                               size="sm"
                               className="h-8 gap-1"
+                              onClick={() => setSettingsFor(b.address)}
+                            >
+                              <Settings2 className="h-3.5 w-3.5" />
+                              Settings
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 gap-1"
                               onClick={() => {
                                 setPwTarget(b.address)
                                 setNewPassword('')
@@ -1230,6 +1341,209 @@ function ServiceDetailView({
               Update password
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Mailbox settings: auto-reply + app passwords ── */}
+      <Dialog open={settingsFor !== null} onOpenChange={(o) => !o && setSettingsFor(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{settingsFor}</DialogTitle>
+            <DialogDescription>
+              Auto-reply and the app passwords this mailbox can sign in with.
+            </DialogDescription>
+          </DialogHeader>
+
+          <Tabs defaultValue="autoreply">
+            <TabsList>
+              <TabsTrigger value="autoreply">Auto-reply</TabsTrigger>
+              <TabsTrigger value="apps">App passwords</TabsTrigger>
+            </TabsList>
+
+            {/* Auto-reply */}
+            <TabsContent value="autoreply" className="space-y-4 pt-4">
+              {!autoReply ? (
+                <Skeleton className="h-56 w-full" />
+              ) : (
+                <>
+                  <div className="flex items-center justify-between rounded-md border p-3">
+                    <div>
+                      <p className="font-medium text-sm">Send an automatic reply</p>
+                      <p className="text-xs text-muted-foreground">
+                        Replies once per sender every {autoReply.intervalDays} day
+                        {autoReply.intervalDays === 1 ? '' : 's'}.
+                      </p>
+                    </div>
+                    <Switch
+                      checked={autoReply.enabled}
+                      onCheckedChange={(v) =>
+                        setAutoReply({ ...autoReply, enabled: v })
+                      }
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="ar-subject">Subject</Label>
+                    <Input
+                      id="ar-subject"
+                      value={autoReply.subject}
+                      onChange={(e) =>
+                        setAutoReply({ ...autoReply, subject: e.target.value })
+                      }
+                      placeholder="Out of office"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="ar-message">Message</Label>
+                    <Textarea
+                      id="ar-message"
+                      rows={5}
+                      value={autoReply.message}
+                      onChange={(e) =>
+                        setAutoReply({ ...autoReply, message: e.target.value })
+                      }
+                      placeholder={`Hi,\n\nI'm away until 10 August and will reply when I'm back.\nFor anything urgent, please contact a colleague.`}
+                    />
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <div className="space-y-2">
+                      <Label htmlFor="ar-start">Start (optional)</Label>
+                      <Input
+                        id="ar-start"
+                        type="date"
+                        value={autoReply.startDate || ''}
+                        onChange={(e) =>
+                          setAutoReply({
+                            ...autoReply,
+                            startDate: e.target.value || null,
+                          })
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="ar-end">End (optional)</Label>
+                      <Input
+                        id="ar-end"
+                        type="date"
+                        value={autoReply.endDate || ''}
+                        onChange={(e) =>
+                          setAutoReply({
+                            ...autoReply,
+                            endDate: e.target.value || null,
+                          })
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="ar-days">Repeat after (days)</Label>
+                      <Input
+                        id="ar-days"
+                        type="number"
+                        min={1}
+                        max={30}
+                        value={autoReply.intervalDays}
+                        onChange={(e) =>
+                          setAutoReply({
+                            ...autoReply,
+                            intervalDays: Math.max(1, Number(e.target.value) || 1),
+                          })
+                        }
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end">
+                    <Button onClick={() => void saveAutoReply()} disabled={busy}>
+                      {busy && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+                      Save auto-reply
+                    </Button>
+                  </div>
+                </>
+              )}
+            </TabsContent>
+
+            {/* App passwords */}
+            <TabsContent value="apps" className="space-y-4 pt-4">
+              <p className="text-sm text-muted-foreground">
+                Give a phone or mail app its own password so you never type the
+                account password into it — and can revoke just that device later.
+              </p>
+
+              <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+                <div className="space-y-2">
+                  <Label htmlFor="ap-name">Name</Label>
+                  <Input
+                    id="ap-name"
+                    value={newAppName}
+                    onChange={(e) => setNewAppName(e.target.value)}
+                    placeholder="iPhone Mail"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="ap-secret">Password</Label>
+                  <Input
+                    id="ap-secret"
+                    value={newAppSecret}
+                    onChange={(e) => setNewAppSecret(e.target.value)}
+                    placeholder="At least 12 characters"
+                  />
+                </div>
+                <Button
+                  onClick={() => void addAppPassword()}
+                  disabled={busy || !newAppName.trim() || newAppSecret.length < 12}
+                >
+                  Create
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Choose something long and random — it is stored hashed and cannot be
+                shown to you again.
+              </p>
+
+              {appPasswords === null ? (
+                <Skeleton className="h-20 w-full" />
+              ) : appPasswords.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-4 text-center">
+                  No app passwords yet.
+                </p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="w-[1%]" />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {appPasswords.map((p) => (
+                      <TableRow key={p.id}>
+                        <TableCell className="font-medium">{p.name}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline">
+                            {p.active ? 'Active' : 'Disabled'}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 text-destructive hover:text-destructive"
+                            disabled={busy}
+                            onClick={() => void revokeAppPassword(p.id)}
+                          >
+                            Revoke
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </TabsContent>
+          </Tabs>
         </DialogContent>
       </Dialog>
 
