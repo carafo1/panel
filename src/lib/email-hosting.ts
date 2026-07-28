@@ -845,7 +845,8 @@ ${rows}
 </table>
 
 <p>Create your mailboxes in the panel under <strong>Email Hosting</strong>, then
-sign in to webmail at <a href="${webmailUrl()}">${webmailUrl()}</a>.</p>
+sign in to webmail at <a href="${webmailUrl()}">${webmailUrl()}</a> using the full
+mailbox address and its own password.</p>
 
 <p><strong>Mail settings for Outlook, Apple Mail or your phone</strong><br>
 Server (incoming &amp; outgoing): <strong>${settings.host}</strong> — not your own domain.<br>
@@ -868,11 +869,20 @@ Username is your full email address.</p>
 }
 
 /** Webmail entry point shown to customers. */
+/**
+ * Where to send a customer for webmail.
+ *
+ * This is the mail host's FRONT PAGE, not `/SOGo/`. Mailcow deliberately
+ * writes a random, unusable password hash into SOGo's authentication view
+ * ("generate random password for sogo to deny direct login" — its own source),
+ * so the SOGo login form rejects every real password. A SOGo session is only
+ * issued after signing in at the mail host, which then performs the SSO.
+ * Pointing customers at /SOGo/ sent them to a page that could never work.
+ */
 export function webmailUrl(): string {
   const configured = process.env.WEBMAIL_URL
   if (configured) return configured.replace(/\/+$/, '')
-  const host = process.env.MAIL_SERVER_HOSTNAME || 'mail.apsamo.com'
-  return `https://${host}/SOGo/`
+  return `https://${mailServerHost()}/`
 }
 
 /** Hostname of the mail server itself — where clients connect. */

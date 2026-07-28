@@ -1010,6 +1010,14 @@ function ServiceDetailView({
   const atLimit = usage?.atMailboxLimit ?? false
 
   /**
+   * Webmail is entered through the mail host's own front page, not /SOGo/
+   * directly: mailcow deliberately writes an unusable password hash into
+   * SOGo's auth view to block direct logins, and hands out a SOGo session
+   * only after signing in here. Going straight to /SOGo/ always fails.
+   */
+  const mailHome = `https://${detail?.mailClient?.host || 'mail.apsamo.com'}/`
+
+  /**
    * A plan change is a purchase, so it goes through checkout exactly like the
    * first one. Provisioning applies the new allowance to the existing service
    * (and pushes it to the mail server) once the payment is confirmed.
@@ -1145,7 +1153,8 @@ function ServiceDetailView({
             Export
           </Button>
           <Button asChild size="sm" variant="outline">
-            <a href={detail.webmail} target="_blank" rel="noopener noreferrer" className="gap-1">
+            {/* Mail host front page, not /SOGo/ — see `mailHome` above. */}
+            <a href={mailHome} target="_blank" rel="noopener noreferrer" className="gap-1">
               Open webmail
               <ExternalLink className="h-3.5 w-3.5" />
             </a>
@@ -1233,6 +1242,7 @@ function ServiceDetailView({
       <Tabs defaultValue="mailboxes">
         <TabsList>
           <TabsTrigger value="mailboxes">Mailboxes</TabsTrigger>
+          <TabsTrigger value="webmail">Webmail</TabsTrigger>
           <TabsTrigger value="aliases">Aliases &amp; lists</TabsTrigger>
           <TabsTrigger value="connect">Connect a device</TabsTrigger>
           <TabsTrigger value="dns">DNS setup</TabsTrigger>
@@ -1498,6 +1508,43 @@ function ServiceDetailView({
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* ── Webmail ── */}
+        <TabsContent value="webmail" className="space-y-3 pt-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <p className="text-sm text-muted-foreground max-w-2xl">
+              Read and send mail without leaving the panel. Sign in with a{' '}
+              <strong>full mailbox address</strong> (for example info@{detail.service.domain})
+              and that mailbox&apos;s own password — not your Apsamo panel password.
+            </p>
+            <Button asChild size="sm" variant="outline" className="shrink-0">
+              <a href={mailHome} target="_blank" rel="noopener noreferrer" className="gap-1">
+                Open in new tab
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            </Button>
+          </div>
+
+          {/*
+            Embedding only works once the mail host allows this origin to frame
+            it. Until then the iframe renders blank, which looks like a broken
+            page — so the notice below is always visible and the "Open in new
+            tab" button above always works as a fallback.
+          */}
+          <div className="rounded-lg border overflow-hidden bg-background">
+            <iframe
+              src={mailHome}
+              title="Webmail"
+              className="w-full"
+              style={{ height: '70vh', minHeight: 460, border: 0 }}
+              referrerPolicy="strict-origin-when-cross-origin"
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Seeing a blank area? Your browser is refusing to embed the mail server. Use
+            <strong> Open in new tab</strong> — everything works there.
+          </p>
         </TabsContent>
 
         {/* ── Connect a device ── */}
