@@ -27,6 +27,7 @@ import {
   Check,
   KeyRound,
   AtSign,
+  Download,
   ExternalLink,
   AlertTriangle,
   ArrowLeft,
@@ -817,6 +818,36 @@ function ServiceDetailView({
     }
   }
 
+  /**
+   * Download the configuration snapshot. Fetched rather than linked so the
+   * Authorization header is sent — a plain <a> would hit the endpoint
+   * unauthenticated and get a 401 JSON file.
+   */
+  const exportConfig = async () => {
+    setBusy(true)
+    try {
+      const res = await fetch(`/api/email-hosting/${serviceId}/export`, {
+        headers: authHeaders(),
+        cache: 'no-store',
+      })
+      if (!res.ok) throw new Error('Export failed')
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `apsamo-email-${detail?.service.domain || 'export'}.json`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+      toast.success('Configuration exported')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Export failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const saveCatchAll = async (destination: string | null) => {
     setBusy(true)
     try {
@@ -1086,6 +1117,16 @@ function ServiceDetailView({
           </Button>
           <Button size="sm" variant="outline" onClick={() => setUpgradeOpen(true)}>
             Change plan
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1"
+            onClick={() => void exportConfig()}
+            disabled={busy}
+          >
+            <Download className="h-4 w-4" />
+            Export
           </Button>
           <Button asChild size="sm" variant="outline">
             <a href={detail.webmail} target="_blank" rel="noopener noreferrer" className="gap-1">
