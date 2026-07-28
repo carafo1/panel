@@ -35,6 +35,18 @@ function apiBase(cfg: MailcowConfig): string {
   return /\/api\/v\d+$/.test(cfg.url) ? cfg.url : `${cfg.url}/api/v1`
 }
 
+/**
+ * Raw Mailcow call. Exported as `mailcowRequest` so sibling modules
+ * (mailcow-mailbox.ts) reuse this transport instead of duplicating the
+ * auth header, base-path and empty-body handling.
+ */
+export async function mailcowRequest<T>(
+  path: string,
+  init: RequestInit = {}
+): Promise<T> {
+  return mc<T>(path, init)
+}
+
 async function mc<T>(path: string, init: RequestInit = {}): Promise<T> {
   const cfg = getConfig()
   if (!cfg) throw new Error('Mail server is not configured')

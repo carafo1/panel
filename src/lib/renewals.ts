@@ -17,6 +17,8 @@
 import { db } from '@/lib/db'
 import { createSubscriptionInvoice, cycleDays } from '@/lib/invoices'
 import { applyCreditToInvoice } from '@/lib/credit'
+import { resumeEmailForSubscription } from '@/lib/email-lifecycle'
+import { emailAddonCostForSubscription } from '@/lib/email-hosting'
 import {
   notifySubscriptionRenewed,
   notifyRenewalFailed,
@@ -96,7 +98,14 @@ export async function renewSubscription(opts: {
   const newStart = base
   const newEnd = new Date(base.getTime() + days * 24 * 60 * 60 * 1000)
 
-  const amount = sub.plan?.price ?? 0
+  // Email add-ons (extra mailboxes / storage) are recurring, so they belong on
+  // every renewal invoice. Billing plan.price alone charged for them once at
+  // purchase and then gave them away for the life of the subscription.
+  const addons = await emailAddonCostForSubscription(sub.id).catch(() => ({
+    total: 0,
+    lines: [] as string[],
+  }))
+  const amount = (sub.plan?.price ?? 0) + addons.total
   const currency = (sub.plan as { currency?: string })?.currency || 'USD'
 
   try {
@@ -113,7 +122,9 @@ export async function renewSubscription(opts: {
       // Only a coupon marked `recurring` is stored on the subscription, so
       // re-applying it here is correct; one-time coupons never get here.
       couponCode: (sub as { couponCode?: string | null }).couponCode || null,
-      description: `${sub.plan?.name || 'Hosting'} — renewal ${newStart.toDateString()} to ${newEnd.toDateString()}`,
+      description:
+        `${sub.plan?.name || 'Hosting'} — renewal ${newStart.toDateString()} to ${newEnd.toDateString()}` +
+        (addons.lines.length ? ` (incl. add-ons — ${addons.lines.join('; ')})` : ''),
     })
 
     // 2. Move the period forward and reset the failure counter.
@@ -128,6 +139,13 @@ export async function renewSubscription(opts: {
         lastRenewalError: null,
       },
     })
+
+    // Renewal reactivates the subscription directly rather than going through
+    // activatePayment, so email has to be restored here too — otherwise a
+    // renewed customer stays cut off at the mail server.
+    await resumeEmailForSubscription(sub.id).catch((err) =>
+      console.error('[renewals] email resume failed:', err)
+    )
 
     // 3. Auto-settle from wallet credit when they have the balance.
     let paidFromCredit = false

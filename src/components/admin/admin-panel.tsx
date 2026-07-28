@@ -56,6 +56,7 @@ import { useAuthStore } from '@/store/auth-store'
 import { PaymentMethodsPanel } from '@/components/admin/payment-methods-panel'
 import { BillingAdminPanel } from '@/components/admin/billing-admin-panel'
 import { PlansAdminPanel } from '@/components/admin/plans-admin-panel'
+import EmailAdminPanel from '@/components/admin/email-admin-panel'
 import { PromotionsAdminPanel } from '@/components/admin/promotions-admin-panel'
 import { ReportsAdminPanel } from '@/components/admin/reports-admin-panel'
 import { GatewaysAdminPanel } from '@/components/admin/gateways-admin-panel'
@@ -467,6 +468,7 @@ export function AdminPanel() {
           <TabsTrigger value="jobs">Job Queue</TabsTrigger>
           <TabsTrigger value="servers">Servers</TabsTrigger>
           <TabsTrigger value="plans">Plans</TabsTrigger>
+          <TabsTrigger value="email">Email</TabsTrigger>
           <TabsTrigger value="promotions">Discounts</TabsTrigger>
           <TabsTrigger value="reports">Reports</TabsTrigger>
           <TabsTrigger value="billing">
@@ -773,6 +775,10 @@ export function AdminPanel() {
             it is not restricted to super_admin. The API allows both roles. */}
         <TabsContent value="plans">
           <PlansAdminPanel />
+        </TabsContent>
+
+        <TabsContent value="email">
+          <EmailAdminPanel />
         </TabsContent>
 
         <TabsContent value="promotions">

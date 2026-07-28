@@ -23,7 +23,7 @@ import { startProvisioning } from '@/lib/orchestration'
 import { fulfilDomainOrder } from '@/lib/domain-checkout'
 import { slugify } from '@/lib/utils'
 import { BRAND_DOMAIN } from '@/lib/brand-config'
-import { provisionEmailService } from '@/lib/email-hosting'
+import { provisionEmailService, syncMailcowLimits } from '@/lib/email-hosting'
 
 export interface ProvisionResult {
   provisioned: boolean
@@ -233,6 +233,49 @@ export async function provisionForPayment(
       return {
         provisioned: true,
         detail: `email hosting ready for ${domainName}`,
+      }
+    }
+
+    // ── EMAIL ADD-ONS → raise an existing service's allowance ───────
+    // Ordering add-ons does not grant them; they are applied here, after the
+    // money is confirmed, and pushed to Mailcow so the ceiling is real.
+    if (purchaseType === 'email-addon') {
+      const serviceId =
+        typeof meta.emailServiceId === 'string' ? meta.emailServiceId : ''
+      if (!serviceId) {
+        return { provisioned: false, detail: 'add-on purchase has no service' }
+      }
+      const addMailboxes = Number(meta.addMailboxes) || 0
+      const addStorageGB = Number(meta.addStorageGB) || 0
+      if (addMailboxes <= 0 && addStorageGB <= 0) {
+        return { provisioned: false, detail: 'add-on purchase has no quantity' }
+      }
+
+      const service = await db.emailService.findUnique({ where: { id: serviceId } })
+      if (!service) {
+        return { provisioned: false, detail: `email service ${serviceId} not found` }
+      }
+      if (service.userId !== payment.userId) {
+        return { provisioned: false, detail: 'add-on does not belong to the payer' }
+      }
+
+      const updated = await db.emailService.update({
+        where: { id: serviceId },
+        data: {
+          extraMailboxes: { increment: addMailboxes },
+          extraStorageGB: { increment: addStorageGB },
+        },
+      })
+      const sync = await syncMailcowLimits(updated)
+      if (!sync.success) {
+        return {
+          provisioned: false,
+          detail: `add-ons recorded but the mail server rejected the new limits: ${sync.error}`,
+        }
+      }
+      return {
+        provisioned: true,
+        detail: `added ${addMailboxes} mailbox(es) and ${addStorageGB} GB to ${service.domain}`,
       }
     }
 

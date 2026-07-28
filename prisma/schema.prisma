@@ -154,12 +154,66 @@ model Plan {
   planType String @default("hosting")
 
   // ── Email-hosting resources (planType = "email") ───────────────────
-  emailMailboxes           Int?
-  emailStoragePerMailboxGB Int?
-  emailTotalStorageGB      Int?
+  // `maxEmailAccounts` above stays the hosting-plan allowance; these describe
+  // a standalone email product.
+  emailMailboxes           Int? // e.g. 3 / 10 / 25
+  emailStoragePerMailboxGB Int? // quota applied to each mailbox
+  emailTotalStorageGB      Int? // ceiling across the whole domain
 
   subscriptions Subscription[]
   emailServices EmailService[]
+}
+
+/// A standalone email-hosting service: one customer's mail domain, its plan
+/// limits, and the Mailcow state backing it. Deliberately separate from
+/// `Project` — email hosting is sold on its own and must not require a website.
+model EmailService {
+  id     String @id @default(cuid())
+  userId String
+  planId String
+  /// The subscription that pays for this service (null for admin-granted/free).
+  subscriptionId String?
+
+  /// The mail domain, e.g. "example.com". One service per domain, globally:
+  /// two customers must never both host mail for the same domain.
+  domain String @unique
+
+  /// active | suspended | pending | cancelled
+  status String @default("pending")
+
+  // Limits copied from the plan at purchase time, plus any add-ons. Stored
+  // here rather than read from the plan so an upgrade, a bought extra mailbox
+  // or a grandfathered allowance is per-service and survives plan edits.
+  mailboxLimit           Int @default(1)
+  storagePerMailboxGB    Int @default(1)
+  totalStorageGB         Int @default(1)
+  /// Paid add-ons on top of the plan.
+  extraMailboxes         Int @default(0)
+  extraStorageGB         Int @default(0)
+
+  // ── Mailcow provisioning state ─────────────────────────────────────
+  mailcowDomainCreated Boolean   @default(false)
+  dkimGenerated        Boolean   @default(false)
+  provisionedAt        DateTime?
+  lastError            String?
+
+  /// Set when the service is suspended so a grace period can be measured.
+  suspendedAt DateTime?
+  /// JSON array of the mailbox addresses this suspension deactivated.
+  /// Deactivating the domain stops logins but NOT delivery — Postfix only
+  /// rejects a recipient when the mailbox itself is inactive. Recording which
+  /// ones we turned off means resuming restores exactly those, and does not
+  /// re-enable a mailbox the customer had deliberately disabled.
+  suspendedMailboxes String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan         Plan          @relation(fields: [planId], references: [id])
+  subscription Subscription? @relation(fields: [subscriptionId], references: [id])
+
+  @@index([userId])
+  @@index([status])
 }
 
 model Subscription {
@@ -1575,47 +1629,4 @@ model MigrationStage {
   migration SiteMigration @relation(fields: [migrationId], references: [id], onDelete: Cascade)
 
   @@index([migrationId])
-}
-
-
-/// A standalone email-hosting service: one customer's mail domain, its plan
-/// limits, and the Mailcow state backing it. Deliberately separate from
-/// `Project` — email hosting is sold on its own and must not require a website.
-model EmailService {
-  id     String @id @default(cuid())
-  userId String
-  planId String
-  /// The subscription that pays for this service (null for admin-granted/free).
-  subscriptionId String?
-
-  /// The mail domain. One service per domain, globally.
-  domain String @unique
-
-  /// active | suspended | pending | cancelled
-  status String @default("pending")
-
-  // Copied from the plan at purchase time, plus add-ons, so an upgrade or a
-  // grandfathered allowance stays with the service.
-  mailboxLimit        Int @default(1)
-  storagePerMailboxGB Int @default(1)
-  totalStorageGB      Int @default(1)
-  extraMailboxes      Int @default(0)
-  extraStorageGB      Int @default(0)
-
-  // ── Mailcow provisioning state ─────────────────────────────────────
-  mailcowDomainCreated Boolean   @default(false)
-  dkimGenerated        Boolean   @default(false)
-  provisionedAt        DateTime?
-  lastError            String?
-
-  suspendedAt DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-
-  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  plan         Plan          @relation(fields: [planId], references: [id])
-  subscription Subscription? @relation(fields: [subscriptionId], references: [id])
-
-  @@index([userId])
-  @@index([status])
 }

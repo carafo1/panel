@@ -628,7 +628,60 @@ export interface UpdateMailboxOptions {
  * Best-effort by design: it shells out to the Dovecot container, and a panel
  * host without docker access should not fail the password change itself.
  */
-async function flushDovecotAuthCache(address: string): Promise<void> {
+/** Run a command inside a mail container. Best-effort; never throws. */
+function dockerExec(container: string, argv: string[], timeoutMs = 10_000): Promise<void> {
+  return new Promise<void>((resolve) => {
+    let settled = false
+    const done = () => {
+      if (!settled) {
+        settled = true
+        resolve()
+      }
+    }
+    try {
+      // argv array, never a shell string, so arguments cannot be interpreted
+      // as shell syntax.
+      const child = spawn('docker', ['exec', container, ...argv], {
+        stdio: ['ignore', 'ignore', 'ignore'],
+      })
+      const timer = setTimeout(() => {
+        child.kill('SIGKILL')
+        done()
+      }, timeoutMs)
+      child.on('error', () => {
+        clearTimeout(timer)
+        done()
+      })
+      child.on('close', () => {
+        clearTimeout(timer)
+        done()
+      })
+    } catch {
+      done()
+    }
+  })
+}
+
+/**
+ * Make Postfix re-read its lookup tables.
+ *
+ * Postfix caches the virtual-domain lookup, so activating or deactivating a
+ * domain does not take effect immediately: after a resume, mail was still
+ * refused with "454 Relay access denied" until the cache turned over, and
+ * after a suspend it was still accepted. Verified against the live server —
+ * a reload flipped the same probe from 454 to 250 at once.
+ *
+ * `postfix reload` is graceful (it is what Mailcow itself runs on a config
+ * change) and best-effort here: a panel host without docker access must not
+ * fail a suspend or resume because of it.
+ */
+export async function reloadPostfix(): Promise<void> {
+  const container =
+    process.env.MAILCOW_POSTFIX_CONTAINER || 'mailcowdockerized-postfix-mailcow-1'
+  await dockerExec(container, ['postfix', 'reload'])
+}
+
+export async function flushDovecotAuthCache(address: string): Promise<void> {
   const container = process.env.MAILCOW_DOVECOT_CONTAINER || 'mailcowdockerized-dovecot-mailcow-1'
   await new Promise<void>((resolve) => {
     let settled = false

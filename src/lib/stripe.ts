@@ -11,12 +11,31 @@
  */
 import Stripe from 'stripe'
 
+/**
+ * The configured secret key, or null when Stripe is not really set up.
+ *
+ * A bare `process.env.STRIPE_SECRET_KEY || null` treated the placeholder
+ * shipped in .env.example (`sk_test_replace_me`) as a working configuration:
+ * demo mode switched off and every Stripe call went out with an invalid key,
+ * failing with an auth error at the worst possible moment — mid-checkout.
+ * Anything that is not a real `sk_test_`/`sk_live_` key counts as unset.
+ */
 function getSecretKey(): string | null {
-  return process.env.STRIPE_SECRET_KEY || null
+  const key = process.env.STRIPE_SECRET_KEY?.trim()
+  if (!key) return null
+  if (!/^sk_(test|live)_/.test(key)) return null
+  if (/replace|placeholder|changeme|your[_-]?key|xxxx/i.test(key)) return null
+  return key
 }
 
 export function isStripeDemoMode(): boolean {
   return !getSecretKey()
+}
+
+/** True when a key is present but unusable — worth surfacing to an admin. */
+export function isStripeKeyPlaceholder(): boolean {
+  const raw = process.env.STRIPE_SECRET_KEY?.trim()
+  return Boolean(raw) && !getSecretKey()
 }
 
 let client: Stripe | null = null

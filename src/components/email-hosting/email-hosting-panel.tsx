@@ -31,6 +31,7 @@ import {
   ArrowLeft,
   ShieldCheck,
   Sparkles,
+  Settings2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -38,6 +39,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Switch } from '@/components/ui/switch'
+import { Textarea } from '@/components/ui/textarea'
 import {
   Card,
   CardContent,
@@ -175,11 +178,64 @@ interface PayMethod {
   displayName: string
 }
 
+interface VerificationRecord {
+  type: string
+  host: string
+  name: string
+  value: string
+}
+
+interface AddonInfo {
+  pricing: {
+    extraMailbox: { label: string; price: number; unit: string }
+    extraStorage: { label: string; price: number; blockGB: number }
+  }
+  current: { extraMailboxes: number; extraStorageGB: number; monthlyCost: number }
+}
+
+interface AutoReplyState {
+  enabled: boolean
+  subject: string
+  message: string
+  startDate: string | null
+  endDate: string | null
+  intervalDays: number
+}
+
+interface AppPasswordRow {
+  id: number
+  name: string
+  active: boolean
+  createdAt?: string
+}
+
+interface AddonOrder {
+  amount: number
+  addMailboxes: number
+  addStorageGB: number
+  message?: string
+  redirectUrl?: string | null
+  status?: string
+}
+
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
 function authHeaders(): HeadersInit {
   const t = typeof window !== 'undefined' ? localStorage.getItem('apsamo_token') : ''
   return { Authorization: `Bearer ${t || ''}`, 'Content-Type': 'application/json' }
+}
+
+/** Carries the API's structured error body so callers can branch on `code`. */
+class ApiError extends Error {
+  status: number
+  code?: string
+  body: Record<string, unknown>
+  constructor(message: string, status: number, body: Record<string, unknown>) {
+    super(message)
+    this.status = status
+    this.body = body
+    this.code = typeof body.code === 'string' ? body.code : undefined
+  }
 }
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
@@ -192,7 +248,12 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
     /* non-JSON */
   }
   if (!res.ok) {
-    throw new Error((data as { error?: string })?.error || `Request failed (${res.status})`)
+    const body = (data || {}) as Record<string, unknown>
+    throw new ApiError(
+      (body.error as string) || `Request failed (${res.status})`,
+      res.status,
+      body
+    )
   }
   return data as T
 }
@@ -257,6 +318,8 @@ function PlanLineup({ onPurchased }: { onPurchased: () => void }) {
   const [method, setMethod] = useState('')
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<CheckoutResult | null>(null)
+  const [verify, setVerify] = useState<VerificationRecord | null>(null)
+  const [verifyNote, setVerifyNote] = useState<string | null>(null)
 
   useEffect(() => {
     api<{ plans: EmailPlan[] }>('/api/billing/plans?type=email')
@@ -293,7 +356,36 @@ function PlanLineup({ onPurchased }: { onPurchased: () => void }) {
       setResult(res)
       onPurchased()
     } catch (e) {
+      // 428 means "prove you control this domain first" — show the record to
+      // publish rather than a bare error the customer can do nothing about.
+      if (e instanceof ApiError && e.code === 'DOMAIN_UNVERIFIED') {
+        setVerify((e.body.verification as VerificationRecord) || null)
+        setVerifyNote(e.message)
+        return
+      }
       toast.error(e instanceof Error ? e.message : 'Checkout failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const recheck = async () => {
+    setBusy(true)
+    try {
+      const res = await api<{ verified: boolean; reason?: string }>(
+        '/api/email-hosting/verify-domain',
+        { method: 'POST', body: JSON.stringify({ domain: domain.trim().toLowerCase() }) }
+      )
+      if (res.verified) {
+        setVerify(null)
+        setVerifyNote(null)
+        toast.success('Domain verified')
+        await buy()
+      } else {
+        setVerifyNote(res.reason || 'Not found yet')
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Check failed')
     } finally {
       setBusy(false)
     }
@@ -450,6 +542,67 @@ function PlanLineup({ onPurchased }: { onPurchased: () => void }) {
                 </Button>
               </DialogFooter>
             </>
+          ) : verify ? (
+            <>
+              <DialogHeader>
+                <DialogTitle>Verify you own {domain}</DialogTitle>
+                <DialogDescription>
+                  Add this TXT record at your DNS provider, then check again. This
+                  proves the domain is yours before we start accepting its mail.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-3 text-sm">
+                <div className="rounded-md border divide-y">
+                  <div className="p-3">
+                    <p className="text-xs text-muted-foreground">Type</p>
+                    <p className="font-mono">{verify.type}</p>
+                  </div>
+                  <div className="p-3">
+                    <p className="text-xs text-muted-foreground">Name / Host</p>
+                    <div className="flex items-center justify-between gap-2">
+                      <code className="break-all">{verify.name}</code>
+                      <CopyButton value={verify.name} />
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                      Some providers want the full name: {verify.host}
+                    </p>
+                  </div>
+                  <div className="p-3">
+                    <p className="text-xs text-muted-foreground">Value</p>
+                    <div className="flex items-start justify-between gap-2">
+                      <code className="break-all">{verify.value}</code>
+                      <CopyButton value={verify.value} />
+                    </div>
+                  </div>
+                </div>
+                {verifyNote && (
+                  <p className="flex items-start gap-2 text-amber-600">
+                    <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                    {verifyNote}
+                  </p>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  DNS changes usually appear within a few minutes, but can take up to
+                  an hour. Nothing has been charged.
+                </p>
+              </div>
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setVerify(null)
+                    setVerifyNote(null)
+                  }}
+                  disabled={busy}
+                >
+                  Back
+                </Button>
+                <Button onClick={() => void recheck()} disabled={busy}>
+                  {busy && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+                  Check again
+                </Button>
+              </DialogFooter>
+            </>
           ) : (
             <>
               <DialogHeader>
@@ -541,6 +694,24 @@ function ServiceDetailView({
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState('')
 
+  const [upgradeOpen, setUpgradeOpen] = useState(false)
+  const [upgradePlans, setUpgradePlans] = useState<EmailPlan[]>([])
+  const [upgradePlanId, setUpgradePlanId] = useState('')
+  const [upgradeResult, setUpgradeResult] = useState<CheckoutResult | null>(null)
+
+  // Per-mailbox settings (auto-reply + app passwords)
+  const [settingsFor, setSettingsFor] = useState<string | null>(null)
+  const [autoReply, setAutoReply] = useState<AutoReplyState | null>(null)
+  const [appPasswords, setAppPasswords] = useState<AppPasswordRow[] | null>(null)
+  const [newAppName, setNewAppName] = useState('')
+  const [newAppSecret, setNewAppSecret] = useState('')
+
+  const [addonOpen, setAddonOpen] = useState(false)
+  const [addonInfo, setAddonInfo] = useState<AddonInfo | null>(null)
+  const [addBoxes, setAddBoxes] = useState(0)
+  const [addBlocks, setAddBlocks] = useState(0)
+  const [addonResult, setAddonResult] = useState<AddonOrder | null>(null)
+
   const load = useCallback(async () => {
     setRefreshing(true)
     try {
@@ -561,8 +732,159 @@ function ServiceDetailView({
     void load()
   }, [load])
 
+  useEffect(() => {
+    if (!upgradeOpen || upgradePlans.length) return
+    api<{ plans: EmailPlan[] }>('/api/billing/plans?type=email')
+      .then((d) => setUpgradePlans(d.plans || []))
+      .catch(() => setUpgradePlans([]))
+  }, [upgradeOpen, upgradePlans.length])
+
+  useEffect(() => {
+    if (!addonOpen) return
+    api<AddonInfo>(`/api/email-hosting/${serviceId}/addons`)
+      .then(setAddonInfo)
+      .catch(() => setAddonInfo(null))
+  }, [addonOpen, serviceId])
+
+  useEffect(() => {
+    if (!settingsFor) return
+    const enc = encodeURIComponent(settingsFor)
+    setAutoReply(null)
+    setAppPasswords(null)
+    api<{ autoReply: AutoReplyState }>(
+      `/api/email-hosting/${serviceId}/mailboxes/${enc}/autoreply`
+    )
+      .then((d) => setAutoReply(d.autoReply))
+      .catch(() => setAutoReply(null))
+    api<{ appPasswords: AppPasswordRow[] }>(
+      `/api/email-hosting/${serviceId}/mailboxes/${enc}/app-passwords`
+    )
+      .then((d) => setAppPasswords(d.appPasswords || []))
+      .catch(() => setAppPasswords([]))
+  }, [settingsFor, serviceId])
+
+  const saveAutoReply = async () => {
+    if (!settingsFor || !autoReply) return
+    setBusy(true)
+    try {
+      const d = await api<{ autoReply: AutoReplyState }>(
+        `/api/email-hosting/${serviceId}/mailboxes/${encodeURIComponent(settingsFor)}/autoreply`,
+        { method: 'PUT', body: JSON.stringify(autoReply) }
+      )
+      setAutoReply(d.autoReply)
+      toast.success(autoReply.enabled ? 'Auto-reply is on' : 'Auto-reply turned off')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not save the auto-reply')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const addAppPassword = async () => {
+    if (!settingsFor) return
+    setBusy(true)
+    try {
+      await api(
+        `/api/email-hosting/${serviceId}/mailboxes/${encodeURIComponent(settingsFor)}/app-passwords`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ name: newAppName.trim(), password: newAppSecret }),
+        }
+      )
+      toast.success(`"${newAppName.trim()}" created — save the password now, it is not shown again`)
+      setNewAppName('')
+      setNewAppSecret('')
+      const d = await api<{ appPasswords: AppPasswordRow[] }>(
+        `/api/email-hosting/${serviceId}/mailboxes/${encodeURIComponent(settingsFor)}/app-passwords`
+      )
+      setAppPasswords(d.appPasswords || [])
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not create the app password')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const revokeAppPassword = async (id: number) => {
+    if (!settingsFor) return
+    setBusy(true)
+    try {
+      await api(
+        `/api/email-hosting/${serviceId}/mailboxes/${encodeURIComponent(settingsFor)}/app-passwords`,
+        { method: 'DELETE', body: JSON.stringify({ id }) }
+      )
+      setAppPasswords((prev) => (prev || []).filter((p) => p.id !== id))
+      toast.success('App password revoked')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not revoke it')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const addonPrice = addonInfo
+    ? Math.round(
+        (addBoxes * addonInfo.pricing.extraMailbox.price +
+          addBlocks * addonInfo.pricing.extraStorage.price) *
+          100
+      ) / 100
+    : 0
+
+  const orderAddons = async () => {
+    setBusy(true)
+    try {
+      const res = await api<AddonOrder>(`/api/email-hosting/${serviceId}/addons`, {
+        method: 'POST',
+        body: JSON.stringify({
+          extraMailboxes: addBoxes,
+          extraStorageBlocks: addBlocks,
+          method: 'manual',
+        }),
+      })
+      if (res.status === 'redirect_required' && res.redirectUrl) {
+        window.location.href = res.redirectUrl
+        return
+      }
+      setAddonResult(res)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not order add-ons')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const usage = detail?.usage
   const atLimit = usage?.atMailboxLimit ?? false
+
+  /**
+   * A plan change is a purchase, so it goes through checkout exactly like the
+   * first one. Provisioning applies the new allowance to the existing service
+   * (and pushes it to the mail server) once the payment is confirmed.
+   */
+  const changePlan = async () => {
+    if (!detail || !upgradePlanId) return
+    setBusy(true)
+    try {
+      const res = await api<CheckoutResult>('/api/billing/checkout', {
+        method: 'POST',
+        body: JSON.stringify({
+          planId: upgradePlanId,
+          type: 'email',
+          domainName: detail.service.domain,
+          method: 'manual',
+        }),
+      })
+      if (res.status === 'redirect_required' && res.redirectUrl) {
+        window.location.href = res.redirectUrl
+        return
+      }
+      setUpgradeResult(res)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not start the plan change')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const createMailbox = async () => {
     setBusy(true)
@@ -655,6 +977,9 @@ function ServiceDetailView({
             ) : (
               <RefreshCw className="h-4 w-4" />
             )}
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setUpgradeOpen(true)}>
+            Change plan
           </Button>
           <Button asChild size="sm" variant="outline">
             <a href={detail.webmail} target="_blank" rel="noopener noreferrer" className="gap-1">
@@ -752,18 +1077,35 @@ function ServiceDetailView({
           <div className="flex items-center justify-between gap-3">
             <p className="text-sm text-muted-foreground">
               {atLimit
-                ? 'Every mailbox in your plan is in use. Upgrade to add more.'
+                ? 'Every mailbox in your plan is in use — buy an extra one or change plan.'
                 : `You can create ${detail.limits.mailboxLimit - (usage?.mailboxes ?? 0)} more mailbox(es).`}
             </p>
-            <Button
-              size="sm"
-              className="gap-1"
-              disabled={atLimit || detail.service.status !== 'active'}
-              onClick={() => setCreateOpen(true)}
-            >
-              <Plus className="h-4 w-4" />
-              New mailbox
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1"
+                disabled={detail.service.status !== 'active'}
+                onClick={() => {
+                  setAddonOpen(true)
+                  setAddonResult(null)
+                  setAddBoxes(atLimit ? 1 : 0)
+                  setAddBlocks(0)
+                }}
+              >
+                <Plus className="h-4 w-4" />
+                Buy add-ons
+              </Button>
+              <Button
+                size="sm"
+                className="gap-1"
+                disabled={atLimit || detail.service.status !== 'active'}
+                onClick={() => setCreateOpen(true)}
+              >
+                <Plus className="h-4 w-4" />
+                New mailbox
+              </Button>
+            </div>
           </div>
 
           <Card>
@@ -810,6 +1152,15 @@ function ServiceDetailView({
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center justify-end gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 gap-1"
+                              onClick={() => setSettingsFor(b.address)}
+                            >
+                              <Settings2 className="h-3.5 w-3.5" />
+                              Settings
+                            </Button>
                             <Button
                               variant="ghost"
                               size="sm"
@@ -990,6 +1341,452 @@ function ServiceDetailView({
               Update password
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Mailbox settings: auto-reply + app passwords ── */}
+      <Dialog open={settingsFor !== null} onOpenChange={(o) => !o && setSettingsFor(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{settingsFor}</DialogTitle>
+            <DialogDescription>
+              Auto-reply and the app passwords this mailbox can sign in with.
+            </DialogDescription>
+          </DialogHeader>
+
+          <Tabs defaultValue="autoreply">
+            <TabsList>
+              <TabsTrigger value="autoreply">Auto-reply</TabsTrigger>
+              <TabsTrigger value="apps">App passwords</TabsTrigger>
+            </TabsList>
+
+            {/* Auto-reply */}
+            <TabsContent value="autoreply" className="space-y-4 pt-4">
+              {!autoReply ? (
+                <Skeleton className="h-56 w-full" />
+              ) : (
+                <>
+                  <div className="flex items-center justify-between rounded-md border p-3">
+                    <div>
+                      <p className="font-medium text-sm">Send an automatic reply</p>
+                      <p className="text-xs text-muted-foreground">
+                        Replies once per sender every {autoReply.intervalDays} day
+                        {autoReply.intervalDays === 1 ? '' : 's'}.
+                      </p>
+                    </div>
+                    <Switch
+                      checked={autoReply.enabled}
+                      onCheckedChange={(v) =>
+                        setAutoReply({ ...autoReply, enabled: v })
+                      }
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="ar-subject">Subject</Label>
+                    <Input
+                      id="ar-subject"
+                      value={autoReply.subject}
+                      onChange={(e) =>
+                        setAutoReply({ ...autoReply, subject: e.target.value })
+                      }
+                      placeholder="Out of office"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="ar-message">Message</Label>
+                    <Textarea
+                      id="ar-message"
+                      rows={5}
+                      value={autoReply.message}
+                      onChange={(e) =>
+                        setAutoReply({ ...autoReply, message: e.target.value })
+                      }
+                      placeholder={`Hi,\n\nI'm away until 10 August and will reply when I'm back.\nFor anything urgent, please contact a colleague.`}
+                    />
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <div className="space-y-2">
+                      <Label htmlFor="ar-start">Start (optional)</Label>
+                      <Input
+                        id="ar-start"
+                        type="date"
+                        value={autoReply.startDate || ''}
+                        onChange={(e) =>
+                          setAutoReply({
+                            ...autoReply,
+                            startDate: e.target.value || null,
+                          })
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="ar-end">End (optional)</Label>
+                      <Input
+                        id="ar-end"
+                        type="date"
+                        value={autoReply.endDate || ''}
+                        onChange={(e) =>
+                          setAutoReply({
+                            ...autoReply,
+                            endDate: e.target.value || null,
+                          })
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="ar-days">Repeat after (days)</Label>
+                      <Input
+                        id="ar-days"
+                        type="number"
+                        min={1}
+                        max={30}
+                        value={autoReply.intervalDays}
+                        onChange={(e) =>
+                          setAutoReply({
+                            ...autoReply,
+                            intervalDays: Math.max(1, Number(e.target.value) || 1),
+                          })
+                        }
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end">
+                    <Button onClick={() => void saveAutoReply()} disabled={busy}>
+                      {busy && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+                      Save auto-reply
+                    </Button>
+                  </div>
+                </>
+              )}
+            </TabsContent>
+
+            {/* App passwords */}
+            <TabsContent value="apps" className="space-y-4 pt-4">
+              <p className="text-sm text-muted-foreground">
+                Give a phone or mail app its own password so you never type the
+                account password into it — and can revoke just that device later.
+              </p>
+
+              <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+                <div className="space-y-2">
+                  <Label htmlFor="ap-name">Name</Label>
+                  <Input
+                    id="ap-name"
+                    value={newAppName}
+                    onChange={(e) => setNewAppName(e.target.value)}
+                    placeholder="iPhone Mail"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="ap-secret">Password</Label>
+                  <Input
+                    id="ap-secret"
+                    value={newAppSecret}
+                    onChange={(e) => setNewAppSecret(e.target.value)}
+                    placeholder="At least 12 characters"
+                  />
+                </div>
+                <Button
+                  onClick={() => void addAppPassword()}
+                  disabled={busy || !newAppName.trim() || newAppSecret.length < 12}
+                >
+                  Create
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Choose something long and random — it is stored hashed and cannot be
+                shown to you again.
+              </p>
+
+              {appPasswords === null ? (
+                <Skeleton className="h-20 w-full" />
+              ) : appPasswords.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-4 text-center">
+                  No app passwords yet.
+                </p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="w-[1%]" />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {appPasswords.map((p) => (
+                      <TableRow key={p.id}>
+                        <TableCell className="font-medium">{p.name}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline">
+                            {p.active ? 'Active' : 'Disabled'}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 text-destructive hover:text-destructive"
+                            disabled={busy}
+                            onClick={() => void revokeAppPassword(p.id)}
+                          >
+                            Revoke
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </TabsContent>
+          </Tabs>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Add-ons dialog ── */}
+      <Dialog
+        open={addonOpen}
+        onOpenChange={(o) => {
+          setAddonOpen(o)
+          if (!o) setAddonResult(null)
+        }}
+      >
+        <DialogContent>
+          {addonResult ? (
+            <>
+              <DialogHeader>
+                <DialogTitle>Add-ons ordered</DialogTitle>
+                <DialogDescription>{addonResult.message}</DialogDescription>
+              </DialogHeader>
+              <div className="rounded-md border p-3 text-sm space-y-1">
+                {addonResult.addMailboxes > 0 && (
+                  <p>{addonResult.addMailboxes} extra mailbox(es)</p>
+                )}
+                {addonResult.addStorageGB > 0 && (
+                  <p>{addonResult.addStorageGB} GB extra storage</p>
+                )}
+                <p className="font-medium pt-1">
+                  ${addonResult.amount.toFixed(2)} per month
+                </p>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Pay using the reference on your invoice in Billing. The extra
+                allowance is applied automatically once it clears.
+              </p>
+              <DialogFooter>
+                <Button
+                  onClick={() => {
+                    setAddonOpen(false)
+                    setAddonResult(null)
+                  }}
+                >
+                  Done
+                </Button>
+              </DialogFooter>
+            </>
+          ) : (
+            <>
+              <DialogHeader>
+                <DialogTitle>Buy add-ons</DialogTitle>
+                <DialogDescription>
+                  Extra capacity on top of your plan, billed monthly alongside it.
+                </DialogDescription>
+              </DialogHeader>
+              {!addonInfo ? (
+                <Skeleton className="h-32 w-full" />
+              ) : (
+                <div className="space-y-4">
+                  {(addonInfo.current.extraMailboxes > 0 ||
+                    addonInfo.current.extraStorageGB > 0) && (
+                    <p className="text-sm text-muted-foreground">
+                      You already have {addonInfo.current.extraMailboxes} extra
+                      mailbox(es) and {addonInfo.current.extraStorageGB} GB extra
+                      storage (${addonInfo.current.monthlyCost.toFixed(2)}/mo).
+                    </p>
+                  )}
+                  <div className="space-y-2">
+                    <Label htmlFor="ao-boxes">
+                      Extra mailboxes — ${addonInfo.pricing.extraMailbox.price.toFixed(2)} each
+                      per month
+                    </Label>
+                    <Input
+                      id="ao-boxes"
+                      type="number"
+                      min={0}
+                      value={addBoxes}
+                      onChange={(e) => setAddBoxes(Math.max(0, Number(e.target.value) || 0))}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="ao-storage">
+                      Extra storage — ${addonInfo.pricing.extraStorage.price.toFixed(2)} per{' '}
+                      {addonInfo.pricing.extraStorage.blockGB} GB per month
+                    </Label>
+                    <Input
+                      id="ao-storage"
+                      type="number"
+                      min={0}
+                      value={addBlocks}
+                      onChange={(e) => setAddBlocks(Math.max(0, Number(e.target.value) || 0))}
+                    />
+                    {addBlocks > 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        = {addBlocks * addonInfo.pricing.extraStorage.blockGB} GB
+                      </p>
+                    )}
+                  </div>
+                  <div className="rounded-md border p-3 flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">Added to your bill</span>
+                    <span className="font-semibold">${addonPrice.toFixed(2)}/mo</span>
+                  </div>
+                </div>
+              )}
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setAddonOpen(false)} disabled={busy}>
+                  Cancel
+                </Button>
+                <Button
+                  onClick={() => void orderAddons()}
+                  disabled={busy || addonPrice <= 0}
+                >
+                  {busy && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+                  Order
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Change plan dialog ── */}
+      <Dialog
+        open={upgradeOpen}
+        onOpenChange={(o) => {
+          setUpgradeOpen(o)
+          if (!o) setUpgradeResult(null)
+        }}
+      >
+        <DialogContent>
+          {upgradeResult ? (
+            <>
+              <DialogHeader>
+                <DialogTitle>Plan change ordered</DialogTitle>
+                <DialogDescription>
+                  {upgradeResult.message ||
+                    'Your order is awaiting confirmation.'}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-3 text-sm">
+                {upgradeResult.paymentDetails?.reference && (
+                  <div className="flex items-center justify-between gap-2 rounded-md border p-3">
+                    <div>
+                      <p className="text-muted-foreground text-xs">Payment reference</p>
+                      <p className="font-mono font-medium">
+                        {upgradeResult.paymentDetails.reference}
+                      </p>
+                    </div>
+                    <CopyButton value={upgradeResult.paymentDetails.reference} />
+                  </div>
+                )}
+                {upgradeResult.paymentDetails?.instructions && (
+                  <p className="text-muted-foreground">
+                    {upgradeResult.paymentDetails.instructions}
+                  </p>
+                )}
+                {upgradeResult.paymentDetails?.accounts?.map((a, i) => (
+                  <div key={i} className="rounded-md border p-3 space-y-1">
+                    <p className="font-medium">{a.label}</p>
+                    {(a.accountNumber || a.phone) && (
+                      <div className="flex items-center justify-between gap-2">
+                        <code className="text-sm">{a.accountNumber || a.phone}</code>
+                        <CopyButton value={(a.accountNumber || a.phone) as string} />
+                      </div>
+                    )}
+                  </div>
+                ))}
+                <p className="text-muted-foreground text-xs">
+                  Your new allowance is applied automatically once the payment is
+                  confirmed. Nothing changes until then.
+                </p>
+              </div>
+              <DialogFooter>
+                <Button
+                  onClick={() => {
+                    setUpgradeOpen(false)
+                    setUpgradeResult(null)
+                  }}
+                >
+                  Done
+                </Button>
+              </DialogFooter>
+            </>
+          ) : (
+            <>
+              <DialogHeader>
+                <DialogTitle>Change plan</DialogTitle>
+                <DialogDescription>
+                  Pick a plan for {detail.service.domain}. Moving to a smaller plan is
+                  refused if you have more mailboxes than it allows — delete some
+                  first.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-2">
+                {upgradePlans.length === 0 ? (
+                  <Skeleton className="h-24 w-full" />
+                ) : (
+                  upgradePlans.map((p) => {
+                    const current = p.name === detail.plan?.name
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        disabled={current}
+                        onClick={() => setUpgradePlanId(p.id)}
+                        className={`w-full text-left rounded-md border p-3 transition-colors ${
+                          upgradePlanId === p.id
+                            ? 'border-primary bg-primary/5'
+                            : 'hover:border-primary/50'
+                        } ${current ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-medium">
+                            {p.name}
+                            {current && (
+                              <Badge variant="outline" className="ml-2 text-xs">
+                                Current
+                              </Badge>
+                            )}
+                          </span>
+                          <span className="font-semibold">${p.price.toFixed(2)}/mo</span>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {p.emailMailboxes} mailboxes · {p.emailStoragePerMailboxGB} GB
+                          each
+                        </p>
+                      </button>
+                    )
+                  })
+                )}
+              </div>
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  onClick={() => setUpgradeOpen(false)}
+                  disabled={busy}
+                >
+                  Cancel
+                </Button>
+                <Button onClick={() => void changePlan()} disabled={busy || !upgradePlanId}>
+                  {busy && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+                  Continue
+                </Button>
+              </DialogFooter>
+            </>
+          )}
         </DialogContent>
       </Dialog>
 

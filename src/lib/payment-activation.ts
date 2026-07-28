@@ -16,6 +16,7 @@
  */
 import { db } from '@/lib/db'
 import { provisionForPayment } from '@/lib/provision-on-payment'
+import { resumeEmailForSubscription } from '@/lib/email-lifecycle'
 import { createNotification } from '@/lib/notifications'
 import { notifyPaymentFailed } from '@/lib/billing-notifications'
 import { findInvoiceForPayment, markInvoicePaid } from '@/lib/invoices'
@@ -135,6 +136,13 @@ export async function activatePayment(
             : {}),
         },
       })
+
+      // Bringing the subscription back does not restore the mail server on its
+      // own: the domain was deactivated in Mailcow at suspension, so without
+      // this the customer pays and still cannot send or receive.
+      await resumeEmailForSubscription(subscription.id).catch((err) =>
+        console.error('[payment-activation] email resume failed:', err)
+      )
     }
   }
 
