@@ -1514,7 +1514,7 @@ function ServiceDetailView({
         <TabsContent value="webmail" className="space-y-3 pt-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <p className="text-sm text-muted-foreground max-w-2xl">
-              Read and send mail without leaving the panel. Sign in with a{' '}
+              Ways to read and send mail on this domain. Wherever you sign in, use a{' '}
               <strong>full mailbox address</strong> (for example info@{detail.service.domain})
               and that mailbox&apos;s own password — not your Apsamo panel password.
             </p>
@@ -1527,24 +1527,66 @@ function ServiceDetailView({
           </div>
 
           {/*
-            Embedding only works once the mail host allows this origin to frame
-            it. Until then the iframe renders blank, which looks like a broken
-            page — so the notice below is always visible and the "Open in new
-            tab" button above always works as a fallback.
+            No iframe here on purpose.
+
+            The mail host accepts the sign-in and then redirects to /SOGo/so/,
+            which currently answers 403 — so embedding it showed customers a
+            bare "Unauthorized" inside the panel, and the old copy claimed
+            "everything works there", which was not true. Until webmail is
+            fixed on the mail server, this tab points at the route that IS
+            verified working (a mail app) and is honest about the rest.
           */}
-          <div className="rounded-lg border overflow-hidden bg-background">
-            <iframe
-              src={mailHome}
-              title="Webmail"
-              className="w-full"
-              style={{ height: '70vh', minHeight: 460, border: 0 }}
-              referrerPolicy="strict-origin-when-cross-origin"
-            />
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Seeing a blank area? Your browser is refusing to embed the mail server. Use
-            <strong> Open in new tab</strong> — everything works there.
-          </p>
+          <Card className="border-amber-500/40 bg-amber-500/5">
+            <CardContent className="flex items-start gap-3 py-4">
+              <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+              <div className="text-sm space-y-1">
+                <p className="font-medium">Webmail is still being set up</p>
+                <p className="text-muted-foreground">
+                  Signing in at the mail server currently ends on an
+                  &ldquo;Unauthorized&rdquo; page. Your mail is safe and is being delivered
+                  normally — it is only the browser-based reader that is unavailable.
+                  Use a mail app in the meantime; the settings are below and on the{' '}
+                  <strong>Connect a device</strong> tab.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Read your mail in an app</CardTitle>
+              <CardDescription>
+                Works today on iPhone, Android, Outlook and Apple Mail. Sign in with the
+                full mailbox address and its own password.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <div className="flex flex-wrap gap-3">
+                <div className="rounded-md border px-3 py-2 flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">Server</span>
+                  <code className="text-sm">
+                    {detail.mailClient?.host || 'mail.apsamo.com'}
+                  </code>
+                  <CopyButton value={detail.mailClient?.host || 'mail.apsamo.com'} />
+                </div>
+                {(detail.mailClient?.servers || [])
+                  .filter((s) => s.recommended)
+                  .map((s, i) => (
+                    <div key={i} className="rounded-md border px-3 py-2 text-sm">
+                      <span className="text-xs text-muted-foreground mr-2">
+                        {s.protocol}
+                      </span>
+                      {s.port} · {s.security}
+                    </div>
+                  ))}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Use <strong>{detail.mailClient?.host || 'mail.apsamo.com'}</strong> as the
+                server name — not your own domain. The certificate only covers the mail
+                host, so your own domain would raise a security warning.
+              </p>
+            </CardContent>
+          </Card>
         </TabsContent>
 
         {/* ── Connect a device ── */}
@@ -1608,16 +1650,8 @@ function ServiceDetailView({
 
               <p className="text-xs text-muted-foreground">
                 IMAP keeps mail on the server and in sync across devices — use it unless you
-                specifically want POP3. Prefer webmail?{' '}
-                <a
-                  href={detail.webmail}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="underline"
-                >
-                  Open it here
-                </a>
-                .
+                specifically want POP3. Browser-based webmail is still being set up on the
+                mail server; a mail app is the way in for now.
               </p>
             </CardContent>
           </Card>
