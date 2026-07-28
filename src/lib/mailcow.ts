@@ -87,6 +87,44 @@ async function mailcowFetch<T>(
   return (await res.json()) as T
 }
 
+/**
+ * Turn a raw Mailcow error into something a customer can act on.
+ *
+ * Mailcow's envelope carries machine codes like `mailbox_quota_exceeded, 1024`
+ * or `access_denied` — accurate for a log, useless in a UI. This maps the ones
+ * a customer can actually hit to plain guidance, and otherwise returns the
+ * original so nothing is silently swallowed.
+ */
+export function friendlyMailcowError(raw: string | undefined | null): string {
+  const err = (raw || '').trim()
+  if (!err) return 'The mail server rejected the request.'
+  const lc = err.toLowerCase()
+
+  if (lc.includes('mailbox_quota_exceeded') || lc.includes('quota_exceeds')) {
+    return 'That mailbox size is larger than your plan allows. Choose a smaller size, or add storage from Buy add-ons.'
+  }
+  if (lc.includes('max_mailbox_exceeded') || lc.includes('max_quota_reached')) {
+    return 'You have used all the mailboxes in your plan. Buy an extra mailbox or move to a larger plan to add more.'
+  }
+  if (lc.includes('object_exists') || lc.includes('is_alias_or_mailbox')) {
+    return 'That address is already in use on your domain.'
+  }
+  if (lc.includes('password_complexity') || lc.includes('password_length')) {
+    return 'That password is too weak. Use at least 8 characters with a mix of letters and numbers.'
+  }
+  if (lc.includes('access_denied')) {
+    // Almost always "the object is gone", not a real permission problem —
+    // see [[mailcow-api-quirks]].
+    return 'That mailbox or address no longer exists. Refresh and try again.'
+  }
+  if (lc.includes('validation_failed') || lc.includes('malformed')) {
+    return 'The mail server could not accept those details. Check the address and try again.'
+  }
+  // Unknown code: strip a trailing ", 1234" numeric argument so at least the
+  // bare code shows without the noise, but keep the text.
+  return err.replace(/,\s*\d+\s*$/, '')
+}
+
 /** Inspect a Mailcow envelope and return `{ success, error }`. */
 function envelopeResult(env: MailcowEnvelope | MailcowEnvelope[]): {
   success: boolean

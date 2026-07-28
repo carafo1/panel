@@ -15,7 +15,7 @@ import {
   emailServiceErrorResponse,
 } from '@/lib/email-service-guard'
 import { effectiveLimits } from '@/lib/email-hosting'
-import { deleteMailbox, updateMailbox } from '@/lib/mailcow'
+import { deleteMailbox, updateMailbox, friendlyMailcowError } from '@/lib/mailcow'
 
 const patchSchema = z.object({
   password: z.string().min(8).max(128).optional(),
@@ -94,7 +94,10 @@ export async function PATCH(
     })
 
     if (!result.success) {
-      return NextResponse.json({ error: result.error }, { status: 422 })
+      return NextResponse.json(
+        { error: friendlyMailcowError(result.error) },
+        { status: 422 }
+      )
     }
     return NextResponse.json({ ok: true, address, quotaGB })
   } catch (err) {
@@ -133,7 +136,10 @@ export async function DELETE(
     })
 
     if (!result.success) {
-      return NextResponse.json({ error: result.error }, { status: 422 })
+      return NextResponse.json(
+        { error: friendlyMailcowError(result.error) },
+        { status: 422 }
+      )
     }
     return NextResponse.json({ ok: true, address })
   } catch (err) {
