@@ -33,7 +33,17 @@ export async function GET(
     const { id } = await params
 
     const project = await db.project.findFirst({
-      where: { id, userId: decoded.userId },
+      // Admins may open any project; everyone else only their own. This route
+      // already tailors its response for admins (the server IP and the other
+      // `userIsAdmin` branches below), but the query never let one through, so
+      // an admin looking at a customer's project got "Project not found" and
+      // that admin-only code could never run. The sibling routes under
+      // /hosting/[id]/* have always had this bypass — this one was the outlier.
+      //
+      // Read only: PATCH and DELETE below stay owner-scoped on purpose, so
+      // support can inspect a project without being able to change or destroy
+      // it by accident. Admin mutation belongs under /api/admin/*.
+      where: userIsAdmin ? { id } : { id, userId: decoded.userId },
       include: {
         server: true,
         deployments: {
