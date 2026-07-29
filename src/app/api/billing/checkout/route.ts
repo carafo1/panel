@@ -6,6 +6,10 @@ import { isStripeDemoMode } from '@/lib/stripe'
 import { BRAND_DOMAIN, NS1_HOSTNAME, NS2_HOSTNAME } from '@/lib/brand-config'
 import { getPriceForDomain } from '@/lib/pricing'
 import { assertDomainControl } from '@/lib/domain-verification'
+import {
+  findPendingEmailOrder,
+  duplicateOrderMessage,
+} from '@/lib/email-order-guard'
 import { provisionForPayment } from '@/lib/provision-on-payment'
 import { createNotification } from '@/lib/notifications'
 import { createSubscriptionInvoice, cycleDays } from '@/lib/invoices'
@@ -147,6 +151,47 @@ export async function POST(request: Request) {
             verification: control.record,
           },
           { status: 428 }
+        )
+      }
+
+      // A double-click, a reload, or an impatient second attempt must not
+      // become a second billable order. Checked last, so the customer is told
+      // about a real duplicate rather than being blocked by one while the
+      // order was invalid anyway.
+      const duplicate = await findPendingEmailOrder(decoded.userId, emailDomain)
+      if (duplicate) {
+        return NextResponse.json(
+          {
+            error: duplicateOrderMessage(`email hosting on ${emailDomain}`, duplicate),
+            code: 'DUPLICATE_ORDER',
+            existingOrder: duplicate,
+          },
+          { status: 409 }
+        )
+      }
+
+      // Buying the SAME plan for a service that already runs it is a no-op the
+      // customer would be charged for. A different plan is a legitimate change
+      // and must still go through — plan upgrades use this very endpoint, so
+      // this deliberately does not refuse "a service already exists".
+      const existingService = await db.emailService.findFirst({
+        where: {
+          domain: emailDomain,
+          userId: decoded.userId,
+          status: { in: ['active', 'suspended'] },
+        },
+        select: { planId: true, status: true },
+      })
+      if (existingService && existingService.planId === plan.id) {
+        return NextResponse.json(
+          {
+            error:
+              existingService.status === 'suspended'
+                ? `${emailDomain} is already on ${plan.name} but the service is suspended. Settle the outstanding invoice to restore it rather than buying it again.`
+                : `${emailDomain} is already on ${plan.name}. Choose a different plan to change it, or buy add-ons for more capacity.`,
+            code: 'ALREADY_ON_PLAN',
+          },
+          { status: 409 }
         )
       }
     }
