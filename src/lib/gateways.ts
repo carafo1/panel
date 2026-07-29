@@ -13,6 +13,7 @@
  * account and credentials, which only the operator can supply.
  */
 import { isWaafiConfigured } from '@/lib/waafi'
+import { isStripeDemoMode } from '@/lib/stripe'
 
 export type GatewayCapability =
   | 'redirect' // hosted checkout page
@@ -134,11 +135,21 @@ export interface GatewayStatus extends GatewayDescriptor {
   mode: 'live' | 'test' | 'unknown' | 'n/a'
 }
 
-/** Env presence check that treats placeholder values as unset. */
+/**
+ * Env presence check that treats placeholder values as unset.
+ *
+ * Matches anywhere in the value, not just at the start. The placeholder
+ * actually shipped is `sk_test_replace_me`, which begins with a legitimate
+ * `sk_test_` prefix — an anchored test passed it, so this endpoint reported
+ * Stripe as configured and usable while `stripe.ts` (which looks for the same
+ * words anywhere) had correctly fallen back to demo mode. The admin panel
+ * showed a green, enabled gateway that could not take a payment, which is the
+ * exact failure this module exists to prevent.
+ */
 function envPresent(name: string): boolean {
-  const v = process.env[name]
+  const v = process.env[name]?.trim()
   if (!v) return false
-  return !/^(replace-with|changeme|your-|xxx|test-key)/i.test(v.trim())
+  return !/(replace|placeholder|changeme|your[_-]?key|your-|xxx|test-key|dummy|example)/i.test(v)
 }
 
 /** Resolve one gateway's live readiness. */
@@ -146,13 +157,18 @@ export function getGatewayStatus(id: string): GatewayStatus | null {
   const g = GATEWAYS.find((x) => x.id === id)
   if (!g) return null
 
-  // Waafi has its own multi-var validator — reuse it rather than duplicating.
+  // Where a gateway owns an authoritative readiness check, defer to it rather
+  // than re-deriving one here. Two independent opinions about whether Stripe
+  // is configured is how this endpoint ended up reporting a usable gateway
+  // that stripe.ts had already given up on.
   const configured =
     g.id === 'waafi'
       ? isWaafiConfigured()
-      : g.requiredEnv.length === 0
-        ? true
-        : g.requiredEnv.every(envPresent)
+      : g.id === 'stripe'
+        ? !isStripeDemoMode()
+        : g.requiredEnv.length === 0
+          ? true
+          : g.requiredEnv.every(envPresent)
 
   const missingEnv = g.requiredEnv.filter((e) => !envPresent(e))
 

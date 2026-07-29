@@ -22,6 +22,10 @@ import {
   effectiveLimits,
 } from '@/lib/email-hosting'
 import { processPayment, resolveActiveMethod } from '@/lib/payment-methods'
+import {
+  findPendingAddonOrder,
+  duplicateOrderMessage,
+} from '@/lib/email-order-guard'
 
 const orderSchema = z
   .object({
@@ -78,6 +82,21 @@ export async function POST(
     const body = orderSchema.parse(await request.json())
     const addMailboxes = body.extraMailboxes || 0
     const addStorageGB = (body.extraStorageBlocks || 0) * STORAGE_BLOCK_GB
+
+    // A duplicate add-on order is worse than a double charge: every
+    // confirmation increments the allowance, so ordering twice by accident
+    // silently doubles what was bought. Refuse while one is still unpaid.
+    const duplicate = await findPendingAddonOrder(auth.userId, service.id)
+    if (duplicate) {
+      return NextResponse.json(
+        {
+          error: duplicateOrderMessage(`add-ons on ${service.domain}`, duplicate),
+          code: 'DUPLICATE_ORDER',
+          existingOrder: duplicate,
+        },
+        { status: 409 }
+      )
+    }
 
     // Price the DELTA being bought, not the resulting total.
     const amount =
