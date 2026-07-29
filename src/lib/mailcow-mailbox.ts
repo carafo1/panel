@@ -17,6 +17,9 @@ import { mailcowRequest, isMailcowConfigured } from '@/lib/mailcow-manage'
 /** Description that marks the sieve script this module manages. */
 export const AUTOREPLY_DESC = 'Apsamo auto-reply'
 
+/** Prefix marking a filter this module generated from a rule form. */
+export const RULE_PREFIX = 'Apsamo rule: '
+
 // ─── Types ─────────────────────────────────────────────────────────────────
 
 export interface SieveFilter {
@@ -273,6 +276,154 @@ export async function setAutoReply(
     filterType: 'postfilter',
     active: true,
   })
+}
+
+// ─── Mail rules (sieve, generated from a form) ─────────────────────────────
+
+export type RuleField = 'from' | 'to' | 'subject'
+export type RuleMatch = 'contains' | 'is'
+export type RuleAction = 'fileinto' | 'discard' | 'markread' | 'flag'
+
+export interface MailRule {
+  /** Mailcow filter id; absent for a rule not yet saved. */
+  id?: number
+  name: string
+  field: RuleField
+  match: RuleMatch
+  value: string
+  action: RuleAction
+  /** Destination folder, required when action is `fileinto`. */
+  folder?: string
+  /** Stop processing later rules once this one matches. */
+  stop: boolean
+  active: boolean
+}
+
+const HEADER_FOR: Record<RuleField, string> = {
+  from: 'from',
+  to: 'to',
+  subject: 'subject',
+}
+
+/**
+ * Turn a rule into sieve.
+ *
+ * Customers should never write sieve — an invalid script is rejected by
+ * Mailcow with a message that means nothing to them, and a subtly wrong one
+ * silently misfiles their mail. So the form is the source of truth and this is
+ * the only place a rule script is produced.
+ */
+export function buildRuleScript(rule: MailRule): string {
+  const requires: string[] = []
+  if (rule.action === 'fileinto') requires.push('"fileinto"', '"mailbox"')
+  if (rule.action === 'markread' || rule.action === 'flag') requires.push('"imap4flags"')
+
+  const test = `header :${rule.match === 'is' ? 'is' : 'contains'} "${HEADER_FOR[rule.field]}" "${escapeSieve(
+    rule.value
+  )}"`
+
+  const body: string[] = []
+  switch (rule.action) {
+    case 'fileinto':
+      // :create makes the folder if the customer named one that does not exist
+      // yet, rather than silently dropping the rule on the floor.
+      body.push(`fileinto :create "${escapeSieve(rule.folder || 'INBOX')}";`)
+      break
+    case 'discard':
+      body.push('discard;')
+      break
+    case 'markread':
+      body.push('addflag "\\\\Seen";')
+      break
+    case 'flag':
+      body.push('addflag "\\\\Flagged";')
+      break
+  }
+  if (rule.stop) body.push('stop;')
+
+  const head = requires.length ? `require [${[...new Set(requires)].join(', ')}];\n` : ''
+  return `${head}if ${test} {\n  ${body.join('\n  ')}\n}\n`
+}
+
+/** Read a rule back out of the script this module generated. */
+function parseRuleScript(f: SieveFilter): MailRule | null {
+  if (!f.description.startsWith(RULE_PREFIX)) return null
+
+  const m = /header :(is|contains) "(from|to|subject)" "((?:[^"\\]|\\.)*)"/.exec(f.script)
+  if (!m) return null
+  const unescape = (s: string) => s.replace(/\\"/g, '"').replace(/\\\\/g, '\\')
+
+  let action: RuleAction = 'fileinto'
+  let folder: string | undefined
+  const fileinto = /fileinto(?: :create)? "((?:[^"\\]|\\.)*)"/.exec(f.script)
+  if (fileinto) {
+    action = 'fileinto'
+    folder = unescape(fileinto[1])
+  } else if (/\bdiscard\s*;/.test(f.script)) action = 'discard'
+  else if (/addflag "\\\\Seen"/.test(f.script)) action = 'markread'
+  else if (/addflag "\\\\Flagged"/.test(f.script)) action = 'flag'
+
+  return {
+    id: f.id,
+    name: f.description.slice(RULE_PREFIX.length),
+    match: m[1] === 'is' ? 'is' : 'contains',
+    field: m[2] as RuleField,
+    value: unescape(m[3]),
+    action,
+    folder,
+    stop: /\bstop\s*;/.test(f.script),
+    active: f.active,
+  }
+}
+
+/**
+ * The rules for a mailbox.
+ *
+ * Only scripts this module generated are returned. A filter written by hand in
+ * Mailcow is deliberately left out — it cannot be represented in the form, and
+ * showing it would invite a save that silently rewrote it.
+ */
+export async function listRules(mailbox: string): Promise<MailRule[]> {
+  const filters = await listFilters(mailbox)
+  return filters
+    .map(parseRuleScript)
+    .filter((r): r is MailRule => r !== null)
+}
+
+export async function createRule(
+  mailbox: string,
+  rule: MailRule
+): Promise<{ success: boolean; error?: string }> {
+  return createFilter({
+    mailbox,
+    description: `${RULE_PREFIX}${rule.name}`,
+    script: buildRuleScript(rule),
+    filterType: 'prefilter',
+    active: rule.active,
+  })
+}
+
+export async function updateRule(
+  id: number,
+  rule: MailRule
+): Promise<{ success: boolean; error?: string }> {
+  return updateFilter(id, {
+    description: `${RULE_PREFIX}${rule.name}`,
+    script: buildRuleScript(rule),
+    active: rule.active,
+  })
+}
+
+/** Delete a rule, refusing anything that is not a managed rule. */
+export async function deleteRule(
+  mailbox: string,
+  id: number
+): Promise<{ success: boolean; error?: string }> {
+  const mine = await listRules(mailbox)
+  if (!mine.some((r) => r.id === id)) {
+    return { success: false, error: 'Rule not found' }
+  }
+  return deleteFilter(id)
 }
 
 // ─── App passwords ─────────────────────────────────────────────────────────

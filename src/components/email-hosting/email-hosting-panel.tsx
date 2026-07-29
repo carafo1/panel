@@ -228,6 +228,36 @@ interface AppPasswordRow {
   createdAt?: string
 }
 
+interface MailRuleRow {
+  id?: number
+  name: string
+  field: 'from' | 'to' | 'subject'
+  match: 'contains' | 'is'
+  value: string
+  action: 'fileinto' | 'discard' | 'markread' | 'flag'
+  folder?: string
+  stop: boolean
+  active: boolean
+}
+
+const BLANK_RULE: MailRuleRow = {
+  name: '',
+  field: 'from',
+  match: 'contains',
+  value: '',
+  action: 'fileinto',
+  folder: '',
+  stop: false,
+  active: true,
+}
+
+const RULE_ACTION_LABEL: Record<MailRuleRow['action'], string> = {
+  fileinto: 'Move to folder',
+  markread: 'Mark as read',
+  flag: 'Flag it',
+  discard: 'Delete it',
+}
+
 interface MailAliasRow {
   id: number
   address: string
@@ -733,6 +763,8 @@ function ServiceDetailView({
 
   // Per-mailbox settings (auto-reply + app passwords)
   const [settingsFor, setSettingsFor] = useState<string | null>(null)
+  const [rules, setRules] = useState<MailRuleRow[] | null>(null)
+  const [ruleDraft, setRuleDraft] = useState<MailRuleRow | null>(null)
   const [autoReply, setAutoReply] = useState<AutoReplyState | null>(null)
   const [appPasswords, setAppPasswords] = useState<AppPasswordRow[] | null>(null)
   const [newAppName, setNewAppName] = useState('')
@@ -904,6 +936,7 @@ function ServiceDetailView({
     const enc = encodeURIComponent(settingsFor)
     setAutoReply(null)
     setAppPasswords(null)
+    setRules(null)
     api<{ autoReply: AutoReplyState }>(
       `/api/email-hosting/${serviceId}/mailboxes/${enc}/autoreply`
     )
@@ -914,7 +947,61 @@ function ServiceDetailView({
     )
       .then((d) => setAppPasswords(d.appPasswords || []))
       .catch(() => setAppPasswords([]))
+    api<{ rules: MailRuleRow[] }>(
+      `/api/email-hosting/${serviceId}/mailboxes/${enc}/rules`
+    )
+      .then((d) => setRules(d.rules || []))
+      .catch(() => setRules([]))
   }, [settingsFor, serviceId])
+
+  const reloadRules = useCallback(async () => {
+    if (!settingsFor) return
+    try {
+      const d = await api<{ rules: MailRuleRow[] }>(
+        `/api/email-hosting/${serviceId}/mailboxes/${encodeURIComponent(settingsFor)}/rules`
+      )
+      setRules(d.rules || [])
+    } catch {
+      setRules([])
+    }
+  }, [settingsFor, serviceId])
+
+  const saveRule = async () => {
+    if (!settingsFor || !ruleDraft) return
+    setBusy(true)
+    try {
+      const url = `/api/email-hosting/${serviceId}/mailboxes/${encodeURIComponent(settingsFor)}/rules`
+      const editing = typeof ruleDraft.id === 'number'
+      await api(url, {
+        method: editing ? 'PATCH' : 'POST',
+        body: JSON.stringify(ruleDraft),
+      })
+      toast.success(editing ? 'Rule updated' : 'Rule created')
+      setRuleDraft(null)
+      await reloadRules()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not save the rule')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const removeRule = async (id: number) => {
+    if (!settingsFor) return
+    setBusy(true)
+    try {
+      await api(
+        `/api/email-hosting/${serviceId}/mailboxes/${encodeURIComponent(settingsFor)}/rules`,
+        { method: 'DELETE', body: JSON.stringify({ id }) }
+      )
+      toast.success('Rule deleted')
+      await reloadRules()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not delete the rule')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const saveAutoReply = async () => {
     if (!settingsFor || !autoReply) return
@@ -1824,8 +1911,227 @@ function ServiceDetailView({
           <Tabs defaultValue="autoreply">
             <TabsList>
               <TabsTrigger value="autoreply">Auto-reply</TabsTrigger>
+              <TabsTrigger value="rules">Rules</TabsTrigger>
               <TabsTrigger value="apps">App passwords</TabsTrigger>
             </TabsList>
+
+            {/* ── Mail rules ── */}
+            <TabsContent value="rules" className="space-y-4 pt-4">
+              {ruleDraft ? (
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="r-name">Rule name</Label>
+                    <Input
+                      id="r-name"
+                      value={ruleDraft.name}
+                      onChange={(e) =>
+                        setRuleDraft({ ...ruleDraft, name: e.target.value })
+                      }
+                      placeholder="Newsletters to a folder"
+                    />
+                  </div>
+
+                  <div className="rounded-md border p-3 space-y-3">
+                    <p className="text-xs font-medium text-muted-foreground">When</p>
+                    <div className="grid grid-cols-3 gap-2">
+                      <select
+                        aria-label="Field"
+                        className="h-9 rounded-md border bg-background px-2 text-sm"
+                        value={ruleDraft.field}
+                        onChange={(e) =>
+                          setRuleDraft({
+                            ...ruleDraft,
+                            field: e.target.value as MailRuleRow['field'],
+                          })
+                        }
+                      >
+                        <option value="from">From</option>
+                        <option value="to">To</option>
+                        <option value="subject">Subject</option>
+                      </select>
+                      <select
+                        aria-label="Match"
+                        className="h-9 rounded-md border bg-background px-2 text-sm"
+                        value={ruleDraft.match}
+                        onChange={(e) =>
+                          setRuleDraft({
+                            ...ruleDraft,
+                            match: e.target.value as MailRuleRow['match'],
+                          })
+                        }
+                      >
+                        <option value="contains">contains</option>
+                        <option value="is">is exactly</option>
+                      </select>
+                      <Input
+                        aria-label="Value"
+                        value={ruleDraft.value}
+                        onChange={(e) =>
+                          setRuleDraft({ ...ruleDraft, value: e.target.value })
+                        }
+                        placeholder="newsletter@"
+                      />
+                    </div>
+
+                    <p className="text-xs font-medium text-muted-foreground pt-1">Then</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <select
+                        aria-label="Action"
+                        className="h-9 rounded-md border bg-background px-2 text-sm"
+                        value={ruleDraft.action}
+                        onChange={(e) =>
+                          setRuleDraft({
+                            ...ruleDraft,
+                            action: e.target.value as MailRuleRow['action'],
+                          })
+                        }
+                      >
+                        {(
+                          Object.keys(RULE_ACTION_LABEL) as MailRuleRow['action'][]
+                        ).map((a) => (
+                          <option key={a} value={a}>
+                            {RULE_ACTION_LABEL[a]}
+                          </option>
+                        ))}
+                      </select>
+                      {ruleDraft.action === 'fileinto' && (
+                        <Input
+                          aria-label="Folder"
+                          value={ruleDraft.folder || ''}
+                          onChange={(e) =>
+                            setRuleDraft({ ...ruleDraft, folder: e.target.value })
+                          }
+                          placeholder="Newsletters"
+                        />
+                      )}
+                    </div>
+                    {ruleDraft.action === 'discard' && (
+                      <p className="text-xs text-amber-600 flex items-start gap-1">
+                        <AlertTriangle className="h-3 w-3 shrink-0 mt-0.5" />
+                        Matching mail is deleted on arrival and cannot be recovered.
+                      </p>
+                    )}
+                    {ruleDraft.action === 'fileinto' && (
+                      <p className="text-[11px] text-muted-foreground">
+                        The folder is created automatically if it doesn&apos;t exist yet.
+                      </p>
+                    )}
+                  </div>
+
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={ruleDraft.stop}
+                      onChange={(e) =>
+                        setRuleDraft({ ...ruleDraft, stop: e.target.checked })
+                      }
+                    />
+                    Stop checking later rules once this one matches
+                  </label>
+
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setRuleDraft(null)}
+                      disabled={busy}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => void saveRule()}
+                      disabled={
+                        busy ||
+                        !ruleDraft.name.trim() ||
+                        !ruleDraft.value.trim() ||
+                        (ruleDraft.action === 'fileinto' && !ruleDraft.folder?.trim())
+                      }
+                    >
+                      {busy && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+                      {typeof ruleDraft.id === 'number' ? 'Save rule' : 'Create rule'}
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm text-muted-foreground">
+                      Sort mail automatically as it arrives — on the server, so it works
+                      on every device.
+                    </p>
+                    <Button
+                      size="sm"
+                      className="gap-1 shrink-0"
+                      onClick={() => setRuleDraft({ ...BLANK_RULE })}
+                    >
+                      <Plus className="h-4 w-4" />
+                      New rule
+                    </Button>
+                  </div>
+
+                  {rules === null ? (
+                    <Skeleton className="h-20 w-full" />
+                  ) : rules.length === 0 ? (
+                    <div className="py-8 text-center border rounded-md">
+                      <p className="font-medium text-sm">No rules yet</p>
+                      <p className="text-xs text-muted-foreground">
+                        For example: move anything from newsletter@ into a Newsletters
+                        folder.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {rules.map((r) => (
+                        <div
+                          key={r.id}
+                          className="rounded-md border p-3 flex items-start justify-between gap-3"
+                        >
+                          <div className="min-w-0 text-sm">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium">{r.name}</span>
+                              {!r.active && (
+                                <Badge variant="outline" className="text-xs">
+                                  Off
+                                </Badge>
+                              )}
+                            </div>
+                            <p className="text-muted-foreground text-xs mt-0.5">
+                              If <strong>{r.field}</strong>{' '}
+                              {r.match === 'is' ? 'is exactly' : 'contains'}{' '}
+                              <code>{r.value}</code> →{' '}
+                              {RULE_ACTION_LABEL[r.action]}
+                              {r.action === 'fileinto' && r.folder ? ` “${r.folder}”` : ''}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8"
+                              disabled={busy}
+                              onClick={() => setRuleDraft({ ...r })}
+                            >
+                              Edit
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+                              disabled={busy || typeof r.id !== 'number'}
+                              onClick={() => r.id && void removeRule(r.id)}
+                              aria-label={`Delete ${r.name}`}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </TabsContent>
 
             {/* Auto-reply */}
             <TabsContent value="autoreply" className="space-y-4 pt-4">
