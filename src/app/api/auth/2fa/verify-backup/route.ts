@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { withRateLimit } from '@/lib/rate-limit'
 import { db } from '@/lib/db'
 import { generateToken } from '@/lib/auth'
 import { consumeBackupCode } from '@/lib/totp'
@@ -17,7 +18,7 @@ import { consumeBackupCode } from '@/lib/totp'
  * Response:
  *   { token, user }
  */
-export async function POST(request: Request) {
+async function postHandler(request: Request) {
   try {
     const body = await request.json()
     const { email, backupCode } = body as { email?: string; backupCode?: string }
@@ -97,3 +98,6 @@ export async function POST(request: Request) {
     )
   }
 }
+
+// Rate limited: see lib/rate-limit. 10 requests per 60s per IP.
+export const POST = withRateLimit(postHandler, { limit: 10, windowMs: 60000 })

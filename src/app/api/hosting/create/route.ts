@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { withRateLimit } from '@/lib/rate-limit'
 import crypto from 'crypto'
 import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
@@ -83,7 +84,7 @@ function parsePlanResources(plan: {
 
 // ─── POST ────────────────────────────────────────────────────────────────
 
-export async function POST(request: Request) {
+async function postHandler(request: Request) {
   try {
     const decoded = await authenticateRequest(request)
     if (!decoded) {
@@ -789,3 +790,6 @@ async function handleLegacyCreate(
     { status: 201 }
   )
 }
+
+// Rate limited: see lib/rate-limit. 20 requests per 60s per IP.
+export const POST = withRateLimit(postHandler, { limit: 20, windowMs: 60000 })

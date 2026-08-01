@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server'
+import { withRateLimit } from '@/lib/rate-limit'
 import { db } from '@/lib/db'
 import bcrypt from 'bcryptjs'
 
-export async function POST(request: Request) {
+async function postHandler(request: Request) {
   try {
     const body = await request.json()
     const { token, newPassword } = body
@@ -56,3 +57,6 @@ export async function POST(request: Request) {
     )
   }
 }
+
+// Rate limited: see lib/rate-limit. 10 requests per 60s per IP.
+export const POST = withRateLimit(postHandler, { limit: 10, windowMs: 60000 })

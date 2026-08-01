@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { runUptimeChecks } from '@/lib/monitor'
+import { recoverUnhealthyAllServers } from '@/lib/vps/docker-maintenance'
 import { requireSecret, isAdmin, safeCompare } from '@/lib/security'
 import { recordHeartbeat } from '@/lib/health'
 
@@ -65,6 +66,20 @@ export async function POST(request: Request) {
         )
       }
     }
+
+    // Restart containers Docker reports unhealthy. Rides the 60s
+
+    // monitor tick so a wedged site is recovered in about a minute
+
+    // rather than waiting for the hourly sweep. Never fails the tick.
+
+    const recovery = await recoverUnhealthyAllServers().catch((err) => {
+
+      console.error('[monitors/run] health recovery failed:', err)
+
+      return { restarted: 0, stillUnhealthy: 0 }
+
+    })
 
     const result = await runUptimeChecks()
 

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { withRateLimit } from '@/lib/rate-limit'
 import { db } from '@/lib/db'
 import { generateToken, verifyTwoFactorTempToken } from '@/lib/auth'
 import { verifyToken as verifyTotpToken } from '@/lib/totp'
@@ -19,7 +20,7 @@ import { logAudit } from '@/lib/audit'
  * Response:
  *   { token, user }
  */
-export async function POST(request: Request) {
+async function postHandler(request: Request) {
   try {
     const body = await request.json()
     const { tempToken, token: totpToken } = body as {
@@ -126,3 +127,6 @@ export async function POST(request: Request) {
     )
   }
 }
+
+// Rate limited: see lib/rate-limit. 10 requests per 60s per IP.
+export const POST = withRateLimit(postHandler, { limit: 10, windowMs: 60000 })
