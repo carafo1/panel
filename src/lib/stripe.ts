@@ -188,21 +188,49 @@ export async function cancelSubscription(
  * Construct a Stripe webhook event from the raw body + signature.
  * Use this in /api/webhooks/stripe to verify webhook authenticity.
  */
+/**
+ * Verify and parse a Stripe webhook.
+ *
+ * This used to fall back to `JSON.parse(payload)` with no verification whenever
+ * demo mode was on or the webhook secret was missing. That is safe on a laptop
+ * and critical in production: /api/billing/webhook is internet-facing, and the
+ * handler provisions from the event's metadata. On this deployment the Stripe
+ * key was a placeholder, so demo mode was ON — a forged
+ * `checkout.session.completed` carrying any userId and domainName would have
+ * been accepted and acted on, spending real registrar balance.
+ *
+ * A webhook that cannot be verified is now refused. Being unable to confirm a
+ * payment is recoverable; provisioning on an unverified one is not.
+ *
+ * Local development that genuinely needs unsigned webhooks must opt in
+ * explicitly with STRIPE_WEBHOOK_ALLOW_UNSIGNED=1, which is deliberately
+ * separate from demo mode so it cannot be switched on by accident or inferred
+ * from an unrelated placeholder value.
+ */
 export async function constructWebhookEvent(
   payload: string,
   signature: string
 ): Promise<Stripe.Event> {
   const secret = process.env.STRIPE_WEBHOOK_SECRET
-  if (isStripeDemoMode() || !secret) {
-    // Demo mode - parse the payload as JSON without verification
-     
+  const stripe = getClient()
+
+  if (secret && stripe) {
+    return stripe.webhooks.constructEvent(payload, signature, secret)
+  }
+
+  if (process.env.STRIPE_WEBHOOK_ALLOW_UNSIGNED === '1') {
     console.warn(
-      '[stripe] DEMO MODE: constructWebhookEvent - signature not verified'
+      '[stripe] STRIPE_WEBHOOK_ALLOW_UNSIGNED=1 — accepting an UNVERIFIED webhook. ' +
+        'Never set this outside local development.'
     )
     return JSON.parse(payload) as Stripe.Event
   }
-  const stripe = getClient()!
-  return stripe.webhooks.constructEvent(payload, signature, secret)
+
+  throw new Error(
+    'Stripe webhook cannot be verified: ' +
+      (!secret ? 'STRIPE_WEBHOOK_SECRET is not set' : 'no usable STRIPE_SECRET_KEY') +
+      '. Refusing to process an unverified event.'
+  )
 }
 
 interface CreateCustomerResult {

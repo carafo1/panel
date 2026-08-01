@@ -4,7 +4,6 @@ import { processEvent } from '@/lib/automation'
 import { provisionForPayment } from '@/lib/provision-on-payment'
 import {
   constructWebhookEvent,
-  isStripeDemoMode,
   getSubscriptionPeriod,
   getInvoiceSubscriptionId,
   getInvoiceChargeId,
@@ -38,12 +37,6 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: 'Invalid signature' },
         { status: 400 }
-      )
-    }
-
-    if (isStripeDemoMode()) {
-      console.warn(
-        '[stripe-webhook] DEMO MODE: accepting webhook without signature verification'
       )
     }
 
