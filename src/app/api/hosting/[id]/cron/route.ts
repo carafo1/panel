@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
+import { enforceLimit } from '@/lib/plan-limits'
 import { logAudit } from '@/lib/audit'
 import { listCronJobs, createCronJob, validateCronExpression } from '@/lib/vps'
 
@@ -53,6 +54,12 @@ export async function POST(
     if (!project) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
     }
+
+    // Plan limit. The quota for cron jobs was computed for the usage bar but
+    // never enforced, so a customer could create them without limit while the
+    // bar sat past 100%. Checked before creating anything.
+    const denied = await enforceLimit(decoded.userId, 'cronJobs', { role: decoded.role })
+    if (denied) return denied
 
     const body = await request.json().catch(() => ({}))
     const expression = typeof body?.expression === 'string' ? body.expression.trim() : ''

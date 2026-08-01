@@ -24,6 +24,7 @@ import { getPriceForDomain } from './pricing'
 import { processPayment } from './payment-methods'
 import { nextInvoiceNumber, markInvoicePaid } from './invoices'
 import { isRegistrarManaged, registrarUnavailableReason } from './domain-ownership'
+import { checkLimit } from './plan-limits'
 import {
   runRegistrationPipeline,
   runRenewalPipeline,
@@ -224,6 +225,20 @@ export async function createDomainOrder(
   if (input.kind === 'register') {
     const contactError = validateRegistrant(input.registrant)
     if (contactError) return { success: false, error: contactError }
+
+    // Plan allowance. maxDomains was shown on the usage bar but never enforced,
+    // so a Starter customer (1 domain) could register any number. Checked here
+    // rather than at fulfilment so we refuse before taking money, not after.
+    const verdict = await checkLimit(input.userId, 'domains')
+    if (!verdict.allowed) {
+      return {
+        success: false,
+        error:
+          `Your ${verdict.planName} plan includes ${verdict.limit} domain${
+            verdict.limit === 1 ? '' : 's'
+          } and you already have ${verdict.used}. Upgrade your plan to register more.`,
+      }
+    }
 
     const existing = await db.domain.findUnique({ where: { name: domain } })
     // A previously deleted record must not block a fresh purchase.

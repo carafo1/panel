@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
+import { enforceLimit } from '@/lib/plan-limits'
 import { logAudit } from '@/lib/audit'
 import { listFtpAccounts, createFtpAccount } from '@/lib/vps'
 
@@ -53,6 +54,12 @@ export async function POST(
     if (!project) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
     }
+
+    // Plan limit. The quota for FTP accounts was computed for the usage bar but
+    // never enforced, so a customer could create them without limit while the
+    // bar sat past 100%. Checked before creating anything.
+    const denied = await enforceLimit(decoded.userId, 'ftpAccounts', { role: decoded.role })
+    if (denied) return denied
 
     const body = await request.json().catch(() => ({}))
     const username = typeof body?.username === 'string' ? body.username.trim() : ''

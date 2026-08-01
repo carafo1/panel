@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
+import { enforceLimit } from '@/lib/plan-limits'
 import { isAdmin } from '@/lib/security'
 import { logAudit } from '@/lib/audit'
 import { provisionProjectDatabase, listProjectDatabases } from '@/lib/vps'
@@ -53,6 +54,12 @@ export async function POST(
     if (!project) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
     }
+
+    // Plan limit. The quota for databases was computed for the usage bar but
+    // never enforced, so a customer could create them without limit while the
+    // bar sat past 100%. Checked before creating anything.
+    const denied = await enforceLimit(decoded.userId, 'databases', { role: decoded.role })
+    if (denied) return denied
 
     const body = await request.json().catch(() => ({}))
     // Normalize type: accept 'mysql', 'mariadb', 'postgres', or 'postgresql'
