@@ -1704,6 +1704,32 @@ function phpIniBlock(ramMB?: number | null): string {
     'max_input_time = 120',
     'max_input_vars = 3000',
     'expose_php = Off',
+    // ── OPcache ──────────────────────────────────────────────────────
+    // The single largest PHP win available and it was simply off: without
+    // it every request re-parses and re-compiles every .php file it touches,
+    // which on WordPress is hundreds of files per page load.
+    //
+    // The php:*-apache and wordpress images ship the extension compiled in
+    // but disabled, so enabling it costs nothing but this directive.
+    'opcache.enable = 1',
+    'opcache.enable_cli = 0',
+    // Sized to the request budget: the cache is shared across workers, so this
+    // is a one-off cost, not per-request.
+    `opcache.memory_consumption = ${Math.min(192, Math.max(64, Math.round(memoryLimit / 4)))}`,
+    'opcache.interned_strings_buffer = 16',
+    // WordPress plus a plugin set comfortably exceeds the 10k default.
+    'opcache.max_accelerated_files = 20000',
+    // Re-stat files every 60s rather than on every request. Deployments
+    // replace the container, so a stale cache cannot outlive a release.
+    'opcache.validate_timestamps = 1',
+    'opcache.revalidate_freq = 60',
+    // Comments are needed at runtime by annotation-driven frameworks
+    // (Doctrine, some Laravel packages); stripping them breaks them.
+    'opcache.save_comments = 1',
+    // ── Realpath cache ───────────────────────────────────────────────
+    // PHP stats a lot of paths; the 16k default is small for WordPress trees.
+    'realpath_cache_size = 4096K',
+    'realpath_cache_ttl = 600',
   ]
   const writes = directives
     .map((d, i) => `echo '${d}' ${i === 0 ? '>' : '>>'} ${ini}`)

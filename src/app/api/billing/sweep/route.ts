@@ -10,6 +10,7 @@ import {
 } from '@/lib/email-lifecycle'
 import { collectAllUsage } from '@/lib/usage'
 import { pruneAllBackups } from '@/lib/vps/backups'
+import { cleanupAllServers } from '@/lib/vps/docker-maintenance'
 import { recordHeartbeat } from '@/lib/health'
 
 /**
@@ -96,6 +97,14 @@ export async function POST(request: Request) {
     const backupPrune = await pruneAllBackups().catch((err) => {
       console.error('[billing-sweep] backup pruning failed:', err)
       return { projects: 0, deleted: 0 }
+    })
+
+    // Reclaim Docker garbage. Nothing ever did: measured on the live host,
+    // 1.5 GB of dangling images plus 297 MB of build cache with no process
+    // that would ever remove them. Conservative — see lib/vps/docker-maintenance.
+    const dockerCleanup = await cleanupAllServers().catch((err) => {
+      console.error('[billing-sweep] docker cleanup failed:', err)
+      return { servers: 0, reclaimedBytes: 0, orphanVolumes: 0 }
     })
 
     const reminded: string[] = []
@@ -229,6 +238,8 @@ export async function POST(request: Request) {
       usageCaptured: usage.captured,
       overLimitAlerts: usage.alerted,
       backupsPruned: backupPrune.deleted,
+      dockerReclaimedMB: Math.round(dockerCleanup.reclaimedBytes / 1024 ** 2),
+      orphanVolumes: dockerCleanup.orphanVolumes,
       reminded: reminded.length,
       pastDue: pastDue.length,
       suspended: suspended.length,

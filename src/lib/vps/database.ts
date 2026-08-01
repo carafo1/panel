@@ -185,6 +185,60 @@ function toRow(
 // ─── Provision ───────────────────────────────────────────────────────────
 
 /**
+ * Container caps and engine tuning for a customer database.
+ *
+ * Customer DB containers were started with `--restart unless-stopped` and
+ * nothing else: no memory cap, no CPU cap, and stock engine settings. A default
+ * MariaDB sizes its InnoDB buffer pool against the HOST's RAM, so every
+ * customer database on a 7.7 GB box believed it had the whole machine. One
+ * busy site could then starve every other container, and the failure mode at
+ * scale is the OOM killer picking a victim at random.
+ *
+ * A database is a supporting service for a site, not the whole allowance, so it
+ * gets a slice of the plan's RAM rather than all of it — clamped so a small
+ * plan still gets a usable engine and a large one cannot monopolise the host.
+ * The buffer pool is then sized to the CONTAINER, which is the setting that
+ * actually determines the footprint.
+ */
+function databaseResourceFlags(
+  planRamMB: number | null | undefined,
+  isPostgres: boolean
+): { runFlags: string[]; engineArgs: string[] } {
+  // A quarter of the site's allowance, never below 256 MB (MariaDB is unhappy
+  // under that) and never above 2 GB from a single tenant.
+  const planRam = planRamMB && planRamMB > 0 ? planRamMB : 1024
+  const memMB = Math.min(2048, Math.max(256, Math.round(planRam / 4)))
+
+  const runFlags = [
+    `--memory ${memMB}m`,
+    // Equal to --memory disables swap for the container. Letting a database
+    // swap trades a fast failure for a slow, host-wide one.
+    `--memory-swap ${memMB}m`,
+    '--cpus 1',
+  ]
+
+  const engineArgs = isPostgres
+    ? [
+        // Postgres: shared_buffers ~25% of container, work_mem modest.
+        `-c shared_buffers=${Math.round(memMB / 4)}MB`,
+        `-c effective_cache_size=${Math.round(memMB / 2)}MB`,
+        '-c work_mem=4MB',
+        '-c maintenance_work_mem=64MB',
+        '-c max_connections=50',
+      ]
+    : [
+        // MariaDB/MySQL: the buffer pool is the dominant allocation.
+        `--innodb-buffer-pool-size=${Math.round(memMB / 2)}M`,
+        '--innodb-log-file-size=64M',
+        '--max-connections=50',
+        '--performance-schema=OFF',
+        '--skip-name-resolve',
+      ]
+
+  return { runFlags, engineArgs }
+}
+
+/**
  * Provision a new database container for a project. Generates a secure name,
  * username, password, and (in real mode) starts a MariaDB/MySQL container on
  * the deployhub docker network. Persists a WebsiteDatabase row with the
@@ -322,13 +376,23 @@ export async function provisionProjectDatabase(
               `-e MYSQL_USER=${shellQuote(dbUser)}`,
               `-e MYSQL_PASSWORD=${shellQuote(dbPass)}`,
             ]
+        // Resource caps + engine tuning from the plan. Without these the
+        // container inherits the host: unbounded RAM and a buffer pool sized
+        // for a machine it does not own.
+        const { runFlags, engineArgs } = databaseResourceFlags(
+          project.resourceRamMB,
+          isPostgres
+        )
+
         const runCmd = [
           'docker run -d',
           `--name ${containerName}`,
           '--network deployhub',
           '--restart unless-stopped',
+          ...runFlags,
           ...envFlags,
           image,
+          ...engineArgs,
         ].join(' ')
         const run = await exec(client, runCmd, { timeoutMs: 60000 })
         if (run.exitCode !== 0) {
