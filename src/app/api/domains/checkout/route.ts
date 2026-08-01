@@ -25,6 +25,7 @@ import {
   type RegistrantInput,
 } from '@/lib/domain-checkout'
 import { getActivePaymentMethods } from '@/lib/payment-methods'
+import { requireVerifiedEmail } from '@/lib/require-verified'
 import { withRateLimit } from '@/lib/rate-limit'
 import { logAudit } from '@/lib/audit'
 
@@ -121,6 +122,12 @@ async function postHandler(request: Request) {
     if (!user) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
+
+    // Domain registration spends non-refundable registrar balance, so require a
+    // confirmed email first. Without this an address the signer-up does not
+    // control could place real orders.
+    const gate = await requireVerifiedEmail(decoded.userId, decoded.role)
+    if (!gate.ok) return gate.response!
 
     const body = await request.json()
     const { domain, kind, years, method, registrant, authCode, domainId, projectId } =

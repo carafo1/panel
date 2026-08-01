@@ -1110,15 +1110,13 @@ function ActivityFeed({ projects }: { projects: ProjectWithIntegration[] }) {
         })
       }
 
-      // Simulated commit push
-      events.push({
-        id: `push-${integration.id}`,
-        type: 'commit_pushed',
-        projectName: project.name,
-        message: `New push to ${integration.branch}`,
-        timestamp: new Date(Date.now() - Math.random() * 86400000 * 3).toISOString(),
-        detail: integration.repoFullName,
-      })
+      // No synthetic push event here.
+      //
+      // This used to append a "New push to <branch>" entry dated at a random
+      // point in the last three days, for every integration, on every render.
+      // It looked like real repository activity and was not — the timestamp
+      // changed each time the panel loaded. Real pushes arrive through the
+      // webhook and appear via the deployment records above.
     }
   }
 

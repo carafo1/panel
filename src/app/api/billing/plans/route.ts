@@ -10,7 +10,6 @@
  */
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { seedDatabase } from '@/lib/seed'
 
 /** Null/0 on a limit column means "unlimited" — say so rather than printing 0. */
 function limit(value: number | null | undefined): number | null {
@@ -42,15 +41,13 @@ export async function GET(request: Request) {
 
     const where = { active: true, hidden: false, archived: false, planType }
 
-    let plans = await db.plan.findMany({ where, orderBy: { priority: 'asc' } })
-
-    // First boot only: seed when the catalogue is genuinely empty. Guard on the
-    // total count, not the filtered one — otherwise an operator who archives
-    // every plan deliberately gets the demo catalogue silently reinstated.
-    if (plans.length === 0 && (await db.plan.count()) === 0) {
-      await seedDatabase()
-      plans = await db.plan.findMany({ where, orderBy: { priority: 'asc' } })
-    }
+    // An empty result is returned as-is. There is deliberately no seed-on-read
+    // fallback: it used to call seedDatabase(), which created Starter $9 /
+    // Pro $29 / Business $79 — prices the business does not sell — and this
+    // endpoint feeds the public pricing page directly. The catalogue is
+    // established by `bun run scripts/seed-plans.ts`, not by someone loading a
+    // page.
+    const plans = await db.plan.findMany({ where, orderBy: { priority: 'asc' } })
 
     return NextResponse.json({
       plans: plans.map((p) => ({

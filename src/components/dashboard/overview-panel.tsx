@@ -68,6 +68,17 @@ export default function OverviewPanel() {
   const [projectsCount, setProjectsCount] = useState(0)
   const [domainsCount, setDomainsCount] = useState(0)
   const [deploymentsCount, setDeploymentsCount] = useState(0)
+  /**
+   * Genuine last-7-day counts. The trend captions used to read
+   * `+${Math.min(count, 5)} this week`, which is just the total capped at five
+   * — a project created a year ago was reported as created this week.
+   */
+  const [newThisWeek, setNewThisWeek] = useState({ projects: 0, domains: 0, deployments: 0 })
+  /**
+   * Real uptime, averaged across the customer's monitors. Null when they have
+   * none — the card then shows "—" rather than inventing a figure.
+   */
+  const [uptime, setUptime] = useState<{ pct: number; monitors: number } | null>(null)
   const [deployments, setDeployments] = useState<Array<{ id: string; status: string; createdAt: string; project?: { name: string } }>>([])
   const [activityTimeline, setActivityTimeline] = useState<Array<{ id: string; type: string; message: string; time: string; status: string }>>([])
   const [planInfo, setPlanInfo] = useState<{ name: string; storage: string; bandwidth: string; projects: number } | null>(null)
@@ -95,7 +106,7 @@ export default function OverviewPanel() {
       if (!token) return
       try {
         const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
-        const [projRes, domRes, depRes, logRes, subRes, usageRes] = await Promise.all([
+        const [projRes, domRes, depRes, logRes, subRes, usageRes, monRes] = await Promise.all([
           fetch('/api/hosting', { headers }).catch(() => null),
           fetch('/api/domains', { headers }).catch(() => null),
           fetch('/api/deployments', { headers }).catch(() => null),
@@ -103,6 +114,8 @@ export default function OverviewPanel() {
           fetch('/api/billing/subscription', { headers }).catch(() => null),
           // Measured usage + plan quotas — the only source for the resource UI.
           fetch('/api/usage', { headers }).catch(() => null),
+          // Real uptime — measured by the worker against live endpoints.
+          fetch('/api/monitors', { headers }).catch(() => null),
         ])
 
         const projData = projRes ? await projRes.json().catch(() => ({ projects: [] })) : { projects: [] }
@@ -123,6 +136,42 @@ export default function OverviewPanel() {
         setDomainsCount(domCount)
         setDeploymentsCount(depCount)
         setDeployments(depList.slice(0, 20))
+
+        // Actual creations in the last 7 days, from createdAt.
+        const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
+        const since = (rows: unknown): number =>
+          Array.isArray(rows)
+            ? rows.filter((r) => {
+                const c = (r as { createdAt?: string }).createdAt
+                return c ? new Date(c).getTime() >= weekAgo : false
+              }).length
+            : 0
+        setNewThisWeek({
+          projects: since(projData.projects),
+          domains: since(domData.domains),
+          deployments: since(depList),
+        })
+
+        // Uptime from real monitors, or null when none are configured.
+        if (monRes?.ok) {
+          const monData = await monRes.json().catch(() => ({ monitors: [] }))
+          const mons: Array<{ uptimePct?: number | null }> = Array.isArray(monData.monitors)
+            ? monData.monitors
+            : []
+          const withData = mons.filter((m) => typeof m.uptimePct === 'number')
+          setUptime(
+            withData.length > 0
+              ? {
+                  pct:
+                    Math.round(
+                      (withData.reduce((sum, m) => sum + (m.uptimePct as number), 0) /
+                        withData.length) * 10
+                    ) / 10,
+                  monitors: withData.length,
+                }
+              : null
+          )
+        }
 
         // Plan info
         if (subData.subscription?.plan) {
@@ -244,10 +293,14 @@ export default function OverviewPanel() {
   const barBgColor = (pct: number) =>
     pct > 80 ? 'bg-red-100' : pct > 60 ? 'bg-amber-100' : 'bg-indigo-100'
 
-  // Uptime calculation
+  // Deployment success rate — the share of this customer's deployments that
+  // reached "live". This used to be labelled "Uptime", which it never was: it
+  // measures build outcomes, not availability, and it fell back to a hardcoded
+  // 99.9% for anyone with no deployments, so a brand-new account with nothing
+  // hosted was shown "Uptime 99.9% — Excellent".
   const liveCount = deployments.filter((d) => d.status === 'live').length
   const totalDep = deployments.length
-  const uptimePct = totalDep > 0 ? Math.round((liveCount / totalDep) * 100) : 99.9
+  const successPct = totalDep > 0 ? Math.round((liveCount / totalDep) * 100) : null
 
   // Timeline icon/color per type
   const timelineIcon = (type: string) => {
@@ -288,8 +341,13 @@ export default function OverviewPanel() {
       icon: Server,
       gradient: 'from-indigo-500 to-indigo-600',
       iconBg: 'bg-indigo-500/20',
-      trend: projectsCount > 0 ? `+${Math.min(projectsCount, 5)} this week` : 'No projects yet',
-      trendUp: true,
+      trend:
+        newThisWeek.projects > 0
+          ? `+${newThisWeek.projects} this week`
+          : projectsCount > 0
+          ? 'No change this week'
+          : 'No projects yet',
+      trendUp: newThisWeek.projects > 0,
       tab: 'hosting' as DashboardTab,
     },
     {
@@ -298,8 +356,13 @@ export default function OverviewPanel() {
       icon: Globe,
       gradient: 'from-indigo-400 to-indigo-500',
       iconBg: 'bg-indigo-400/20',
-      trend: domainsCount > 0 ? `+${Math.min(domainsCount, 3)} this week` : 'No domains yet',
-      trendUp: true,
+      trend:
+        newThisWeek.domains > 0
+          ? `+${newThisWeek.domains} this week`
+          : domainsCount > 0
+          ? 'No change this week'
+          : 'No domains yet',
+      trendUp: newThisWeek.domains > 0,
       tab: 'domains' as DashboardTab,
     },
     {
@@ -308,19 +371,28 @@ export default function OverviewPanel() {
       icon: Rocket,
       gradient: 'from-indigo-500 to-indigo-700',
       iconBg: 'bg-indigo-500/20',
-      trend: deploymentsCount > 0 ? `↑ ${uptimePct}% success` : 'No deployments yet',
-      trendUp: uptimePct >= 80,
+      trend:
+        successPct !== null
+          ? `${successPct}% reached live`
+          : 'No deployments yet',
+      trendUp: successPct !== null && successPct >= 80,
       tab: 'deployments' as DashboardTab,
     },
     {
+      // Real availability, measured by the worker against live endpoints.
+      // Shows "—" rather than a number when the customer has no monitors:
+      // there is genuinely nothing to report, and a placeholder percentage
+      // here is exactly what made this card untrustworthy before.
       title: 'Uptime',
-      value: `${uptimePct}%`,
+      value: uptime ? `${uptime.pct}%` : '—',
       icon: Activity,
       gradient: 'from-indigo-400 to-indigo-600',
       iconBg: 'bg-indigo-400/20',
-      trend: uptimePct >= 99 ? 'Excellent' : uptimePct >= 95 ? 'Good' : 'Needs attention',
-      trendUp: uptimePct >= 95,
-      tab: 'deployments' as DashboardTab,
+      trend: uptime
+        ? `${uptime.monitors} monitor${uptime.monitors === 1 ? '' : 's'}`
+        : 'Not monitored yet',
+      trendUp: uptime ? uptime.pct >= 99 : false,
+      tab: 'monitoring' as DashboardTab,
     },
   ]
 
