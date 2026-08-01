@@ -27,6 +27,7 @@ import {
   withConnection,
   exec,
   isServerInDemoMode,
+  shellQuote,
   type SshCredentials,
 } from './ssh'
 import { getServerCredentials } from './provisioner'
@@ -47,6 +48,8 @@ export interface ResourceUsage {
   /** Current storage used in GB. */
   storageUsedGB: number
   /** Cumulative network RX bytes since container start. */
+  /** Files + directories in the project tree. Plans cap this. */
+  inodesUsed: number
   networkRxBytes: number
   /** Cumulative network TX bytes since container start. */
   networkTxBytes: number
@@ -159,6 +162,7 @@ export async function getProjectResourceUsage(
       ramUsedMB: 0,
       storageGB,
       storageUsedGB: 0,
+      inodesUsed: 0,
       networkRxBytes: 0,
       networkTxBytes: 0,
       uptimeSeconds: 0,
@@ -180,6 +184,7 @@ export async function getProjectResourceUsage(
       ramUsedMB: usedRam,
       storageGB,
       storageUsedGB: usedStorage,
+      inodesUsed: Math.floor(rand() * 50000),
       networkRxBytes: Math.floor(rand() * 1e9),
       networkTxBytes: Math.floor(rand() * 5e8),
       uptimeSeconds: uptime,
@@ -212,16 +217,32 @@ export async function getProjectResourceUsage(
         }
       }
 
-      // df -h deployPath
+      // Disk and inodes actually used by THIS project's directory.
+      //
+      // This used to run `df -h <deployPath>`, which reports the filesystem
+      // containing the path — i.e. the whole host. Every customer was shown the
+      // server's total usage as their own: 27 GB against a 20 GB Starter quota
+      // for a site occupying 40 KB, so the bar sat permanently over 100% and
+      // the number was identical for everyone.
+      //
+      // `du -sb` measures the directory. Inodes are counted in the same pass;
+      // the plans advertise 100k/300k/800k and nothing measured them at all.
       let storageUsedGB = 0
+      let inodesUsed = 0
       if (project.deployPath) {
-        const df = await exec(
+        const usage = await exec(
           client,
-          `df -h ${project.deployPath} 2>/dev/null | tail -1`,
-          { timeoutMs: 10000 }
+          `du -sb ${shellQuote(project.deployPath)} 2>/dev/null | cut -f1; ` +
+            `find ${shellQuote(project.deployPath)} -xdev 2>/dev/null | wc -l`,
+          { timeoutMs: 60000 }
         )
-        const parsed = parseDfRow(df.stdout)
-        if (parsed) storageUsedGB = +parsed.usedGB.toFixed(2)
+        const [bytesLine, inodeLine] = usage.stdout.trim().split(/\r?\n/)
+        const bytes = parseInt((bytesLine || '').trim(), 10)
+        if (Number.isFinite(bytes)) {
+          storageUsedGB = +(bytes / (1024 * 1024 * 1024)).toFixed(3)
+        }
+        const inodes = parseInt((inodeLine || '').trim(), 10)
+        if (Number.isFinite(inodes)) inodesUsed = inodes
       }
 
       // Uptime
@@ -244,6 +265,7 @@ export async function getProjectResourceUsage(
         ramUsedMB,
         storageGB,
         storageUsedGB,
+        inodesUsed,
         networkRxBytes: netRx,
         networkTxBytes: netTx,
         uptimeSeconds,
@@ -259,6 +281,7 @@ export async function getProjectResourceUsage(
       ramUsedMB: 0,
       storageGB,
       storageUsedGB: 0,
+      inodesUsed: 0,
       networkRxBytes: 0,
       networkTxBytes: 0,
       uptimeSeconds: 0,

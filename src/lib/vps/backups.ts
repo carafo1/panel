@@ -224,6 +224,13 @@ export async function createBackup(
       })
     })
 
+    // Apply the plan's retention now that a new backup exists. Best-effort:
+    // a pruning failure must not make a successful backup look failed.
+    const pruned = await pruneBackups(projectId).catch(() => ({ deleted: 0 }))
+    if (pruned.deleted > 0) {
+      log(`Retention: removed ${pruned.deleted} expired backup(s).`)
+    }
+
     return {
       id: '',
       filename,
@@ -672,4 +679,95 @@ export async function deleteBackup(
 
   await db.websiteBackup.delete({ where: { id: backupId } })
   return { ok: true, message: 'Backup deleted' }
+}
+
+/**
+ * Apply the plan's backup retention to one project.
+ *
+ * `backupRetentionDays` (7 / 14 / 30 across the catalogue) and `maxBackups`
+ * were stored on every plan and read by nothing: backups accumulated forever,
+ * so retention was a line on the pricing page rather than a behaviour, and disk
+ * on the host grew without bound.
+ *
+ * Two rules, applied in order:
+ *   1. Delete anything older than the plan's retention window.
+ *   2. If more than `maxBackups` remain, delete the oldest until the count fits.
+ *
+ * The newest backup is never deleted, whatever the rules say — a customer whose
+ * plan lapsed should still be able to restore something. Deletion goes through
+ * deleteBackup(), so the archive on disk is removed, not just the row.
+ */
+export async function pruneBackups(
+  projectId: string
+): Promise<{ deleted: number; retainedDays: number | null; maxKept: number | null }> {
+  const project = await db.project.findUnique({
+    where: { id: projectId },
+    select: { userId: true },
+  })
+  if (!project) return { deleted: 0, retainedDays: null, maxKept: null }
+
+  const sub = await db.subscription.findFirst({
+    where: {
+      userId: project.userId,
+      status: { in: ['active', 'trialing', 'past_due'] },
+    },
+    orderBy: { createdAt: 'desc' },
+    include: { plan: true },
+  })
+
+  const retentionDays = sub?.plan?.backupRetentionDays ?? null
+  const maxBackups = sub?.plan?.maxBackups ?? null
+  if (!retentionDays && !maxBackups) {
+    return { deleted: 0, retainedDays: null, maxKept: null }
+  }
+
+  // Newest first, so index 0 is the one we always keep.
+  const rows = await db.websiteBackup.findMany({
+    where: { projectId },
+    orderBy: { createdAt: 'desc' },
+    select: { id: true, createdAt: true },
+  })
+  if (rows.length <= 1) {
+    return { deleted: 0, retainedDays: retentionDays, maxKept: maxBackups }
+  }
+
+  const doomed = new Set<string>()
+
+  if (retentionDays && retentionDays > 0) {
+    const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1000
+    for (const r of rows.slice(1)) {
+      if (new Date(r.createdAt).getTime() < cutoff) doomed.add(r.id)
+    }
+  }
+
+  if (maxBackups && maxBackups > 0) {
+    const survivors = rows.filter((r) => !doomed.has(r.id))
+    for (const r of survivors.slice(maxBackups)) doomed.add(r.id)
+  }
+
+  let deleted = 0
+  for (const id of doomed) {
+    const res = await deleteBackup(projectId, id).catch(() => ({ ok: false, message: '' }))
+    if (res.ok) deleted++
+  }
+
+  return { deleted, retainedDays: retentionDays, maxKept: maxBackups }
+}
+
+/**
+ * Prune every project that has backups. Driven by the worker sweep so retention
+ * is applied continuously, not only when someone happens to take a new backup.
+ */
+export async function pruneAllBackups(): Promise<{ projects: number; deleted: number }> {
+  const grouped = await db.websiteBackup.groupBy({
+    by: ['projectId'],
+    _count: { _all: true },
+  })
+
+  let deleted = 0
+  for (const g of grouped) {
+    const res = await pruneBackups(g.projectId).catch(() => ({ deleted: 0 }))
+    deleted += res.deleted
+  }
+  return { projects: grouped.length, deleted }
 }

@@ -9,6 +9,7 @@ import {
   runEmailLifecycle,
 } from '@/lib/email-lifecycle'
 import { collectAllUsage } from '@/lib/usage'
+import { pruneAllBackups } from '@/lib/vps/backups'
 import { recordHeartbeat } from '@/lib/health'
 
 /**
@@ -86,6 +87,15 @@ export async function POST(request: Request) {
     const usage = await collectAllUsage().catch((err) => {
       console.error('[billing-sweep] usage collection failed:', err)
       return { captured: 0, failed: 0, alerted: 0 }
+    })
+
+    // Apply each plan's backup retention. backupRetentionDays (7/14/30) and
+    // maxBackups were stored on every plan and read by nothing, so archives
+    // accumulated forever and the host's disk grew without bound. Runs on the
+    // same hourly sweep rather than adding another scheduler.
+    const backupPrune = await pruneAllBackups().catch((err) => {
+      console.error('[billing-sweep] backup pruning failed:', err)
+      return { projects: 0, deleted: 0 }
     })
 
     const reminded: string[] = []
@@ -218,6 +228,7 @@ export async function POST(request: Request) {
       renewalFailures: renewals.failed,
       usageCaptured: usage.captured,
       overLimitAlerts: usage.alerted,
+      backupsPruned: backupPrune.deleted,
       reminded: reminded.length,
       pastDue: pastDue.length,
       suspended: suspended.length,

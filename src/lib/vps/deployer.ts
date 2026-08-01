@@ -1477,10 +1477,11 @@ function settingsGet<T = string>(settings: Record<string, unknown>, key: string,
 
 function generateMethodDockerfile(
   methodId: DeploymentMethodId,
-  project: { name: string; slug: string; runtime?: string | null; runtimeVersion?: string | null; buildCommand?: string | null; startCommand?: string | null; appPort?: number | null; documentRoot?: string | null; framework?: string | null },
+  project: { name: string; slug: string; runtime?: string | null; runtimeVersion?: string | null; buildCommand?: string | null; startCommand?: string | null; appPort?: number | null; documentRoot?: string | null; framework?: string | null; resourceRamMB?: number | null },
   settings: Record<string, unknown>
 ): string {
   const phpVersion = (project.runtimeVersion as string) || '8.2'
+  const phpIni = phpIniBlock(project.resourceRamMB)
   const nodeVersion = (project.runtimeVersion as string) || '20'
   const pythonVersion = (project.runtimeVersion as string) || '3.11'
   const documentRoot = project.documentRoot || '/var/www/html'
@@ -1491,6 +1492,7 @@ function generateMethodDockerfile(
     return `FROM wordpress:php${phpVersion}-apache
 # APSAMO Panel — managed WordPress image
 RUN docker-php-ext-install mysqli pdo pdo_mysql && a2enmod rewrite
+${phpIni}
 EXPOSE 80
 CMD ["apache2-foreground"]
 `
@@ -1506,6 +1508,7 @@ COPY . .
 RUN composer install --no-dev --optimize-autoloader --no-interaction || true
 RUN php artisan config:cache || true
 RUN php artisan route:cache || true
+${phpIni}
 EXPOSE 80
 CMD ["php-fpm"]
 `
@@ -1514,6 +1517,7 @@ CMD ["php-fpm"]
   if (methodId === 'php') {
     return `FROM php:${phpVersion}-apache
 RUN docker-php-ext-install mysqli pdo pdo_mysql && a2enmod rewrite
+${phpIni}
 COPY . ${documentRoot}/
 RUN chown -R www-data:www-data ${documentRoot}
 EXPOSE 80
@@ -1665,6 +1669,47 @@ CMD ["sh", "-c", "${startCmd}"]
 }
 
 // ─── docker-compose.yml generation (new + legacy) ─────────────────────────
+
+/**
+ * php.ini directives scaled to the plan's RAM allowance.
+ *
+ * Only the PHP *version* was ever applied — it picked the base image and
+ * nothing else. Every site therefore ran on PHP's stock defaults
+ * (memory_limit 128M, upload_max_filesize 2M), so a customer on a 6 GB
+ * Enterprise plan got the same 2 MB upload ceiling as one on Starter, and the
+ * "PHP settings" row on the comparison table described nothing.
+ *
+ * memory_limit is a per-request cap, not the container total: giving a request
+ * the whole container invites the OOM killer to take the whole site down
+ * instead of failing one request. A quarter of container RAM, clamped to a
+ * sane 128M–512M, is the usual shape.
+ */
+function phpIniBlock(ramMB?: number | null): string {
+  const ram = ramMB && ramMB > 0 ? ramMB : 512
+  const memoryLimit = Math.min(512, Math.max(128, Math.round(ram / 4)))
+  // Uploads are bounded by the request memory, and post_max_size must exceed
+  // upload_max_filesize or the upload fails with an empty $_FILES.
+  const uploadMB = Math.min(256, Math.max(8, Math.round(memoryLimit / 2)))
+  const postMB = uploadMB + 8
+
+  // Deliberately a single physical line. Multi-line RUN blocks need shell
+  // continuations, and those backslashes are hostile to escape correctly
+  // through a TS template literal into a generated Dockerfile.
+  const ini = '/usr/local/etc/php/conf.d/zz-apsamo.ini'
+  const directives = [
+    `memory_limit = ${memoryLimit}M`,
+    `upload_max_filesize = ${uploadMB}M`,
+    `post_max_size = ${postMB}M`,
+    'max_execution_time = 120',
+    'max_input_time = 120',
+    'max_input_vars = 3000',
+    'expose_php = Off',
+  ]
+  const writes = directives
+    .map((d, i) => `echo '${d}' ${i === 0 ? '>' : '>>'} ${ini}`)
+    .join(' && ')
+  return `RUN ${writes}`
+}
 
 function resourceLimitsBlock(cpuCores?: number | null, ramMB?: number | null): string {
   if (!cpuCores && !ramMB) return ''
