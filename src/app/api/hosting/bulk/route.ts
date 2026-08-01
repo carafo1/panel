@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { purgeProject } from '@/lib/project-teardown'
+import { deployProject, stopProject, restartProject } from '@/lib/vps'
 
 type BulkAction = 'deploy' | 'stop' | 'restart' | 'delete'
 
@@ -107,32 +108,44 @@ export async function POST(request: Request) {
             continue
           }
 
-          // Create a new deployment record
+          // Real build on the host. This previously created a deployment row,
+          // immediately flipped it to "live" with a hand-written ✅ build log
+          // and a Math.random() duration, and never touched the server — so a
+          // bulk deploy reported success while shipping nothing.
           const deployment = await db.deployment.create({
             data: {
               projectId: project.id,
               userId: decoded.userId,
-              commit: `auto-${Date.now()}`,
+              commit: `bulk-${Date.now()}`,
               branch: 'main',
-              status: 'building',
+              status: 'queued',
               triggeredBy: 'user',
+              buildLog: '🚀 Queued by bulk deploy…',
             },
           })
 
-          // Simulate deployment completing
-          await db.deployment.update({
-            where: { id: deployment.id },
-            data: {
-              status: 'live',
-              deployUrl: `https://${project.subdomain}`,
-              duration: Math.floor(Math.random() * 120) + 30,
-              buildLog: `✅ Build started at ${new Date().toISOString()}\n✅ Installing dependencies...\n✅ Building ${project.framework} application...\n✅ Build completed successfully\n✅ Deployment is live at https://${project.subdomain}`,
-            },
+          // deployProject takes minutes and streams its own log; don't hold the
+          // request open for every selected project. Failures are written back
+          // to the deployment row, which is what the UI polls.
+          void deployProject({
+            projectId: project.id,
+            deploymentId: deployment.id,
+            onLog: (m) => console.log(`[bulk-deploy ${deployment.id.slice(0, 8)}] ${m}`),
+          }).catch(async (err) => {
+            const msg = err instanceof Error ? err.message : String(err)
+            console.error(`[bulk-deploy] ${project.id} failed:`, msg)
+            await db.deployment
+              .update({
+                where: { id: deployment.id },
+                data: { status: 'failed', buildLog: `❌ Deploy failed: ${msg}` },
+              })
+              .catch(() => {})
           })
 
           await logAudit({
             userId: decoded.userId,
             action: 'project.deploy',
+
             resource: 'project',
             resourceId: project.id,
             req: request,
@@ -157,10 +170,16 @@ export async function POST(request: Request) {
             continue
           }
 
-          await db.project.update({
-            where: { id: project.id },
-            data: { status: 'stopped' },
-          })
+          // Actually stop the container. This used to set the DB status to
+          // "stopped" and nothing else, so the container kept running — still
+          // serving traffic and still holding its host port — while the panel
+          // showed it as stopped. stopProject runs `docker compose down` and
+          // updates the row only once that succeeds.
+          const stopped = await stopProject(project.id)
+          if (!stopped.ok) {
+            results.push({ id: project.id, success: false, error: stopped.message })
+            continue
+          }
 
           await logAudit({
             userId: decoded.userId,
@@ -176,32 +195,14 @@ export async function POST(request: Request) {
 
           results.push({ id: project.id, success: true })
         } else if (action === 'restart') {
-          // Restart: set status back to running and create a new deployment
-          await db.project.update({
-            where: { id: project.id },
-            data: { status: 'running' },
-          })
-
-          const deployment = await db.deployment.create({
-            data: {
-              projectId: project.id,
-              userId: decoded.userId,
-              commit: `restart-${Date.now()}`,
-              branch: 'main',
-              status: 'building',
-              triggeredBy: 'user',
-            },
-          })
-
-          await db.deployment.update({
-            where: { id: deployment.id },
-            data: {
-              status: 'live',
-              deployUrl: `https://${project.subdomain}`,
-              duration: Math.floor(Math.random() * 120) + 30,
-              buildLog: `✅ Restart triggered at ${new Date().toISOString()}\n✅ Build completed successfully\n✅ Deployment is live at https://${project.subdomain}`,
-            },
-          })
+          // Real container restart. This used to flip the status to "running"
+          // and write a fabricated "live" deployment with a Math.random()
+          // duration, without restarting anything.
+          const restarted = await restartProject(project.id)
+          if (!restarted.ok) {
+            results.push({ id: project.id, success: false, error: restarted.message })
+            continue
+          }
 
           await logAudit({
             userId: decoded.userId,
@@ -211,7 +212,6 @@ export async function POST(request: Request) {
             req: request,
             metadata: {
               name: project.name,
-              deploymentId: deployment.id,
               bulk: true,
             },
           })

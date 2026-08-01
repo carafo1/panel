@@ -5,6 +5,7 @@ import { processEvent } from '@/lib/automation'
 import { isStripeDemoMode } from '@/lib/stripe'
 import { BRAND_DOMAIN, NS1_HOSTNAME, NS2_HOSTNAME } from '@/lib/brand-config'
 import { getPriceForDomain } from '@/lib/pricing'
+import { requireVerifiedEmail } from '@/lib/require-verified'
 import { assertDomainControl } from '@/lib/domain-verification'
 import {
   findPendingEmailOrder,
@@ -205,18 +206,36 @@ export async function POST(request: Request) {
       )
     }
 
-    // Calculate amount. For domain purchases, charge the real per-TLD selling
-    // price (wholesale + markup) from the DomainPrice table — a flat $12.99 fee
-    // gave away margin on expensive TLDs (.ai ≈ $95, .io ≈ $39) and could
-    // overcharge on cheap ones. Falls back to $12.99 only when no priced row
-    // is found for the domain's TLD.
-    let domainFee = 12.99
+    // Checkout starts a subscription and provisions real infrastructure (and,
+    // for domain purchases, spends non-refundable registrar balance). Require a
+    // confirmed email address first — `emailVerified` was recorded at signup
+    // but never actually checked anywhere.
+    const gate = await requireVerifiedEmail(decoded.userId, decoded.role)
+    if (!gate.ok) return gate.response!
+
+    // Charge the real per-TLD selling price from the DomainPrice catalogue.
+    //
+    // There is deliberately no fallback. This used to default to a flat $12.99
+    // for any TLD without a catalogue row, which silently undercharged on
+    // everything expensive — .ai sells at $95.60, .io at $38.89 — while the
+    // registrar still billed us in full. Refusing the order is recoverable;
+    // quoting a price we lose money on is not.
+    let domainFee = 0
     if ((type === 'domain' || type === 'both') && typeof domainName === 'string' && domainName.trim()) {
       const priceRow = await getPriceForDomain(domainName.trim().toLowerCase())
-      if (priceRow?.registration && priceRow.registration > 0) {
-        domainFee = priceRow.registration
+      if (!priceRow?.registration || priceRow.registration <= 0) {
+        return NextResponse.json(
+          {
+            error:
+              'We do not currently sell that domain extension. Please choose another, or contact support.',
+            code: 'tld_not_priced',
+          },
+          { status: 400 }
+        )
       }
+      domainFee = priceRow.registration
     }
+
     let amount = plan.price
     if (type === 'domain') {
       amount = domainFee

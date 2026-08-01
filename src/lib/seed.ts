@@ -1,60 +1,17 @@
 import { db } from '@/lib/db'
 
 export async function seedDatabase() {
-  // Seed Plans
-  const existingPlans = await db.plan.count()
-  if (existingPlans === 0) {
-    await db.plan.createMany({
-      data: [
-        {
-          name: 'Starter',
-          slug: 'starter',
-          description: 'Perfect for personal projects and small websites',
-          price: 9,
-          ram: '1GB',
-          cpu: '1 vCPU',
-          storage: '10GB',
-          bandwidth: '100GB',
-          projects: 1,
-          ssl: true,
-          customDomain: false,
-          priority: 1,
-          popular: false,
-        },
-        {
-          name: 'Pro',
-          slug: 'pro',
-          description: 'Ideal for growing businesses and teams',
-          price: 29,
-          ram: '4GB',
-          cpu: '2 vCPU',
-          storage: '50GB',
-          bandwidth: '500GB',
-          projects: 5,
-          ssl: true,
-          customDomain: true,
-          priority: 2,
-          popular: true,
-        },
-        {
-          name: 'Business',
-          slug: 'business',
-          description: 'For large-scale applications and enterprises',
-          price: 79,
-          ram: '16GB',
-          cpu: '4 vCPU',
-          storage: '200GB',
-          bandwidth: 'Unlimited',
-          projects: 999,
-          ssl: true,
-          customDomain: true,
-          priority: 3,
-          popular: false,
-        },
-      ],
-    })
-    console.log('✅ Plans seeded')
-  }
+  // Plans are NOT seeded here.
+  //
+  // This used to create Starter $9 / Pro $29 / Business $79 — prices that were
+  // superseded by the real catalogue (Starter $4.99, Professional $8.99,
+  // Enterprise $17.99, seeded by scripts/seed-plans.ts). Leaving them here
+  // meant an empty Plan table would silently repopulate with prices the
+  // business does not sell, on a public endpoint that renders straight onto the
+  // pricing page.
+  //
+  // Run `bun run scripts/seed-plans.ts` to establish the real catalogue; it is
+  // idempotent and shows a dry run first.
 
   // Seed demo Servers — DEV ONLY. In production the installer registers a real
   // "localhost" server (single-box) or you add real VPS hosts via Admin → Servers.
