@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { withRateLimit } from '@/lib/rate-limit'
 import { db } from '@/lib/db'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import {
@@ -26,7 +27,7 @@ import {
  * hashed and can never be retrieved again. The UI must prompt the user
  * to save them immediately.
  */
-export async function POST(request: Request) {
+async function postHandler(request: Request) {
   try {
     const authHeader = request.headers.get('Authorization')
     const token = extractTokenFromHeader(authHeader)
@@ -110,3 +111,6 @@ export async function POST(request: Request) {
     )
   }
 }
+
+// Rate limited: see lib/rate-limit. 10 requests per 60s per IP.
+export const POST = withRateLimit(postHandler, { limit: 10, windowMs: 60000 })

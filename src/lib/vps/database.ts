@@ -215,6 +215,10 @@ function databaseResourceFlags(
     // swap trades a fast failure for a slow, host-wide one.
     `--memory-swap ${memMB}m`,
     '--cpus 1',
+    // A database has no legitimate reason to fork hundreds of
+    // processes; without this an unbounded fork exhausts the host's
+    // process table and every other container dies with it.
+    '--pids-limit 256',
   ]
 
   const engineArgs = isPostgres

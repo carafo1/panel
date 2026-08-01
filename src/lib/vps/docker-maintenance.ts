@@ -180,3 +180,103 @@ export async function cleanupAllServers(): Promise<{
   }
   return { servers: servers.length, reclaimedBytes, orphanVolumes }
 }
+
+/**
+ * Restart containers Docker reports as unhealthy.
+ *
+ * `restart: unless-stopped` only reacts to a process that EXITS. A container
+ * that is still running but wedged — a deadlocked PHP-FPM pool, a database
+ * refusing connections — stays "Up" indefinitely and serves errors, which is
+ * why healthchecks were added to the compose templates. This is the half that
+ * acts on them.
+ *
+ * Deliberately narrow:
+ *   - Only containers this platform manages (deployhub-* prefix). Restarting a
+ *     Mailcow or panel container from here would fight whatever supervises it.
+ *   - One restart per pass. If a container is unhealthy because the app itself
+ *     is broken, restarting it every minute turns a broken site into a crash
+ *     loop that also burns CPU. Repeated failures are surfaced, not hammered.
+ */
+export async function restartUnhealthyContainers(
+  serverId: string
+): Promise<{ checked: number; restarted: string[]; stillUnhealthy: string[] }> {
+  const empty = { checked: 0, restarted: [], stillUnhealthy: [] }
+
+  const server = await db.server.findUnique({ where: { id: serverId } })
+  if (!server || isServerInDemoMode(server)) return empty
+
+  try {
+    const creds: SshCredentials = await getServerCredentials(serverId)
+    return await withConnection(creds, async (client) => {
+      const list = await exec(
+        client,
+        "docker ps --filter health=unhealthy --filter name=deployhub- --format '{{.Names}}' 2>/dev/null",
+        { timeoutMs: 30000 }
+      )
+      const unhealthy = list.stdout
+        .split('\n')
+        .map((n) => n.trim())
+        .filter(Boolean)
+
+      const restarted: string[] = []
+      const stillUnhealthy: string[] = []
+
+      for (const name of unhealthy) {
+        // Skip one that was already restarted recently — see the crash-loop
+        // note above. Docker records the last start time.
+        const started = await exec(
+          client,
+          `docker inspect --format '{{.State.StartedAt}}' ${name} 2>/dev/null`,
+          { timeoutMs: 15000 }
+        )
+        const startedAt = new Date(started.stdout.trim()).getTime()
+        const minutesUp = Number.isFinite(startedAt)
+          ? (Date.now() - startedAt) / 60000
+          : Infinity
+
+        if (minutesUp < 10) {
+          stillUnhealthy.push(name)
+          console.warn(
+            `[docker-health] ${name} unhealthy ${minutesUp.toFixed(0)}min after a restart — not restarting again`
+          )
+          continue
+        }
+
+        const res = await exec(client, `docker restart ${name} 2>&1`, {
+          timeoutMs: 60000,
+        })
+        if (res.exitCode === 0) {
+          restarted.push(name)
+          console.warn(`[docker-health] restarted unhealthy container ${name}`)
+        } else {
+          stillUnhealthy.push(name)
+        }
+      }
+
+      return { checked: unhealthy.length, restarted, stillUnhealthy }
+    })
+  } catch (err) {
+    console.error('[docker-health] check failed:', err)
+    return empty
+  }
+}
+
+/** Health recovery pass across every active server. */
+export async function recoverUnhealthyAllServers(): Promise<{
+  restarted: number
+  stillUnhealthy: number
+}> {
+  const servers = await db.server.findMany({
+    where: { status: 'active' },
+    select: { id: true },
+  })
+  let restarted = 0
+  let stillUnhealthy = 0
+  for (const s of servers) {
+    const r = await restartUnhealthyContainers(s.id).catch(() => null)
+    if (!r) continue
+    restarted += r.restarted.length
+    stillUnhealthy += r.stillUnhealthy.length
+  }
+  return { restarted, stillUnhealthy }
+}

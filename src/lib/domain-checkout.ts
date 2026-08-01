@@ -307,8 +307,26 @@ export async function createDomainOrder(
     }
   }
 
-  // ── Order (nothing spent yet) ───────────────────────────────────────
-  const order = await db.domainOrder.create({
+  const label =
+    input.kind === 'register'
+      ? 'Domain registration'
+      : input.kind === 'renew'
+      ? 'Domain renewal'
+      : 'Domain transfer'
+
+  // ── Order + invoice, atomically (nothing spent yet) ─────────────────
+  //
+  // These were two sequential creates. If the invoice insert failed — a
+  // collision on the unique invoice number, a disk error, a dropped connection
+  // — the order row survived in `pending_payment` with no invoice attached:
+  // invisible to the customer, impossible to pay, and reclaimed by nothing.
+  //
+  // processPayment stays OUTSIDE this transaction deliberately. It makes a
+  // network call to Stripe or Waafi, and holding a database transaction open
+  // across an external HTTP request is how connection pools get exhausted. A
+  // failure there is already handled by the compensating cleanup below.
+  const { order, invoice, invoiceNumber } = await db.$transaction(async (tx) => {
+    const createdOrder = await tx.domainOrder.create({
     data: {
       userId: input.userId,
       domainId: existingDomainId,
@@ -329,20 +347,14 @@ export async function createDomainOrder(
     },
   })
 
-  // ── Invoice the customer can actually pay against ───────────────────
-  const invoiceNumber = await nextInvoiceNumber()
-  const label =
-    input.kind === 'register'
-      ? 'Domain registration'
-      : input.kind === 'renew'
-      ? 'Domain renewal'
-      : 'Domain transfer'
+    // Invoice the customer can actually pay against.
+    const number = await nextInvoiceNumber()
 
-  const invoice = await db.invoice.create({
+    const createdInvoice = await tx.invoice.create({
     data: {
-      number: invoiceNumber,
+      number,
       userId: input.userId,
-      orderId: order.id,
+      orderId: createdOrder.id,
       domainId: existingDomainId,
       items: JSON.stringify([
         {
@@ -361,6 +373,13 @@ export async function createDomainOrder(
       status: 'pending',
       paidAt: null,
     },
+    })
+
+    return {
+      order: createdOrder,
+      invoice: createdInvoice,
+      invoiceNumber: number,
+    }
   })
 
   // ── Take the money ──────────────────────────────────────────────────

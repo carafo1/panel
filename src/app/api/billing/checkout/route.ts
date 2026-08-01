@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { withRateLimit } from '@/lib/rate-limit'
 import { db } from '@/lib/db'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { processEvent } from '@/lib/automation'
@@ -28,7 +29,7 @@ function slugify(text: string): string {
     .slice(0, 40)
 }
 
-export async function POST(request: Request) {
+async function postHandler(request: Request) {
   try {
     const authHeader = request.headers.get('Authorization')
     const token = extractTokenFromHeader(authHeader)
@@ -704,3 +705,6 @@ export async function POST(request: Request) {
     )
   }
 }
+
+// Rate limited: see lib/rate-limit. 20 requests per 60s per IP.
+export const POST = withRateLimit(postHandler, { limit: 20, windowMs: 60000 })
