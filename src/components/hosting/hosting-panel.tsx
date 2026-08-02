@@ -78,6 +78,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import CreateWebsiteWizard from '@/components/hosting/create-website-wizard'
 import ImportWizard from '@/components/hosting/import-wizard'
 import ImportDashboard from '@/components/hosting/import-dashboard'
+import { EmailManagement } from '@/components/hosting/email-management'
 import {
   Dialog,
   DialogContent,
@@ -97,7 +98,6 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import {
-import { EmailManagement } from '@/components/hosting/email-management'
   Select,
   SelectContent,
   SelectItem,
