@@ -258,8 +258,35 @@ export async function PATCH(
     }
 
     const { id } = await params
-    const body = await request.json()
-    const { autoDeploy, sslEnabled, repoUrl, customDomain } = body
+    const body = await request.json().catch(() => null)
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json({ error: 'A JSON body is required' }, { status: 400 })
+    }
+    const { autoDeploy, sslEnabled, repoUrl, customDomain } = body as Record<
+      string,
+      unknown
+    >
+
+    // SECURITY: `customDomain` is the column the Caddy generator emits, and
+    // generateCaddyBlock interpolates it raw into the site address. Accepting
+    // it here skipped every guard POST /domains applies — hostname shape,
+    // reserved platform names, cross-tenant conflicts and, most importantly,
+    // proof of ownership. A value containing a newline and a brace injected
+    // arbitrary directives into the shared Caddyfile.
+    //
+    // Rather than duplicate four checks that would drift, refuse it here and
+    // send the caller to the endpoint built for it.
+    if (customDomain !== undefined) {
+      return NextResponse.json(
+        {
+          error:
+            'Set a custom domain through POST /api/hosting/' +
+            id +
+            '/domains, which verifies you control it first.',
+        },
+        { status: 400 }
+      )
+    }
 
     const project = await db.project.findFirst({
       where: { id, userId: decoded.userId },
@@ -275,8 +302,22 @@ export async function PATCH(
     const updateData: Record<string, unknown> = {}
     if (typeof autoDeploy === 'boolean') updateData.autoDeploy = autoDeploy
     if (typeof sslEnabled === 'boolean') updateData.sslEnabled = sslEnabled
-    if (typeof repoUrl === 'string') updateData.repoUrl = repoUrl || null
-    if (typeof customDomain === 'string') updateData.customDomain = customDomain || null
+    if (typeof repoUrl === 'string') {
+      const trimmed = repoUrl.trim()
+      // Handed to git and echoed back to the browser. Anything that is not an
+      // http(s) or scp-style git remote has no business being stored.
+      if (
+        trimmed &&
+        !/^https?:\/\/[^\s]+$/i.test(trimmed) &&
+        !/^git@[^\s:]+:[^\s]+$/i.test(trimmed)
+      ) {
+        return NextResponse.json(
+          { error: 'repoUrl must be an https:// or git@host:path repository URL' },
+          { status: 400 }
+        )
+      }
+      updateData.repoUrl = trimmed || null
+    }
 
     await db.project.update({
       where: { id },
