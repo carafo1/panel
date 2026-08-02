@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { withRateLimit } from '@/lib/rate-limit'
+import { enforceOverage } from '@/lib/plan-limits'
 import crypto from 'crypto'
 import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
@@ -205,6 +206,13 @@ async function handleWizardCreate(
       )
     }
   }
+
+  // A new site consumes storage the customer does not have. Refuse while
+  // they are over allowance rather than letting the overage grow.
+  const overQuota = await enforceOverage(decoded.userId, 'disk', {
+    role: decoded.role,
+  })
+  if (overQuota) return overQuota
 
   // ── Domain resolution ─────────────────────────────────────────────
   const slug = slugify(name) + '-' + randomSuffix(4)

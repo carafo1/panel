@@ -211,9 +211,40 @@ model EmailService {
   user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   plan         Plan          @relation(fields: [planId], references: [id])
   subscription Subscription? @relation(fields: [subscriptionId], references: [id])
+  mailboxSecrets EmailMailboxSecret[]
 
   @@index([userId])
   @@index([status])
+}
+
+/// Mailbox credentials the panel holds so it can sign a customer into webmail
+/// without asking them to type a password.
+///
+/// Mailcow blocks direct SOGo login by design and rejects app passwords for its
+/// own UI, so the ONLY credential that can drive single sign-on is the real
+/// mailbox password. It is stored encrypted (AES-256-GCM via lib/encryption),
+/// never in plaintext, and kept in its own table so a careless `include` on
+/// EmailService cannot drag secrets into an API response.
+///
+/// Only ever written for passwords the PANEL itself set. If a customer changes
+/// their password directly in mailcow the stored copy goes stale — single
+/// sign-on then fails and the panel falls back to normal login, which is why
+/// `lastVerifiedAt` exists.
+model EmailMailboxSecret {
+  id        String @id @default(cuid())
+  serviceId String
+  /// Full mailbox address, lowercased.
+  address   String @unique
+  /// AES-256-GCM ciphertext. NEVER select this into a response payload.
+  passwordEnc String
+  /// Last time single sign-on with this credential actually worked.
+  lastVerifiedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  service EmailService @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@index([serviceId])
 }
 
 model Subscription {
