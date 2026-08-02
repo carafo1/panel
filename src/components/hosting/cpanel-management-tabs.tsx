@@ -1991,6 +1991,231 @@ export function RedirectsTab({ projectId }: { projectId: string }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════════════
+// MalwareScanCard — the plan's malwareScanner tier, made real
+// ═══════════════════════════════════════════════════════════════════════
+
+interface ScanStatus {
+  tier: string
+  entitled: boolean
+  onDemand?: boolean
+  scheduled?: boolean
+  scannerAvailable: boolean
+  engine?: string | null
+  reason?: string
+  deployed?: boolean
+}
+
+interface ScanOutcome {
+  scanned: boolean
+  tier: string
+  engine?: string | null
+  infected: Array<{ path: string; signature: string }>
+  filesScanned: number
+  durationMs: number
+  reason?: string
+}
+
+function MalwareScanCard({ projectId }: { projectId: string }) {
+  const [status, setStatus] = useState<ScanStatus | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [scanning, setScanning] = useState(false)
+  const [result, setResult] = useState<ScanOutcome | null>(null)
+
+  const fetchStatus = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await fetch(`/api/hosting/${projectId}/malware-scan`, {
+        headers: getAuthHeaders(),
+      })
+      const data = await res.json()
+      if (res.ok) setStatus(data)
+      else toast.error(data.error || 'Could not read scanner status')
+    } catch {
+      toast.error('Network error reading scanner status')
+    } finally {
+      setLoading(false)
+    }
+  }, [projectId])
+
+  useEffect(() => {
+    fetchStatus()
+  }, [fetchStatus])
+
+  const runScan = async () => {
+    setScanning(true)
+    setResult(null)
+    try {
+      const res = await fetch(`/api/hosting/${projectId}/malware-scan`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      })
+      const data: ScanOutcome & { error?: string } = await res.json()
+      if (!res.ok) {
+        toast.error(data.error || 'Scan failed')
+        return
+      }
+      setResult(data)
+      if (!data.scanned) toast.info(data.reason || 'The scan could not run.')
+      else if (data.infected.length > 0)
+        toast.error(`${data.infected.length} infected file(s) found`)
+      else toast.success(`Clean — ${data.filesScanned} files scanned`)
+    } catch {
+      toast.error('Network error running the scan')
+    } finally {
+      setScanning(false)
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <ShieldCheck className={`size-5 ${primaryText}`} />
+              Malware Scanning
+            </CardTitle>
+            <CardDescription className="mt-1">
+              {loading
+                ? 'Checking your plan and the scanner…'
+                : status?.entitled
+                ? `${status.tier} protection included in your plan.`
+                : 'Not included in your plan.'}
+            </CardDescription>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs"
+              onClick={fetchStatus}
+              disabled={loading || scanning}
+            >
+              <RefreshCw className={`size-3.5 mr-1 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+            {status?.entitled && status.onDemand && (
+              <Button
+                size="sm"
+                className={primaryBtn}
+                onClick={runScan}
+                disabled={scanning || !status.scannerAvailable}
+              >
+                {scanning ? (
+                  <>
+                    <Loader2 className="size-3.5 mr-1 animate-spin" />
+                    Scanning…
+                  </>
+                ) : (
+                  <>
+                    <Shield className="size-3.5 mr-1" />
+                    Scan now
+                  </>
+                )}
+              </Button>
+            )}
+          </div>
+        </div>
+      </CardHeader>
+
+      <CardContent className="space-y-3">
+        {loading && <Skeleton className="h-16 w-full" />}
+
+        {!loading && status && !status.entitled && (
+          <div className="rounded-lg border p-3 text-sm text-muted-foreground">
+            Malware scanning is available on higher plans. Upgrade to have your site
+            files checked against the ClamAV signature database.
+          </div>
+        )}
+
+        {/* An entitled customer whose scanner is off must be told plainly. A
+            silent "no threats" from something that never ran is worse than
+            nothing, because it gets believed. */}
+        {!loading && status?.entitled && !status.scannerAvailable && (
+          <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3">
+            <div className="flex items-start gap-2 text-sm">
+              <AlertTriangle className="size-4 text-amber-600 mt-0.5 shrink-0" />
+              <div>
+                <p className="font-medium">Scanner unavailable — no scan has run</p>
+                <p className="text-muted-foreground mt-0.5">
+                  {status.reason || 'The scanning service is not running on this server.'}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!loading && status?.entitled && status.scannerAvailable && (
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            <div className="rounded-lg border p-3">
+              <div className="text-xs text-muted-foreground">Tier</div>
+              <div className="text-sm font-medium mt-1">{status.tier}</div>
+            </div>
+            <div className="rounded-lg border p-3">
+              <div className="text-xs text-muted-foreground">Engine</div>
+              <div className="text-sm font-medium mt-1 truncate">
+                {status.engine || 'ClamAV'}
+              </div>
+            </div>
+            <div className="rounded-lg border p-3">
+              <div className="text-xs text-muted-foreground">Scheduled sweep</div>
+              <div className="text-sm font-medium mt-1">
+                {status.scheduled ? 'Included' : 'On demand only'}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {result && (
+          <div
+            className={`rounded-lg border p-3 ${
+              !result.scanned
+                ? ''
+                : result.infected.length > 0
+                ? 'border-destructive/40 bg-destructive/5'
+                : 'border-emerald-500/40 bg-emerald-500/5'
+            }`}
+          >
+            {!result.scanned ? (
+              <p className="text-sm text-muted-foreground">{result.reason}</p>
+            ) : result.infected.length === 0 ? (
+              <p className="text-sm">
+                <span className="font-medium text-emerald-600 dark:text-emerald-400">
+                  No threats found.
+                </span>{' '}
+                <span className="text-muted-foreground">
+                  {result.filesScanned} files, {(result.durationMs / 1000).toFixed(1)}s.
+                </span>
+              </p>
+            ) : (
+              <div className="text-sm">
+                <p className="font-medium text-destructive mb-2">
+                  {result.infected.length} infected file
+                  {result.infected.length === 1 ? '' : 's'} found
+                </p>
+                <ul className="space-y-1 font-mono text-xs">
+                  {result.infected.slice(0, 20).map((f) => (
+                    <li key={f.path} className="break-all">
+                      <span className="text-destructive">{f.signature}</span> — {f.path}
+                    </li>
+                  ))}
+                </ul>
+                {result.infected.length > 20 && (
+                  <p className="text-muted-foreground mt-2">
+                    …and {result.infected.length - 20} more.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 // 4. SecurityTab
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -2177,6 +2402,8 @@ export function SecurityTab({ projectId }: { projectId: string }) {
   ).length
 
   return (
+    <div className="space-y-4">
+    <MalwareScanCard projectId={projectId} />
     <Card>
       <CardHeader>
         <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -2499,5 +2726,6 @@ export function SecurityTab({ projectId }: { projectId: string }) {
         </AlertDialogContent>
       </AlertDialog>
     </Card>
+    </div>
   )
 }
