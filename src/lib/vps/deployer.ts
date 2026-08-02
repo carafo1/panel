@@ -1776,7 +1776,24 @@ function healthcheckBlock(containerPort: number): string {
  * Always emits a block. The process cap is fork-bomb protection and must not
  * depend on whether a plan happens to have its RAM column filled in.
  */
-function resourceLimitsBlock(cpuCores?: number | null, ramMB?: number | null): string {
+function resourceLimitsBlock(
+  cpuCores?: number | null,
+  ramMB?: number | null,
+  host?: { cpuCores?: number | null; ramGB?: number | null } | null
+): string {
+  // Clamp to the host. A ceiling above physical RAM is not a ceiling: the
+  // container can never reach it, so the kernel OOM-kills something else on
+  // the box instead of the site that overran.
+  const hostRamMB = host?.ramGB ? host.ramGB * 1024 : null
+  if (ramMB && hostRamMB) {
+    // At most half the machine for one customer site — the same box runs the
+    // panel, the worker, Caddy, Mailcow and the tenant databases.
+    ramMB = Math.min(ramMB, Math.floor(hostRamMB / 2))
+  }
+  if (cpuCores && host?.cpuCores) {
+    cpuCores = Math.min(cpuCores, host.cpuCores)
+  }
+
   const lines: string[] = []
   lines.push('    deploy:')
   lines.push('      resources:')
@@ -1813,7 +1830,17 @@ function envBlock(envVars: Record<string, string>): string {
 
 function generateMethodCompose(
   methodId: DeploymentMethodId,
-  project: { slug: string; resourceCpuCores?: number | null; resourceRamMB?: number | null; databaseHost?: string | null; databaseName?: string | null; databaseUser?: string | null; databasePassword?: string | null },
+  project: {
+    slug: string
+    resourceCpuCores?: number | null
+    resourceRamMB?: number | null
+    databaseHost?: string | null
+    databaseName?: string | null
+    databaseUser?: string | null
+    databasePassword?: string | null
+    /** Capacity of the machine this lands on — limits are clamped to it. */
+    server?: { cpuCores?: number | null; ramGB?: number | null } | null
+  },
   settings: Record<string, unknown>,
   opts: {
     containerName: string
@@ -1823,7 +1850,11 @@ function generateMethodCompose(
     envVars: Record<string, string>
   }
 ): string {
-  const limits = resourceLimitsBlock(project.resourceCpuCores, project.resourceRamMB)
+  const limits = resourceLimitsBlock(
+    project.resourceCpuCores,
+    project.resourceRamMB,
+    project.server
+  )
   const health = healthcheckBlock(opts.containerPort)
   const env = envBlock(opts.envVars)
 
