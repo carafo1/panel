@@ -122,7 +122,13 @@ export async function PATCH(
       return NextResponse.json({ error: 'Only owner or admin can update team' }, { status: 403 })
     }
 
-    const body = await request.json()
+    const body = await request.json().catch(() => null)
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json(
+        { error: 'A JSON body is required' },
+        { status: 400 }
+      )
+    }
     const { name } = body
 
     if (!name || typeof name !== 'string' || name.trim().length === 0) {

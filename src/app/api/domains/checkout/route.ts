@@ -129,7 +129,13 @@ async function postHandler(request: Request) {
     const gate = await requireVerifiedEmail(decoded.userId, decoded.role)
     if (!gate.ok) return gate.response!
 
-    const body = await request.json()
+    const body = await request.json().catch(() => null)
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json(
+        { error: 'A JSON body is required' },
+        { status: 400 }
+      )
+    }
     const { domain, kind, years, method, registrant, authCode, domainId, projectId } =
       body as Record<string, unknown>
 

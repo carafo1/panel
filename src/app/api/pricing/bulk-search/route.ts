@@ -28,7 +28,10 @@ async function handler(request: Request) {
     }
     const userIsAdmin = isAdmin(decoded.role)
 
-    const body = await request.json()
+    const body = await request.json().catch(() => null)
+    if (!body || typeof body !== 'object') {
+      return apiError.badRequest('A JSON body is required')
+    }
     const { domains, base, tlds } = body
 
     let queryDomains: string[] = []

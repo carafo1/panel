@@ -7,7 +7,13 @@ export const POST = withRateLimit(contactHandler, { limit: 5, windowMs: 60_000 }
 
 async function contactHandler(request: Request) {
   try {
-    const body = await request.json()
+    const body = await request.json().catch(() => null)
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json(
+        { error: 'A JSON body is required' },
+        { status: 400 }
+      )
+    }
     const { name, email, subject, message } = body
 
     if (!name || !email || !message) {

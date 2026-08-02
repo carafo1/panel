@@ -39,6 +39,16 @@ export async function POST(
     if (err instanceof DbAccessError) {
       return NextResponse.json({ error: err.message }, { status: err.status })
     }
+    if (err instanceof z.ZodError) {
+      // Report the first problem in words. err.message is a JSON dump of the
+      // internal issue list and is not something to put in front of a user.
+      const first = err.issues[0]
+      const where = first?.path?.length ? first.path.join('.') : 'body'
+      return NextResponse.json(
+        { error: `${where}: ${first?.message || 'is invalid'}` },
+        { status: 400 }
+      )
+    }
     const anyErr = err as { message?: string; code?: string }
     return NextResponse.json(
       { error: anyErr.message || 'Operation failed', code: anyErr.code },

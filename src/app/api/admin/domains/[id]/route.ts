@@ -81,7 +81,10 @@ export async function PATCH(
   if (user.role !== 'admin' && user.role !== 'super_admin') return apiError.forbidden(`Admin access required`)
 
   const { id } = await params
-  const body = await request.json()
+  const body = await request.json().catch(() => null)
+  if (!body || typeof body !== 'object') {
+    return apiError.badRequest('A JSON body is required')
+  }
   const { status } = body
 
   const domain = await db.domain.findUnique({ where: { id } })

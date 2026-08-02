@@ -22,7 +22,13 @@ import { logAudit } from '@/lib/audit'
  */
 async function postHandler(request: Request) {
   try {
-    const body = await request.json()
+    const body = await request.json().catch(() => null)
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json(
+        { error: 'A JSON body is required' },
+        { status: 400 }
+      )
+    }
     const { tempToken, token: totpToken } = body as {
       tempToken?: string
       token?: string

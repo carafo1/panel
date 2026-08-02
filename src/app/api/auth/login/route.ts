@@ -9,7 +9,13 @@ export const POST = withRateLimit(loginHandler, { limit: 10, windowMs: 60_000 })
 
 async function loginHandler(request: Request) {
   try {
-    const body = await request.json()
+    const body = await request.json().catch(() => null)
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json(
+        { error: 'A JSON body is required' },
+        { status: 400 }
+      )
+    }
     const { email, password } = body
 
     if (!email || !password) {

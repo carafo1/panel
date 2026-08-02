@@ -17,6 +17,16 @@ import { driverFor } from '@/lib/db-engine/driver'
 type Ctx = { params: Promise<{ id: string; dbId: string; table: string }> }
 
 function fail(err: unknown) {
+  if (err instanceof z.ZodError) {
+    // Report the first problem in words. err.message is a JSON dump of the
+    // internal issue list and is not something to put in front of a user.
+    const first = err.issues[0]
+    const where = first?.path?.length ? first.path.join('.') : 'body'
+    return NextResponse.json(
+      { error: `${where}: ${first?.message || 'is invalid'}` },
+      { status: 400 }
+    )
+  }
   if (err instanceof DbAccessError) {
     return NextResponse.json({ error: err.message }, { status: err.status })
   }

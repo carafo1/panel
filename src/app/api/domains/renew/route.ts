@@ -25,7 +25,10 @@ export async function POST(request: Request) {
   if (!user) return apiError.unauthorized()
 
   try {
-    const body = await request.json()
+    const body = await request.json().catch(() => null)
+    if (!body || typeof body !== 'object') {
+      return apiError.badRequest('A JSON body is required')
+    }
     const { domainId, duration: rawDuration, method, force } = body
 
     if (!domainId) return apiError.badRequest('domainId is required')

@@ -45,7 +45,13 @@ export async function PATCH(
     }
 
     const { id: projectId, varId } = await params
-    const body = await request.json()
+    const body = await request.json().catch(() => null)
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json(
+        { error: 'A JSON body is required' },
+        { status: 400 }
+      )
+    }
     const { key, value } = body
 
     // Verify project ownership

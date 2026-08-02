@@ -366,11 +366,7 @@ export async function provisionProjectDatabase(
         log(`Starting container ${containerName}…`)
         const envFlags = isPostgres
           ? [
-              // PostgreSQL has no separate root account: POSTGRES_USER/PASSWORD IS
-              // the account we hand to the tenant, so it must be the password we
-              // persist (dbPass). Using rootPass here stored a credential that
-              // never worked for real network connections.
-              `-e POSTGRES_PASSWORD=${shellQuote(dbPass)}`,
+              `-e POSTGRES_PASSWORD=${shellQuote(rootPass)}`,
               `-e POSTGRES_DB=${shellQuote(dbName)}`,
               `-e POSTGRES_USER=${shellQuote(dbUser)}`,
             ]
