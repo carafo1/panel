@@ -81,6 +81,7 @@ export function BackupsAdminPanel() {
   const [data, setData] = useState<BackupsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [running, setRunning] = useState(false)
+  const [shipping, setShipping] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -108,6 +109,23 @@ export function BackupsAdminPanel() {
       toast.error(err instanceof Error ? err.message : 'Could not start the backup')
     } finally {
       setRunning(false)
+    }
+  }
+
+  const sendOffsite = async () => {
+    setShipping(true)
+    try {
+      const res = await apiFetch<{ message?: string }>('/admin/backups/offsite', {
+        method: 'POST',
+      })
+      toast.success(res.message || 'Uploaded to Google Drive.')
+      load()
+    } catch (err) {
+      // The route answers with specifics — no Drive connected, no passphrase,
+      // Drive full — so show them rather than a generic failure.
+      toast.error(err instanceof Error ? err.message : 'Offsite upload failed')
+    } finally {
+      setShipping(false)
     }
   }
 
@@ -143,6 +161,20 @@ export function BackupsAdminPanel() {
                   <Play className="size-3.5 mr-1" />
                 )}
                 Back up now
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={sendOffsite}
+                disabled={shipping}
+                title="Encrypt the newest archive and upload it to the connected Google Drive"
+              >
+                {shipping ? (
+                  <Loader2 className="size-3.5 mr-1 animate-spin" />
+                ) : (
+                  <Cloud className="size-3.5 mr-1" />
+                )}
+                Send offsite
               </Button>
             </div>
           </div>
