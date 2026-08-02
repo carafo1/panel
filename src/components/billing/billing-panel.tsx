@@ -59,6 +59,10 @@ import {
   AlertTriangle,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import {
+  PlanChangeDialog,
+  PlanDirectionBadge,
+} from '@/components/billing/plan-change-dialog'
 
 // ── Types ──────────────────────────────────────────────────────────────
 interface Plan {
@@ -919,6 +923,10 @@ export function BillingPanel() {
 
   // Checkout dialog state
   const [checkoutOpen, setCheckoutOpen] = useState(false)
+  // Changing an existing plan is a different transaction from buying one:
+  // it prorates, it can issue credit, and it can be refused.
+  const [planChangeOpen, setPlanChangeOpen] = useState(false)
+  const [planChangeTarget, setPlanChangeTarget] = useState<Plan | null>(null)
   const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null)
   const [selectedPlanIndex, setSelectedPlanIndex] = useState(0)
 
@@ -958,6 +966,14 @@ export function BillingPanel() {
   }, [fetchData])
 
   const handleSelectPlan = (plan: Plan, index: number) => {
+    // An existing subscriber is CHANGING plan, not buying one. Sending them to
+    // checkout raised a second subscription alongside the first and left them
+    // paying twice.
+    if (subscription && subscription.plan?.id !== plan.id) {
+      setPlanChangeTarget(plan)
+      setPlanChangeOpen(true)
+      return
+    }
     setSelectedPlan(plan)
     setSelectedPlanIndex(index)
     setCheckoutOpen(true)
@@ -1210,7 +1226,15 @@ export function BillingPanel() {
                       <Icon className="size-5" />
                     </div>
                     <div>
-                      <CardTitle className="text-lg">{plan.name}</CardTitle>
+                      <div className="flex items-center gap-2">
+                        <CardTitle className="text-lg">{plan.name}</CardTitle>
+                        {subscription && !isCurrent ? (
+                          <PlanDirectionBadge
+                            currentPrice={subscription.plan?.price ?? 0}
+                            planPrice={plan.price}
+                          />
+                        ) : null}
+                      </div>
                       <CardDescription>{plan.tagline || plan.description}</CardDescription>
                     </div>
                   </div>
@@ -1256,6 +1280,12 @@ export function BillingPanel() {
                           <span className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
                           Processing…
                         </span>
+                      ) : subscription ? (
+                        plan.price > (subscription.plan?.price ?? 0) ? (
+                          'Upgrade'
+                        ) : (
+                          'Downgrade'
+                        )
                       ) : (
                         'Select Plan'
                       )}
@@ -1342,6 +1372,18 @@ export function BillingPanel() {
           plan={selectedPlan}
           planIndex={selectedPlanIndex}
           onSuccess={handleCheckoutSuccess}
+        />
+      )}
+
+      {/* ── Plan Change Dialog ────────────────────────────────────── */}
+      {planChangeTarget && (
+        <PlanChangeDialog
+          open={planChangeOpen}
+          onOpenChange={setPlanChangeOpen}
+          targetPlanId={planChangeTarget.id}
+          targetPlanName={planChangeTarget.name}
+          onChanged={fetchData}
+          apiFetch={apiFetch}
         />
       )}
     </div>
