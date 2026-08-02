@@ -135,7 +135,13 @@ async function getHandler(request: Request) {
  */
 async function postHandler(request: Request) {
   try {
-    const body = await request.json()
+    const body = await request.json().catch(() => null)
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json(
+        { error: 'A JSON body is required' },
+        { status: 400 }
+      )
+    }
     const { domain, domains } = body
 
     // ─── Bulk search mode ───────────────────────────────────────────────

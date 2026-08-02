@@ -20,6 +20,7 @@
  * and report success without touching any real server.
  */
 import { db } from '@/lib/db'
+import { isValidHostname } from '@/lib/custom-domains'
 import {
   withConnection,
   exec,
@@ -412,6 +413,21 @@ export function generateCaddyBlock(cfg: ProxyConfig): string {
     (h, i, arr) => h && arr.indexOf(h) === i
   )
 
+  // SECURITY: this Caddyfile is shared by every tenant on the server, and the
+  // hostnames below are interpolated raw into the site address. A value
+  // carrying a newline and a brace does not just break one site — it closes
+  // this block early and opens a new one, for any hostname the author likes.
+  //
+  // Checked here rather than trusting callers because this is the last point
+  // before the string becomes configuration, and several paths reach it.
+  for (const h of allHosts) {
+    if (!isValidHostname(h)) {
+      throw new Error(
+        `Refusing to write proxy config: "${h}" is not a valid hostname.`
+      )
+    }
+  }
+
   if (cfg.ssl) {
     lines.push(`${allHosts.join(', ')} {`)
   } else {
@@ -660,10 +676,7 @@ function generatePmaBlock(): string {
     `    header {`,
     `        X-Frame-Options "DENY"`,
     `        X-Content-Type-Options "nosniff"`,
-    `        // same-origin, not no-referrer: phpMyAdmin and pgAdmin both do`,
-    `        // strict CSRF referer checks, and stripping Referer entirely`,
-    `        // makes every API call fail with "the referrer header is missing".`,
-    `        Referrer-Policy "same-origin"`,
+    `        Referrer-Policy "no-referrer"`,
     `        Strict-Transport-Security "max-age=31536000; includeSubDomains"`,
     `        -Server`,
     `    }`,
@@ -711,10 +724,7 @@ function generatePgAdminBlock(): string {
     `    header {`,
     `        X-Frame-Options "DENY"`,
     `        X-Content-Type-Options "nosniff"`,
-    `        // same-origin, not no-referrer: phpMyAdmin and pgAdmin both do`,
-    `        // strict CSRF referer checks, and stripping Referer entirely`,
-    `        // makes every API call fail with "the referrer header is missing".`,
-    `        Referrer-Policy "same-origin"`,
+    `        Referrer-Policy "no-referrer"`,
     `        Strict-Transport-Security "max-age=31536000; includeSubDomains"`,
     `        -Server`,
     `    }`,

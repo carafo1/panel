@@ -40,7 +40,14 @@ export async function POST(request: Request) {
       )
     }
 
-    const body = (await request.json()) as BulkRequestBody
+    const raw = await request.json().catch(() => null)
+    if (!raw || typeof raw !== 'object') {
+      return NextResponse.json(
+        { error: 'A JSON body is required' },
+        { status: 400 }
+      )
+    }
+    const body = raw as BulkRequestBody
     const { action, projectIds } = body
 
     // ── Validate input ────────────────────────────────────────────────

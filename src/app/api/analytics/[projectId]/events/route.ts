@@ -27,7 +27,13 @@ export async function POST(
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
     }
 
-    const body = await req.json()
+    const body = await req.json().catch(() => null)
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json(
+        { error: 'A JSON body is required' },
+        { status: 400 }
+      )
+    }
     const events = Array.isArray(body) ? body : [body]
 
     const created: Awaited<ReturnType<typeof db.analyticsEvent.create>>[] = []

@@ -153,7 +153,13 @@ export async function PATCH(
       return NextResponse.json({ error: 'Mailbox not found' }, { status: 404 })
     }
 
-    const json = await request.json()
+    const json = await request.json().catch(() => null)
+    if (!json || typeof json !== 'object') {
+      return NextResponse.json(
+        { error: 'A JSON body is required' },
+        { status: 400 }
+      )
+    }
     const { id } = patchSchema.parse(json)
     const body = ruleSchema.parse(json)
 

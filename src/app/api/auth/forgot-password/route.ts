@@ -9,7 +9,13 @@ export const POST = withRateLimit(forgotPasswordHandler, { limit: 5, windowMs: 6
 
 async function forgotPasswordHandler(request: Request) {
   try {
-    const body = await request.json()
+    const body = await request.json().catch(() => null)
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json(
+        { error: 'A JSON body is required' },
+        { status: 400 }
+      )
+    }
     const { email } = body
 
     if (!email) {

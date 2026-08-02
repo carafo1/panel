@@ -232,7 +232,13 @@ export async function POST(
       return NextResponse.json({ error: 'Domain not found' }, { status: 404 })
     }
 
-    const body = await request.json()
+    const body = await request.json().catch(() => null)
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json(
+        { error: 'A JSON body is required' },
+        { status: 400 }
+      )
+    }
     const { action } = body
 
     if (action === 'renew') {

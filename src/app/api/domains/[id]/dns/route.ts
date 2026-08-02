@@ -42,7 +42,13 @@ export async function PUT(
       )
     }
 
-    const body = await request.json()
+    const body = await request.json().catch(() => null)
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json(
+        { error: 'A JSON body is required' },
+        { status: 400 }
+      )
+    }
     const { records } = body // Array of { type, name, value, ttl?, priority?, proxied? }
 
     if (!records || !Array.isArray(records) || records.length === 0) {

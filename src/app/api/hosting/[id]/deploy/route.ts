@@ -53,7 +53,13 @@ export async function POST(
     let branch = 'main'
     let commit: string | undefined
     try {
-      const body = await request.json()
+      const body = await request.json().catch(() => null)
+      if (!body || typeof body !== 'object') {
+        return NextResponse.json(
+          { error: 'A JSON body is required' },
+          { status: 400 }
+        )
+      }
       if (body && typeof body.branch === 'string') branch = body.branch
       if (body && typeof body.commit === 'string') commit = body.commit
     } catch {

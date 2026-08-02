@@ -60,7 +60,13 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     const existing = await db.service.findUnique({ where: { id } })
     if (!existing) return NextResponse.json({ error: 'Service not found' }, { status: 404 })
 
-    const body = await request.json()
+    const body = await request.json().catch(() => null)
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json(
+        { error: 'A JSON body is required' },
+        { status: 400 }
+      )
+    }
     const {
       slug, name, tagline, description, iconName, accent,
       features, visible, order, plans, highlights, faqs,

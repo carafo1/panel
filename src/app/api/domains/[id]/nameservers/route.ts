@@ -30,7 +30,10 @@ export async function PUT(
     const notOurs = assertRegistrarManaged(domain)
     if (notOurs) return notOurs
 
-    const body = await request.json()
+    const body = await request.json().catch(() => null)
+    if (!body || typeof body !== 'object') {
+      return apiError.badRequest('A JSON body is required')
+    }
     const { nameservers } = body
     if (!Array.isArray(nameservers) || nameservers.length < 2) {
       return apiError.badRequest('At least 2 nameservers are required')

@@ -106,7 +106,13 @@ export async function POST(
     }
 
     const { id: projectId } = await params
-    const body = await request.json()
+    const body = await request.json().catch(() => null)
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json(
+        { error: 'A JSON body is required' },
+        { status: 400 }
+      )
+    }
     const { key, value } = body
 
     if (!key || typeof key !== 'string' || !key.trim()) {

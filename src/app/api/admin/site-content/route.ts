@@ -48,7 +48,13 @@ export async function PUT(request: Request) {
   const user = guard.user
 
   try {
-    const body = await request.json()
+    const body = await request.json().catch(() => null)
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json(
+        { error: 'A JSON body is required' },
+        { status: 400 }
+      )
+    }
     const { content } = body
     if (!content || typeof content !== 'object') {
       return NextResponse.json({ error: 'content object is required' }, { status: 400 })

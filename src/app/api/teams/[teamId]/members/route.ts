@@ -39,7 +39,13 @@ export async function POST(
       return NextResponse.json({ error: 'Only owner or admin can invite members' }, { status: 403 })
     }
 
-    const body = await request.json()
+    const body = await request.json().catch(() => null)
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json(
+        { error: 'A JSON body is required' },
+        { status: 400 }
+      )
+    }
     const { email, role } = body
 
     if (!email || typeof email !== 'string' || email.trim().length === 0) {
