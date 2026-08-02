@@ -346,6 +346,16 @@ async function createLocalBackup(
     })
 
     log(`Backup complete: ${backupPath} (${sizeBytes} bytes).`)
+
+    // Copy to the customer's own storage, if they connected any. Deliberately
+    // AFTER the row exists and deliberately not awaited into the result: the
+    // local backup has already succeeded, and a full Drive or a revoked token
+    // must not report that success as a failure. Errors are recorded against
+    // the destination so the customer sees them in the panel.
+    void replicateToDestinations(projectId, row.id, filename).catch((err) => {
+      log(`Offsite copy failed (the local backup is unaffected): ${String(err)}`)
+    })
+
     return {
       id: row.id,
       filename,
@@ -770,4 +780,43 @@ export async function pruneAllBackups(): Promise<{ projects: number; deleted: nu
     deleted += res.deleted
   }
   return { projects: grouped.length, deleted }
+}
+
+
+/**
+ * Copy a finished backup to whatever external destinations the owner has
+ * connected.
+ *
+ * Reads the archive back through downloadBackup rather than re-reading the
+ * remote path directly, so it works identically for local-mode and remote
+ * servers and cannot drift from wherever backups actually live.
+ */
+async function replicateToDestinations(
+  projectId: string,
+  backupId: string,
+  filename: string
+): Promise<void> {
+  const project = await db.project.findUnique({
+    where: { id: projectId },
+    select: { userId: true },
+  })
+  if (!project) return
+
+  const dests = await db.backupDestination.findMany({
+    where: { userId: project.userId, enabled: true },
+    select: { id: true, provider: true },
+  })
+  if (dests.length === 0) return
+
+  // Only pay the download cost if somewhere actually wants it.
+  const { content } = await downloadBackup(projectId, backupId)
+
+  for (const dest of dests) {
+    if (dest.provider !== 'google_drive') continue
+    const { uploadBackup } = await import('@/lib/google-drive')
+    const res = await uploadBackup(dest.id, filename, content)
+    if (!res.ok) {
+      console.error(`[backups] Drive upload failed for ${filename}: ${res.error}`)
+    }
+  }
 }
