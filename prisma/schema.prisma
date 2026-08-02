@@ -61,6 +61,7 @@ model User {
   templateRatings     TemplateRating[]
   templateReviews     TemplateReview[]
   emailServices      EmailService[]
+  backupDestinations BackupDestination[]
 }
 
 model Plan {
@@ -1660,4 +1661,50 @@ model MigrationStage {
   migration SiteMigration @relation(fields: [migrationId], references: [id], onDelete: Cascade)
 
   @@index([migrationId])
+}
+
+/// Where a customer wants their backups copied, outside this platform.
+///
+/// One row per user per provider. Google Drive is the first provider; the
+/// column is a string rather than an enum so adding Dropbox or S3 later does
+/// not need a migration on a live SQLite database.
+model BackupDestination {
+  id       String @id @default(cuid())
+  userId   String
+  /// 'google_drive' today.
+  provider String @default("google_drive")
+
+  /// AES-256-GCM ciphertext of the OAuth refresh token. This is the entire
+  /// credential — it mints access tokens indefinitely — so it must NEVER be
+  /// selected into a response payload.
+  refreshTokenEnc String
+  /// Short-lived; cached to avoid a refresh round-trip on every upload.
+  accessTokenEnc  String?
+  accessExpiresAt DateTime?
+
+  /// The Drive folder we create and own. With the drive.file scope we can only
+  /// see what we created, so losing this id means losing track of the folder.
+  folderId   String?
+  folderName String @default("Apsamo Backups")
+
+  /// The account the customer connected, shown so they can tell which Google
+  /// account they used. Display only.
+  accountEmail String?
+
+  enabled Boolean @default(true)
+
+  /// Outcome of the last upload attempt, so a silently-expired token is
+  /// visible instead of being discovered at restore time.
+  lastStatus  String? // 'ok' | 'failed' | null
+  lastError   String?
+  lastSyncAt  DateTime?
+  bytesStored BigInt  @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider])
+  @@index([userId])
 }
