@@ -16,6 +16,7 @@ import {
 } from '@/lib/email-service-guard'
 import { effectiveLimits } from '@/lib/email-hosting'
 import { deleteMailbox, updateMailbox, friendlyMailcowError } from '@/lib/mailcow'
+import { rememberMailboxPassword, forgetMailboxPassword } from '@/lib/webmail-sso'
 
 const patchSchema = z.object({
   password: z.string().min(8).max(128).optional(),
@@ -99,6 +100,17 @@ export async function PATCH(
         { status: 422 }
       )
     }
+
+    // Keep the stored credential in step, or webmail sign-on would keep
+    // replaying the old password after a change.
+    if (body.password) {
+      await rememberMailboxPassword({
+        serviceId: service.id,
+        address,
+        password: body.password,
+      })
+    }
+
     return NextResponse.json({ ok: true, address, quotaGB })
   } catch (err) {
     if (err instanceof z.ZodError) {
@@ -141,6 +153,11 @@ export async function DELETE(
         { status: 422 }
       )
     }
+
+    // The mailbox is gone; keeping its password would be a stored secret with
+    // nothing left to protect.
+    await forgetMailboxPassword(address)
+
     return NextResponse.json({ ok: true, address })
   } catch (err) {
     const { error, status } = emailServiceErrorResponse(err)

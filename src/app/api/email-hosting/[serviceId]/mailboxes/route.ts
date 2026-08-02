@@ -16,6 +16,7 @@ import {
 } from '@/lib/email-service-guard'
 import { effectiveLimits, getEmailUsage } from '@/lib/email-hosting'
 import { listMailboxes, createMailbox, friendlyMailcowError } from '@/lib/mailcow'
+import { rememberMailboxPassword } from '@/lib/webmail-sso'
 
 const createSchema = z.object({
   localPart: z
@@ -115,6 +116,16 @@ export async function POST(
         { status: 422 }
       )
     }
+
+    // Remember the credential so the customer can reach webmail in one click.
+    // Only ever stored for a password the panel itself set, and never returned
+    // to any caller.
+    await rememberMailboxPassword({
+      serviceId: service.id,
+      address,
+      password: body.password,
+    })
+
     return NextResponse.json({ ok: true, address, quotaGB })
   } catch (err) {
     if (err instanceof z.ZodError) {
