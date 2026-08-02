@@ -176,3 +176,129 @@ export async function enforceLimit(
   const verdict = await checkLimit(userId, resource, opts)
   return verdict.allowed ? null : verdict.response!
 }
+
+// ─── Measured-resource overage ────────────────────────────────────────────────
+
+export type MeasuredResource = 'disk' | 'bandwidth'
+
+export interface OverageVerdict {
+  over: boolean
+  resource: MeasuredResource
+  usedMB: number
+  limitMB: number | null
+  planName: string | null
+  /** How stale the measurement is, in minutes. */
+  measuredMinutesAgo: number | null
+  response?: Response
+}
+
+const MEASURED_COLUMN: Record<MeasuredResource, string> = {
+  disk: 'diskMB',
+  bandwidth: 'bandwidthMB',
+}
+
+const MEASURED_LABEL: Record<MeasuredResource, string> = {
+  disk: 'storage',
+  bandwidth: 'bandwidth',
+}
+
+function formatMB(mb: number): string {
+  return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`
+}
+
+/**
+ * Is the customer over their measured allowance for this resource?
+ *
+ * Returns over:false when there is no plan, no limit, or no usage snapshot yet
+ * — an absent measurement must never block a customer, or a worker outage
+ * becomes an outage for everyone.
+ */
+export async function checkOverage(
+  userId: string,
+  resource: MeasuredResource,
+  opts: { role?: string } = {}
+): Promise<OverageVerdict> {
+  const none: OverageVerdict = {
+    over: false,
+    resource,
+    usedMB: 0,
+    limitMB: null,
+    planName: null,
+    measuredMinutesAgo: null,
+  }
+
+  if (opts.role && isAdmin(opts.role)) return none
+
+  const sub = await db.subscription.findFirst({
+    where: { userId, status: { in: ['active', 'trialing', 'past_due'] } },
+    orderBy: { createdAt: 'desc' },
+    include: { plan: true },
+  })
+  if (!sub?.plan) return none
+
+  const rawLimit = (sub.plan as unknown as Record<string, unknown>)[
+    MEASURED_COLUMN[resource]
+  ]
+  const limitMB = typeof rawLimit === 'number' && rawLimit > 0 ? rawLimit : null
+  if (limitMB === null) return { ...none, planName: sub.plan.name }
+
+  const snapshot = await db.usageRecord.findFirst({
+    where: { userId },
+    orderBy: { capturedAt: 'desc' },
+    select: { diskMB: true, bandwidthMB: true, capturedAt: true },
+  })
+  if (!snapshot) return { ...none, limitMB, planName: sub.plan.name }
+
+  const usedMB = resource === 'disk' ? snapshot.diskMB : snapshot.bandwidthMB
+  const measuredMinutesAgo = Math.round(
+    (Date.now() - new Date(snapshot.capturedAt).getTime()) / 60000
+  )
+
+  if (usedMB <= limitMB) {
+    return {
+      over: false,
+      resource,
+      usedMB,
+      limitMB,
+      planName: sub.plan.name,
+      measuredMinutesAgo,
+    }
+  }
+
+  return {
+    over: true,
+    resource,
+    usedMB,
+    limitMB,
+    planName: sub.plan.name,
+    measuredMinutesAgo,
+    response: Response.json(
+      {
+        error:
+          `You are using ${formatMB(usedMB)} of ${MEASURED_LABEL[resource]} and your ` +
+          `${sub.plan.name} plan includes ${formatMB(limitMB)}. Free some space or ` +
+          `upgrade your plan before creating anything new.`,
+        code: 'plan_overage',
+        resource,
+        usedMB: Math.round(usedMB),
+        limitMB,
+      },
+      { status: 403 }
+    ),
+  }
+}
+
+/**
+ * Convenience wrapper: the 403 Response to return, or null to proceed.
+ *
+ *   const denied = await enforceOverage(userId, 'disk', { role })
+ *   if (denied) return denied
+ */
+export async function enforceOverage(
+  userId: string,
+  resource: MeasuredResource,
+  opts: { role?: string } = {}
+): Promise<Response | null> {
+  const verdict = await checkOverage(userId, resource, opts)
+  return verdict.over ? verdict.response! : null
+}

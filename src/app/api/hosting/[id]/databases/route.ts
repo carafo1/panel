@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
-import { enforceLimit } from '@/lib/plan-limits'
+import { enforceLimit, enforceOverage } from '@/lib/plan-limits'
 import { isAdmin } from '@/lib/security'
 import { logAudit } from '@/lib/audit'
 import { provisionProjectDatabase, listProjectDatabases } from '@/lib/vps'
@@ -60,6 +60,11 @@ export async function POST(
     // bar sat past 100%. Checked before creating anything.
     const denied = await enforceLimit(decoded.userId, 'databases', { role: decoded.role })
     if (denied) return denied
+
+    // A database only grows from here. Refuse while the customer is
+    // already over their storage allowance.
+    const overQuota = await enforceOverage(decoded.userId, 'disk', { role: decoded.role })
+    if (overQuota) return overQuota
 
     const body = await request.json().catch(() => ({}))
     // Normalize type: accept 'mysql', 'mariadb', 'postgres', or 'postgresql'
