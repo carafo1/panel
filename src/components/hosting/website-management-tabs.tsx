@@ -970,6 +970,7 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
+            <DriveBackupRow />
             <div className="grid gap-2">
               <Label>Type</Label>
               <Select value={createType} onValueChange={(v) => setCreateType(v as 'mysql' | 'mariadb' | 'postgres' | 'sqlite')}>
@@ -1211,7 +1212,7 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
 
 
 // ═══════════════════════════════════════════════════════════════════════
-// BackupDestinationCard — the customer's own offsite copy
+// DriveBackupRow — offered inside Create Backup, where it is relevant
 // ═══════════════════════════════════════════════════════════════════════
 
 interface DriveStatus {
@@ -1230,20 +1231,16 @@ interface DriveStatus {
   } | null
 }
 
-function BackupDestinationCard() {
+function DriveBackupRow() {
   const [status, setStatus] = useState<DriveStatus | null>(null)
-  const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
 
   const load = useCallback(async () => {
-    setLoading(true)
     try {
       const res = await fetch('/api/backups/google', { headers: getAuthHeaders() })
       if (res.ok) setStatus(await res.json())
     } catch {
-      // Leave the card blank rather than claiming a state we did not read.
-    } finally {
-      setLoading(false)
+      // Render nothing rather than claim a state we did not read.
     }
   }, [])
 
@@ -1254,10 +1251,7 @@ function BackupDestinationCard() {
   const connect = async () => {
     setBusy(true)
     try {
-      const res = await fetch('/api/backups/google', {
-        method: 'POST',
-        headers: getAuthHeaders(),
-      })
+      const res = await fetch('/api/backups/google', { method: 'POST', headers: getAuthHeaders() })
       const data = await res.json()
       if (!res.ok) {
         toast.error(data.error || 'Could not start the Google connection')
@@ -1272,21 +1266,15 @@ function BackupDestinationCard() {
   }
 
   const disconnect = async () => {
-    if (!window.confirm('Disconnect Google Drive? Backups already uploaded stay in your Drive.')) {
-      return
-    }
+    if (!window.confirm('Disconnect Google Drive? Backups already uploaded stay in your Drive.')) return
     setBusy(true)
     try {
-      const res = await fetch('/api/backups/google', {
-        method: 'DELETE',
-        headers: getAuthHeaders(),
-      })
-      const data = await res.json()
+      const res = await fetch('/api/backups/google', { method: 'DELETE', headers: getAuthHeaders() })
       if (!res.ok) {
-        toast.error(data.error || 'Could not disconnect')
+        toast.error('Could not disconnect')
         return
       }
-      toast.success(data.message || 'Disconnected.')
+      toast.success('Google Drive disconnected.')
       load()
     } catch {
       toast.error('Network error disconnecting')
@@ -1295,88 +1283,72 @@ function BackupDestinationCard() {
     }
   }
 
-  if (loading) return <Skeleton className="h-28 w-full mb-4" />
-  if (!status) return null
+  // Nothing to offer if the platform has no Google credentials — showing a
+  // Connect button that cannot work is worse than showing nothing.
+  if (!status || !status.configured) return null
 
   const d = status.destination
   const broken = Boolean(d && d.lastStatus === 'failed')
 
-  return (
-    <Card className="mb-4">
-      <CardHeader>
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div>
-            <CardTitle className="text-lg flex items-center gap-2">
-              <HardDrive className="size-5" />
-              Offsite copy
-            </CardTitle>
-            <CardDescription className="mt-1">
-              {status.connected
-                ? 'Every backup is also copied to your Google Drive.'
-                : 'Backups are stored on this server. Connect your Google Drive to keep a copy elsewhere.'}
-            </CardDescription>
-          </div>
-          {status.configured && (
-            <Button
-              size="sm"
-              variant={status.connected ? 'outline' : 'default'}
-              onClick={status.connected ? disconnect : connect}
-              disabled={busy}
-            >
-              {busy ? (
-                <Loader2 className="size-3.5 mr-1 animate-spin" />
-              ) : null}
-              {status.connected ? 'Disconnect' : 'Connect Google Drive'}
+  if (broken) {
+    return (
+      <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3">
+        <div className="flex items-start gap-2 text-sm">
+          <AlertTriangle className="size-4 text-destructive mt-0.5 shrink-0" />
+          <div className="min-w-0">
+            <p className="font-medium">Backups are not reaching your Google Drive</p>
+            <p className="text-muted-foreground mt-0.5 break-words">{d?.lastError}</p>
+            <Button size="sm" className="mt-2 h-7 text-xs" onClick={connect} disabled={busy}>
+              {busy ? <Loader2 className="size-3 mr-1 animate-spin" /> : null}
+              Reconnect
             </Button>
-          )}
+          </div>
         </div>
-      </CardHeader>
+      </div>
+    )
+  }
 
-      <CardContent className="space-y-3">
-        {!status.configured && (
-          <div className="rounded-lg border p-3 text-sm text-muted-foreground">
-            {status.reason || 'Google Drive backup is not available on this platform yet.'}
+  if (d) {
+    return (
+      <div className="rounded-lg border p-3 flex items-center justify-between gap-3">
+        <div className="flex items-start gap-2 text-sm min-w-0">
+          <CheckCircle2 className="size-4 text-emerald-600 mt-0.5 shrink-0" />
+          <div className="min-w-0">
+            <p>A copy also goes to your Google Drive</p>
+            <p className="text-xs text-muted-foreground truncate">
+              {d.accountEmail || 'Connected'} · {d.folderName}
+            </p>
           </div>
-        )}
+        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 text-xs shrink-0"
+          onClick={disconnect}
+          disabled={busy}
+        >
+          Disconnect
+        </Button>
+      </div>
+    )
+  }
 
-        {/* The state this card exists for: connected, but not working. */}
-        {broken && (
-          <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3">
-            <div className="flex items-start gap-2 text-sm">
-              <AlertTriangle className="size-4 text-destructive mt-0.5 shrink-0" />
-              <div>
-                <p className="font-medium">Backups are not reaching your Drive</p>
-                <p className="text-muted-foreground mt-0.5">{d?.lastError}</p>
-                <Button size="sm" className="mt-2" onClick={connect} disabled={busy}>
-                  Reconnect
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {d && !broken && (
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-            <div className="rounded-lg border p-3">
-              <div className="text-xs text-muted-foreground">Account</div>
-              <div className="text-sm font-medium mt-1 truncate">
-                {d.accountEmail || 'Google Drive'}
-              </div>
-            </div>
-            <div className="rounded-lg border p-3">
-              <div className="text-xs text-muted-foreground">Folder</div>
-              <div className="text-sm font-medium mt-1 truncate">{d.folderName}</div>
-            </div>
-            <div className="rounded-lg border p-3">
-              <div className="text-xs text-muted-foreground">Last copied</div>
-              <div className="text-sm font-medium mt-1">
-                {d.lastSyncAt ? new Date(d.lastSyncAt).toLocaleString() : 'Not yet'}
-              </div>
-            </div>
-          </div>
-        )}
-      </CardContent>
-    </Card>
+  return (
+    <div className="rounded-lg border p-3 flex items-center justify-between gap-3">
+      <div className="flex items-start gap-2 text-sm min-w-0">
+        <HardDrive className="size-4 text-muted-foreground mt-0.5 shrink-0" />
+        <div className="min-w-0">
+          <p>Also keep a copy in your Google Drive</p>
+          <p className="text-xs text-muted-foreground">
+            Backups live on this server. A second copy protects you if it is lost.
+          </p>
+        </div>
+      </div>
+      <Button size="sm" className="h-7 text-xs shrink-0" onClick={connect} disabled={busy}>
+        {busy ? <Loader2 className="size-3 mr-1 animate-spin" /> : null}
+        Connect
+      </Button>
+    </div>
   )
 }
 
@@ -1573,7 +1545,6 @@ export function BackupsTab({ projectId }: { projectId: string }) {
 
   return (
     <div className="space-y-4">
-    <BackupDestinationCard />
     <Card>
       <CardHeader>
         <div className="flex items-center justify-between gap-3 flex-wrap">

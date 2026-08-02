@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server'
-import { requireAdminRole } from '@/lib/auth'
+import { requireAdminRole, authenticateRequest } from '@/lib/auth'
+import { logAudit } from '@/lib/audit'
+import { withRateLimit } from '@/lib/rate-limit'
 import { promises as fs } from 'fs'
+import { spawn } from 'child_process'
 import path from 'path'
 
 /**
@@ -112,3 +115,68 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
+
+
+const BACKUP_SCRIPT = '/usr/local/bin/apsamo-full-backup.sh'
+
+/**
+ * POST /api/admin/backups — take a server backup now.
+ *
+ * Returns as soon as the job is launched, not when it finishes. Progress is
+ * observed by polling GET: a fresh archive appears in the list and
+ * newestAgeHours drops. The script appends to /var/log/apsamo-backup.log, which
+ * is the authoritative record either way.
+ */
+async function postHandler(request: Request) {
+  if (!(await requireAdminRole(request))) {
+    return NextResponse.json({ error: 'Admin access required' }, { status: 403 })
+  }
+  const user = await authenticateRequest(request)
+
+  try {
+    await fs.access(BACKUP_SCRIPT)
+  } catch {
+    return NextResponse.json(
+      {
+        error: `The backup script is not installed at ${BACKUP_SCRIPT}.`,
+        code: 'script_missing',
+      },
+      { status: 503 }
+    )
+  }
+
+  // Detached and fully disowned: if the panel restarts mid-run — which a
+  // backup taken before an upgrade makes quite likely — the job must survive
+  // rather than leave a half-written snapshot.
+  const child = spawn('/bin/bash', [BACKUP_SCRIPT], {
+    detached: true,
+    stdio: 'ignore',
+  })
+  child.unref()
+
+  await logAudit({
+    userId: user?.userId || 'system',
+    action: 'admin.backup.started',
+    resource: 'server',
+    resourceId: 'full-backup',
+    req: request,
+    metadata: { script: BACKUP_SCRIPT, pid: child.pid },
+  }).catch(() => {})
+
+  return NextResponse.json(
+    {
+      ok: true,
+      started: true,
+      pid: child.pid,
+      message:
+        'Server backup started. It runs in the background — refresh in a minute ' +
+        'to see the new archive. Progress is logged to /var/log/apsamo-backup.log.',
+    },
+    { status: 202 }
+  )
+}
+
+// A full run is heavy: every tenant database plus the volume archive. Two per
+// ten minutes is generous for a human and stops a stuck refresh button from
+// queueing a dozen overlapping runs.
+export const POST = withRateLimit(postHandler, { limit: 2, windowMs: 600_000 })
