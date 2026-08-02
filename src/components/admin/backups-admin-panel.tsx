@@ -77,6 +77,151 @@ function bytes(n?: number): string {
   return `${(n / 1024).toFixed(0)} KB`
 }
 
+
+interface DriveState {
+  configured: boolean
+  reason?: string
+  connected: boolean
+  destination: {
+    accountEmail: string | null
+    folderName: string
+    lastStatus: string | null
+    lastError: string | null
+    lastSyncAt: string | null
+  } | null
+}
+
+/**
+ * Drive connection for the OPERATOR.
+ *
+ * This is the account the platform's own backups go to. Whoever connects here
+ * is choosing where the panel database, every tenant dump and .env end up, so
+ * the copy says so plainly rather than calling it "offsite storage".
+ */
+function AdminDriveConnect({ onChange }: { onChange: () => void }) {
+  const [state, setState] = useState<DriveState | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const load = useCallback(async () => {
+    try {
+      setState(await apiFetch<DriveState>('/backups/google'))
+    } catch {
+      // Show nothing rather than assert a state we did not read.
+    }
+  }, [])
+
+  useEffect(() => {
+    load()
+  }, [load])
+
+  const connect = async () => {
+    setBusy(true)
+    try {
+      const r = await apiFetch<{ url: string }>('/backups/google', { method: 'POST' })
+      window.location.href = r.url
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not start the Google connection')
+      setBusy(false)
+    }
+  }
+
+  const disconnect = async () => {
+    if (
+      !window.confirm(
+        'Disconnect Google Drive? Platform backups will stop being copied offsite. ' +
+          'Archives already uploaded stay in the Drive.'
+      )
+    ) {
+      return
+    }
+    setBusy(true)
+    try {
+      await apiFetch('/backups/google', { method: 'DELETE' })
+      toast.success('Disconnected.')
+      await load()
+      onChange()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not disconnect')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (!state) return null
+
+  if (!state.configured) {
+    return (
+      <div className="rounded-lg border p-3 text-sm text-muted-foreground">
+        {state.reason ||
+          'Google Drive is not set up on this platform. Add GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET.'}
+      </div>
+    )
+  }
+
+  const d = state.destination
+  const broken = Boolean(d && d.lastStatus === 'failed')
+
+  if (!d) {
+    return (
+      <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 flex items-center justify-between gap-3">
+        <div className="flex items-start gap-2 text-sm min-w-0">
+          <CloudOff className="size-4 text-amber-600 mt-0.5 shrink-0" />
+          <div className="min-w-0">
+            <p className="font-medium">No Google Drive connected</p>
+            <p className="text-muted-foreground mt-0.5">
+              Platform backups — panel database, tenant databases, volumes, mailcow config —
+              stay on this server until one is.
+            </p>
+          </div>
+        </div>
+        <Button size="sm" onClick={connect} disabled={busy} className="shrink-0">
+          {busy ? <Loader2 className="size-3.5 mr-1 animate-spin" /> : null}
+          Connect Google Drive
+        </Button>
+      </div>
+    )
+  }
+
+  return (
+    <div
+      className={`rounded-lg border p-3 flex items-center justify-between gap-3 ${
+        broken ? 'border-destructive/40 bg-destructive/5' : ''
+      }`}
+    >
+      <div className="flex items-start gap-2 text-sm min-w-0">
+        {broken ? (
+          <AlertTriangle className="size-4 text-destructive mt-0.5 shrink-0" />
+        ) : (
+          <Cloud className="size-4 text-emerald-600 mt-0.5 shrink-0" />
+        )}
+        <div className="min-w-0">
+          <p className="font-medium">
+            {broken ? 'Google Drive is not accepting uploads' : 'Platform backups go to Google Drive'}
+          </p>
+          <p className="text-muted-foreground mt-0.5 truncate">
+            {broken ? d.lastError : `${d.accountEmail || 'Connected'} · ${d.folderName}`}
+          </p>
+          {!broken && d.lastSyncAt && (
+            <p className="text-xs text-muted-foreground">
+              Last upload {new Date(d.lastSyncAt).toLocaleString()}
+            </p>
+          )}
+        </div>
+      </div>
+      <div className="flex items-center gap-2 shrink-0">
+        {broken && (
+          <Button size="sm" onClick={connect} disabled={busy}>
+            Reconnect
+          </Button>
+        )}
+        <Button variant="ghost" size="sm" onClick={disconnect} disabled={busy}>
+          Disconnect
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 export function BackupsAdminPanel() {
   const [data, setData] = useState<BackupsResponse | null>(null)
   const [loading, setLoading] = useState(true)
@@ -201,6 +346,8 @@ export function BackupsAdminPanel() {
               {data.message || 'The backup directory is not readable from the panel.'}
             </div>
           )}
+
+          <AdminDriveConnect onChange={load} />
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <div className="rounded-lg border p-3">
