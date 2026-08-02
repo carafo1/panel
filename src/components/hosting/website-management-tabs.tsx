@@ -970,7 +970,6 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
-            <DriveBackupRow />
             <div className="grid gap-2">
               <Label>Type</Label>
               <Select value={createType} onValueChange={(v) => setCreateType(v as 'mysql' | 'mariadb' | 'postgres' | 'sqlite')}>
@@ -1683,6 +1682,7 @@ export function BackupsTab({ projectId }: { projectId: string }) {
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
+            <DriveBackupRow />
             <div className="grid gap-2">
               <Label>Type</Label>
               <Select value={createType} onValueChange={(v) => setCreateType(v as 'manual' | 'scheduled')}>
