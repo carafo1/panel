@@ -267,6 +267,8 @@ async function createLocalBackup(
     name: string
     slug: string | null
     serverId: string | null
+    /// Where the site's files actually are. The archive is taken from here.
+    deployPath: string | null
     server: { sshHost?: string | null } | null
     websiteDatabases: Array<{
       id: string
@@ -287,13 +289,35 @@ async function createLocalBackup(
 
   try {
     await ensureDir(backupDir)
-    await ensureDir(projectRoot)
 
-    // Step 1: tar+gzip the project root.
-    log(`Archiving ${projectRoot}…`)
+    // Archive where the site ACTUALLY lives.
+    //
+    // This used to archive PROJECT_ROOT(projectId) — a panel-local path — and
+    // ensureDir'd it first, so tar happily archived a freshly created empty
+    // directory and reported success. Every backup on a single-box install was
+    // a valid, complete-looking, 105-byte file containing nothing.
+    const sourceDir = project.deployPath || projectRoot
+    if (!project.deployPath) {
+      log(`WARNING: project has no deployPath; falling back to ${projectRoot}.`)
+    }
+
     const creds: SshCredentials = await getServerCredentials(project.serverId!)
     await withConnection(creds, async (client) => {
-      const tarCmd = `tar -czf ${shellQuote(backupPath)} -C ${shellQuote(projectRoot)} . 2>&1`
+      // Refuse to "back up" something that is not there, rather than
+      // producing an empty archive that looks fine.
+      const check = await exec(
+        client,
+        `test -d ${shellQuote(sourceDir)} && find ${shellQuote(sourceDir)} -type f | head -1`,
+        { timeoutMs: 20000 }
+      )
+      if (!check.stdout.trim()) {
+        throw new Error(
+          `Nothing to back up: ${sourceDir} is missing or contains no files.`
+        )
+      }
+
+      log(`Archiving ${sourceDir}…`)
+      const tarCmd = `tar -czf ${shellQuote(backupPath)} -C ${shellQuote(sourceDir)} . 2>&1`
       const tar = await exec(client, tarCmd, { timeoutMs: 300000 })
       if (tar.exitCode !== 0) {
         throw new Error(`tar failed: ${(tar.stderr || tar.stdout).slice(0, 500)}`)
@@ -305,23 +329,65 @@ async function createLocalBackup(
     // (in practice the database.ts module auto-converts to SQLite for
     // localhost servers without Docker, so this branch is rare).
     for (const dbRow of project.websiteDatabases) {
-      const isSqlite = (dbRow.type || '').toLowerCase() === 'sqlite'
-      if (!isSqlite) {
-        log(`Skipping non-SQLite database ${dbRow.name} (requires Docker for dump).`)
+      const type = (dbRow.type || '').toLowerCase()
+
+      if (type === 'sqlite') {
+        const srcPath = dbRow.externalRef
+        if (!srcPath) {
+          log(`No externalRef for ${dbRow.name}; skipping.`)
+          continue
+        }
+        const destPath = `${backupPath}.db-${dbRow.name}.sqlite`
+        try {
+          await copyFile(srcPath, destPath)
+          log(`Copied SQLite database ${dbRow.name} → ${path.basename(destPath)}.`)
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          log(`WARNING: copy SQLite ${dbRow.name} failed: ${msg}`)
+        }
         continue
       }
-      const srcPath = dbRow.externalRef
-      if (!srcPath) {
-        log(`No externalRef for ${dbRow.name}; skipping.`)
+
+      // MySQL / MariaDB / PostgreSQL run in containers on this host. The old
+      // code skipped them with "requires Docker for dump" on a box that has
+      // Docker, so a WordPress site's entire database went unbacked-up while
+      // the backup reported success.
+      const container = dbRow.externalRef
+      if (!container) {
+        log(`WARNING: no container recorded for ${dbRow.name}; cannot dump it.`)
         continue
       }
-      const destPath = `${backupPath}.db-${dbRow.name}.sqlite`
+      const destPath = `${backupPath}.db-${dbRow.name}.sql.gz`
+      const isPg = type === 'postgres' || type === 'postgresql'
+      const inner = isPg
+        ? `pg_dumpall -U "\${POSTGRES_USER:-postgres}"`
+        : `sh -c 'DUMP=$(command -v mariadb-dump || command -v mysqldump); ` +
+          `"$DUMP" -u root -p"\${MARIADB_ROOT_PASSWORD:-$MYSQL_ROOT_PASSWORD}" ` +
+          `--all-databases --single-transaction --quick 2>/dev/null'`
+
       try {
-        await copyFile(srcPath, destPath)
-        log(`Copied SQLite database ${dbRow.name} → ${path.basename(destPath)}.`)
+        const credsDb: SshCredentials = await getServerCredentials(project.serverId!)
+        await withConnection(credsDb, async (client) => {
+          const cmd = `docker exec ${shellQuote(container)} ${inner} | gzip > ${shellQuote(destPath)}`
+          const r = await exec(client, cmd, { timeoutMs: 300000 })
+          if (r.exitCode !== 0) {
+            throw new Error((r.stderr || r.stdout).slice(0, 300))
+          }
+          // An empty dump is a failed dump. Say so instead of leaving a 20-byte
+          // file that looks like a database.
+          const sz = await exec(client, `stat -c %s ${shellQuote(destPath)} 2>/dev/null || echo 0`, {
+            timeoutMs: 15000,
+          })
+          const n = parseInt(sz.stdout.trim(), 10) || 0
+          if (n < 100) {
+            await exec(client, `rm -f ${shellQuote(destPath)}`, { timeoutMs: 10000 })
+            throw new Error('dump was empty')
+          }
+          log(`Dumped ${type} database ${dbRow.name} (${n} bytes).`)
+        })
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
-        log(`WARNING: copy SQLite ${dbRow.name} failed: ${msg}`)
+        log(`WARNING: dump of ${dbRow.name} failed: ${msg}`)
       }
     }
 
@@ -332,6 +398,14 @@ async function createLocalBackup(
       sizeBytes = s.size
     } catch {
       /* leave at 0 */
+    }
+
+    // An empty gzip is ~100 bytes. A backup that small captured nothing, and
+    // recording it as "completed" is how this went unnoticed for so long.
+    if (sizeBytes > 0 && sizeBytes < 200) {
+      throw new Error(
+        `Backup archive is only ${sizeBytes} bytes — nothing was captured from ${sourceDir}.`
+      )
     }
 
     const row = await db.websiteBackup.create({
