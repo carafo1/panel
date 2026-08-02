@@ -1765,8 +1765,35 @@ function healthcheckBlock(containerPort: number): string {
   ].join('\n')
 }
 
-function resourceLimitsBlock(cpuCores?: number | null, ramMB?: number | null): string {
-  if (!cpuCores && !ramMB) return ''
+/**
+ * Per-container resource caps.
+ *
+ * All three live in `deploy.resources.limits`. A sibling `pids_limit` key is
+ * not merely redundant -- Compose refuses the entire project with "can't set
+ * distinct values on 'pids_limit' and 'deploy.resources.limits.pids'", so a
+ * file carrying both never deploys at all.
+ *
+ * Always emits a block. The process cap is fork-bomb protection and must not
+ * depend on whether a plan happens to have its RAM column filled in.
+ */
+function resourceLimitsBlock(
+  cpuCores?: number | null,
+  ramMB?: number | null,
+  host?: { cpuCores?: number | null; ramGB?: number | null } | null
+): string {
+  // Clamp to the host. A ceiling above physical RAM is not a ceiling: the
+  // container can never reach it, so the kernel OOM-kills something else on
+  // the box instead of the site that overran.
+  const hostRamMB = host?.ramGB ? host.ramGB * 1024 : null
+  if (ramMB && hostRamMB) {
+    // At most half the machine for one customer site — the same box runs the
+    // panel, the worker, Caddy, Mailcow and the tenant databases.
+    ramMB = Math.min(ramMB, Math.floor(hostRamMB / 2))
+  }
+  if (cpuCores && host?.cpuCores) {
+    cpuCores = Math.min(cpuCores, host.cpuCores)
+  }
+
   const lines: string[] = []
   lines.push('    deploy:')
   lines.push('      resources:')
@@ -1777,19 +1804,43 @@ function resourceLimitsBlock(cpuCores?: number | null, ramMB?: number | null): s
   if (ramMB) {
     lines.push(`          memory: ${ramMB}M`)
   }
+  lines.push('          pids: 512')
   return lines.join('\n')
 }
 
+/**
+ * The indented `KEY: "value"` pairs only, with no `environment:` header.
+ *
+ * Templates that already declare their own environment mapping (WordPress
+ * needs one for the DB connection) must append to it. Emitting a second
+ * `environment:` key on the same service is a duplicate mapping key, which
+ * makes the whole file unparseable.
+ */
+function envEntries(envVars: Record<string, string>): string {
+  return Object.entries(envVars)
+    .map(([k, v]) => `      ${k}: "${v.replace(/"/g, '\\"')}"`)
+    .join('\n')
+}
+
 function envBlock(envVars: Record<string, string>): string {
-  const entries = Object.entries(envVars)
-  if (entries.length === 0) return ''
-  const lines = entries.map(([k, v]) => `      ${k}: "${v.replace(/"/g, '\\"')}"`)
-  return `    environment:\n${lines.join('\n')}`
+  const entries = envEntries(envVars)
+  if (!entries) return ''
+  return `    environment:\n${entries}`
 }
 
 function generateMethodCompose(
   methodId: DeploymentMethodId,
-  project: { slug: string; resourceCpuCores?: number | null; resourceRamMB?: number | null; databaseHost?: string | null; databaseName?: string | null; databaseUser?: string | null; databasePassword?: string | null },
+  project: {
+    slug: string
+    resourceCpuCores?: number | null
+    resourceRamMB?: number | null
+    databaseHost?: string | null
+    databaseName?: string | null
+    databaseUser?: string | null
+    databasePassword?: string | null
+    /** Capacity of the machine this lands on — limits are clamped to it. */
+    server?: { cpuCores?: number | null; ramGB?: number | null } | null
+  },
   settings: Record<string, unknown>,
   opts: {
     containerName: string
@@ -1799,7 +1850,11 @@ function generateMethodCompose(
     envVars: Record<string, string>
   }
 ): string {
-  const limits = resourceLimitsBlock(project.resourceCpuCores, project.resourceRamMB)
+  const limits = resourceLimitsBlock(
+    project.resourceCpuCores,
+    project.resourceRamMB,
+    project.server
+  )
   const health = healthcheckBlock(opts.containerPort)
   const env = envBlock(opts.envVars)
 
@@ -1824,10 +1879,10 @@ services:
       # undefined ${'$'}{WP_DB_PASSWORD}, so Compose printed
       # "variable is not set. Defaulting to a blank string" in the customer's
       # install log — alarming, and it looked like the cause of the failure.
-${env ? env + '\n' : ''}    volumes:
+${envEntries(opts.envVars) ? envEntries(opts.envVars) + '\n' : ''}    volumes:
       - ./wp-content:/var/www/html/wp-content
       - ./wp-config-docker.php:/var/www/html/wp-config.php
-${limits ? limits + '\n' : ''}    pids_limit: 512\n${health ? health + '\n' : ''}    networks:
+${limits ? limits + '\n' : ''}${health ? health + '\n' : ''}    networks:
       - default
       - deployhub
 
@@ -1847,7 +1902,7 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:${opts.externalPort}:${opts.containerPort}"
-${env ? env + '\n' : ''}${limits ? limits + '\n' : ''}    pids_limit: 512\n${health ? health + '\n' : ''}    networks:
+${env ? env + '\n' : ''}${limits ? limits + '\n' : ''}${health ? health + '\n' : ''}    networks:
       - default
       - deployhub
 
@@ -1866,7 +1921,7 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:${opts.externalPort}:${opts.containerPort}"
-${env ? env + '\n' : ''}${limits ? limits + '\n' : ''}    pids_limit: 512\n${health ? health + '\n' : ''}    networks:
+${env ? env + '\n' : ''}${limits ? limits + '\n' : ''}${health ? health + '\n' : ''}    networks:
       - default
       - deployhub
 
@@ -1909,7 +1964,7 @@ ${env ? env + '\n' : ''}    volumes:
       - ./wp-content:/var/www/html/wp-content
     depends_on:
       - db
-${limits ? limits + '\n' : ''}    pids_limit: 512\n${health ? health + '\n' : ''}    networks:
+${limits ? limits + '\n' : ''}${health ? health + '\n' : ''}    networks:
       - default
       - deployhub
 
@@ -1941,7 +1996,7 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:${opts.externalPort}:${opts.containerPort}"
-${env ? env + '\n' : ''}${limits ? limits + '\n' : ''}    pids_limit: 512\n${health ? health + '\n' : ''}    networks:
+${env ? env + '\n' : ''}${limits ? limits + '\n' : ''}${health ? health + '\n' : ''}    networks:
       - default
       - deployhub
 
@@ -1959,7 +2014,7 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:${opts.externalPort}:${opts.containerPort}"
-${env ? env + '\n' : ''}${limits ? limits + '\n' : ''}    pids_limit: 512\n${health ? health + '\n' : ''}    networks:
+${env ? env + '\n' : ''}${limits ? limits + '\n' : ''}${health ? health + '\n' : ''}    networks:
       - default
       - deployhub
 
