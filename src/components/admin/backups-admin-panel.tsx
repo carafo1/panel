@@ -39,6 +39,8 @@ import {
   CloudOff,
   Cloud,
   Play,
+  Download,
+  Trash2,
 } from 'lucide-react'
 
 interface ArchiveRow {
@@ -227,6 +229,7 @@ export function BackupsAdminPanel() {
   const [loading, setLoading] = useState(true)
   const [running, setRunning] = useState(false)
   const [shipping, setShipping] = useState(false)
+  const [acting, setActing] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -271,6 +274,55 @@ export function BackupsAdminPanel() {
       toast.error(err instanceof Error ? err.message : 'Offsite upload failed')
     } finally {
       setShipping(false)
+    }
+  }
+
+  const download = async (name: string) => {
+    setActing(name)
+    try {
+      const token = localStorage.getItem('apsamo_token')
+      const res = await fetch(`/api/admin/backups/archive/${encodeURIComponent(name)}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({ error: 'Download failed' }))
+        toast.error(e.error || 'Download failed')
+        return
+      }
+      // Stream to a blob so the browser saves it with the right filename
+      // instead of navigating away from the panel.
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = name
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch {
+      toast.error('Network error downloading the archive')
+    } finally {
+      setActing(null)
+    }
+  }
+
+  const remove = async (name: string) => {
+    if (!window.confirm(`Delete ${name}? This cannot be undone.`)) return
+    setActing(name)
+    try {
+      const res = await apiFetch<{ deleted?: string }>(
+        `/admin/backups/archive/${encodeURIComponent(name)}`,
+        { method: 'DELETE' }
+      )
+      toast.success(`Deleted ${res.deleted || name}`)
+      load()
+    } catch (err) {
+      // The route explains itself — "this is the only backup archive" — so
+      // show that rather than a generic failure.
+      toast.error(err instanceof Error ? err.message : 'Could not delete the archive')
+    } finally {
+      setActing(null)
     }
   }
 
@@ -428,6 +480,7 @@ export function BackupsAdminPanel() {
                     <TableHead>Archive</TableHead>
                     <TableHead>Size</TableHead>
                     <TableHead>Created</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -436,6 +489,34 @@ export function BackupsAdminPanel() {
                       <TableCell className="font-mono text-xs break-all">{a.name}</TableCell>
                       <TableCell>{bytes(a.bytes)}</TableCell>
                       <TableCell>{new Date(a.modified).toLocaleString()}</TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs"
+                            onClick={() => download(a.name)}
+                            disabled={acting === a.name}
+                          >
+                            {acting === a.name ? (
+                              <Loader2 className="size-3 mr-1 animate-spin" />
+                            ) : (
+                              <Download className="size-3 mr-1" />
+                            )}
+                            Download
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs text-destructive hover:text-destructive"
+                            onClick={() => remove(a.name)}
+                            disabled={acting === a.name}
+                          >
+                            <Trash2 className="size-3 mr-1" />
+                            Delete
+                          </Button>
+                        </div>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
