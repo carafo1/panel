@@ -15,6 +15,7 @@ import {
   Card, CardContent, CardDescription, CardHeader, CardTitle,
 } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { DomainPricingPanel } from '@/components/admin/domain-pricing-panel'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
@@ -2375,11 +2376,6 @@ function PricingTab({ isAdmin, globalMarkup, onMarkupChanged }: PricingTabProps)
   const [syncing, setSyncing] = useState(false)
   const [info, setInfo] = useState<{ markup: number; formula: string } | null>(null)
 
-  // Markup editor state
-  const [markupInput, setMarkupInput] = useState<string>('')
-  const [savingMarkup, setSavingMarkup] = useState(false)
-  const [markupConfirmOpen, setMarkupConfirmOpen] = useState(false)
-
   const load = useCallback(async () => {
     setLoading(true)
     try {
@@ -2387,9 +2383,6 @@ function PricingTab({ isAdmin, globalMarkup, onMarkupChanged }: PricingTabProps)
       setPrices(data.data?.tlds || [])
       const m = data.data?.markup
       setInfo({ markup: m, formula: data.data?.formula })
-      if (typeof m === 'number') {
-        setMarkupInput(m.toFixed(2))
-      }
     } catch (err) {
       toast.error('Failed to load pricing', { description: (err as Error).message })
     } finally {
@@ -2398,13 +2391,6 @@ function PricingTab({ isAdmin, globalMarkup, onMarkupChanged }: PricingTabProps)
   }, [])
 
   useEffect(() => { load() }, [load])
-
-  // Keep the input in sync with the parent badge's value too.
-  useEffect(() => {
-    if (typeof globalMarkup === 'number' && !savingMarkup) {
-      setMarkupInput(globalMarkup.toFixed(2))
-    }
-  }, [globalMarkup, savingMarkup])
 
   const sync = async () => {
     setSyncing(true)
@@ -2419,122 +2405,16 @@ function PricingTab({ isAdmin, globalMarkup, onMarkupChanged }: PricingTabProps)
     }
   }
 
-  const saveMarkup = async () => {
-    const parsed = parseFloat(markupInput)
-    if (!Number.isFinite(parsed) || parsed < 0) {
-      toast.error('Invalid markup', { description: 'Enter a non-negative number, e.g. 8.50' })
-      return
-    }
-    if (parsed > 1000) {
-      toast.error('Invalid markup', { description: 'Markup must be less than $1000 USD' })
-      return
-    }
-    setSavingMarkup(true)
-    try {
-      const data = await apiFetch('/pricing/markup', {
-        method: 'POST',
-        body: JSON.stringify({ markup: parsed }),
-        headers: { 'Content-Type': 'application/json' },
-      })
-      const newMarkup = data.data?.markup
-      toast.success('Markup updated', {
-        description: data.message || `Now $${newMarkup?.toFixed(2)} — all prices recalculated`,
-      })
-      setMarkupConfirmOpen(false)
-      if (typeof newMarkup === 'number') {
-        setMarkupInput(newMarkup.toFixed(2))
-        onMarkupChanged?.(newMarkup)
-      }
-      load() // reload the table with new prices
-    } catch (err) {
-      toast.error('Failed to update markup', { description: (err as Error).message })
-    } finally {
-      setSavingMarkup(false)
-    }
-  }
 
   const currentMarkup = typeof globalMarkup === 'number' ? globalMarkup : info?.markup
-  const hasMarkupChanged =
-    currentMarkup !== undefined &&
-    Math.abs((parseFloat(markupInput) || 0) - currentMarkup) > 0.001
 
   return (
     <div className="space-y-4">
-      {isAdmin && (
-        <Card className="border-amber-500/30 bg-amber-50/40 dark:bg-amber-950/10">
-          <CardHeader>
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <div>
-                <CardTitle className="flex items-center gap-2 text-lg">
-                  <Sparkles className="h-5 w-5 text-amber-500" /> Global Markup
-                </CardTitle>
-                <CardDescription>
-                  The markup (USD) added to every TLD's wholesale price. Changing
-                  it instantly recalculates all selling prices.
-                </CardDescription>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-mono text-sm pointer-events-none">$</span>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    max="1000"
-                    inputMode="decimal"
-                    value={markupInput}
-                    onChange={(e) => setMarkupInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && hasMarkupChanged) setMarkupConfirmOpen(true)
-                    }}
-                    className="w-32 pl-7 font-mono"
-                    placeholder="6.50"
-                    aria-label="Markup amount in USD"
-                  />
-                </div>
-                <Button
-                  size="sm"
-                  onClick={() => setMarkupConfirmOpen(true)}
-                  disabled={!hasMarkupChanged || savingMarkup}
-                >
-                  {savingMarkup ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <BadgeDollarSign className="h-4 w-4 mr-1" />}
-                  Save &amp; Recalculate
-                </Button>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
-              <div className="rounded-lg border bg-background/60 p-3">
-                <div className="text-xs uppercase text-muted-foreground">Current markup</div>
-                <div className="text-lg font-mono font-semibold text-amber-600 mt-1">
-                  {currentMarkup !== undefined ? `$${currentMarkup.toFixed(2)}` : '—'}
-                </div>
-              </div>
-              <div className="rounded-lg border bg-background/60 p-3">
-                <div className="text-xs uppercase text-muted-foreground">Formula</div>
-                <div className="text-sm font-mono mt-1 break-words">
-                  {info?.formula || `Selling = Wholesale + $${currentMarkup?.toFixed(2) ?? '6.50'}`}
-                </div>
-              </div>
-              <div className="rounded-lg border bg-background/60 p-3">
-                <div className="text-xs uppercase text-muted-foreground">Affected TLDs</div>
-                <div className="text-lg font-mono font-semibold mt-1">
-                  {prices.length || '—'}
-                </div>
-              </div>
-            </div>
-            <p className="text-xs text-muted-foreground mt-3">
-              Example: a <span className="font-mono">.com</span> domain with a wholesale
-              of <span className="font-mono">$8.49</span> sells for{' '}
-              <span className="font-mono font-semibold">
-                ${currentMarkup !== undefined ? (8.49 + currentMarkup).toFixed(2) : '14.99'}
-              </span>{' '}
-              at the current markup.
-            </p>
-          </CardContent>
-        </Card>
-      )}
+      {/* Admin pricing controls: markups and discounts per action.
+          Replaces the old single Global Markup card — two markup editors
+          on one page, with one of them only a fallback for the other, is
+          how the wrong field gets edited and silently does nothing. */}
+      {isAdmin && <DomainPricingPanel />}
 
       <Card>
         <CardHeader>
@@ -2601,59 +2481,6 @@ function PricingTab({ isAdmin, globalMarkup, onMarkupChanged }: PricingTabProps)
       </Card>
 
       {/* Markup change confirmation */}
-      <AlertDialog open={markupConfirmOpen} onOpenChange={setMarkupConfirmOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Change global markup?</AlertDialogTitle>
-            <AlertDialogDescription asChild>
-              <div className="space-y-2">
-                <p>
-                  This will change the markup from{' '}
-                  <span className="font-mono font-semibold text-amber-600">
-                    ${currentMarkup?.toFixed(2) ?? '—'}
-                  </span>{' '}
-                  to{' '}
-                  <span className="font-mono font-semibold text-amber-600">
-                    ${(parseFloat(markupInput) || 0).toFixed(2)}
-                  </span>{' '}
-                  and immediately recalculate the selling price of every TLD
-                  ({prices.length} entries). Existing invoices and past orders
-                  are not affected.
-                </p>
-                <p className="text-xs">
-                  Example .com price:{' '}
-                  <span className="font-mono">
-                    ${(8.49 + (currentMarkup ?? 0)).toFixed(2)}
-                  </span>{' '}
-                  →{' '}
-                  <span className="font-mono font-semibold">
-                    ${(8.49 + (parseFloat(markupInput) || 0)).toFixed(2)}
-                  </span>
-                </p>
-              </div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={savingMarkup}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(e) => {
-                e.preventDefault()
-                saveMarkup()
-              }}
-              disabled={savingMarkup}
-              className="bg-amber-600 hover:bg-amber-700 text-white"
-            >
-              {savingMarkup ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" /> Saving…
-                </>
-              ) : (
-                'Confirm & Save'
-              )}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   )
 }
