@@ -340,17 +340,25 @@ export async function getAllPrices(): Promise<PricedTld[]> {
     where: { active: true },
     orderBy: { tld: 'asc' },
   })
-  return rows.map((r) => ({
-    tld: r.tld,
-    wholesale: r.wholesale,
-    markup: r.markup,
-    registration: r.registration,
-    renewal: r.renewal,
-    transfer: r.transfer,
-    currency: r.currency,
-    active: r.active,
-    lastSyncedAt: r.lastSyncedAt ? r.lastSyncedAt.toISOString() : null,
-  }))
+  // Recomputed from wholesale rather than returned from the stored columns.
+  // Those are written by the registrar sync from the single global markup, so
+  // reading them would ignore the admin's per-action settings and then quietly
+  // overwrite them on the next sync.
+  const s = await getDomainPricingSettings()
+  return rows.map((r) => {
+    const p = sellingPrices(r.wholesale, s)
+    return {
+      tld: r.tld,
+      wholesale: r.wholesale,
+      markup: s.registerMarkup,
+      registration: p.registration,
+      renewal: p.renewal,
+      transfer: p.transfer,
+      currency: r.currency,
+      active: r.active,
+      lastSyncedAt: r.lastSyncedAt ? r.lastSyncedAt.toISOString() : null,
+    }
+  })
 }
 
 /**
@@ -366,27 +374,29 @@ export async function getPriceForTld(tld: string): Promise<PricedTld | null> {
     // guarantees search and checkout always quote the same number.
     const wholesale =
       TLD_WHOLESALE_PRICES[normalized]?.registration ?? CATALOG_DEFAULT_WHOLESALE
-    const markup = await getGlobalMarkup()
-    const registration = applyMarkup(wholesale, markup)
+    const s = await getDomainPricingSettings()
+    const p = sellingPrices(wholesale, s)
     return {
       tld: normalized,
       wholesale,
-      markup,
-      registration,
-      renewal: registration,
-      transfer: registration,
+      markup: s.registerMarkup,
+      registration: p.registration,
+      renewal: p.renewal,
+      transfer: p.transfer,
       currency: 'USD',
       active: true,
       lastSyncedAt: null,
     }
   }
+  const s = await getDomainPricingSettings()
+  const p = sellingPrices(row.wholesale, s)
   return {
     tld: row.tld,
     wholesale: row.wholesale,
-    markup: row.markup,
-    registration: row.registration,
-    renewal: row.renewal,
-    transfer: row.transfer,
+    markup: s.registerMarkup,
+    registration: p.registration,
+    renewal: p.renewal,
+    transfer: p.transfer,
     currency: row.currency,
     active: row.active,
     lastSyncedAt: row.lastSyncedAt ? row.lastSyncedAt.toISOString() : null,
@@ -568,5 +578,139 @@ export async function updateMarkup(
     currency: updated.currency,
     active: updated.active,
     lastSyncedAt: updated.lastSyncedAt ? updated.lastSyncedAt.toISOString() : null,
+  }
+}
+
+
+// ─── Per-action markup + discount ────────────────────────────────────────────
+
+/** AppSetting keys. Per-action markups fall back to MARKUP_SETTING_KEY. */
+export const MARKUP_REGISTER_KEY = 'domain.markup.register'
+export const MARKUP_RENEW_KEY = 'domain.markup.renew'
+export const MARKUP_TRANSFER_KEY = 'domain.markup.transfer'
+export const DISCOUNT_PERCENT_KEY = 'domain.discountPercent'
+
+export interface DomainPricingSettings {
+  /** USD added to wholesale, per action. */
+  registerMarkup: number
+  renewMarkup: number
+  transferMarkup: number
+  /** Percentage off the final price. 0-90. */
+  discountPercent: number
+  /** The legacy single markup, still the fallback for any unset action. */
+  globalMarkup: number
+}
+
+async function readNumber(key: string): Promise<number | null> {
+  try {
+    const row = await db.appSetting.findUnique({ where: { key } })
+    if (!row) return null
+    const n = parseFloat(row.value)
+    return Number.isFinite(n) ? n : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Current pricing settings.
+ *
+ * An unset per-action markup falls back to the global one, so an install that
+ * has never touched these prices exactly as it did before.
+ */
+export async function getDomainPricingSettings(): Promise<DomainPricingSettings> {
+  const globalMarkup = await getGlobalMarkup()
+  const [reg, ren, xfer, disc] = await Promise.all([
+    readNumber(MARKUP_REGISTER_KEY),
+    readNumber(MARKUP_RENEW_KEY),
+    readNumber(MARKUP_TRANSFER_KEY),
+    readNumber(DISCOUNT_PERCENT_KEY),
+  ])
+  return {
+    registerMarkup: reg !== null && reg >= 0 ? reg : globalMarkup,
+    renewMarkup: ren !== null && ren >= 0 ? ren : globalMarkup,
+    transferMarkup: xfer !== null && xfer >= 0 ? xfer : globalMarkup,
+    // Capped at 90%: a 100% discount means giving domains away at a loss,
+    // since the wholesale cost is still paid to the registrar.
+    discountPercent: disc !== null && disc > 0 ? Math.min(disc, 90) : 0,
+    globalMarkup,
+  }
+}
+
+export interface PricingUpdate {
+  registerMarkup?: number
+  renewMarkup?: number
+  transferMarkup?: number
+  discountPercent?: number
+}
+
+/**
+ * Write the settings an admin changed. Only the keys supplied are touched.
+ *
+ * Rejects a markup below zero and a discount outside 0-90: either would sell
+ * domains for less than they cost, and the registrar still has to be paid.
+ */
+export async function setDomainPricingSettings(
+  update: PricingUpdate,
+  updatedBy?: string
+): Promise<{ ok: boolean; error?: string; settings?: DomainPricingSettings }> {
+  const pairs: Array<[string, number]> = []
+
+  for (const [field, key] of [
+    ['registerMarkup', MARKUP_REGISTER_KEY],
+    ['renewMarkup', MARKUP_RENEW_KEY],
+    ['transferMarkup', MARKUP_TRANSFER_KEY],
+  ] as const) {
+    const v = update[field]
+    if (v === undefined) continue
+    if (!Number.isFinite(v) || v < 0) {
+      return { ok: false, error: `${field} must be zero or more.` }
+    }
+    if (v > 1000) {
+      return { ok: false, error: `${field} of $${v} looks like a mistake.` }
+    }
+    pairs.push([key, v])
+  }
+
+  if (update.discountPercent !== undefined) {
+    const d = update.discountPercent
+    if (!Number.isFinite(d) || d < 0 || d > 90) {
+      return { ok: false, error: 'Discount must be between 0 and 90 percent.' }
+    }
+    pairs.push([DISCOUNT_PERCENT_KEY, d])
+  }
+
+  for (const [key, value] of pairs) {
+    await db.appSetting.upsert({
+      where: { key },
+      create: { key, value: String(value), updatedBy: updatedBy ?? null },
+      update: { value: String(value), updatedBy: updatedBy ?? null },
+    })
+  }
+
+  return { ok: true, settings: await getDomainPricingSettings() }
+}
+
+/** Round to cents, never below zero. */
+function money(n: number): number {
+  return Math.max(0, Math.round(n * 100) / 100)
+}
+
+/**
+ * Selling prices for one wholesale cost.
+ *
+ * Discount is applied AFTER the markup, so "20% off" is 20% off the price the
+ * customer sees rather than 20% off the margin — which is what a customer
+ * reading the banner will expect.
+ */
+export function sellingPrices(
+  wholesale: number,
+  s: DomainPricingSettings
+): { registration: number; renewal: number; transfer: number } {
+  const f = 1 - s.discountPercent / 100
+  return {
+    registration: money((wholesale + s.registerMarkup) * f),
+    renewal: money((wholesale + s.renewMarkup) * f),
+    transfer: money((wholesale + s.transferMarkup) * f),
   }
 }
