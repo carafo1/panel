@@ -436,6 +436,25 @@ export function generateCaddyBlock(cfg: ProxyConfig): string {
     lines.push(`  handle @host {`)
   }
 
+  // ── Sensitive paths — denied before anything else can serve them. ──
+  //
+  // These are the files that actually get exploited on shared hosting: a
+  // customer who deploys their repository with .env or .git in the webroot is
+  // one request away from giving away their database password and their whole
+  // source history, and a PHP handler that stops handling .php will serve
+  // wp-config.php as plain text.
+  //
+  // Returns 404 rather than 403 on purpose — a 403 confirms the file is there.
+  lines.push(`    @apsamo_blocked {`)
+  lines.push(`      path /.env /.env.* /.git /.git/* /.htaccess /.htpasswd`)
+  lines.push(`      path /wp-config.php /wp-config-sample.php /wp-config-docker.php`)
+  lines.push(`      path /xmlrpc.php`)
+  lines.push(`      path *.sql *.sql.gz *.bak *.old *.swp *.orig ~*`)
+  lines.push(`      path /composer.json /composer.lock /package-lock.json /yarn.lock`)
+  lines.push(`      path /Dockerfile /docker-compose.yml /docker-compose.yaml`)
+  lines.push(`    }`)
+  lines.push(`    respond @apsamo_blocked 404`)
+
   // ── IP blocks (deny rules) — injected BEFORE reverse_proxy so they take ──
   // precedence. Allow rules are enforced at the middleware layer (Caddy's
   // `client_ip` matcher is deny-oriented; whitelist semantics are easier in
