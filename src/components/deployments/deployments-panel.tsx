@@ -30,6 +30,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import {
+  Trash2,
   GitBranch,
   Clock,
   ArrowLeft,
@@ -225,6 +226,7 @@ export function DeploymentsPanel() {
   const [loading, setLoading] = useState(true)
   const [detailLoading, setDetailLoading] = useState(false)
   const [rollbackLoading, setRollbackLoading] = useState(false)
+  const [deleteLoading, setDeleteLoading] = useState(false)
   const [activeFilter, setActiveFilter] = useState('all')
   const [searchInput, setSearchInput] = useState('')
   const [searchQuery, setSearchQuery] = useState('') // debounced
@@ -402,6 +404,31 @@ export function DeploymentsPanel() {
     }
   }, [selectedId, fetchDetail])
 
+  const handleDelete = async (id: string) => {
+    if (
+      !window.confirm(
+        'Delete this deployment record?\n\nIt removes the build log and stage ' +
+          'history. The site itself is not touched.'
+      )
+    ) {
+      return
+    }
+    setDeleteLoading(true)
+    try {
+      await apiFetch(`/deployments/${id}`, { method: 'DELETE' })
+      toast.success('Deployment removed')
+      setSelectedId(null)
+      setDetail(null)
+      await fetchDeployments()
+    } catch (err) {
+      // The route explains itself — "currently serving the site", "the only
+      // successful deployment" — so surface that, not a generic failure.
+      toast.error(err instanceof Error ? err.message : 'Could not delete the deployment')
+    } finally {
+      setDeleteLoading(false)
+    }
+  }
+
   const handleRollback = async (id: string) => {
     setRollbackLoading(true)
     try {
@@ -560,6 +587,24 @@ export function DeploymentsPanel() {
                       <RotateCcw className="size-4 mr-1" />
                     )}
                     Rollback
+                  </Button>
+                )}
+                {/* Not offered on the live deployment: the server refuses it,
+                    and a button that always errors teaches nothing. */}
+                {!isLive && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-destructive hover:text-destructive"
+                    disabled={deleteLoading}
+                    onClick={() => handleDelete(detail.id)}
+                  >
+                    {deleteLoading ? (
+                      <Loader2 className="size-4 animate-spin mr-1" />
+                    ) : (
+                      <Trash2 className="size-4 mr-1" />
+                    )}
+                    Delete
                   </Button>
                 )}
               </div>
