@@ -589,14 +589,21 @@ export const MARKUP_REGISTER_KEY = 'domain.markup.register'
 export const MARKUP_RENEW_KEY = 'domain.markup.renew'
 export const MARKUP_TRANSFER_KEY = 'domain.markup.transfer'
 export const DISCOUNT_PERCENT_KEY = 'domain.discountPercent'
+export const DISCOUNT_REGISTER_KEY = 'domain.discount.register'
+export const DISCOUNT_RENEW_KEY = 'domain.discount.renew'
+export const DISCOUNT_TRANSFER_KEY = 'domain.discount.transfer'
 
 export interface DomainPricingSettings {
   /** USD added to wholesale, per action. */
   registerMarkup: number
   renewMarkup: number
   transferMarkup: number
-  /** Percentage off the final price. 0-90. */
+  /** The "all actions" percentage off. 0-90. Used where no per-action value is set. */
   discountPercent: number
+  /** Per-action percentages. Each falls back to discountPercent. */
+  registerDiscount: number
+  renewDiscount: number
+  transferDiscount: number
   /** The legacy single markup, still the fallback for any unset action. */
   globalMarkup: number
 }
@@ -620,19 +627,34 @@ async function readNumber(key: string): Promise<number | null> {
  */
 export async function getDomainPricingSettings(): Promise<DomainPricingSettings> {
   const globalMarkup = await getGlobalMarkup()
-  const [reg, ren, xfer, disc] = await Promise.all([
+  const [reg, ren, xfer, disc, dReg, dRen, dXfer] = await Promise.all([
     readNumber(MARKUP_REGISTER_KEY),
     readNumber(MARKUP_RENEW_KEY),
     readNumber(MARKUP_TRANSFER_KEY),
     readNumber(DISCOUNT_PERCENT_KEY),
+    readNumber(DISCOUNT_REGISTER_KEY),
+    readNumber(DISCOUNT_RENEW_KEY),
+    readNumber(DISCOUNT_TRANSFER_KEY),
   ])
+
+  // Capped at 90% throughout: a 100% discount gives domains away at a loss,
+  // because the registrar still charges wholesale either way.
+  // >= 0, not > 0: a stored 0 is a deliberate "no discount on this action",
+  // not an absent value. Only a key that was never written inherits.
+  const cap = (v: number | null, fallback: number): number =>
+    v !== null && v >= 0 ? Math.min(Math.max(v, 0), 90) : fallback
+  const all = disc !== null && disc > 0 ? Math.min(disc, 90) : 0
+
   return {
     registerMarkup: reg !== null && reg >= 0 ? reg : globalMarkup,
     renewMarkup: ren !== null && ren >= 0 ? ren : globalMarkup,
     transferMarkup: xfer !== null && xfer >= 0 ? xfer : globalMarkup,
-    // Capped at 90%: a 100% discount means giving domains away at a loss,
-    // since the wholesale cost is still paid to the registrar.
-    discountPercent: disc !== null && disc > 0 ? Math.min(disc, 90) : 0,
+    discountPercent: all,
+    // A per-action discount overrides the "all actions" one. Same shape as the
+    // markups above, so both halves of the form behave the same way.
+    registerDiscount: cap(dReg, all),
+    renewDiscount: cap(dRen, all),
+    transferDiscount: cap(dXfer, all),
     globalMarkup,
   }
 }
@@ -642,6 +664,9 @@ export interface PricingUpdate {
   renewMarkup?: number
   transferMarkup?: number
   discountPercent?: number
+  registerDiscount?: number
+  renewDiscount?: number
+  transferDiscount?: number
 }
 
 /**
@@ -672,12 +697,18 @@ export async function setDomainPricingSettings(
     pairs.push([key, v])
   }
 
-  if (update.discountPercent !== undefined) {
-    const d = update.discountPercent
+  for (const [field, key, label] of [
+    ['discountPercent', DISCOUNT_PERCENT_KEY, 'Discount'],
+    ['registerDiscount', DISCOUNT_REGISTER_KEY, 'Registration discount'],
+    ['renewDiscount', DISCOUNT_RENEW_KEY, 'Renewal discount'],
+    ['transferDiscount', DISCOUNT_TRANSFER_KEY, 'Transfer discount'],
+  ] as const) {
+    const d = update[field]
+    if (d === undefined) continue
     if (!Number.isFinite(d) || d < 0 || d > 90) {
-      return { ok: false, error: 'Discount must be between 0 and 90 percent.' }
+      return { ok: false, error: `${label} must be between 0 and 90 percent.` }
     }
-    pairs.push([DISCOUNT_PERCENT_KEY, d])
+    pairs.push([key, d])
   }
 
   for (const [key, value] of pairs) {
@@ -707,10 +738,10 @@ export function sellingPrices(
   wholesale: number,
   s: DomainPricingSettings
 ): { registration: number; renewal: number; transfer: number } {
-  const f = 1 - s.discountPercent / 100
+  const off = (pct: number) => 1 - pct / 100
   return {
-    registration: money((wholesale + s.registerMarkup) * f),
-    renewal: money((wholesale + s.renewMarkup) * f),
-    transfer: money((wholesale + s.transferMarkup) * f),
+    registration: money((wholesale + s.registerMarkup) * off(s.registerDiscount)),
+    renewal: money((wholesale + s.renewMarkup) * off(s.renewDiscount)),
+    transfer: money((wholesale + s.transferMarkup) * off(s.transferDiscount)),
   }
 }

@@ -62,7 +62,15 @@ async function putHandler(request: Request) {
   // Only fields actually present are touched — a form that submits three of
   // four must not reset the fourth to zero.
   const update: Record<string, number> = {}
-  for (const k of ['registerMarkup', 'renewMarkup', 'transferMarkup', 'discountPercent']) {
+  for (const k of [
+    'registerMarkup',
+    'renewMarkup',
+    'transferMarkup',
+    'discountPercent',
+    'registerDiscount',
+    'renewDiscount',
+    'transferDiscount',
+  ]) {
     const v = body[k]
     if (v === undefined || v === null || v === '') continue
     const n = typeof v === 'number' ? v : parseFloat(String(v))

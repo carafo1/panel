@@ -29,6 +29,9 @@ interface Settings {
   renewMarkup: number
   transferMarkup: number
   discountPercent: number
+  registerDiscount: number
+  renewDiscount: number
+  transferDiscount: number
   globalMarkup: number
 }
 
@@ -58,6 +61,9 @@ export function DomainPricingPanel() {
   const [ren, setRen] = useState('')
   const [xfer, setXfer] = useState('')
   const [disc, setDisc] = useState('')
+  const [dReg, setDReg] = useState('')
+  const [dRen, setDRen] = useState('')
+  const [dXfer, setDXfer] = useState('')
 
   const load = useCallback(async () => {
     try {
@@ -67,6 +73,9 @@ export function DomainPricingPanel() {
       setRen(String(r.settings.renewMarkup))
       setXfer(String(r.settings.transferMarkup))
       setDisc(String(r.settings.discountPercent))
+      setDReg(String(r.settings.registerDiscount))
+      setDRen(String(r.settings.renewDiscount))
+      setDXfer(String(r.settings.transferDiscount))
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not load domain pricing')
     } finally {
@@ -88,6 +97,9 @@ export function DomainPricingPanel() {
           renewMarkup: ren,
           transferMarkup: xfer,
           discountPercent: disc,
+          registerDiscount: dReg,
+          renewDiscount: dRen,
+          transferDiscount: dXfer,
         }),
       })
       toast.success(r.message || 'Domain pricing updated.')
@@ -109,17 +121,33 @@ export function DomainPricingPanel() {
     const v = parseFloat(s)
     return Number.isFinite(v) ? v : 0
   }
-  const f = 1 - Math.min(Math.max(n(disc), 0), 90) / 100
-  const preview = (wholesale: number, markup: number) =>
-    Math.max(0, Math.round((wholesale + markup) * f * 100) / 100)
+  // A blank per-action discount follows "All actions", matching the server.
+  const pct = (s: string, fallback: number) => {
+    const v = parseFloat(s)
+    return Number.isFinite(v) && v > 0 ? Math.min(v, 90) : fallback
+  }
+  const allPct = Math.min(Math.max(n(disc), 0), 90)
+  const preview = (wholesale: number, markup: number, discountStr: string) =>
+    Math.max(
+      0,
+      Math.round((wholesale + markup) * (1 - pct(discountStr, allPct) / 100) * 100) / 100
+    )
 
   const dirty =
     n(reg) !== data.settings.registerMarkup ||
     n(ren) !== data.settings.renewMarkup ||
     n(xfer) !== data.settings.transferMarkup ||
-    n(disc) !== data.settings.discountPercent
+    n(disc) !== data.settings.discountPercent ||
+    n(dReg) !== data.settings.registerDiscount ||
+    n(dRen) !== data.settings.renewDiscount ||
+    n(dXfer) !== data.settings.transferDiscount
 
-  const belowCost = data.examples.some((e) => preview(e.wholesale, n(reg)) < e.wholesale)
+  const belowCost = data.examples.some(
+    (e) =>
+      preview(e.wholesale, n(reg), dReg) < e.wholesale ||
+      preview(e.wholesale, n(ren), dRen) < e.wholesale ||
+      preview(e.wholesale, n(xfer), dXfer) < e.wholesale
+  )
 
   return (
     <div className="space-y-4">
@@ -194,26 +222,64 @@ export function DomainPricingPanel() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="grid gap-2">
-              <Label htmlFor="dp-disc" className="flex items-center gap-1">
-                <Percent className="size-3.5" />
-                Discount
-              </Label>
-              <div className="relative">
-                <Input
-                  id="dp-disc"
-                  className="pr-8"
-                  inputMode="decimal"
-                  placeholder="e.g. 20"
-                  value={disc}
-                  onChange={(e) => setDisc(e.target.value)}
-                />
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">%</span>
+          <div className="pt-2 border-t">
+            <p className="text-sm font-medium mb-1">Discounts</p>
+            <p className="text-xs text-muted-foreground mb-3">
+              “All actions” fills the other three — set it first, then adjust any one
+              of them. Each box is what customers are charged, so 0 means no discount.
+              Max 90%: the registrar still charges you wholesale.
+            </p>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="dp-disc" className="flex items-center gap-1">
+                  <Percent className="size-3.5" />
+                  All actions
+                </Label>
+                <div className="relative">
+                  <Input id="dp-disc" className="pr-8" inputMode="decimal" placeholder="0"
+                    value={disc}
+                    onChange={(e) => {
+                      // Writes through to all three rather than being inherited
+                      // silently — the four boxes always show what is charged.
+                      setDisc(e.target.value)
+                      setDReg(e.target.value)
+                      setDRen(e.target.value)
+                      setDXfer(e.target.value)
+                    }} />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">%</span>
+                </div>
+                <p className="text-xs text-muted-foreground">Sets all three.</p>
               </div>
-              <p className="text-xs text-muted-foreground">
-                Off the final price, all three actions. Max 90%.
-              </p>
+
+              <div className="grid gap-2">
+                <Label htmlFor="dp-dreg">Registration</Label>
+                <div className="relative">
+                  <Input id="dp-dreg" className="pr-8" inputMode="decimal" placeholder="0"
+                    value={dReg} onChange={(e) => setDReg(e.target.value)} />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">%</span>
+                </div>
+                <p className="text-xs text-muted-foreground">First year only.</p>
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="dp-dren">Renewal</Label>
+                <div className="relative">
+                  <Input id="dp-dren" className="pr-8" inputMode="decimal" placeholder="0"
+                    value={dRen} onChange={(e) => setDRen(e.target.value)} />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">%</span>
+                </div>
+                <p className="text-xs text-muted-foreground">Every year after.</p>
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="dp-dxfer">Transfer</Label>
+                <div className="relative">
+                  <Input id="dp-dxfer" className="pr-8" inputMode="decimal" placeholder="0"
+                    value={dXfer} onChange={(e) => setDXfer(e.target.value)} />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">%</span>
+                </div>
+                <p className="text-xs text-muted-foreground">Moved in from elsewhere.</p>
+              </div>
             </div>
           </div>
 
@@ -261,9 +327,9 @@ export function DomainPricingPanel() {
               </TableHeader>
               <TableBody>
                 {data.examples.map((e) => {
-                  const r = preview(e.wholesale, n(reg))
-                  const rn = preview(e.wholesale, n(ren))
-                  const x = preview(e.wholesale, n(xfer))
+                  const r = preview(e.wholesale, n(reg), dReg)
+                  const rn = preview(e.wholesale, n(ren), dRen)
+                  const x = preview(e.wholesale, n(xfer), dXfer)
                   const margin = rn - e.wholesale
                   return (
                     <TableRow key={e.tld}>

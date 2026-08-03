@@ -470,7 +470,7 @@ export function AdminPanel() {
           <TabsTrigger value="jobs">Job Queue</TabsTrigger>
           <TabsTrigger value="servers">Servers</TabsTrigger>
           <TabsTrigger value="backups">Backups</TabsTrigger>
-          <TabsTrigger value="domain-pricing">Domain Pricing</TabsTrigger>
+          <TabsTrigger value="domain-pricing">Domain - Pricing</TabsTrigger>
           <TabsTrigger value="plans">Plans</TabsTrigger>
           <TabsTrigger value="email">Email</TabsTrigger>
           <TabsTrigger value="promotions">Discounts</TabsTrigger>
