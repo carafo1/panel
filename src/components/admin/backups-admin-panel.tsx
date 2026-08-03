@@ -224,6 +224,172 @@ function AdminDriveConnect({ onChange }: { onChange: () => void }) {
   )
 }
 
+interface DriveFile {
+  id: string
+  name: string
+  bytes: number
+  createdAt: string
+}
+
+interface DriveListing {
+  configured: boolean
+  connected: boolean
+  account?: string | null
+  folder?: string
+  ok?: boolean
+  error?: string
+  files: DriveFile[]
+  totalBytes?: number
+}
+
+
+/**
+ * The contents of the connected Drive folder.
+ *
+ * A listing failure is shown as a failure, never as an empty list — "there are
+ * no backups" and "we could not ask" look identical in a bare table and mean
+ * opposite things.
+ */
+function DriveFilesTable() {
+  const [data, setData] = useState<DriveListing | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    try {
+      setData(await apiFetch<DriveListing>('/admin/backups/drive'))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not read Google Drive')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    load()
+  }, [load])
+
+  const remove = async (f: DriveFile) => {
+    if (!window.confirm(`Remove ${f.name} from Google Drive?\n\nIt goes to the Drive bin and is recoverable there for 30 days.`)) {
+      return
+    }
+    setBusy(f.id)
+    try {
+      const r = await apiFetch<{ message?: string }>('/admin/backups/drive', {
+        method: 'DELETE',
+        body: JSON.stringify({ fileId: f.id }),
+      })
+      toast.success(r.message || 'Removed from Drive.')
+      load()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not remove the file')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  if (loading) return <Skeleton className="h-40 w-full" />
+  if (!data || !data.configured || !data.connected) return null
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Cloud className="size-4" />
+              In Google Drive
+            </CardTitle>
+            <CardDescription className="mt-1">
+              {data.account ? `${data.account} · ` : ''}
+              {data.folder || 'Apsamo Backups'}
+              {data.files.length > 0 && ` · ${data.files.length} file(s), ${bytes(data.totalBytes)}`}
+            </CardDescription>
+          </div>
+          <Button variant="outline" size="sm" onClick={load}>
+            <RefreshCw className="size-3.5 mr-1" />
+            Refresh
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {data.ok === false && (
+          <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm mb-3">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="size-4 text-destructive mt-0.5 shrink-0" />
+              <div>
+                <p className="font-medium">Could not read the Drive folder</p>
+                <p className="text-muted-foreground mt-0.5">{data.error}</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {data.ok !== false && data.files.length === 0 && (
+          <p className="text-sm text-muted-foreground">
+            Nothing has been uploaded yet. Use “Send offsite” above.
+          </p>
+        )}
+
+        {data.files.length > 0 && (
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>File</TableHead>
+                  <TableHead>Size</TableHead>
+                  <TableHead>Uploaded</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {data.files.map((f) => (
+                  <TableRow key={f.id}>
+                    <TableCell className="font-mono text-xs break-all">
+                      {f.name}
+                      {/* Anything this small predates the createLocalBackup fix
+                          and contains nothing. Flag it rather than let it sit
+                          in the list looking like a backup. */}
+                      {f.bytes < 200 && (
+                        <Badge
+                          variant="outline"
+                          className="ml-2 border-amber-500/50 text-amber-600"
+                        >
+                          empty
+                        </Badge>
+                      )}
+                    </TableCell>
+                    <TableCell>{bytes(f.bytes)}</TableCell>
+                    <TableCell>
+                      {f.createdAt ? new Date(f.createdAt).toLocaleString() : '—'}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 text-xs text-destructive hover:text-destructive"
+                        onClick={() => remove(f)}
+                        disabled={busy === f.id}
+                      >
+                        {busy === f.id ? (
+                          <Loader2 className="size-3 mr-1 animate-spin" />
+                        ) : (
+                          <Trash2 className="size-3 mr-1" />
+                        )}
+                        Remove
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 export function BackupsAdminPanel() {
   const [data, setData] = useState<BackupsResponse | null>(null)
   const [loading, setLoading] = useState(true)
@@ -525,6 +691,8 @@ export function BackupsAdminPanel() {
           </CardContent>
         </Card>
       )}
+
+      <DriveFilesTable />
     </div>
   )
 }

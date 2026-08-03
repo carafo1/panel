@@ -327,3 +327,96 @@ export async function disconnect(destId: string): Promise<void> {
   }
   await db.backupDestination.delete({ where: { id: destId } }).catch(() => {})
 }
+
+
+export interface DriveFile {
+  id: string
+  name: string
+  bytes: number
+  createdAt: string
+}
+
+/**
+ * Files this app has put in the destination's folder, newest first.
+ *
+ * Only ever sees its own uploads -- `drive.file` grants no visibility into
+ * anything else in the account, which is why it was chosen.
+ */
+export async function listFiles(
+  destId: string
+): Promise<{ ok: boolean; error?: string; files: DriveFile[] }> {
+  const token = await accessTokenFor(destId)
+  if (!token) {
+    return { ok: false, error: 'Could not reach Google Drive. Reconnect it.', files: [] }
+  }
+
+  const dest = await db.backupDestination.findUnique({
+    where: { id: destId },
+    select: { folderId: true },
+  })
+  if (!dest?.folderId) {
+    // No folder yet means nothing has been uploaded -- an empty list, not an
+    // error to alarm anyone with.
+    return { ok: true, files: [] }
+  }
+
+  const q = encodeURIComponent(`'${dest.folderId}' in parents and trashed = false`)
+  const res = await fetch(
+    `${FILES_URL}?q=${q}&fields=files(id,name,size,createdTime)&orderBy=createdTime desc&pageSize=100`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  )
+  if (!res.ok) {
+    return { ok: false, error: `Drive listing failed (HTTP ${res.status}).`, files: [] }
+  }
+
+  const data = (await res.json()) as {
+    files?: Array<{ id: string; name: string; size?: string; createdTime?: string }>
+  }
+  return {
+    ok: true,
+    files: (data.files || []).map((f) => ({
+      id: f.id,
+      name: f.name,
+      bytes: Number(f.size || 0),
+      createdAt: f.createdTime || '',
+    })),
+  }
+}
+
+/**
+ * Remove one file from the destination's folder.
+ *
+ * Trashes rather than hard-deletes: a mis-click on a backup should be
+ * recoverable from the customer's own Drive bin, not gone.
+ */
+export async function deleteFile(
+  destId: string,
+  fileId: string
+): Promise<{ ok: boolean; error?: string }> {
+  const token = await accessTokenFor(destId)
+  if (!token) return { ok: false, error: 'Could not reach Google Drive. Reconnect it.' }
+
+  // Confirm the file is one of ours before touching it. drive.file already
+  // limits this to app-created files, but an id arriving from a request should
+  // never be passed straight through to a delete.
+  const dest = await db.backupDestination.findUnique({
+    where: { id: destId },
+    select: { folderId: true },
+  })
+  const check = await fetch(`${FILES_URL}/${encodeURIComponent(fileId)}?fields=id,parents`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!check.ok) return { ok: false, error: 'That file is not in this backup folder.' }
+  const meta = (await check.json()) as { parents?: string[] }
+  if (dest?.folderId && !(meta.parents || []).includes(dest.folderId)) {
+    return { ok: false, error: 'That file is not in this backup folder.' }
+  }
+
+  const res = await fetch(`${FILES_URL}/${encodeURIComponent(fileId)}`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ trashed: true }),
+  })
+  if (!res.ok) return { ok: false, error: `Could not remove the file (HTTP ${res.status}).` }
+  return { ok: true }
+}
