@@ -132,7 +132,14 @@ EOF
 
 # ── Create tarball ────────────────────────────────────────────────────────
 ok "Compressing backup → $OUTPUT"
-tar -czf "$OUTPUT" -C "$STAGE" apsamo
+# The operator scripts live outside the repo, so nothing else captures them.
+# apsamo-restore.sh in particular is what you want in your hands right after
+# losing the server -- it should not be a casualty of the event it exists for.
+mkdir -p "$STAGE/apsamo/bin"
+cp -a /usr/local/bin/apsamo-*.sh "$STAGE/apsamo/bin/" 2>/dev/null || true
+cp -a /usr/local/bin/apsamo "$STAGE/apsamo/bin/" 2>/dev/null || true
+
+tar --exclude='storage/backups' --exclude='./storage/backups' -czf "$OUTPUT" -C "$STAGE" apsamo
 
 # ── Show result ───────────────────────────────────────────────────────────
 SIZE=$(du -h "$OUTPUT" | cut -f1)
