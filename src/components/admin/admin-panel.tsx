@@ -61,7 +61,6 @@ import { PromotionsAdminPanel } from '@/components/admin/promotions-admin-panel'
 import { ReportsAdminPanel } from '@/components/admin/reports-admin-panel'
 import { GatewaysAdminPanel } from '@/components/admin/gateways-admin-panel'
 import { BackupsAdminPanel } from '@/components/admin/backups-admin-panel'
-import { DomainPricingPanel } from '@/components/admin/domain-pricing-panel'
 import { InfrastructurePanel } from '@/components/admin/infrastructure-panel'
 import { ServersPanel } from '@/components/admin/servers-panel'
 import { CmsPanel } from '@/components/admin/cms-panel'
@@ -470,7 +469,6 @@ export function AdminPanel() {
           <TabsTrigger value="jobs">Job Queue</TabsTrigger>
           <TabsTrigger value="servers">Servers</TabsTrigger>
           <TabsTrigger value="backups">Backups</TabsTrigger>
-          <TabsTrigger value="domain-pricing">Domain - Pricing</TabsTrigger>
           <TabsTrigger value="plans">Plans</TabsTrigger>
           <TabsTrigger value="email">Email</TabsTrigger>
           <TabsTrigger value="promotions">Discounts</TabsTrigger>
@@ -777,13 +775,6 @@ export function AdminPanel() {
 
         <TabsContent value="backups">
           <BackupsAdminPanel />
-
-
-        </TabsContent>
-
-
-        <TabsContent value="domain-pricing">
-          <DomainPricingPanel />
 
 
         </TabsContent>
