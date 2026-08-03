@@ -26,6 +26,7 @@
 import { NextResponse } from 'next/server'
 import { requireAdminRole, authenticateRequest } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
+import { db } from '@/lib/db'
 import { promises as fs } from 'fs'
 import path from 'path'
 
@@ -130,6 +131,13 @@ export async function DELETE(
     return NextResponse.json({ error: 'Archive not found' }, { status: 404 })
   }
 
+  // Clear the offsite copy as well. Without this the two tables on the admin
+  // page disagree: gone from "Recent archives", still listed under "In Google
+  // Drive" a few rows below.
+  await removeArchiveFromDrive(path.basename(full)).catch((err) => {
+    console.error('[admin/backups] could not remove the Drive copy:', err)
+  })
+
   const user = await authenticateRequest(request)
   await logAudit({
     userId: user?.userId || 'system',
@@ -141,4 +149,40 @@ export async function DELETE(
   }).catch(() => {})
 
   return NextResponse.json({ ok: true, deleted: path.basename(full), bytes })
+}
+
+
+/**
+ * Remove the matching archive from the administrator's Drive.
+ *
+ * Best-effort: a Drive outage must not stop an operator reclaiming disk.
+ */
+async function removeArchiveFromDrive(archiveName: string): Promise<void> {
+  const { listFiles, deleteFile, driveConfig } = await import('@/lib/google-drive')
+  if (!driveConfig()) return
+
+  const admins = await db.user.findMany({
+    where: { role: { in: ['admin', 'super_admin'] } },
+    select: { id: true },
+  })
+  const dest = await db.backupDestination.findFirst({
+    where: {
+      userId: { in: admins.map((a) => a.id) },
+      provider: 'google_drive',
+      enabled: true,
+    },
+    orderBy: { createdAt: 'asc' },
+    select: { id: true },
+  })
+  if (!dest) return
+
+  const listing = await listFiles(dest.id)
+  if (!listing.ok) return
+  for (const f of listing.files) {
+    // The platform path encrypts before upload, so the Drive name carries a
+    // .enc suffix. Match both in case that changes.
+    if (f.name === archiveName || f.name === `${archiveName}.enc`) {
+      await deleteFile(dest.id, f.id)
+    }
+  }
 }
