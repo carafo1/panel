@@ -761,6 +761,13 @@ export async function deleteBackup(
     }
   }
 
+  // Remove the offsite copy as well, so "delete" means deleted rather than
+  // "hidden from this list". Done BEFORE the row goes, because the row is
+  // where the filename lives.
+  await removeFromDestinations(projectId, row.filename).catch((err) => {
+    console.error(`[backups] could not remove ${row.filename} from Drive:`, err)
+  })
+
   await db.websiteBackup.delete({ where: { id: backupId } })
   return { ok: true, message: 'Backup deleted' }
 }
@@ -891,6 +898,45 @@ async function replicateToDestinations(
     const res = await uploadBackup(dest.id, filename, content)
     if (!res.ok) {
       console.error(`[backups] Drive upload failed for ${filename}: ${res.error}`)
+    }
+  }
+}
+
+
+/**
+ * Delete a backup from every external destination its owner has connected.
+ *
+ * Matched by filename: uploadBackup stores the archive under the same name the
+ * local copy has, so the two stay addressable without another column.
+ *
+ * Best-effort throughout. A revoked token or a Drive outage must not prevent
+ * someone deleting their own backup, and must not leave a row behind that the
+ * UI still lists.
+ */
+async function removeFromDestinations(projectId: string, filename: string): Promise<void> {
+  const project = await db.project.findUnique({
+    where: { id: projectId },
+    select: { userId: true },
+  })
+  if (!project) return
+
+  const dests = await db.backupDestination.findMany({
+    where: { userId: project.userId, enabled: true },
+    select: { id: true, provider: true },
+  })
+  if (dests.length === 0) return
+
+  const { listFiles, deleteFile } = await import('@/lib/google-drive')
+  for (const dest of dests) {
+    if (dest.provider !== 'google_drive') continue
+    const listing = await listFiles(dest.id)
+    if (!listing.ok) continue
+    // Both the plain name and the .enc form, since the platform path encrypts
+    // before upload and the per-site path does not.
+    for (const f of listing.files) {
+      if (f.name === filename || f.name === `${filename}.enc`) {
+        await deleteFile(dest.id, f.id)
+      }
     }
   }
 }
