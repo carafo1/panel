@@ -421,6 +421,14 @@ async function createLocalBackup(
 
     log(`Backup complete: ${backupPath} (${sizeBytes} bytes).`)
 
+    // Apply the plan's retention now that a new backup exists. The remote path
+    // has always done this; the local path did not, so on a single-box install
+    // the cap was only enforced whenever the periodic sweep happened to run.
+    const pruned = await pruneBackups(projectId).catch(() => ({ deleted: 0 }))
+    if (pruned.deleted > 0) {
+      log(`Retention: removed ${pruned.deleted} older backup(s).`)
+    }
+
     // Copy to the customer's own storage, if they connected any. Deliberately
     // AFTER the row exists and deliberately not awaited into the result: the
     // local backup has already succeeded, and a full Drive or a revoked token
