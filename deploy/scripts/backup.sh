@@ -132,7 +132,7 @@ EOF
 
 # ── Create tarball ────────────────────────────────────────────────────────
 ok "Compressing backup → $OUTPUT"
-tar -czf "$OUTPUT" -C "$STAGE" apsamo
+tar --exclude='storage/backups' --exclude='./storage/backups' -czf "$OUTPUT" -C "$STAGE" apsamo
 
 # ── Show result ───────────────────────────────────────────────────────────
 SIZE=$(du -h "$OUTPUT" | cut -f1)
