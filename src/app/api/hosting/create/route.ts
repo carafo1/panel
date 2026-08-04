@@ -18,6 +18,7 @@ import { BRAND_DOMAIN } from '@/lib/brand-config'
 import {
   isValidHostname,
   isReservedHostname,
+  isReservedLabel,
   findConflict,
   generateVerificationToken,
   getServerIps,
@@ -64,22 +65,43 @@ function randomSuffix(len = 6): string {
 }
 
 /**
- * A slug free across the whole platform.
+ * A slug free across the whole platform, preferring the bare name.
  *
  * Project slugs become `<slug>.apsamo.com`, so uniqueness is global, not
  * per-user. Returning 409 on a taken slug let one customer squat a name for
- * everyone; appending a suffix keeps the namespace shared without denying it.
+ * everyone; suffixing on collision keeps the namespace shared without denying
+ * it.
+ *
+ * The bare name is tried FIRST because the wizard shows the customer
+ * `https://<name>.apsamo.com` on the domain step. This route used to append
+ * `-<4 hex>` unconditionally, so a project named "Edma" was promised
+ * edma.apsamo.com and given edma-4890.apsamo.com — the address the customer
+ * was shown never existed.
+ *
+ * A suffix is still forced when the bare label is reserved for the platform,
+ * already held by another project, or already attached to a site as a custom
+ * domain.
  */
 async function uniqueSlug(base: string): Promise<string> {
   const root = base || 'site'
-  let candidate = root
-  for (let i = 0; i < 6; i++) {
+
+  const free = async (candidate: string): Promise<boolean> => {
+    if (isReservedLabel(candidate)) return false
     const taken = await db.project.findFirst({
       where: { slug: candidate },
       select: { id: true },
     })
-    if (!taken) return candidate
-    candidate = `${root}-${randomSuffix(4)}`
+    if (taken) return false
+    // Someone may hold <candidate>.apsamo.com as an attached domain even with
+    // no project of that slug.
+    const clash = await findConflict(`${candidate}.${BRAND_DOMAIN}`)
+    return !clash.conflict
+  }
+
+  if (await free(root)) return root
+  for (let i = 0; i < 6; i++) {
+    const candidate = `${root}-${randomSuffix(4)}`
+    if (await free(candidate)) return candidate
   }
   return `${root}-${randomSuffix(8)}`
 }
@@ -245,7 +267,7 @@ async function handleWizardCreate(
   if (overQuota) return overQuota
 
   // ── Domain resolution ─────────────────────────────────────────────
-  const slug = await uniqueSlug(slugify(name) + '-' + randomSuffix(4))
+  const slug = await uniqueSlug(slugify(name))
   let subdomain: string
   let customDomain: string | null = null
   // Set instead of customDomain when the domain is registered elsewhere: it
