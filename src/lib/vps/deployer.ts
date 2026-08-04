@@ -482,7 +482,10 @@ async function deployMethodProject(
   // ── REAL deploy ─────────────────────────────────────────────────────
   const creds: SshCredentials = await getServerCredentials(project.serverId!)
   let containerId: string | undefined
-  const envVars = await getProjectEnvVars(projectId)
+  const envVars = withRuntimePort(
+    await getProjectEnvVars(projectId),
+    containerPort
+  )
 
   await runStage('create_directory', 'Creating project directory…', async () => {
     await withConnection(creds, async (client) => {
@@ -1110,7 +1113,10 @@ async function deployLegacyProject(
   })
 
   await runStage('write_compose', 'Writing docker-compose.yml…', async () => {
-    const envVars = await getProjectEnvVars(projectId)
+    const envVars = withRuntimePort(
+      await getProjectEnvVars(projectId),
+      containerPort
+    )
     const composeYml = generateLegacyCompose({
       projectName: project.slug,
       containerName,
@@ -1526,6 +1532,27 @@ async function pickExternalPort(serverId: string): Promise<number> {
   throw new Error(
     'No free host port available in the 30000-39999 range on this server.'
   )
+}
+
+/**
+ * Hand the application the port the panel is proxying to.
+ *
+ * Nearly every runtime takes it from the environment -- `process.env.PORT` in
+ * Node, `os.environ["PORT"]` in Python -- and falls back to its own default
+ * when it is missing. The panel asked the customer for an App Port, published
+ * the container on it and pointed Caddy at it, but never passed it to the app.
+ * So an app whose own default differed listened somewhere else and every
+ * request came back 502. Reproduced with heroku/node-js-getting-started, which
+ * is `process.env.PORT || 5006`: container published on 3000, app on 5006.
+ *
+ * A PORT the customer set explicitly wins -- they know their app better.
+ */
+function withRuntimePort(
+  envVars: Record<string, string>,
+  containerPort: number
+): Record<string, string> {
+  if (envVars.PORT !== undefined && envVars.PORT !== '') return envVars
+  return { ...envVars, PORT: String(containerPort) }
 }
 
 async function getProjectEnvVars(projectId: string): Promise<Record<string, string>> {
