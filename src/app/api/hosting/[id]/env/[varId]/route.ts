@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
+import { isValidEnvKey, ENV_KEY_ERROR } from '@/lib/safe-values'
 import { encrypt, decrypt } from '@/lib/encryption'
 
 /**
@@ -76,6 +77,11 @@ export async function PATCH(
         { error: 'Environment variable not found' },
         { status: 404 }
       )
+    }
+
+    // Renaming is a write path too: same compose interpolation, same risk.
+    if (typeof key === 'string' && key.trim() && !isValidEnvKey(key.trim())) {
+      return NextResponse.json({ error: ENV_KEY_ERROR }, { status: 400 })
     }
 
     // If key is being changed, check for duplicates

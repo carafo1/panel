@@ -41,6 +41,7 @@
 import { readFile } from 'fs/promises'
 import { db } from '@/lib/db'
 import { STACK_DEFINITIONS, getStackDefinition } from '@/lib/stacks'
+import { isValidEnvKey, yamlQuoted, safeRuntimeVersion, safeDocumentRoot } from '@/lib/safe-values'
 import { getDeploymentMethod, type DeploymentMethodId } from '@/lib/deployment-methods'
 import { encrypt } from '@/lib/encryption'
 import { broadcastDeploymentLog, broadcastDeploymentStatus } from '@/lib/realtime'
@@ -1480,11 +1481,13 @@ function generateMethodDockerfile(
   project: { name: string; slug: string; runtime?: string | null; runtimeVersion?: string | null; buildCommand?: string | null; startCommand?: string | null; appPort?: number | null; documentRoot?: string | null; framework?: string | null; resourceRamMB?: number | null },
   settings: Record<string, unknown>
 ): string {
-  const phpVersion = (project.runtimeVersion as string) || '8.2'
+  // These are interpolated into FROM / COPY / RUN lines below. Unchecked,
+  // a newline in any of them appends arbitrary build instructions.
+  const phpVersion = safeRuntimeVersion(project.runtimeVersion, '8.2')
   const phpIni = phpIniBlock(project.resourceRamMB)
-  const nodeVersion = (project.runtimeVersion as string) || '20'
-  const pythonVersion = (project.runtimeVersion as string) || '3.11'
-  const documentRoot = project.documentRoot || '/var/www/html'
+  const nodeVersion = safeRuntimeVersion(project.runtimeVersion, '20')
+  const pythonVersion = safeRuntimeVersion(project.runtimeVersion, '3.11')
+  const documentRoot = safeDocumentRoot(project.documentRoot, '/var/www/html')
   const framework = (settingsGet<string>(settings, 'framework') || project.framework || '') as string
   const packageManager = (settingsGet<string>(settings, 'packageManager') || 'npm') as string
 
@@ -1818,7 +1821,17 @@ function resourceLimitsBlock(
  */
 function envEntries(envVars: Record<string, string>): string {
   return Object.entries(envVars)
-    .map(([k, v]) => `      ${k}: "${v.replace(/"/g, '\\"')}"`)
+    .filter(([k]) => {
+      if (isValidEnvKey(k)) return true
+      // A row that predates the API-side check, or one written by some future
+      // path that forgets it. Dropping the variable breaks one app; emitting it
+      // hands the host to whoever named it. See lib/safe-values.
+      console.error(
+        `[deployer] refusing to emit environment variable with unsafe name: ${JSON.stringify(k)}`
+      )
+      return false
+    })
+    .map(([k, v]) => `      ${k}: ${yamlQuoted(v)}`)
     .join('\n')
 }
 

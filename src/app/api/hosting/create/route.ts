@@ -1,6 +1,12 @@
 import { NextResponse } from 'next/server'
 import { withRateLimit } from '@/lib/rate-limit'
 import { enforceLimit, enforceOverage } from '@/lib/plan-limits'
+import {
+  isValidEnvKey,
+  safeRuntimeVersion,
+  safeDocumentRoot,
+  safePort,
+} from '@/lib/safe-values'
 import crypto from 'crypto'
 import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
@@ -55,6 +61,27 @@ function slugify(text: string): string {
 
 function randomSuffix(len = 6): string {
   return crypto.randomBytes(len).toString('hex').slice(0, len)
+}
+
+/**
+ * A slug free across the whole platform.
+ *
+ * Project slugs become `<slug>.apsamo.com`, so uniqueness is global, not
+ * per-user. Returning 409 on a taken slug let one customer squat a name for
+ * everyone; appending a suffix keeps the namespace shared without denying it.
+ */
+async function uniqueSlug(base: string): Promise<string> {
+  const root = base || 'site'
+  let candidate = root
+  for (let i = 0; i < 6; i++) {
+    const taken = await db.project.findFirst({
+      where: { slug: candidate },
+      select: { id: true },
+    })
+    if (!taken) return candidate
+    candidate = `${root}-${randomSuffix(4)}`
+  }
+  return `${root}-${randomSuffix(8)}`
 }
 
 interface ParsedPlan {
@@ -189,18 +216,26 @@ async function handleWizardCreate(
   }
 
   // ── Plan limits ───────────────────────────────────────────────────
+  // Read with the same statuses enforceLimit uses. Fetching only 'active' left
+  // trialing and past_due customers with subscription === null, which both
+  // skipped the limit check below and fell back to the 512 MB starter
+  // resources further down instead of the plan they are actually on.
   const subscription = await db.subscription.findFirst({
-    where: { userId: decoded.userId, status: 'active' },
+    where: {
+      userId: decoded.userId,
+      status: { in: ['active', 'trialing', 'past_due'] },
+    },
+    orderBy: { createdAt: 'desc' },
     include: { plan: true },
   })
-  if (subscription && subscription.plan) {
-    // enforceLimit owns this: it honours null/0 as UNLIMITED, which is how the
-    // catalogue stores it. The hand-rolled `count >= plan.projects` here read 0
-    // as "none allowed" and so blocked every site on the Enterprise plan, which
-    // advertises unlimited websites.
-    const denied = await enforceLimit(decoded.userId, 'websites', { role: decoded.role })
-    if (denied) return denied
-  }
+
+  // Unconditional: enforceLimit resolves the plan itself and allows when there
+  // is none. Guarding the call on a subscription we looked up separately is
+  // how trial accounts ended up with no cap at all.
+  const denied = await enforceLimit(decoded.userId, 'websites', {
+    role: decoded.role,
+  })
+  if (denied) return denied
 
   // A new site consumes storage the customer does not have. Refuse while
   // they are over allowance rather than letting the overage grow.
@@ -210,7 +245,7 @@ async function handleWizardCreate(
   if (overQuota) return overQuota
 
   // ── Domain resolution ─────────────────────────────────────────────
-  const slug = slugify(name) + '-' + randomSuffix(4)
+  const slug = await uniqueSlug(slugify(name) + '-' + randomSuffix(4))
   let subdomain: string
   let customDomain: string | null = null
   // Set instead of customDomain when the domain is registered elsewhere: it
@@ -278,15 +313,6 @@ async function handleWizardCreate(
     }
   }
 
-  // Check slug uniqueness.
-  const existing = await db.project.findFirst({ where: { slug } })
-  if (existing) {
-    return NextResponse.json(
-      { error: 'A project with this name already exists' },
-      { status: 409 }
-    )
-  }
-
   // ── Server assignment ─────────────────────────────────────────────
   const serverCandidates = await db.server.findMany({
     where: { status: 'active' },
@@ -318,11 +344,20 @@ async function handleWizardCreate(
   const cfg = body.config || {}
   const framework = cfg.framework || method.id // sensible default
   const runtime = cfg.runtime || method.runtime
-  const runtimeVersion = cfg.runtimeVersion || method.defaultRuntimeVersion
+  // runtimeVersion, documentRoot and appPort are interpolated into the
+  // generated Dockerfile and compose file, so they are clamped to safe shapes
+  // rather than trusted. buildCommand/startCommand are deliberately free-form:
+  // they run inside the customer's own container, which is the point of them.
+  const runtimeVersion = safeRuntimeVersion(
+    cfg.runtimeVersion,
+    method.defaultRuntimeVersion
+  )
   const buildCommand = cfg.buildCommand ?? method.defaultBuildCommand ?? null
   const startCommand = cfg.startCommand ?? method.defaultStartCommand ?? null
-  const appPort = cfg.appPort ?? method.defaultPort
-  const documentRoot = cfg.documentRoot ?? null
+  const appPort = safePort(cfg.appPort) ?? method.defaultPort
+  const documentRoot = cfg.documentRoot == null
+    ? null
+    : safeDocumentRoot(cfg.documentRoot, '/var/www/html')
 
   // WordPress admin — required when method=wordpress.
   let wpAdminUser: string | null = null
@@ -440,7 +475,7 @@ async function handleWizardCreate(
   // ── Persist env vars (encrypted) ──────────────────────────────────
   if (Array.isArray(cfg.envVars)) {
     for (const v of cfg.envVars) {
-      if (v && typeof v.key === 'string' && v.key.trim() && typeof v.value === 'string') {
+      if (v && isValidEnvKey(v.key?.trim()) && typeof v.value === 'string') {
         await db.environmentVariable.create({
           data: {
             projectId: project.id,
@@ -448,7 +483,14 @@ async function handleWizardCreate(
             value: encrypt(v.value),
             encrypted: true,
           },
-        }).catch(() => {})
+        }).catch((err) => {
+          // Not fatal to the deploy, but the app will start without a variable
+          // the customer explicitly set, so it must not vanish quietly.
+          console.error(
+            `[hosting/create] failed to persist env var ${v.key.trim()}:`,
+            err
+          )
+        })
       }
     }
   }
@@ -610,26 +652,23 @@ async function handleLegacyCreate(
     )
   }
 
-  const subscription = await db.subscription.findFirst({
-    where: { userId: decoded.userId, status: 'active' },
-    include: { plan: true },
+  // Same as the wizard path: unconditional, and overage too. This handler had
+  // neither guard, so the older create dialog was a way around both.
+  const denied = await enforceLimit(decoded.userId, 'websites', {
+    role: decoded.role,
   })
-  if (subscription && subscription.plan) {
-    // Same check as above, via the shared helper — see the note there.
-    const denied = await enforceLimit(decoded.userId, 'websites', { role: decoded.role })
-    if (denied) return denied
-  }
+  if (denied) return denied
 
-  const slug = slugify(name)
+  const overQuota = await enforceOverage(decoded.userId, 'disk', {
+    role: decoded.role,
+  })
+  if (overQuota) return overQuota
+
+  // Slugs are global (they become subdomains), so a bare slugify(name) meant
+  // the first customer to create "blog" permanently denied that name to every
+  // other customer on the platform. Suffix on collision instead of refusing.
+  const slug = await uniqueSlug(slugify(name))
   const subdomain = `${slug}.${BRAND_DOMAIN}`
-
-  const existing = await db.project.findFirst({ where: { slug } })
-  if (existing) {
-    return NextResponse.json(
-      { error: 'A project with this name already exists' },
-      { status: 409 }
-    )
-  }
 
   const serverCandidates = await db.server.findMany({
     where: { status: 'active' },

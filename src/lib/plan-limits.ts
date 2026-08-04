@@ -8,8 +8,13 @@
  *
  * This is the enforcement half. One place resolves the plan, counts what the
  * customer already has, and refuses the create when it would exceed the
- * allowance — the same shape as the project-count check that
- * /api/hosting/create has always done correctly.
+ * allowance.
+ *
+ * An earlier version of this comment held up /api/hosting/create as the
+ * check that had "always done it correctly". It had not: it compared against
+ * the raw plan column, so projects = 0 (unlimited) read as "none allowed" and
+ * the Enterprise plan could not create a single website. That route now calls
+ * enforceLimit like everything else.
  *
  * Conventions that matter:
  *   - null or 0 on a limit column means UNLIMITED, matching the rest of the
