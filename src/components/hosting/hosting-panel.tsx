@@ -34,6 +34,7 @@ import {
   EyeOff,
   Key,
   Lock,
+  Upload,
   Edit,
   Github,
   GitCommit,
@@ -1050,6 +1051,11 @@ function ProjectDetailView({
   const [envKey, setEnvKey] = useState('')
   const [envValue, setEnvValue] = useState('')
   const [envEncrypted, setEnvEncrypted] = useState(false)
+  const [envImportOpen, setEnvImportOpen] = useState(false)
+  const [envImportText, setEnvImportText] = useState('')
+  const [envImportName, setEnvImportName] = useState('')
+  const [envImportOverwrite, setEnvImportOverwrite] = useState(true)
+  const [envImporting, setEnvImporting] = useState(false)
   const [envSaving, setEnvSaving] = useState(false)
   const [envDeleteId, setEnvDeleteId] = useState<string | null>(null)
   const [envDeleting, setEnvDeleting] = useState(false)
@@ -1323,6 +1329,76 @@ function ProjectDetailView({
       setEnvEncrypted(false)
     }
     setEnvDialogOpen(true)
+  }
+
+  /** Read a chosen .env into the textarea so the customer sees what will land. */
+  const handleEnvFile = async (file: File | null | undefined) => {
+    if (!file) return
+    if (file.size > 512 * 1024) {
+      toast.error('That file is too large to be a .env (limit 512 KB).')
+      return
+    }
+    try {
+      const text = await file.text()
+      setEnvImportText(text)
+      setEnvImportName(file.name)
+    } catch {
+      toast.error('Could not read that file.')
+    }
+  }
+
+  const handleImportEnv = async () => {
+    if (!envImportText.trim()) {
+      toast.error('Choose a .env file or paste its contents first.')
+      return
+    }
+    setEnvImporting(true)
+    try {
+      const res = await fetch(`/api/hosting/${projectId}/env`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          action: 'import',
+          content: envImportText,
+          overwrite: envImportOverwrite,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        toast.error(data.error || 'Import failed')
+        return
+      }
+      const bits: string[] = []
+      if (data.added?.length) bits.push(`${data.added.length} added`)
+      if (data.updated?.length) bits.push(`${data.updated.length} updated`)
+      if (data.skipped?.length) bits.push(`${data.skipped.length} skipped`)
+      toast.success(bits.join(', ') || 'Nothing to import', {
+        description: 'Redeploy the site for the container to pick them up.',
+      })
+      // Lines that could not be used are worth naming — silently dropping a
+      // variable the customer believes they set is the bad outcome here.
+      if (data.invalid?.length) {
+        toast.warning(
+          `${data.invalid.length} line${data.invalid.length === 1 ? '' : 's'} skipped`,
+          {
+            description: data.invalid
+              .slice(0, 3)
+              .map((v: { line: number; text: string; reason: string }) =>
+                `line ${v.line}: ${v.reason}`
+              )
+              .join(' · '),
+          }
+        )
+      }
+      setEnvImportOpen(false)
+      setEnvImportText('')
+      setEnvImportName('')
+      fetchEnvVars()
+    } catch {
+      toast.error('Network error during import')
+    } finally {
+      setEnvImporting(false)
+    }
   }
 
   const handleSaveEnvVar = async () => {
@@ -2320,6 +2396,15 @@ function ProjectDetailView({
                 )}
               </Button>
               <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setEnvImportOpen(true)}
+                className="h-8 text-xs"
+              >
+                <Upload className="size-3.5 mr-1" />
+                Import .env
+              </Button>
+              <Button
                 size="sm"
                 onClick={() => handleOpenEnvDialog('create')}
                 className="bg-indigo-600 hover:bg-indigo-700 text-white h-8 text-xs"
@@ -2903,6 +2988,91 @@ function ProjectDetailView({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Bulk .env import */}
+      <Dialog open={envImportOpen} onOpenChange={(v) => !v && setEnvImportOpen(false)}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Upload className="size-5 text-indigo-600" />
+              Import from .env
+            </DialogTitle>
+            <DialogDescription>
+              Upload a .env file or paste its contents. Values are encrypted at rest,
+              exactly as with variables added one at a time.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-4 py-2">
+            <div className="grid gap-2">
+              <Label htmlFor="env-file">Choose a file</Label>
+              <Input
+                id="env-file"
+                type="file"
+                accept=".env,.txt,text/plain"
+                onChange={(e) => handleEnvFile(e.target.files?.[0])}
+                className="text-sm"
+              />
+              {envImportName && (
+                <p className="text-xs text-muted-foreground">
+                  Loaded <span className="font-mono">{envImportName}</span> — review below
+                  before importing.
+                </p>
+              )}
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="env-paste">…or paste</Label>
+              <textarea
+                id="env-paste"
+                value={envImportText}
+                onChange={(e) => setEnvImportText(e.target.value)}
+                spellCheck={false}
+                rows={9}
+                placeholder={'DATABASE_URL=postgres://user:pass@host/db\nJWT_SECRET=…\nCRON_SECRET=…'}
+                className="w-full rounded-md border bg-background p-2.5 font-mono text-xs leading-relaxed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+              <p className="text-xs text-muted-foreground">
+                Comments, blank lines and <span className="font-mono">export</span> prefixes
+                are handled. Quoted values keep their spaces and <span className="font-mono">#</span>.
+              </p>
+            </div>
+
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={envImportOverwrite}
+                onChange={(e) => setEnvImportOverwrite(e.target.checked)}
+                className="size-4 rounded border-input"
+              />
+              Overwrite variables that already exist
+            </label>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEnvImportOpen(false)} disabled={envImporting}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleImportEnv}
+              disabled={envImporting || !envImportText.trim()}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white"
+            >
+              {envImporting ? (
+                <>
+                  <Loader2 className="size-4 mr-1.5 animate-spin" />
+                  Importing…
+                </>
+              ) : (
+                <>
+                  <Upload className="size-4 mr-1.5" />
+                  Import
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Environment Variable Dialog */}
       <Dialog open={envDialogOpen} onOpenChange={(v) => !v && setEnvDialogOpen(false)}>

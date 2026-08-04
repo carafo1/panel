@@ -2,7 +2,12 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
 import { isValidEnvKey, ENV_KEY_ERROR } from '@/lib/safe-values'
+import { parseDotenv } from '@/lib/dotenv-parse'
+
+/** Enough for any real application; stops an import filling the table. */
+const MAX_ENV_VARS = 500
 import { encrypt, decrypt } from '@/lib/encryption'
+import { logAudit } from '@/lib/audit'
 
 /**
  * Mask a sensitive value for display.
@@ -114,6 +119,99 @@ export async function POST(
         { status: 400 }
       )
     }
+    // ── Bulk import from a .env file ────────────────────────────────
+    // Sent as text rather than multipart: a .env is text, and one code path
+    // is easier to keep correct than two.
+    if (body.action === 'import') {
+      if (typeof body.content !== 'string' || !body.content.trim()) {
+        return NextResponse.json(
+          { error: 'Paste the contents of a .env file, or choose one to upload.' },
+          { status: 400 }
+        )
+      }
+      if (body.content.length > 512 * 1024) {
+        return NextResponse.json(
+          { error: 'That file is too large to be a .env (limit 512 KB).' },
+          { status: 413 }
+        )
+      }
+
+      const parsed = parseDotenv(body.content)
+      if (parsed.entries.length === 0) {
+        return NextResponse.json(
+          {
+            error: 'No usable KEY=value lines found.',
+            invalid: parsed.invalid.slice(0, 20),
+          },
+          { status: 400 }
+        )
+      }
+      if (parsed.entries.length > MAX_ENV_VARS) {
+        return NextResponse.json(
+          { error: `That is ${parsed.entries.length} variables; the limit is ${MAX_ENV_VARS}.` },
+          { status: 400 }
+        )
+      }
+
+      const overwrite = body.overwrite !== false // default: update what exists
+      const added: string[] = []
+      const updated: string[] = []
+      const skipped: Array<{ key: string; reason: string }> = []
+
+      for (const entry of parsed.entries) {
+        const existing = await db.environmentVariable.findFirst({
+          where: { projectId, key: entry.key },
+          select: { id: true },
+        })
+        if (existing) {
+          if (!overwrite) {
+            skipped.push({ key: entry.key, reason: 'already set' })
+            continue
+          }
+          await db.environmentVariable.update({
+            where: { id: existing.id },
+            data: { value: encrypt(entry.value), encrypted: true },
+          })
+          updated.push(entry.key)
+        } else {
+          await db.environmentVariable.create({
+            data: {
+              projectId,
+              key: entry.key,
+              value: encrypt(entry.value),
+              encrypted: true,
+            },
+          })
+          added.push(entry.key)
+        }
+      }
+
+      await logAudit({
+        userId: decoded.userId,
+        action: 'project.env.import',
+        resource: 'project',
+        resourceId: projectId,
+        req: request,
+        metadata: { added: added.length, updated: updated.length, skipped: skipped.length },
+      }).catch(() => {})
+
+      return NextResponse.json(
+        {
+          ok: true,
+          added,
+          updated,
+          skipped,
+          invalid: parsed.invalid.slice(0, 20),
+          duplicates: parsed.duplicates,
+          // The container only picks these up when it is rebuilt.
+          message:
+            `${added.length} added, ${updated.length} updated. ` +
+            `Redeploy the site for the container to pick them up.`,
+        },
+        { status: 201 }
+      )
+    }
+
     const { key, value } = body
 
     if (!key || typeof key !== 'string' || !key.trim()) {
