@@ -589,14 +589,20 @@ export function DeploymentsPanel() {
                     Rollback
                   </Button>
                 )}
-                {/* Not offered on the live deployment: the server refuses it,
-                    and a button that always errors teaches nothing. */}
-                {!isLive && (
+                {/* Shown even when it cannot apply, disabled with the reason.
+                    Hiding it made the feature look absent — which is exactly
+                    what happened when the only deployment was live. */}
+                {true && (
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="text-destructive hover:text-destructive"
-                    disabled={deleteLoading}
+                    className="text-destructive hover:text-destructive disabled:text-muted-foreground"
+                    title={
+                      isLive
+                        ? 'This deployment is serving the site. Deploy again first.'
+                        : 'Remove this deployment record'
+                    }
+                    disabled={deleteLoading || isLive}
                     onClick={() => handleDelete(detail.id)}
                   >
                     {deleteLoading ? (
@@ -884,6 +890,7 @@ export function DeploymentsPanel() {
                             <TableHead>Triggered By</TableHead>
                             <TableHead>Duration</TableHead>
                             <TableHead>Time</TableHead>
+                            <TableHead className="text-right">Actions</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -919,6 +926,37 @@ export function DeploymentsPanel() {
                               </TableCell>
                               <TableCell className="text-muted-foreground text-xs">
                                 {timeAgo(d.createdAt)}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {/* Shown on every row, disabled where it cannot
+                                    apply. "You cannot delete this, and here is
+                                    why" is more useful than no button at all. */}
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 text-xs text-destructive hover:text-destructive disabled:text-muted-foreground"
+                                  disabled={
+                                    deleteLoading ||
+                                    d.status === 'live' ||
+                                    d.status === 'building' ||
+                                    d.status === 'deploying'
+                                  }
+                                  title={
+                                    d.status === 'live'
+                                      ? 'This deployment is serving the site. Deploy again first.'
+                                      : d.status === 'building' || d.status === 'deploying'
+                                      ? 'Still running — wait for it to finish.'
+                                      : 'Remove this deployment record'
+                                  }
+                                  onClick={(e) => {
+                                    // The row opens the detail view; a delete
+                                    // click must not also navigate.
+                                    e.stopPropagation()
+                                    handleDelete(d.id)
+                                  }}
+                                >
+                                  <Trash2 className="size-3.5" />
+                                </Button>
                               </TableCell>
                             </TableRow>
                           ))}
