@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
+import { isValidEnvKey, ENV_KEY_ERROR } from '@/lib/safe-values'
 import { encrypt, decrypt } from '@/lib/encryption'
 
 /**
@@ -120,6 +121,13 @@ export async function POST(
         { error: 'Key is required' },
         { status: 400 }
       )
+    }
+
+    // The name is interpolated into docker-compose.yml. Anything outside the
+    // POSIX charset -- a newline above all -- lets the customer append
+    // arbitrary service properties. See lib/safe-values.
+    if (!isValidEnvKey(key.trim())) {
+      return NextResponse.json({ error: ENV_KEY_ERROR }, { status: 400 })
     }
 
     if (value === undefined || value === null || typeof value !== 'string') {

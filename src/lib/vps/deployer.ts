@@ -41,6 +41,7 @@
 import { readFile } from 'fs/promises'
 import { db } from '@/lib/db'
 import { STACK_DEFINITIONS, getStackDefinition } from '@/lib/stacks'
+import { isValidEnvKey, yamlQuoted, safeRuntimeVersion, safeDocumentRoot } from '@/lib/safe-values'
 import { getDeploymentMethod, type DeploymentMethodId } from '@/lib/deployment-methods'
 import { encrypt } from '@/lib/encryption'
 import { broadcastDeploymentLog, broadcastDeploymentStatus } from '@/lib/realtime'
@@ -1480,11 +1481,13 @@ function generateMethodDockerfile(
   project: { name: string; slug: string; runtime?: string | null; runtimeVersion?: string | null; buildCommand?: string | null; startCommand?: string | null; appPort?: number | null; documentRoot?: string | null; framework?: string | null; resourceRamMB?: number | null },
   settings: Record<string, unknown>
 ): string {
-  const phpVersion = (project.runtimeVersion as string) || '8.2'
+  // These are interpolated into FROM / COPY / RUN lines below. Unchecked,
+  // a newline in any of them appends arbitrary build instructions.
+  const phpVersion = safeRuntimeVersion(project.runtimeVersion, '8.2')
   const phpIni = phpIniBlock(project.resourceRamMB)
-  const nodeVersion = (project.runtimeVersion as string) || '20'
-  const pythonVersion = (project.runtimeVersion as string) || '3.11'
-  const documentRoot = project.documentRoot || '/var/www/html'
+  const nodeVersion = safeRuntimeVersion(project.runtimeVersion, '20')
+  const pythonVersion = safeRuntimeVersion(project.runtimeVersion, '3.11')
+  const documentRoot = safeDocumentRoot(project.documentRoot, '/var/www/html')
   const framework = (settingsGet<string>(settings, 'framework') || project.framework || '') as string
   const packageManager = (settingsGet<string>(settings, 'packageManager') || 'npm') as string
 
@@ -1752,10 +1755,36 @@ function phpIniBlock(ramMB?: number | null): string {
  * it marks a healthy container unhealthy and invites a restart loop.
  */
 function healthcheckBlock(containerPort: number): string {
+  // The old probe was `sh -c '<' /dev/null > /dev/tcp/127.0.0.1/PORT`, with a
+  // comment calling it a "bare-Bourne TCP probe: no external binary required".
+  // /dev/tcp is not Bourne -- it is a bash feature, and CMD-SHELL runs
+  // /bin/sh, which is dash on Debian and busybox ash on Alpine. Neither has
+  // it. The probe failed in every image the panel builds:
+  //
+  //     /bin/sh: 1: cannot create /dev/tcp/127.0.0.1/80: Directory nonexistent
+  //
+  // So every container sat permanently unhealthy, and restartUnhealthyContainers
+  // duly restarted each one every time it had been up 10 minutes. Every
+  // customer site was being bounced roughly every 15 minutes, indefinitely.
+  //
+  // No single tool is present in every image (checked across the live
+  // containers: the WordPress image has curl but not wget or nc; nginx:alpine
+  // has all three; the MariaDB images have none of them but do have bash).
+  // At least one of these always resolves, so try them in order.
+  //
+  // An open port is the signal, not a 2xx -- `curl` is deliberately used
+  // without -f so that a site answering 403 or 500 still counts as up. It is
+  // running; marking it unhealthy is what gets it restarted.
+  const p = containerPort
+  const probe = [
+    `nc -z 127.0.0.1 ${p}`,
+    `curl -s -o /dev/null http://127.0.0.1:${p}/`,
+    `wget -q -O /dev/null http://127.0.0.1:${p}/`,
+    `bash -c '</dev/tcp/127.0.0.1/${p}'`,
+  ].join(' || ')
   return [
     '    healthcheck:',
-    // Bare-Bourne TCP probe: no external binary required.
-    `      test: ["CMD-SHELL", "timeout 3 sh -c '<' /dev/null > /dev/tcp/127.0.0.1/${containerPort} || exit 1"]`,
+    `      test: ["CMD-SHELL", "${probe} || exit 1"]`,
     '      interval: 30s',
     '      timeout: 5s',
     // Generous: a cold PHP or Node boot can exceed a minute on a busy host,
@@ -1818,7 +1847,17 @@ function resourceLimitsBlock(
  */
 function envEntries(envVars: Record<string, string>): string {
   return Object.entries(envVars)
-    .map(([k, v]) => `      ${k}: "${v.replace(/"/g, '\\"')}"`)
+    .filter(([k]) => {
+      if (isValidEnvKey(k)) return true
+      // A row that predates the API-side check, or one written by some future
+      // path that forgets it. Dropping the variable breaks one app; emitting it
+      // hands the host to whoever named it. See lib/safe-values.
+      console.error(
+        `[deployer] refusing to emit environment variable with unsafe name: ${JSON.stringify(k)}`
+      )
+      return false
+    })
+    .map(([k, v]) => `      ${k}: ${yamlQuoted(v)}`)
     .join('\n')
 }
 

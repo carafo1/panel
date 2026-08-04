@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import crypto from 'crypto'
 import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
+import { enforceLimit } from '@/lib/plan-limits'
 import { logAudit } from '@/lib/audit'
 import { assertPublicUrl } from '@/lib/ssrf'
 import { BRAND_DOMAIN } from '@/lib/brand-config'
@@ -171,21 +172,12 @@ export async function POST(request: Request) {
     }
 
     // ── Plan limits ──────────────────────────────────────────────────
-    const subscription = await db.subscription.findFirst({
-      where: { userId: decoded.userId, status: 'active' },
-      include: { plan: true },
-    })
-    if (subscription?.plan) {
-      const count = await db.project.count({ where: { userId: decoded.userId } })
-      if (count >= subscription.plan.projects) {
-        return NextResponse.json(
-          {
-            error: `Project limit reached (${subscription.plan.projects} on the ${subscription.plan.name} plan).`,
-          },
-          { status: 403 }
-        )
-      }
-    }
+    // An imported site is still a site, so it uses the same helper as
+    // /api/hosting/create. The hand-rolled check that stood here read
+    // projects = 0 -- the catalogue's "unlimited" -- as "none allowed" and
+    // refused every Enterprise import.
+    const denied = await enforceLimit(decoded.userId, 'websites', { role: decoded.role })
+    if (denied) return denied
 
     // ── Domain ───────────────────────────────────────────────────────
     const slug = `${slugify(name)}-${crypto.randomBytes(2).toString('hex')}`

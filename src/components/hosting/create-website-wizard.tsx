@@ -120,6 +120,36 @@ import {
 } from '@/components/ui/tooltip'
 import { toast } from 'sonner'
 
+/**
+ * A plan whose `projects` column is 0 (or null) is UNLIMITED. That is how the
+ * catalogue stores it -- Enterprise advertises "Unlimited Websites" and carries
+ * projects = 0 -- and how lib/plan-limits.ts reads it on the server.
+ *
+ * Comparing against the raw column instead turns "unlimited" into "none
+ * allowed", which is what greyed out the Create button and printed "1/0" for
+ * every Enterprise customer before they could send a single request.
+ */
+function projectCap(plan?: { projects?: number | null } | null): number | null {
+  const n = plan?.projects
+  return n === null || n === undefined || n <= 0 ? null : n
+}
+
+function isAtProjectLimit(
+  projectCount: number,
+  plan?: { projects?: number | null } | null
+): boolean {
+  const cap = projectCap(plan)
+  return cap !== null && projectCount >= cap
+}
+
+function projectUsageLabel(
+  projectCount: number,
+  plan?: { projects?: number | null } | null
+): string {
+  const cap = projectCap(plan)
+  return cap === null ? `${projectCount} of unlimited` : `${projectCount}/${cap}`
+}
+
 /* ────────────────────────────────────────────────────────────────────────── */
 /*  Types                                                                       */
 /* ────────────────────────────────────────────────────────────────────────── */
@@ -394,7 +424,7 @@ function PlanLimitsPanel({
       </Card>
     )
   }
-  const atLimit = projectCount >= plan.projects
+  const atLimit = isAtProjectLimit(projectCount, plan)
   return (
     <Card className={atLimit ? 'border-destructive/40 bg-destructive/5' : 'border-dashed'}>
       <CardContent className="p-4 space-y-3">
@@ -408,7 +438,7 @@ function PlanLimitsPanel({
           <div className="flex items-center justify-between">
             <span>Websites</span>
             <span className={atLimit ? 'font-semibold text-destructive' : 'text-foreground'}>
-              {projectCount}/{plan.projects}
+              {projectUsageLabel(projectCount, plan)}
             </span>
           </div>
           <div className="flex items-center justify-between">
@@ -836,7 +866,7 @@ export default function CreateWebsiteWizard({
     return source
   }, [selectedMethod, source])
 
-  const atProjectLimit = !!plan && projectCount >= plan.projects
+  const atProjectLimit = isAtProjectLimit(projectCount, plan)
 
   /* ── Reset on open ────────────────────────────────────────────────────── */
   useEffect(() => {
@@ -1407,7 +1437,7 @@ export default function CreateWebsiteWizard({
                     <div className="flex-1">
                       <p className="font-medium text-destructive">Project limit reached</p>
                       <p className="mt-0.5 text-xs text-muted-foreground">
-                        You&apos;re using {projectCount}/{plan?.projects ?? '—'} websites on the {plan?.name} plan.
+                        You&apos;re using {projectUsageLabel(projectCount, plan)} websites on the {plan?.name} plan.
                         Upgrade to deploy more.
                       </p>
                       <Button
@@ -2271,7 +2301,7 @@ function ReviewSummary({
                   {plan.storage}
                 </span>
                 <span className="text-foreground">
-                  {projectCount}/{plan.projects} sites
+                  {projectUsageLabel(projectCount, plan)} sites
                 </span>
               </div>
             )}
