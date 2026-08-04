@@ -469,7 +469,7 @@ function PlanLimitsPanel({
               variant="outline"
               className="mt-2 h-7 w-full border-destructive/40 text-destructive hover:bg-destructive/10"
               onClick={() => {
-                window.location.href = '/dashboard?tab=billing'
+                window.location.href = '/?tab=billing'
               }}
             >
               Upgrade Plan
@@ -1445,7 +1445,7 @@ export default function CreateWebsiteWizard({
                         variant="outline"
                         className="mt-2 h-7 border-destructive/40 text-destructive hover:bg-destructive/10"
                         onClick={() => {
-                          window.location.href = '/dashboard?tab=billing'
+                          window.location.href = '/?tab=billing'
                         }}
                       >
                         Upgrade Plan
@@ -1507,7 +1507,7 @@ export default function CreateWebsiteWizard({
                         variant="link"
                         className="h-auto p-0 text-primary"
                         onClick={() => {
-                          window.location.href = '/dashboard?tab=domains'
+                          window.location.href = '/?tab=domains'
                         }}
                       >
                         Register one in the Domains tab →

@@ -202,7 +202,7 @@ export const DEPLOYMENT_METHODS: DeploymentMethod[] = [
     supportsManual: true,
     needsDatabase: false,
     detectable: true,
-    defaultBuildCommand: 'npm run build',
+    defaultBuildCommand: 'npm run build --if-present',
     defaultStartCommand: 'npm start',
     fields: [
       {
@@ -251,7 +251,7 @@ export const DEPLOYMENT_METHODS: DeploymentMethod[] = [
         label: 'Build Command',
         type: 'text',
         placeholder: 'npm run build',
-        defaultValue: 'npm run build',
+        defaultValue: 'npm run build --if-present',
         helpText: 'Leave empty to skip the build step.',
         showForSources: ['git', 'zip'],
       },
@@ -323,7 +323,7 @@ export const DEPLOYMENT_METHODS: DeploymentMethod[] = [
     supportsManual: true,
     needsDatabase: false,
     detectable: true,
-    defaultBuildCommand: 'npm run build',
+    defaultBuildCommand: 'npm run build --if-present',
     fields: [
       {
         id: 'framework',
@@ -354,7 +354,7 @@ export const DEPLOYMENT_METHODS: DeploymentMethod[] = [
         label: 'Build Command',
         type: 'text',
         placeholder: 'npm run build',
-        defaultValue: 'npm run build',
+        defaultValue: 'npm run build --if-present',
         helpText: 'Leave empty for plain HTML (no build step).',
         showForSources: ['git', 'zip'],
       },

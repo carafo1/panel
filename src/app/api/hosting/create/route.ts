@@ -383,6 +383,13 @@ async function handleWizardCreate(
     gitUrl: body.gitUrl || null,
     gitBranch: body.gitBranch || 'main',
     gitProvider: body.gitProvider || null,
+    // The wizard has always collected a personal access token and this route
+    // has always dropped it on the floor: it was declared in WizardPayload,
+    // never read, never stored, and the deployer had no token handling at all.
+    // So every private repository failed with git's raw
+    // "could not read Username for 'https://github.com'" and the field in the
+    // UI did nothing. Encrypted at rest like every other secret.
+    gitTokenEnc: body.gitToken ? encrypt(body.gitToken) : null,
     uploadId: body.uploadId || null,
     config: cfg,
   })

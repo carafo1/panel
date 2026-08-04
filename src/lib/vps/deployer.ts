@@ -43,7 +43,7 @@ import { db } from '@/lib/db'
 import { STACK_DEFINITIONS, getStackDefinition } from '@/lib/stacks'
 import { isValidEnvKey, yamlQuoted, safeRuntimeVersion, safeDocumentRoot } from '@/lib/safe-values'
 import { getDeploymentMethod, type DeploymentMethodId } from '@/lib/deployment-methods'
-import { encrypt } from '@/lib/encryption'
+import { encrypt, decrypt } from '@/lib/encryption'
 import { broadcastDeploymentLog, broadcastDeploymentStatus } from '@/lib/realtime'
 import {
   withConnection,
@@ -114,6 +114,64 @@ const ALL_STAGES: StageDef[] = [
   { name: 'post_install', label: 'Post-install setup…' },
   { name: 'verify', label: 'Verifying deployment…' },
 ]
+
+/**
+ * Put a personal access token on an https git remote.
+ *
+ * ssh remotes authenticate with keys, so they are left alone. The token is
+ * never logged: `redactToken` scrubs it from anything echoed back from the VPS.
+ */
+function authedGitUrl(
+  url: string,
+  token: string,
+  provider?: string | null
+): string {
+  try {
+    const u = new URL(url)
+    if (u.protocol !== 'https:') return url
+    u.username =
+      provider === 'gitlab'
+        ? 'oauth2'
+        : provider === 'bitbucket'
+          ? 'x-token-auth'
+          : 'x-access-token'
+    u.password = token
+    return u.toString()
+  } catch {
+    return url
+  }
+}
+
+function redactToken(s: string, token?: string | null): string {
+  return token ? s.split(token).join('***') : s
+}
+
+/**
+ * Git's own message for "private repo, no credentials" is
+ * "could not read Username for 'https://github.com': No such device or
+ * address", which tells a customer nothing. GitHub also returns 404 rather
+ * than 403 for private repos, so "not found" genuinely can mean "no access".
+ */
+function gitAccessError(repoUrl: string, branch: string, stderr: string): string {
+  if (
+    /could not read Username|Authentication failed|Invalid username or password|terminal prompts disabled/i.test(
+      stderr
+    )
+  ) {
+    return (
+      `Could not sign in to ${repoUrl}. If the repository is private, enter a ` +
+      `personal access token in the Git step of the wizard — GitHub returns ` +
+      `"not found" for private repositories you are not authenticated for.`
+    )
+  }
+  if (/not found|does not exist|Could not find remote branch/i.test(stderr)) {
+    return (
+      `${repoUrl} could not be read on branch "${branch}". Check the URL and ` +
+      `the branch name, and add an access token if the repository is private.`
+    )
+  }
+  return `git clone failed: ${stderr}`
+}
 
 // ─── Main deploy function ────────────────────────────────────────────────
 
@@ -446,10 +504,34 @@ async function deployMethodProject(
       if (source === 'git' && project.repoUrl) {
         stageLog(`Cloning ${project.repoUrl}…`)
         const branch = project.sourceBranch || 'main'
-        const cloneCmd = `if [ -d ${shellQuote(deployPath + '/.git')} ]; then cd ${shellQuote(deployPath)} && git fetch --all && git checkout ${shellQuote(branch)} && git reset --hard origin/${shellQuote(branch)}; else rm -rf ${shellQuote(deployPath)}/* ${shellQuote(deployPath)}/.[!.]* 2>/dev/null; git clone --branch ${shellQuote(branch)} ${shellQuote(project.repoUrl)} ${shellQuote(deployPath)}; fi`
+        // Decrypt the token the wizard collected, if there is one.
+        let gitToken: string | null = null
+        const tokenEnc = settingsGet<string>(settings, 'gitTokenEnc')
+        if (tokenEnc) {
+          try {
+            gitToken = decrypt(tokenEnc)
+          } catch (err) {
+            stageLog('Stored git token could not be decrypted — cloning anonymously.')
+          }
+        }
+        const cloneUrl = gitToken
+          ? authedGitUrl(project.repoUrl, gitToken, project.sourceProvider)
+          : project.repoUrl
+        if (gitToken) stageLog('Using the stored access token for this repository.')
+        // GIT_TERMINAL_PROMPT=0: without it git blocks trying to prompt for a
+        // username on a private repo and only dies at the 180s timeout.
+        const cloneCmd = `if [ -d ${shellQuote(deployPath + '/.git')} ]; then cd ${shellQuote(deployPath)} && GIT_TERMINAL_PROMPT=0 git fetch --all && git checkout ${shellQuote(branch)} && git reset --hard origin/${shellQuote(branch)}; else rm -rf ${shellQuote(deployPath)}/* ${shellQuote(deployPath)}/.[!.]* 2>/dev/null; GIT_TERMINAL_PROMPT=0 git clone --branch ${shellQuote(branch)} ${shellQuote(cloneUrl)} ${shellQuote(deployPath)}; fi`
         const r = await exec(client, cloneCmd, { timeoutMs: 180000 })
-        stageLog(r.stdout.slice(-500))
-        if (r.exitCode !== 0) throw new Error(`git clone failed: ${r.stderr}`)
+        stageLog(redactToken(r.stdout.slice(-500), gitToken))
+        if (r.exitCode !== 0) {
+          throw new Error(
+            gitAccessError(
+              project.repoUrl,
+              branch,
+              redactToken(r.stderr || '', gitToken)
+            )
+          )
+        }
         // Capture commit sha.
         const sha = await exec(client, `cd ${shellQuote(deployPath)} && git rev-parse HEAD`, { timeoutMs: 10000 })
         await db.project.update({
@@ -991,11 +1073,15 @@ async function deployLegacyProject(
         log(`Cloning ${project.repoUrl}…`)
         const clone = await exec(
           client,
-          `if [ -d ${shellQuote(deployPath + '/.git')} ]; then cd ${shellQuote(deployPath)} && git pull; else rm -rf ${shellQuote(deployPath)}/* ${shellQuote(deployPath)}/.[!.]* 2>/dev/null; git clone ${shellQuote(project.repoUrl)} ${shellQuote(deployPath)}; fi`,
+          `if [ -d ${shellQuote(deployPath + '/.git')} ]; then cd ${shellQuote(deployPath)} && GIT_TERMINAL_PROMPT=0 git pull; else rm -rf ${shellQuote(deployPath)}/* ${shellQuote(deployPath)}/.[!.]* 2>/dev/null; GIT_TERMINAL_PROMPT=0 git clone ${shellQuote(project.repoUrl)} ${shellQuote(deployPath)}; fi`,
           { timeoutMs: 120000 }
         )
         stageLog(clone.stdout.slice(-400))
-        if (clone.exitCode !== 0) throw new Error(`git clone failed: ${clone.stderr}`)
+        if (clone.exitCode !== 0) {
+          throw new Error(
+            gitAccessError(project.repoUrl, project.sourceBranch || 'main', clone.stderr || '')
+          )
+        }
       } else {
         log('No repo URL — writing placeholder app from stack template…')
         const placeholder = generatePlaceholderApp(project.stack as DeploymentMethodId, project.name)
