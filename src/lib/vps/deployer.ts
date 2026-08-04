@@ -1670,12 +1670,24 @@ CMD ["apache2-foreground"]
     const buildCmd = project.buildCommand || (framework === 'nextjs' ? 'npm run build' : '')
     const startCmd = project.startCommand || (framework === 'nextjs' ? 'npm start' : 'node index.js')
     const buildLine = buildCmd ? `RUN ${buildCmd}\n` : ''
+    // Prisma's client is a stub until `prisma generate` writes the real types
+    // from schema.prisma. Its postinstall hook would normally do that, but the
+    // install above runs before `COPY . .`, so the schema is not in the image
+    // yet and nothing regenerates afterwards. Every Prisma project therefore
+    // failed type checking with, e.g.
+    //
+    //     Module '"@prisma/client"' has no exported member 'UserRole'
+    //
+    // Guarded on the schema existing, so non-Prisma projects are unaffected.
+    // This is the fix Prisma's own Docker documentation gives.
+    const prismaLine =
+      'RUN if [ -f prisma/schema.prisma ] || [ -f schema.prisma ]; then npx prisma generate; fi\n'
     return `FROM node:${nodeVersion}-alpine
 WORKDIR /app
 COPY package*.json ./
 ${pmInstall}
 COPY . .
-${buildLine}EXPOSE ${project.appPort || 3000}
+${prismaLine}${buildLine}EXPOSE ${project.appPort || 3000}
 ENV NODE_ENV=production
 CMD ["sh", "-c", "${startCmd}"]
 `
