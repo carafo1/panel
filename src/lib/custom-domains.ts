@@ -61,6 +61,45 @@ export function isReservedHostname(host: string, brandDomain: string): boolean {
   return false
 }
 
+/**
+ * Labels a customer may not take as their <label>.apsamo.com address.
+ *
+ * Project slugs become subdomains and are written straight into the Caddyfile,
+ * so a project named "panel" would emit a `panel.apsamo.com` vhost competing
+ * with the control panel's own. isReservedHostname does not cover this: it
+ * rejects hostnames *ending in* the brand domain, which is about customers
+ * pasting someone else's address, not about which label a slug may occupy.
+ *
+ * Grounded in what this server actually serves today (panel, mail, pgadmin,
+ * pma in the Caddyfile; mail.apsamo.com in mailcow.conf) plus the mail and
+ * control-plane names that are conventionally expected to exist.
+ */
+export const RESERVED_SUBDOMAIN_LABELS = new Set([
+  // control plane
+  'panel', 'admin', 'dashboard', 'api', 'app', 'billing', 'status',
+  'account', 'accounts', 'login', 'auth', 'sso', 'support', 'help', 'docs',
+  // database consoles the panel runs
+  'pma', 'phpmyadmin', 'pgadmin', 'db', 'database', 'adminer',
+  // mail, where a wrong answer silently breaks delivery
+  'mail', 'webmail', 'smtp', 'imap', 'pop', 'pop3', 'mx', 'autodiscover',
+  'autoconfig', 'mta-sts', 'dmarc', 'dkim', 'spf', 'bounce', 'newsletter',
+  // dns
+  'ns', 'ns1', 'ns2', 'ns3', 'ns4', 'dns',
+  // web conventions
+  'www', 'ftp', 'sftp', 'cdn', 'static', 'assets', 'media', 'img', 'images',
+  // environments an operator expects to control
+  'dev', 'staging', 'stage', 'test', 'qa', 'preview', 'demo', 'sandbox',
+  'internal', 'vpn', 'remote', 'git', 'ci', 'registry', 'monitor', 'metrics',
+])
+
+/** May a customer project occupy `<label>.<brand>`? */
+export function isReservedLabel(label: string): boolean {
+  const l = label.toLowerCase()
+  // Leading underscore is reserved for protocol records (_dmarc, _acme-challenge).
+  if (l.startsWith('_')) return true
+  return RESERVED_SUBDOMAIN_LABELS.has(l)
+}
+
 export function generateVerificationToken(): string {
   return `apsamo-verify-${randomBytes(16).toString('hex')}`
 }
