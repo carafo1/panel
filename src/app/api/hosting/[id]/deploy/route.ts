@@ -4,6 +4,7 @@ import { authenticateRequest } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { createMonitor } from '@/lib/monitor'
 import { deployProject } from '@/lib/vps'
+import { claimDeploySlot } from '@/lib/deploy-guard'
 
 export async function POST(
   request: Request,
@@ -31,20 +32,25 @@ export async function POST(
       )
     }
 
-    // A failed install leaves the project in `error`, and a fresh one sits in
-    // `creating` — both are exactly the states the "Retry Installation" button
-    // is offered from. Requiring `running` made that button permanently dead:
-    // the only way to reach it is a failure, and a failure disqualifies you.
-    // `deploying` is excluded so a concurrent deploy isn't started twice.
-    const DEPLOYABLE = ['running', 'stopped', 'error', 'creating']
+    // Concurrency is enforced on the Deployment row (see lib/deploy-guard),
+    // not here. This check used to gate on project.status, which meant a panel
+    // restart mid-build left the project on 'building' and permanently
+    // undeployable — and it could not stop two simultaneous clicks anyway,
+    // since both read the status before either wrote it.
+    //
+    // 'building' and 'deploying' stay in the list on purpose: the row lock
+    // below decides, and it expires, so a crashed run recovers on its own.
+    const DEPLOYABLE = [
+      'running',
+      'stopped',
+      'error',
+      'creating',
+      'building',
+      'deploying',
+    ]
     if (!DEPLOYABLE.includes(project.status)) {
       return NextResponse.json(
-        {
-          error:
-            project.status === 'deploying'
-              ? 'A deployment is already in progress for this project.'
-              : `Project cannot be deployed while its status is "${project.status}".`,
-        },
+        { error: `Project cannot be deployed while its status is "${project.status}".` },
         { status: 400 }
       )
     }
@@ -71,17 +77,34 @@ export async function POST(
     // the real VPS deployer immediately below — the deployer streams its
     // progress into this row's buildLog + transitions status to 'live' or
     // 'failed' as it runs.
-    const deployment = await db.deployment.create({
-      data: {
-        projectId: project.id,
-        userId: decoded.userId,
-        commit: commit || `auto-${Date.now()}`,
-        branch,
-        status: 'building',
-        triggeredBy: 'user',
-        buildLog: `🚀 Deployment triggered by ${decoded.email}\nBranch: ${branch}\nProject: ${project.name} (${project.framework})\n\nConnecting to VPS…`,
-      },
+    // Check-and-create in one transaction, so a double click cannot produce
+    // two builds of the same image. Docker would happily run both; BuildKit
+    // dedupes the layers, so the second finishes suspiciously fast and its
+    // recorded stage timings disagree with its own build log.
+    const claim = await claimDeploySlot({
+      projectId: project.id,
+      userId: decoded.userId,
+      branch,
+      commit,
+      triggeredBy: 'user',
+      buildLog: `🚀 Deployment triggered by ${decoded.email}\nBranch: ${branch}\nProject: ${project.name} (${project.framework})\n\nConnecting to VPS…`,
     })
+    if (!claim.ok) {
+      const mins = Math.round(claim.existing.ageMs / 60000)
+      return NextResponse.json(
+        {
+          error:
+            `A deployment is already running for this project (started ${mins} ` +
+            `minute${mins === 1 ? '' : 's'} ago). Wait for it to finish, or ` +
+            `open it to watch the progress.`,
+          code: 'deploy_in_progress',
+          deploymentId: claim.existing.id,
+          startedAt: claim.existing.createdAt,
+        },
+        { status: 409 }
+      )
+    }
+    const deployment = { id: claim.deploymentId, createdAt: claim.createdAt }
 
     // Fire-and-forget the real deploy so the HTTP response returns
     // immediately. The deployer updates the Deployment row's status + buildLog
