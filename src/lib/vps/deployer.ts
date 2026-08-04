@@ -1643,13 +1643,30 @@ CMD ["apache2-foreground"]
 
   if (methodId === 'nodejs') {
     const pm = packageManager === 'pnpm' ? 'pnpm' : packageManager === 'yarn' ? 'yarn' : packageManager === 'bun' ? 'bun' : 'npm'
+    // devDependencies are BUILD dependencies. next, tsc, tailwind, vite and
+    // every postcss plugin live there by convention, and the build runs in
+    // this image a few lines below.
+    //
+    // This was `npm ci --omit=dev || npm install`. With a package-lock.json
+    // present `npm ci` succeeds, so the fallback never ran and the image had
+    // production dependencies only. A Next.js + Tailwind app then died at
+    //
+    //     Error: Cannot find module '@tailwindcss/postcss'
+    //
+    // npm was the odd one out here -- the yarn, pnpm and bun branches all
+    // install dev dependencies already, so this also makes them consistent.
+    //
+    // Deliberately not pruning afterwards: `npm prune --omit=dev` would shrink
+    // the runtime image, but plenty of projects list `next` (or their whole
+    // server) under devDependencies, and pruning would then break `npm start`.
+    // A larger image beats a site that does not run.
     const pmInstall = pm === 'pnpm'
       ? 'RUN npm install -g pnpm && pnpm install --frozen-lockfile || pnpm install'
       : pm === 'yarn'
         ? 'RUN yarn install --frozen-lockfile || yarn install'
         : pm === 'bun'
           ? 'RUN npm install -g bun && bun install'
-          : 'RUN npm ci --omit=dev || npm install'
+          : 'RUN npm ci || npm install'
     const buildCmd = project.buildCommand || (framework === 'nextjs' ? 'npm run build' : '')
     const startCmd = project.startCommand || (framework === 'nextjs' ? 'npm start' : 'node index.js')
     const buildLine = buildCmd ? `RUN ${buildCmd}\n` : ''
