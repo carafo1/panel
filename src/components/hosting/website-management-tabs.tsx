@@ -1934,10 +1934,25 @@ export function FilesTab({ projectId }: { projectId: string }) {
                 resolve({ ok: false, error: data.error || data.message || 'Upload failed' })
               }
             } catch {
-              reject(new Error('Invalid server response'))
+              // A proxy rejecting the body (413, 502) answers with HTML, not
+              // JSON. Reporting "invalid server response" hides the status
+              // code, which is the only useful part.
+              resolve({
+                ok: false,
+                error:
+                  xhr.status >= 200 && xhr.status < 300
+                    ? 'Upload succeeded but the server response could not be read.'
+                    : `Upload failed (HTTP ${xhr.status || 'no response'}).`,
+              })
             }
           }
           xhr.onerror = () => reject(new Error('Network error during upload'))
+          xhr.onabort = () => reject(new Error('Upload aborted'))
+          // The request was fully prepared above and then never sent, so this
+          // promise never settled: the spinner sat at 0% forever and no request
+          // reached the server. The two other XMLHttpRequest call sites in this
+          // codebase (the create and import wizards) both send correctly.
+          xhr.send(formData)
         }
       )
       if (result.ok) {
