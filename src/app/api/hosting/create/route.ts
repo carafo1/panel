@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { withRateLimit } from '@/lib/rate-limit'
-import { enforceOverage } from '@/lib/plan-limits'
+import { enforceLimit, enforceOverage } from '@/lib/plan-limits'
 import crypto from 'crypto'
 import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
@@ -194,17 +194,12 @@ async function handleWizardCreate(
     include: { plan: true },
   })
   if (subscription && subscription.plan) {
-    const projectCount = await db.project.count({
-      where: { userId: decoded.userId },
-    })
-    if (projectCount >= subscription.plan.projects) {
-      return NextResponse.json(
-        {
-          error: `Project limit reached (${subscription.plan.projects} projects on ${subscription.plan.name} plan)`,
-        },
-        { status: 403 }
-      )
-    }
+    // enforceLimit owns this: it honours null/0 as UNLIMITED, which is how the
+    // catalogue stores it. The hand-rolled `count >= plan.projects` here read 0
+    // as "none allowed" and so blocked every site on the Enterprise plan, which
+    // advertises unlimited websites.
+    const denied = await enforceLimit(decoded.userId, 'websites', { role: decoded.role })
+    if (denied) return denied
   }
 
   // A new site consumes storage the customer does not have. Refuse while
@@ -620,15 +615,9 @@ async function handleLegacyCreate(
     include: { plan: true },
   })
   if (subscription && subscription.plan) {
-    const projectCount = await db.project.count({
-      where: { userId: decoded.userId },
-    })
-    if (projectCount >= subscription.plan.projects) {
-      return NextResponse.json(
-        { error: `Project limit reached (${subscription.plan.projects} projects on ${subscription.plan.name} plan)` },
-        { status: 403 }
-      )
-    }
+    // Same check as above, via the shared helper — see the note there.
+    const denied = await enforceLimit(decoded.userId, 'websites', { role: decoded.role })
+    if (denied) return denied
   }
 
   const slug = slugify(name)
