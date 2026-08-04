@@ -121,7 +121,7 @@ const ALL_STAGES: StageDef[] = [
  * ssh remotes authenticate with keys, so they are left alone. The token is
  * never logged: `redactToken` scrubs it from anything echoed back from the VPS.
  */
-function authedGitUrl(
+export function authedGitUrl(
   url: string,
   token: string,
   provider?: string | null
