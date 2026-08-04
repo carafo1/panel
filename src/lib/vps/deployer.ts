@@ -698,8 +698,14 @@ async function deployMethodProject(
     await withConnection(creds, async (client) => {
       const buildGen = execStream(
         client,
-        `cd ${shellQuote(deployPath)} && docker compose build --progress=plain 2>&1`,
-        { timeoutMs: 600000 }
+        // BUILDX_NO_DEFAULT_ATTESTATIONS: buildx writes an SBOM/provenance
+        // attestation manifest by default. Nothing in this platform reads it.
+        //
+        // The timeout was 600s. A real customer build measured 660s for the
+        // image step alone, so this was already past the limit and a slightly
+        // larger app would have been killed mid-build with a confusing error.
+        `cd ${shellQuote(deployPath)} && BUILDX_NO_DEFAULT_ATTESTATIONS=1 docker compose build --progress=plain 2>&1`,
+        { timeoutMs: 1800000 }
       )
       let final: ExecResult | undefined
       while (true) {
@@ -906,6 +912,18 @@ require_once ABSPATH . 'wp-settings.php';
       stageLog('SSL is disabled for this project.')
     }
   })
+
+  // Only Laravel has work here, and it does it before the build (writing
+  // .env, above). Every other method never called this stage at all, so the
+  // row pre-created by /api/hosting/create stayed "pending" and the finished
+  // deployment showed a step that looked stuck. The legacy path has always
+  // marked it skipped; the method path never did.
+  if (methodId !== 'laravel') {
+    await runStage('run_migrations', 'Running migrations…', async () => undefined, {
+      skip: true,
+      skipReason: `No migration step for ${methodId}`,
+    })
+  }
 
   // Verify.
   await runStage('verify', 'Verifying deployment…', async () => {
@@ -1138,8 +1156,14 @@ async function deployLegacyProject(
     await withConnection(creds, async (client) => {
       const buildGen = execStream(
         client,
-        `cd ${shellQuote(deployPath)} && docker compose build --progress=plain 2>&1`,
-        { timeoutMs: 600000 }
+        // BUILDX_NO_DEFAULT_ATTESTATIONS: buildx writes an SBOM/provenance
+        // attestation manifest by default. Nothing in this platform reads it.
+        //
+        // The timeout was 600s. A real customer build measured 660s for the
+        // image step alone, so this was already past the limit and a slightly
+        // larger app would have been killed mid-build with a confusing error.
+        `cd ${shellQuote(deployPath)} && BUILDX_NO_DEFAULT_ATTESTATIONS=1 docker compose build --progress=plain 2>&1`,
+        { timeoutMs: 1800000 }
       )
       while (true) {
         const r = await buildGen.next()
@@ -1666,10 +1690,21 @@ CMD ["apache2-foreground"]
         ? 'RUN yarn install --frozen-lockfile || yarn install'
         : pm === 'bun'
           ? 'RUN npm install -g bun && bun install'
-          : 'RUN npm ci || npm install'
+          // A BuildKit cache mount keeps npm's download cache between builds,
+          // so the packages are not re-fetched for every deploy and every new
+          // project on this server. --no-audit/--no-fund drop two network
+          // round trips that produce nothing but console output; the install
+          // log showed "added 1061 packages, and audited 1062 packages in 2m".
+          : 'RUN --mount=type=cache,target=/root/.npm,sharing=locked npm ci --no-audit --no-fund --prefer-offline || npm install --no-audit --no-fund'
     const buildCmd = project.buildCommand || (framework === 'nextjs' ? 'npm run build' : '')
     const startCmd = project.startCommand || (framework === 'nextjs' ? 'npm start' : 'node index.js')
-    const buildLine = buildCmd ? `RUN ${buildCmd}\n` : ''
+    // .next/cache is Next's incremental compilation cache. Mounting it means
+    // a redeploy reuses the previous compile instead of starting cold. The
+    // mount is not part of the image, so this also keeps the cache out of the
+    // exported layers.
+    const buildLine = buildCmd
+      ? `RUN --mount=type=cache,target=/app/.next/cache,sharing=locked ${buildCmd}\n`
+      : ''
     // Prisma's client is a stub until `prisma generate` writes the real types
     // from schema.prisma. Its postinstall hook would normally do that, but the
     // install above runs before `COPY . .`, so the schema is not in the image
