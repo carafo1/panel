@@ -1755,10 +1755,36 @@ function phpIniBlock(ramMB?: number | null): string {
  * it marks a healthy container unhealthy and invites a restart loop.
  */
 function healthcheckBlock(containerPort: number): string {
+  // The old probe was `sh -c '<' /dev/null > /dev/tcp/127.0.0.1/PORT`, with a
+  // comment calling it a "bare-Bourne TCP probe: no external binary required".
+  // /dev/tcp is not Bourne -- it is a bash feature, and CMD-SHELL runs
+  // /bin/sh, which is dash on Debian and busybox ash on Alpine. Neither has
+  // it. The probe failed in every image the panel builds:
+  //
+  //     /bin/sh: 1: cannot create /dev/tcp/127.0.0.1/80: Directory nonexistent
+  //
+  // So every container sat permanently unhealthy, and restartUnhealthyContainers
+  // duly restarted each one every time it had been up 10 minutes. Every
+  // customer site was being bounced roughly every 15 minutes, indefinitely.
+  //
+  // No single tool is present in every image (checked across the live
+  // containers: the WordPress image has curl but not wget or nc; nginx:alpine
+  // has all three; the MariaDB images have none of them but do have bash).
+  // At least one of these always resolves, so try them in order.
+  //
+  // An open port is the signal, not a 2xx -- `curl` is deliberately used
+  // without -f so that a site answering 403 or 500 still counts as up. It is
+  // running; marking it unhealthy is what gets it restarted.
+  const p = containerPort
+  const probe = [
+    `nc -z 127.0.0.1 ${p}`,
+    `curl -s -o /dev/null http://127.0.0.1:${p}/`,
+    `wget -q -O /dev/null http://127.0.0.1:${p}/`,
+    `bash -c '</dev/tcp/127.0.0.1/${p}'`,
+  ].join(' || ')
   return [
     '    healthcheck:',
-    // Bare-Bourne TCP probe: no external binary required.
-    `      test: ["CMD-SHELL", "timeout 3 sh -c '<' /dev/null > /dev/tcp/127.0.0.1/${containerPort} || exit 1"]`,
+    `      test: ["CMD-SHELL", "${probe} || exit 1"]`,
     '      interval: 30s',
     '      timeout: 5s',
     // Generous: a cold PHP or Node boot can exceed a minute on a busy host,
