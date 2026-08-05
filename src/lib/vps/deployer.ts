@@ -123,6 +123,64 @@ const ALL_STAGES: StageDef[] = [
  * ssh remotes authenticate with keys, so they are left alone. The token is
  * never logged: `redactToken` scrubs it from anything echoed back from the VPS.
  */
+/**
+ * Run git against a private remote without putting the token in the command.
+ *
+ * The token used to be embedded in the URL (`https://x-access-token:TOKEN@…`).
+ * That URL then appears in argv, in `ps`, and — the part that actually bit —
+ * in the text of any exception the exec layer raises. A `git ls-remote` that
+ * timed out threw "SSH exec timeout after 45000ms: <the whole command>", which
+ * was written verbatim to a log file. Redaction was applied to the command's
+ * OUTPUT, not to thrown errors, so the token was published in clear.
+ *
+ * Redacting harder is the wrong fix: it leaves the secret in every string and
+ * relies on remembering to scrub each new path. Git reads credentials from a
+ * store file instead, so the command carries only the path to it and there is
+ * nothing to leak. The file is 0600 and removed straight after.
+ */
+export interface GitCreds {
+  /** Prefix a git command with this. */
+  prefix: string
+  /** Always call, even on failure. */
+  cleanup: () => Promise<void>
+}
+
+export async function withGitCredentials(
+  client: Parameters<typeof exec>[0],
+  repoUrl: string,
+  token: string | null
+): Promise<GitCreds> {
+  const none: GitCreds = {
+    prefix: 'GIT_TERMINAL_PROMPT=0 ',
+    cleanup: async () => {},
+  }
+  if (!token) return none
+  let origin: string
+  let user = 'x-access-token'
+  try {
+    const u = new URL(repoUrl)
+    if (u.protocol !== 'https:') return none
+    if (u.hostname.includes('gitlab')) user = 'oauth2'
+    else if (u.hostname.includes('bitbucket')) user = 'x-token-auth'
+    origin = `${u.protocol}//${user}:${token}@${u.host}`
+  } catch {
+    return none
+  }
+
+  const path = `/tmp/.apsamo-git-${crypto.randomUUID().replace(/-/g, '')}`
+  await putFile(client, path, origin + '\n', { mode: 0o600 })
+  return {
+    prefix:
+      `GIT_TERMINAL_PROMPT=0 git -c ` +
+      `${shellQuote('credential.helper=store --file=' + path)} `,
+    cleanup: async () => {
+      await exec(client, `rm -f ${shellQuote(path)}`, { timeoutMs: 10000 }).catch(
+        () => {}
+      )
+    },
+  }
+}
+
 export function authedGitUrl(
   url: string,
   token: string,
@@ -519,14 +577,17 @@ async function deployMethodProject(
             stageLog('Stored git token could not be decrypted — cloning anonymously.')
           }
         }
-        const cloneUrl = gitToken
-          ? authedGitUrl(project.repoUrl, gitToken, project.sourceProvider)
-          : project.repoUrl
+        // The URL stays clean; the credential file carries the secret.
+        const creds2 = await withGitCredentials(client, project.repoUrl, gitToken)
+        const cloneUrl = project.repoUrl
         if (gitToken) stageLog('Using the stored access token for this repository.')
         // GIT_TERMINAL_PROMPT=0: without it git blocks trying to prompt for a
         // username on a private repo and only dies at the 180s timeout.
-        const cloneCmd = `if [ -d ${shellQuote(deployPath + '/.git')} ]; then cd ${shellQuote(deployPath)} && GIT_TERMINAL_PROMPT=0 git fetch --all && git checkout ${shellQuote(branch)} && git reset --hard origin/${shellQuote(branch)}; else rm -rf ${shellQuote(deployPath)}/* ${shellQuote(deployPath)}/.[!.]* 2>/dev/null; GIT_TERMINAL_PROMPT=0 git clone --branch ${shellQuote(branch)} ${shellQuote(cloneUrl)} ${shellQuote(deployPath)}; fi`
-        const r = await exec(client, cloneCmd, { timeoutMs: 180000 })
+        const G = creds2.prefix
+        const cloneCmd = `if [ -d ${shellQuote(deployPath + '/.git')} ]; then cd ${shellQuote(deployPath)} && ${G}fetch --all && ${G}checkout ${shellQuote(branch)} && ${G}reset --hard origin/${shellQuote(branch)}; else rm -rf ${shellQuote(deployPath)}/* ${shellQuote(deployPath)}/.[!.]* 2>/dev/null; ${G}clone --branch ${shellQuote(branch)} ${shellQuote(cloneUrl)} ${shellQuote(deployPath)}; fi`
+        const r = await exec(client, cloneCmd, { timeoutMs: 180000 }).finally(
+          () => void creds2.cleanup()
+        )
         stageLog(redactToken(r.stdout.slice(-500), gitToken))
         if (r.exitCode !== 0) {
           throw new Error(

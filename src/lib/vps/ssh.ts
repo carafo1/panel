@@ -170,7 +170,7 @@ export async function exec(
       }
       reject(
         new Error(
-          `SSH exec timeout after ${opts.timeoutMs ?? 60000}ms: ${command.slice(0, 120)}`
+          `SSH exec timeout after ${opts.timeoutMs ?? 60000}ms: ${sanitiseCommand(command).slice(0, 120)}`
         )
       )
     }, opts.timeoutMs ?? 60000)
@@ -232,7 +232,7 @@ export async function* execStream(
 
   const stream = await new Promise<ClientChannel>((resolve, reject) => {
     const timer = setTimeout(() => {
-      reject(new Error(`SSH exec timeout: ${command.slice(0, 120)}`))
+      reject(new Error(`SSH exec timeout: ${sanitiseCommand(command).slice(0, 120)}`))
     }, opts.timeoutMs ?? 60000)
     client.exec(fullCmd, { pty: false }, (err, s) => {
       clearTimeout(timer)
@@ -436,6 +436,50 @@ export async function testConnection(creds: SshCredentials): Promise<{
  * Minimal POSIX shell quoting. Wraps the string in single quotes and escapes
  * any embedded single quotes via the '\'' trick.
  */
+/**
+ * Strip credentials out of a command before it goes into an error message.
+ *
+ * Every exec timeout embeds the command it gave up on, which is genuinely
+ * useful for debugging and was also the exact mechanism that published a
+ * customer's GitHub token to a log file: the token sat in a URL inside the
+ * command, and the thrown message was written out verbatim.
+ *
+ * Fixing the callers one at a time does not hold — it relies on whoever adds
+ * the next credential-bearing command remembering. This is the one place every
+ * such message is built, so it is the place to scrub.
+ *
+ * Commands that still carry a secret in their first 120 characters today:
+ *   ftp.ts       echo 'user:password' | chpasswd
+ *   migration    docker exec -e MYSQL_PWD='…'
+ *   backups.ts   mariadb -uuser -p'…' (restore)
+ */
+export function sanitiseCommand(command: string): string {
+  return (
+    command
+      // env-style: MYSQL_PWD=…, PGPASSWORD=…, MARIADB_ROOT_PASSWORD=…
+      .replace(
+        /\b([A-Z_]*(?:PASSWORD|PWD|TOKEN|SECRET|API_KEY)[A-Z_]*)=('[^']*'|"[^"]*"|\S+)/g,
+        '$1=***'
+      )
+      // credentials in a URL: https://user:pass@host
+      .replace(/(:\/\/[^\s:@'"]+:)([^@\s'"]+)(@)/g, '$1***$3')
+      // provider tokens, wherever they appear
+      .replace(/\bgh[pousr]_[A-Za-z0-9]{10,}/g, 'gh*_***')
+      .replace(/\bxox[baprs]-[A-Za-z0-9-]{10,}/g, 'xox*-***')
+      // mysql/mariadb -p<password> (a path after -p is a real flag elsewhere)
+      .replace(/(\s-p)('[^']+'|"[^"]+"|[^\s'"/][^\s'"]*)/g, '$1***')
+      // long-form flags
+      .replace(
+        /(--(?:admin_)?(?:password|token|secret|api[-_]?key)[= ])('[^']*'|"[^"]*"|\S+)/gi,
+        '$1***'
+      )
+      // echo 'user:password' | chpasswd
+      .replace(/(echo\s+'[^':]*:)([^']*)(')/g, "$1***$3")
+      // Authorization: Bearer …
+      .replace(/(Bearer\s+)\S+/gi, '$1***')
+  )
+}
+
 export function shellQuote(s: string): string {
   if (s === '') return "''"
   // If the string is "safe" (alnum + a few punctuation), skip quoting for readability.
