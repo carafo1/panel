@@ -616,9 +616,30 @@ async function deployMethodProject(
   // Set when we deferred to a compose file the project supplied, which means
   // the running container's name is theirs to choose, not ours to assume.
   let usingProvidedCompose = false
-  const dockerfile = generateMethodDockerfile(methodId, project, settings, envVars)
+  let dockerfile = generateMethodDockerfile(methodId, project, settings, envVars)
   await runStage('write_dockerfile', 'Writing Dockerfile…', async () => {
     await withConnection(creds, async (client) => {
+      // Decide the image shape from what the repository actually contains,
+      // now that the source is on disk. See standaloneRuntimeIsSafe.
+      if (methodId === 'nodejs') {
+        try {
+          const probe = await exec(
+            client,
+            `cd ${shellQuote(deployPath)} && cat package.json 2>/dev/null | head -c 8000; ` +
+              `echo '---APSAMO-SPLIT---'; cat next.config.js next.config.mjs next.config.ts 2>/dev/null | head -c 8000`,
+            { timeoutMs: 20000 }
+          )
+          const [pkgJson = '', nextCfg = ''] = probe.stdout.split('---APSAMO-SPLIT---')
+          if (standaloneRuntimeIsSafe(pkgJson, nextCfg)) {
+            dockerfile = generateMethodDockerfile(methodId, project, settings, envVars, true)
+            stageLog(
+              'Next.js standalone output detected and `next start` is the start command — building a slim runtime image.'
+            )
+          }
+        } catch {
+          /* probing is an optimisation; failing it just keeps the safe image */
+        }
+      }
       const theirs = usesOwnBuildFiles
         ? await exec(
             client,
@@ -1794,11 +1815,45 @@ function settingsGet<T = string>(settings: Record<string, unknown>, key: string,
 
 // ─── Dockerfile generation per method ────────────────────────────────────
 
+/**
+ * Is a Next.js standalone runtime stage safe for this project?
+ *
+ * `output: 'standalone'` produces a self-contained server that needs neither
+ * node_modules nor the source tree, which takes the runtime image from
+ * gigabytes to a couple of hundred megabytes and removes most of the layer
+ * export from every deploy.
+ *
+ * It is only safe when `next start` (or the standalone server directly) is
+ * genuinely what runs the app. Declaring standalone output says nothing about
+ * that. The project this was written against declares it and then starts with
+ * `node scripts/start.js`, a launcher that spawns two worker processes from
+ * `scripts/` and `mini-services/` — directories a standalone runner stage does
+ * not copy. Shipping that image would have deleted two thirds of the
+ * application and left a site that boots and quietly does half its job.
+ *
+ * So: standalone output AND a start command that is plainly Next's own. Any
+ * custom launcher keeps the single-stage image, which is bigger and correct.
+ */
+function standaloneRuntimeIsSafe(packageJson: string, nextConfig: string): boolean {
+  if (!/output\s*:\s*['"`]standalone['"`]/.test(nextConfig)) return false
+  let start = ''
+  try {
+    const pkg = JSON.parse(packageJson) as { scripts?: Record<string, string> }
+    start = (pkg.scripts?.start || '').trim()
+  } catch {
+    return false
+  }
+  if (!start) return false
+  // `next start`, `npx next start`, `node server.js` — and nothing else.
+  return /^(npx\s+)?next\s+start(\s|$)/.test(start) || /^node\s+server\.js$/.test(start)
+}
+
 function generateMethodDockerfile(
   methodId: DeploymentMethodId,
   project: { name: string; slug: string; runtime?: string | null; runtimeVersion?: string | null; buildCommand?: string | null; startCommand?: string | null; appPort?: number | null; documentRoot?: string | null; framework?: string | null; resourceRamMB?: number | null },
   settings: Record<string, unknown>,
-  envVars: Record<string, string> = {}
+  envVars: Record<string, string> = {},
+  standaloneSafe = false
 ): string {
   // These are interpolated into FROM / COPY / RUN lines below. Unchecked,
   // a newline in any of them appends arbitrary build instructions.
@@ -1904,12 +1959,38 @@ CMD ["apache2-foreground"]
     const publicArgs = buildTimeEnv(envVars)
       .map(([k]) => `ARG ${k}\nENV ${k}=$${k}\n`)
       .join('')
+    const port = project.appPort || 3000
+    if (standaloneSafe) {
+      // Build stage keeps every dependency and the whole source tree; the
+      // runtime stage takes only what Next's standalone output actually needs.
+      // `mkdir -p public` so the COPY below cannot fail on a project without
+      // one.
+      return `FROM node:${nodeVersion}-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+${pmInstall}
+COPY . .
+RUN mkdir -p public
+${prismaLine}${publicArgs}${buildLine}
+FROM node:${nodeVersion}-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+ENV PORT=${port}
+# Next's standalone bundle already contains the server and the dependencies it
+# resolved; static assets and public/ are emitted outside it and must follow.
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+COPY --from=builder /app/public ./public
+EXPOSE ${port}
+CMD ["node", "server.js"]
+`
+    }
     return `FROM node:${nodeVersion}-alpine
 WORKDIR /app
 COPY package*.json ./
 ${pmInstall}
 COPY . .
-${prismaLine}${publicArgs}${buildLine}EXPOSE ${project.appPort || 3000}
+${prismaLine}${publicArgs}${buildLine}EXPOSE ${port}
 ENV NODE_ENV=production
 CMD ["sh", "-c", "${startCmd}"]
 `
