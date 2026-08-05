@@ -568,12 +568,16 @@ export async function restoreBackup(
     const creds = await getServerCredentials(project.serverId!)
     await withConnection(creds, async (client) => {
       // 1. Stop the app container.
-      if (project.containerName) {
-        log(`Stopping container ${project.containerName}…`)
-        await exec(client, `docker stop ${shellQuote(project.containerName)} 2>/dev/null; true`, {
-          timeoutMs: 30000,
-        })
-      }
+      //
+      // Derived when the column is empty, the same reasoning as teardown: a
+      // project whose deploy failed before persisting containerName still has
+      // a container, and restoring files underneath a running app is how you
+      // get a half-written site.
+      const appContainer = project.containerName || `deployhub-${project.slug}`
+      log(`Stopping container ${appContainer}…`)
+      await exec(client, `docker stop ${shellQuote(appContainer)} 2>/dev/null; true`, {
+        timeoutMs: 30000,
+      })
 
       // 2. Clear deployPath + extract tar.
       log(`Clearing ${project.deployPath}…`)
@@ -623,12 +627,10 @@ export async function restoreBackup(
       }
 
       // 4. Restart the app container.
-      if (project.containerName) {
-        log(`Starting container ${project.containerName}…`)
-        await exec(client, `docker start ${shellQuote(project.containerName)} 2>&1`, {
-          timeoutMs: 30000,
-        })
-      }
+      log(`Starting container ${appContainer}…`)
+      await exec(client, `docker start ${shellQuote(appContainer)} 2>&1`, {
+        timeoutMs: 30000,
+      })
     })
 
     log('Restore complete.')
