@@ -769,7 +769,7 @@ async function deployMethodProject(
       })
     },
     gating === 0
-      ? { skip: true, skipReason: 'No active pipeline for this project' }
+      ? { skip: true, skipReason: 'No pipeline is set to gate deployments' }
       : {}
   )
 
