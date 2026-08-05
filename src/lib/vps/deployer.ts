@@ -42,6 +42,7 @@ import { readFile } from 'fs/promises'
 import { db } from '@/lib/db'
 import { STACK_DEFINITIONS, getStackDefinition } from '@/lib/stacks'
 import { isValidEnvKey, yamlQuoted, safeRuntimeVersion, safeDocumentRoot } from '@/lib/safe-values'
+import { runPreDeployChecks } from '@/lib/pipeline-runner'
 import { getDeploymentMethod, type DeploymentMethodId } from '@/lib/deployment-methods'
 import { encrypt, decrypt } from '@/lib/encryption'
 import { broadcastDeploymentLog, broadcastDeploymentStatus } from '@/lib/realtime'
@@ -107,6 +108,7 @@ const ALL_STAGES: StageDef[] = [
   { name: 'write_dockerfile', label: 'Writing Dockerfile…' },
   { name: 'write_compose', label: 'Writing docker-compose.yml…' },
   { name: 'build_image', label: 'Building Docker image…' },
+  { name: 'run_checks', label: 'Running pipeline checks…' },
   { name: 'start_container', label: 'Starting container…' },
   { name: 'configure_proxy', label: 'Configuring reverse proxy…' },
   { name: 'configure_ssl', label: 'Configuring SSL…' },
@@ -722,6 +724,40 @@ async function deployMethodProject(
       }
     })
   })
+
+  // Gate: run the project's active pipelines against the image just built,
+  // before anything is swapped. A failure throws, so `docker compose up` below
+  // never runs and the container currently serving traffic is left alone.
+  //
+  // This is what makes a pipeline worth having. Auto-update deploys whatever
+  // lands on the branch; without a gate, a broken commit reaches production and
+  // the first anyone knows is a customer noticing. Pipelines are opt-in
+  // (status 'active' + a deploy/push trigger), so a project with none — or with
+  // drafts — deploys exactly as before.
+  const gating = await db.pipeline.count({ where: { projectId, status: 'active' } })
+  await runStage(
+    'run_checks',
+    'Running pipeline checks…',
+    async () => {
+      await withConnection(creds, async (client) => {
+        const res = await runPreDeployChecks(projectId, deployPath, client, {
+          commit: project.sourceCommit,
+          branch: project.sourceBranch,
+          onLog: stageLog,
+        })
+        if (!res.ok) {
+          throw new Error(
+            `Pipeline checks failed, deployment stopped before the container was replaced. ` +
+              `The running site is untouched. Failed: ${res.failures.join('; ')}`
+          )
+        }
+        if (res.ran > 0) stageLog(`All checks passed across ${res.ran} pipeline(s).`)
+      })
+    },
+    gating === 0
+      ? { skip: true, skipReason: 'No active pipeline for this project' }
+      : {}
+  )
 
   // Start container.
   await runStage('start_container', 'Starting container…', async () => {

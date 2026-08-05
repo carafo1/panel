@@ -172,3 +172,149 @@ export async function reconcileStaleRuns(pipelineId: string): Promise<void> {
     /* best-effort */
   }
 }
+
+/* ── Pre-deploy gate ───────────────────────────────────────────────────────
+ *
+ * The runner above executes stages with `docker exec` against the container
+ * that is ALREADY RUNNING — that is, against the code already in production.
+ * Useful for an ad-hoc command, useless as a check: by the time it runs, the
+ * change it was meant to vet is live.
+ *
+ * This runs the same stages against the image that was just built and has not
+ * been started yet, from inside the deploy stage, before the container is
+ * swapped. A failure aborts the deployment, `docker compose up` never runs, and
+ * the previous container keeps serving.
+ *
+ * `docker compose run --rm --no-deps app` is used rather than a raw
+ * `docker run` so the checks see exactly the image, environment and network the
+ * real service will get, without publishing its ports or starting its
+ * dependencies.
+ */
+
+/** Does this pipeline want to gate deployments? */
+function gatesDeploys(pipeline: { status: string; triggerEvents: string }): boolean {
+  if (pipeline.status !== 'active') return false
+  let events: unknown = pipeline.triggerEvents
+  try {
+    const parsed = JSON.parse(pipeline.triggerEvents)
+    if (Array.isArray(parsed)) events = parsed
+  } catch {
+    /* stored as a bare string */
+  }
+  const list = Array.isArray(events) ? events.map(String) : [String(events)]
+  return list.some((e) => e === 'deploy' || e === 'push')
+}
+
+export interface PreDeployResult {
+  ok: boolean
+  ran: number
+  failures: string[]
+}
+
+/**
+ * Run every active gating pipeline for this project against the freshly built
+ * image. Returns ok:false with a human-readable reason for each failure.
+ *
+ * `client` is the caller's live SSH connection, so this adds no new session.
+ */
+export async function runPreDeployChecks(
+  projectId: string,
+  deployPath: string,
+  client: Parameters<typeof exec>[0],
+  opts: { commit?: string | null; branch?: string | null; onLog?: (m: string) => void } = {}
+): Promise<PreDeployResult> {
+  const log = (m: string) => opts.onLog?.(m)
+  const out: PreDeployResult = { ok: true, ran: 0, failures: [] }
+
+  const pipelines = await db.pipeline.findMany({ where: { projectId } })
+  const gating = pipelines.filter(gatesDeploys)
+  if (gating.length === 0) return out
+
+  for (const pipeline of gating) {
+    let stages: PipelineStageDef[] = []
+    try {
+      const parsed = JSON.parse(pipeline.stages)
+      if (Array.isArray(parsed)) stages = parsed as PipelineStageDef[]
+    } catch {
+      /* malformed config is not a reason to block a deploy */
+    }
+    if (stages.length === 0) continue
+
+    const ordered = [...stages].sort((a, b) => a.order - b.order)
+    const results: PipelineStageResult[] = ordered.map((s) => ({
+      name: s.name,
+      type: s.type,
+      status: 'skipped',
+      duration: 0,
+      output: '',
+    }))
+
+    const run = await db.pipelineRun.create({
+      data: {
+        pipelineId: pipeline.id,
+        status: 'running',
+        trigger: 'deploy',
+        commit: opts.commit || null,
+        branch: opts.branch || pipeline.triggerBranch,
+        stages: JSON.stringify(results),
+      },
+      select: { id: true },
+    })
+
+    out.ran++
+    const startedMs = Date.now()
+    let overall: 'success' | 'failed' = 'success'
+    log(`Pipeline "${pipeline.name}": ${ordered.length} check(s) against the new image`)
+
+    for (let i = 0; i < ordered.length; i++) {
+      const stage = ordered[i]
+      const command = stage.config?.command?.trim()
+      const t0 = Date.now()
+      if (!command) {
+        results[i] = { name: stage.name, type: stage.type, status: 'failed', duration: 0, output: 'No command configured for this stage.' }
+        overall = 'failed'
+        out.failures.push(`${pipeline.name} → ${stage.name}: no command configured`)
+        break
+      }
+
+      const wrapped =
+        `cd ${shellQuote(deployPath)} && docker compose run --rm --no-deps ` +
+        `--entrypoint sh app -c ${shellQuote(command)} 2>&1`
+      const r = await exec(client, wrapped, { timeoutMs: STAGE_TIMEOUT_MS })
+      const duration = Math.round((Date.now() - t0) / 1000)
+      const output = (r.stdout || r.stderr || '').slice(-MAX_STAGE_OUTPUT)
+
+      if (r.exitCode === 0) {
+        results[i] = { name: stage.name, type: stage.type, status: 'success', duration, output: output || '(no output)' }
+        log(`  ✓ ${stage.name} (${duration}s)`)
+      } else {
+        results[i] = { name: stage.name, type: stage.type, status: 'failed', duration, output: output || `Command exited with code ${r.exitCode}` }
+        overall = 'failed'
+        out.failures.push(`${pipeline.name} → ${stage.name} (exit ${r.exitCode})`)
+        log(`  ✗ ${stage.name} failed (${duration}s)`)
+        log(output.slice(-1500))
+        break
+      }
+    }
+
+    const completedAt = new Date()
+    await db.pipelineRun
+      .update({
+        where: { id: run.id },
+        data: {
+          status: overall,
+          stages: JSON.stringify(results),
+          completedAt,
+          duration: Math.round((Date.now() - startedMs) / 1000),
+        },
+      })
+      .catch(() => {})
+    await db.pipeline
+      .update({ where: { id: pipeline.id }, data: { lastRunAt: completedAt, lastRunStatus: overall } })
+      .catch(() => {})
+
+    if (overall === 'failed') out.ok = false
+  }
+
+  return out
+}
