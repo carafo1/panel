@@ -59,13 +59,11 @@ export async function POST(
     let branch = 'main'
     let commit: string | undefined
     try {
+      // branch and commit are both optional, so there is nothing a body is
+      // required FOR. Demanding one meant the panel's own Deploy button — which
+      // sends headers and no body — got 400 "A JSON body is required" every
+      // time, while the same request with `{}` deployed fine.
       const body = await request.json().catch(() => null)
-      if (!body || typeof body !== 'object') {
-        return NextResponse.json(
-          { error: 'A JSON body is required' },
-          { status: 400 }
-        )
-      }
       if (body && typeof body.branch === 'string') branch = body.branch
       if (body && typeof body.commit === 'string') commit = body.commit
     } catch {

@@ -1232,13 +1232,16 @@ function ProjectDetailView({
       const res = await fetch(`/api/hosting/${projectId}/deploy`, {
         method: 'POST',
         headers: getAuthHeaders(),
+        body: JSON.stringify({}),
       })
       const data = await res.json()
       if (!res.ok) {
         toast.error(data.error || 'Deploy failed')
         return
       }
-      toast.success('Deployment triggered!')
+      toast.success('Deployment triggered!', {
+        description: 'Watch progress in the Deployments tab.',
+      })
       fetchProject()
       onRefresh()
     } catch {
@@ -1676,7 +1679,12 @@ function ProjectDetailView({
         <div className="flex items-center gap-2 flex-wrap">
           <Button
             onClick={handleDeploy}
-            disabled={deploying || project.status !== 'running'}
+            // Was `status !== 'running'`, which greyed this out for a stopped or
+            // errored site — the two states you most need to redeploy from. The
+            // API allows running | stopped | error | creating | building |
+            // deploying, and refuses a genuine overlap with 409, so the button
+            // only has to keep up with it.
+            disabled={deploying || project.status === 'deleting'}
             className="bg-indigo-600 hover:bg-indigo-700 text-white"
           >
             {deploying ? (
@@ -1684,7 +1692,7 @@ function ProjectDetailView({
             ) : (
               <Rocket className="size-4 mr-2" />
             )}
-            Deploy
+            {project.lastDeployment ? 'Redeploy' : 'Deploy'}
           </Button>
           <Button variant="outline" onClick={handleStop} disabled={project.status !== 'running'}>
             <StopCircle className="size-4 mr-2" />
@@ -2027,7 +2035,7 @@ function ProjectDetailView({
               <Button
                 size="sm"
                 onClick={handleDeploy}
-                disabled={deploying || project.status !== 'running'}
+                disabled={deploying || project.status === 'deleting'}
                 className="mt-4 bg-indigo-600 hover:bg-indigo-700 text-white h-8 text-xs"
               >
                 {deploying ? (
@@ -2608,6 +2616,7 @@ function ProjectDetailView({
                       const res = await fetch(`/api/hosting/${projectId}/deploy`, {
                         method: 'POST',
                         headers: getAuthHeaders(),
+                        body: JSON.stringify({}),
                       })
                       const data = await res.json()
                       if (res.ok) {
