@@ -734,7 +734,21 @@ async function deployMethodProject(
   // the first anyone knows is a customer noticing. Pipelines are opt-in
   // (status 'active' + a deploy/push trigger), so a project with none — or with
   // drafts — deploys exactly as before.
-  const gating = await db.pipeline.count({ where: { projectId, status: 'active' } })
+  // Count only pipelines that actually gate, so the stage is skipped (rather
+  // than running and finding nothing) for a project whose pipelines are merely
+  // active. See gatesDeploys in lib/pipeline-runner.
+  const gatingRows = await db.pipeline.findMany({
+    where: { projectId, status: 'active' },
+    select: { triggerEvents: true },
+  })
+  const gating = gatingRows.filter((p) => {
+    try {
+      const parsed = JSON.parse(p.triggerEvents)
+      return Array.isArray(parsed) && parsed.map(String).includes('deploy')
+    } catch {
+      return p.triggerEvents === 'deploy'
+    }
+  }).length
   await runStage(
     'run_checks',
     'Running pipeline checks…',

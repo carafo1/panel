@@ -191,7 +191,25 @@ export async function reconcileStaleRuns(pipelineId: string): Promise<void> {
  * dependencies.
  */
 
-/** Does this pipeline want to gate deployments? */
+/**
+ * Does this pipeline want to gate deployments?
+ *
+ * Only the explicit 'deploy' trigger does. This started out accepting 'push'
+ * too, which was wrong twice over.
+ *
+ * Semantically: 'push' means "run this when new code arrives" — a CI run whose
+ * result is information. Gating a release is a different, stronger request and
+ * deserves to be asked for separately.
+ *
+ * Practically: 'active' and 'push' already existed and did nothing, so people
+ * had set them with no idea a gate would later attach to them. Treating those
+ * rows as gates changed the meaning of a setting under the customer and blocked
+ * deployments they had every reason to expect to work — which is exactly what
+ * happened to the first project that had one.
+ *
+ * 'deploy' is a value nothing set before this, so no existing pipeline can
+ * start gating by surprise. Opting in has to be a decision.
+ */
 function gatesDeploys(pipeline: { status: string; triggerEvents: string }): boolean {
   if (pipeline.status !== 'active') return false
   let events: unknown = pipeline.triggerEvents
@@ -202,7 +220,7 @@ function gatesDeploys(pipeline: { status: string; triggerEvents: string }): bool
     /* stored as a bare string */
   }
   const list = Array.isArray(events) ? events.map(String) : [String(events)]
-  return list.some((e) => e === 'deploy' || e === 'push')
+  return list.includes('deploy')
 }
 
 export interface PreDeployResult {
