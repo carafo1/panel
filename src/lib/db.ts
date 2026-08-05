@@ -1,5 +1,34 @@
 import { PrismaClient } from '@prisma/client'
 
+/**
+ * SQLite concurrency.
+ *
+ * The database shipped on `journal_mode = delete` with `busy_timeout = 0`,
+ * which is the worst pairing available: a rollback-journal writer takes an
+ * EXCLUSIVE lock on the whole file, and a zero timeout means any concurrent
+ * reader gives up instantly rather than waiting. That is why reads returned
+ *
+ *     Error: in prepare, database is locked (5)
+ *
+ * whenever a deployment was writing stage updates — and it would have got
+ * worse with concurrent deploys, not better.
+ *
+ * WAL lets readers continue while a writer works, and busy_timeout makes the
+ * remaining writer-vs-writer overlaps wait instead of failing. journal_mode is
+ * persisted in the file header, so it survives restarts; busy_timeout is
+ * per-connection and has to be set each time.
+ */
+async function applySqlitePragmas(client: PrismaClient): Promise<void> {
+  if (!(process.env.DATABASE_URL || '').startsWith('file:')) return
+  try {
+    await client.$executeRawUnsafe('PRAGMA journal_mode = WAL')
+    await client.$executeRawUnsafe('PRAGMA busy_timeout = 5000')
+    await client.$executeRawUnsafe('PRAGMA synchronous = NORMAL')
+  } catch (err) {
+    console.error('[db] could not apply SQLite pragmas:', err)
+  }
+}
+
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined
   prismaSchemaVersion?: string
@@ -70,3 +99,8 @@ export const db =
   })
 
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db
+
+// Fire-and-forget: the pragmas apply to the connection Prisma opens, and every
+// query after this point benefits. Failing to set them is not a reason to
+// refuse to start — it just leaves the previous, contended behaviour.
+void applySqlitePragmas(db)
