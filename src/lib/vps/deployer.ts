@@ -1410,9 +1410,15 @@ export async function removeProjectContainer(projectId: string): Promise<{ ok: b
           `docker ps -aq --filter name=^${shellQuote(containerName)} | xargs -r docker rm -f 2>&1 || true`,
           { timeoutMs: 30000 }
         )
-        if (project.deployPath) {
-          await exec(client, `rm -rf ${shellQuote(project.deployPath)}`, { timeoutMs: 30000 })
-        }
+        // Derived, not trusted from the row — the same reasoning as
+        // containerName above. deployPath is only written once a deploy gets
+        // far enough to persist it, so a project whose very first deploy failed
+        // at, say, `git clone` had a directory on disk and NULL in the column.
+        // Deleting the project then left the directory behind forever; six such
+        // orphans had accumulated on production.
+        const dirToRemove =
+          project.deployPath || `/opt/deployhub/projects/${project.slug}`
+        await exec(client, `rm -rf ${shellQuote(dirToRemove)}`, { timeoutMs: 30000 })
         // Confirm rather than assume — this function previously reported
         // success without checking anything.
         const check = await exec(
