@@ -1056,6 +1056,12 @@ function ProjectDetailView({
   const [envImportName, setEnvImportName] = useState('')
   const [envImportOverwrite, setEnvImportOverwrite] = useState(true)
   const [envImporting, setEnvImporting] = useState(false)
+  const [envDrift, setEnvDrift] = useState<{
+    pending: boolean
+    keys: string[]
+    needsRebuild: string[]
+  } | null>(null)
+  const [envApplying, setEnvApplying] = useState(false)
   const [envSaving, setEnvSaving] = useState(false)
   const [envDeleteId, setEnvDeleteId] = useState<string | null>(null)
   const [envDeleting, setEnvDeleting] = useState(false)
@@ -1134,6 +1140,7 @@ function ProjectDetailView({
       const data = await res.json()
       if (res.ok) {
         setEnvVars(data.envVars || [])
+        setEnvDrift(data.drift ?? null)
       } else {
         toast.error(data.error || 'Failed to load env vars')
       }
@@ -1401,6 +1408,36 @@ function ProjectDetailView({
       toast.error('Network error during import')
     } finally {
       setEnvImporting(false)
+    }
+  }
+
+  /** Recreate the container with the current variables — no image rebuild. */
+  const handleApplyEnv = async () => {
+    setEnvApplying(true)
+    try {
+      const res = await fetch(`/api/hosting/${projectId}/env/apply`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({}),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        toast.error(data.error || 'Could not apply the environment')
+        return
+      }
+      if (data.needsRebuild?.length) {
+        toast.success('Environment applied', {
+          description: `${data.needsRebuild.length} NEXT_PUBLIC_* value${data.needsRebuild.length === 1 ? '' : 's'} are compiled into the browser bundle and still need a Redeploy.`,
+        })
+      } else {
+        toast.success('Environment applied — the container was recreated.')
+      }
+      fetchEnvVars()
+      fetchProject()
+    } catch {
+      toast.error('Network error while applying the environment')
+    } finally {
+      setEnvApplying(false)
     }
   }
 
@@ -2424,6 +2461,52 @@ function ProjectDetailView({
           </div>
         </CardHeader>
         <CardContent>
+          {envDrift?.pending && (
+            <div className="mb-4 flex flex-col gap-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-900/50 dark:bg-amber-950/20 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600" />
+                <div>
+                  <p className="font-medium text-amber-900 dark:text-amber-200">
+                    {envDrift.keys.length} variable{envDrift.keys.length === 1 ? '' : 's'} not yet in the running container
+                  </p>
+                  <p className="mt-0.5 text-xs text-amber-800/80 dark:text-amber-200/70">
+                    Variables reach the app only when its container is recreated.
+                    {envDrift.needsRebuild.length > 0 && (
+                      <>
+                        {' '}
+                        {envDrift.needsRebuild.length} of them start with{' '}
+                        <span className="font-mono">NEXT_PUBLIC_</span> and are
+                        compiled into the browser bundle — those need a full
+                        Redeploy.
+                      </>
+                    )}
+                  </p>
+                  <p className="mt-1 font-mono text-[11px] text-amber-800/70 dark:text-amber-200/60">
+                    {envDrift.keys.slice(0, 6).join(', ')}
+                    {envDrift.keys.length > 6 ? ` +${envDrift.keys.length - 6} more` : ''}
+                  </p>
+                </div>
+              </div>
+              <Button
+                size="sm"
+                onClick={handleApplyEnv}
+                disabled={envApplying}
+                className="h-8 shrink-0 bg-amber-600 text-white hover:bg-amber-700 text-xs"
+              >
+                {envApplying ? (
+                  <>
+                    <Loader2 className="size-3.5 mr-1 animate-spin" />
+                    Applying…
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="size-3.5 mr-1" />
+                    Apply now
+                  </>
+                )}
+              </Button>
+            </div>
+          )}
           {envLoading ? (
             <div className="space-y-3">
               <Skeleton className="h-10 w-full" />

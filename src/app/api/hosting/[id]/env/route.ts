@@ -76,6 +76,21 @@ export async function GET(
     const url = new URL(request.url)
     const reveal = url.searchParams.get('reveal') === 'true'
 
+    // Has anything changed since the container was last built from these?
+    //
+    // Environment variables only reach the container when docker-compose.yml is
+    // regenerated, so editing one and doing nothing else leaves the running app
+    // on the old values — with no sign anything is pending. That is exactly how
+    // a site ended up serving 503s after a .env import: 29 variables saved, and
+    // a container that still had two.
+    //
+    // Comparing timestamps costs nothing. Asking the server what the container
+    // actually has would mean an SSH round trip on every load of this tab.
+    const lastApplied = project.lastDeployedAt
+    const pending = envVars.filter(
+      (v) => !lastApplied || v.updatedAt > lastApplied
+    )
+
     return NextResponse.json({
       envVars: envVars.map((v) => {
         const plain = revealValue(v.value, v.encrypted)
@@ -88,6 +103,16 @@ export async function GET(
           updatedAt: v.updatedAt.toISOString(),
         }
       }),
+      drift: {
+        pending: pending.length > 0,
+        keys: pending.map((v) => v.key),
+        lastAppliedAt: lastApplied ? lastApplied.toISOString() : null,
+        // Values compiled into the browser bundle need a real rebuild, not a
+        // container recreate — the UI offers the right action for each.
+        needsRebuild: pending
+          .map((v) => v.key)
+          .filter((k) => k.startsWith('NEXT_PUBLIC_')),
+      },
     })
   } catch (error) {
     console.error('Get env vars error:', error)
