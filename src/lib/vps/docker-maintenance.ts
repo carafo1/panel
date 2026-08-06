@@ -225,8 +225,24 @@ export async function reapOrphanedProjectResources(
     dbRows.flatMap((d) => [d.host, d.externalRef]).filter((x): x is string => !!x)
   )
 
-  const belongsToLiveProject = (name: string) =>
-    referenced.has(name) || slugs.some((s) => name.includes(s))
+  /**
+   * Exact matching, deliberately.
+   *
+   * A substring test is wrong in both directions here. `deployhub-db-edmaapsa-
+   * 9a262558` contains the live slug `edma`, so `includes` treated a genuinely
+   * orphaned 172 MB database as belonging to a live project and skipped it —
+   * the very resource this function exists to remove. Loose matching in the
+   * other direction is worse: it would delete something live.
+   *
+   * Containers the panel creates are named `deployhub-<slug>`; databases carry
+   * generated names and are recognised only by the row that references them.
+   * Images are `<slug>-app`.
+   */
+  const liveContainerNames = new Set(slugs.map((s) => `deployhub-${s}`))
+  const liveImageRepos = new Set(slugs.map((s) => `${s}-app`))
+  const containerBelongsToLiveProject = (name: string) =>
+    referenced.has(name) || liveContainerNames.has(name)
+  const imageBelongsToLiveProject = (repo: string) => liveImageRepos.has(repo)
 
   try {
     const creds: SshCredentials = await getServerCredentials(serverId)
@@ -239,8 +255,37 @@ export async function reapOrphanedProjectResources(
         `docker ps -a --filter name=^deployhub- --format '{{.Names}}' 2>/dev/null`,
         { timeoutMs: 30000 }
       )
-      for (const name of list.stdout.split('\n').map((s) => s.trim()).filter(Boolean)) {
-        if (belongsToLiveProject(name)) continue
+      const names = list.stdout.split('\n').map((s) => s.trim()).filter(Boolean)
+
+      // SANITY GUARD — refuse to act on a host this database does not describe.
+      //
+      // This function decides what to destroy by asking the panel's database
+      // what still exists. Point it at the wrong database and everything on the
+      // host looks orphaned. That is not hypothetical: the first dry run was
+      // executed from the development tree, whose DATABASE_URL is a different
+      // SQLite file listing different projects, and it duly proposed deleting
+      // the live customer's database container and application image.
+      //
+      // If the database knows of projects but not one of them has a container
+      // here, the two are describing different worlds and nothing should be
+      // removed on the strength of it.
+      if (slugs.length > 0 && names.length > 0) {
+        const intersects = names.some(
+          (n) => liveContainerNames.has(n) || referenced.has(n)
+        )
+        if (!intersects) {
+          return {
+            ...out,
+            ran: false,
+            detail:
+              `refusing to reap: this database lists ${slugs.length} project(s) ` +
+              `(${slugs.slice(0, 3).join(', ')}) and none of them has a container ` +
+              `on this host — it is almost certainly not the database this server runs on`,
+          }
+        }
+      }
+      for (const name of names) {
+        if (containerBelongsToLiveProject(name)) continue
         const info = await exec(
           client,
           `docker inspect ${shellQuote(name)} --format '{{.Created}}' 2>/dev/null`,
@@ -274,7 +319,7 @@ export async function reapOrphanedProjectResources(
       )
       for (const ref of imgs.stdout.split('\n').map((s) => s.trim()).filter(Boolean)) {
         const repo = ref.split(':')[0]
-        if (belongsToLiveProject(repo)) continue
+        if (imageBelongsToLiveProject(repo)) continue
         const entry = { name: ref, removed: false }
         if (!dryRun) {
           const rm = await exec(client, `docker rmi -f ${shellQuote(ref)} 2>&1`, {
@@ -295,6 +340,49 @@ export async function reapOrphanedProjectResources(
   } catch (err) {
     return { ...out, detail: err instanceof Error ? err.message : String(err) }
   }
+}
+
+/**
+ * Reap orphans on every active server. Driven by the same hourly sweep as
+ * cleanupAllServers.
+ *
+ * A seven-day age floor rather than the one-day default: this removes a
+ * customer's database container, and a week is long enough that anything
+ * deleted by mistake is noticed while the nightly backups still hold it. The
+ * resources it touches have no row in the panel at all, so nothing in the
+ * product can reach them either way.
+ */
+export async function reapOrphansAllServers(): Promise<{
+  servers: number
+  containers: number
+  images: number
+  refused: number
+}> {
+  const servers = await db.server.findMany({
+    where: { status: 'active' },
+    select: { id: true, name: true },
+  })
+  let containers = 0
+  let images = 0
+  let refused = 0
+  for (const s of servers) {
+    const r = await reapOrphanedProjectResources(s.id, {
+      dryRun: false,
+      minAgeHours: 168,
+    }).catch(() => null)
+    if (!r) continue
+    if (!r.ran) {
+      refused++
+      console.warn(`[orphan-reap] ${s.name}: ${r.detail}`)
+      continue
+    }
+    containers += r.containers.filter((c) => c.removed).length
+    images += r.images.filter((i) => i.removed).length
+    if (r.containers.length || r.images.length) {
+      console.warn(`[orphan-reap] ${s.name}: ${r.detail}`)
+    }
+  }
+  return { servers: servers.length, containers, images, refused }
 }
 
 /** Run the cleanup across every active server. Driven by the hourly sweep. */
