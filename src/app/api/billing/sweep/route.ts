@@ -10,7 +10,7 @@ import {
 } from '@/lib/email-lifecycle'
 import { collectAllUsage } from '@/lib/usage'
 import { pruneAllBackups } from '@/lib/vps/backups'
-import { cleanupAllServers } from '@/lib/vps/docker-maintenance'
+import { cleanupAllServers, reapOrphansAllServers } from '@/lib/vps/docker-maintenance'
 import { recordHeartbeat } from '@/lib/health'
 
 /**
@@ -105,6 +105,15 @@ export async function POST(request: Request) {
     const dockerCleanup = await cleanupAllServers().catch((err) => {
       console.error('[billing-sweep] docker cleanup failed:', err)
       return { servers: 0, reclaimedBytes: 0, orphanVolumes: 0 }
+    })
+
+    // Docker's own pruning cannot see these: a deleted project's database
+    // container is running and its image is tagged, so neither looks like
+    // garbage. Left alone they simply accumulate — 172 MB of database and
+    // 301 MB of images had been sitting here for weeks.
+    const orphanReap = await reapOrphansAllServers().catch((err) => {
+      console.error('[billing-sweep] orphan reap failed:', err)
+      return { servers: 0, containers: 0, images: 0, refused: 0 }
     })
 
     const reminded: string[] = []
