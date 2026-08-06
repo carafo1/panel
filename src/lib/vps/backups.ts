@@ -762,7 +762,14 @@ export async function deleteBackup(
       await withConnection(creds, async (client) => {
         await exec(
           client,
-          `rm -f ${shellQuote(backupPath)} ${shellQuote(backupPath + '.*')} 2>/dev/null; true`,
+          // The `.*` must sit OUTSIDE the quotes. shellQuote wraps anything
+          // containing a metacharacter in single quotes, so quoting the whole
+          // pattern turned the glob into a literal filename: `rm -f 'x.tar.gz.*'`
+          // matches a file actually called "x.tar.gz.*", which never exists.
+          // The archive itself was removed (its path has no metacharacter) while
+          // every sibling database dump survived — nine of them, 6.2 MB, were
+          // still on disk for a project deleted days earlier.
+          `rm -f ${shellQuote(backupPath)} ${shellQuote(backupPath)}.* 2>/dev/null; true`,
           { timeoutMs: 15000 }
         )
       })

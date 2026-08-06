@@ -229,11 +229,17 @@ export async function getProjectResourceUsage(
       // the plans advertise 100k/300k/800k and nothing measured them at all.
       let storageUsedGB = 0
       let inodesUsed = 0
-      if (project.deployPath) {
+      // Derived when the column is empty — the third instance of this pattern.
+      // A project that has not persisted deployPath still occupies a directory,
+      // and reporting 0 GB for it means the usage bar and the disk-overage
+      // check both under-count exactly the projects most likely to be broken.
+      const measurePath =
+        project.deployPath || `/opt/deployhub/projects/${project.slug}`
+      {
         const usage = await exec(
           client,
-          `du -sb ${shellQuote(project.deployPath)} 2>/dev/null | cut -f1; ` +
-            `find ${shellQuote(project.deployPath)} -xdev 2>/dev/null | wc -l`,
+          `du -sb ${shellQuote(measurePath)} 2>/dev/null | cut -f1; ` +
+            `find ${shellQuote(measurePath)} -xdev 2>/dev/null | wc -l`,
           { timeoutMs: 60000 }
         )
         const [bytesLine, inodeLine] = usage.stdout.trim().split(/\r?\n/)
