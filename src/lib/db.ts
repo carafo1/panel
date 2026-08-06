@@ -20,12 +20,24 @@ import { PrismaClient } from '@prisma/client'
  */
 async function applySqlitePragmas(client: PrismaClient): Promise<void> {
   if (!(process.env.DATABASE_URL || '').startsWith('file:')) return
-  try {
-    await client.$executeRawUnsafe('PRAGMA journal_mode = WAL')
-    await client.$executeRawUnsafe('PRAGMA busy_timeout = 5000')
-    await client.$executeRawUnsafe('PRAGMA synchronous = NORMAL')
-  } catch (err) {
-    console.error('[db] could not apply SQLite pragmas:', err)
+  // $queryRawUnsafe, not $executeRawUnsafe: `PRAGMA journal_mode = WAL` answers
+  // with a row ("wal"), and execute refuses any result on SQLite with
+  // "Execute returned results, which is not allowed in SQLite".
+  //
+  // That threw on the first statement and, because all three shared one try
+  // block, silently skipped the other two — so busy_timeout stayed at 0 while
+  // the log said only "could not apply SQLite pragmas". Each one is now
+  // independent, so a failure costs one setting rather than the rest.
+  for (const pragma of [
+    'journal_mode = WAL',
+    'busy_timeout = 5000',
+    'synchronous = NORMAL',
+  ]) {
+    try {
+      await client.$queryRawUnsafe(`PRAGMA ${pragma}`)
+    } catch (err) {
+      console.error(`[db] could not apply PRAGMA ${pragma}:`, err)
+    }
   }
 }
 

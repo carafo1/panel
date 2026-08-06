@@ -27,6 +27,7 @@ import {
   withConnection,
   exec,
   isServerInDemoMode,
+  shellQuote,
   type SshCredentials,
 } from './ssh'
 import { getServerCredentials } from './provisioner'
@@ -156,6 +157,143 @@ export async function cleanupDocker(
       ...empty,
       detail: err instanceof Error ? err.message : String(err),
     }
+  }
+}
+
+/**
+ * Remove containers and images belonging to projects that no longer exist.
+ *
+ * cleanupDocker above prunes what Docker itself considers garbage: untagged
+ * images, containers stopped for a day, old build cache. That misses the two
+ * things a deleted project actually leaves behind, because neither looks like
+ * garbage to Docker:
+ *
+ *   - a database container, which is RUNNING, so container prune skips it;
+ *   - the project's built image, which is TAGGED, so image prune skips it.
+ *
+ * Measured on this host: a MariaDB container holding 172 MB was still running
+ * two weeks after its project was deleted, alongside 301 MB of images for
+ * projects that no longer existed. Nothing in the system would ever have
+ * removed them, and with the panel rows gone nothing pointed at them either.
+ *
+ * Deleting a live database is not something to get wrong, so every condition
+ * must hold before anything is touched:
+ *
+ *   - the name matches the panel's own `deployhub-` prefix;
+ *   - no WebsiteDatabase row references it, by host or by externalRef;
+ *   - no live project's slug appears in the name;
+ *   - it was created more than `minAgeHours` ago, so a deploy in flight — which
+ *     creates the container before it writes the row — is never caught.
+ *
+ * `dryRun` is the default. The caller has to ask for deletion explicitly.
+ */
+export interface OrphanReapResult {
+  ran: boolean
+  dryRun: boolean
+  containers: Array<{ name: string; sizeHint: string; removed: boolean }>
+  images: Array<{ name: string; removed: boolean }>
+  detail: string
+}
+
+export async function reapOrphanedProjectResources(
+  serverId: string,
+  opts: { dryRun?: boolean; minAgeHours?: number } = {}
+): Promise<OrphanReapResult> {
+  const dryRun = opts.dryRun !== false
+  const minAgeHours = opts.minAgeHours ?? 24
+  const out: OrphanReapResult = {
+    ran: false,
+    dryRun,
+    containers: [],
+    images: [],
+    detail: '',
+  }
+
+  const server = await db.server.findUnique({ where: { id: serverId } })
+  if (!server) return { ...out, detail: 'server not found' }
+  if (isServerInDemoMode(server)) return { ...out, detail: 'demo mode' }
+
+  // What the panel still knows about. Slugs guard the app containers and
+  // images; the database rows guard the database containers by their real
+  // names, which do not always contain the slug.
+  const projects = await db.project.findMany({ select: { slug: true } })
+  const slugs = projects.map((p) => p.slug).filter(Boolean)
+  const dbRows = await db.websiteDatabase.findMany({
+    select: { host: true, externalRef: true },
+  })
+  const referenced = new Set(
+    dbRows.flatMap((d) => [d.host, d.externalRef]).filter((x): x is string => !!x)
+  )
+
+  const belongsToLiveProject = (name: string) =>
+    referenced.has(name) || slugs.some((s) => name.includes(s))
+
+  try {
+    const creds: SshCredentials = await getServerCredentials(serverId)
+    return await withConnection(creds, async (client) => {
+      const cutoffMs = Date.now() - minAgeHours * 3600_000
+
+      // ── containers ────────────────────────────────────────────────────
+      const list = await exec(
+        client,
+        `docker ps -a --filter name=^deployhub- --format '{{.Names}}' 2>/dev/null`,
+        { timeoutMs: 30000 }
+      )
+      for (const name of list.stdout.split('\n').map((s) => s.trim()).filter(Boolean)) {
+        if (belongsToLiveProject(name)) continue
+        const info = await exec(
+          client,
+          `docker inspect ${shellQuote(name)} --format '{{.Created}}' 2>/dev/null`,
+          { timeoutMs: 15000 }
+        )
+        const created = Date.parse(info.stdout.trim())
+        if (Number.isFinite(created) && created > cutoffMs) continue // too new
+
+        const sz = await exec(
+          client,
+          `docker ps -a --filter name=^${shellQuote(name)}$ --format '{{.Size}}' 2>/dev/null`,
+          { timeoutMs: 15000 }
+        )
+        const entry = { name, sizeHint: sz.stdout.trim() || 'unknown', removed: false }
+        if (!dryRun) {
+          const rm = await exec(
+            client,
+            `docker rm -f -v ${shellQuote(name)} 2>&1`,
+            { timeoutMs: 60000 }
+          )
+          entry.removed = rm.exitCode === 0
+        }
+        out.containers.push(entry)
+      }
+
+      // ── images ────────────────────────────────────────────────────────
+      const imgs = await exec(
+        client,
+        `docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -E -- '-app:' || true`,
+        { timeoutMs: 30000 }
+      )
+      for (const ref of imgs.stdout.split('\n').map((s) => s.trim()).filter(Boolean)) {
+        const repo = ref.split(':')[0]
+        if (belongsToLiveProject(repo)) continue
+        const entry = { name: ref, removed: false }
+        if (!dryRun) {
+          const rm = await exec(client, `docker rmi -f ${shellQuote(ref)} 2>&1`, {
+            timeoutMs: 60000,
+          })
+          entry.removed = rm.exitCode === 0
+        }
+        out.images.push(entry)
+      }
+
+      out.ran = true
+      out.detail = dryRun
+        ? `${out.containers.length} container(s) and ${out.images.length} image(s) orphaned — dry run, nothing removed`
+        : `removed ${out.containers.filter((c) => c.removed).length} container(s), ` +
+          `${out.images.filter((i) => i.removed).length} image(s)`
+      return out
+    })
+  } catch (err) {
+    return { ...out, detail: err instanceof Error ? err.message : String(err) }
   }
 }
 
