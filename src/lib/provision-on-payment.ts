@@ -132,6 +132,10 @@ export async function provisionForPayment(
       let projectId =
         typeof meta.projectId === 'string' && meta.projectId ? meta.projectId : null
 
+      // Honour the customer's choice from checkout. Defaults to auto: someone
+      // who has just paid expects their site to come up without a second step.
+      const autoDeploy = meta.deployMode !== 'manual'
+
       if (!projectId) {
         const baseName =
           (typeof meta.projectName === 'string' && meta.projectName.trim()) ||
@@ -150,14 +154,25 @@ export async function provisionForPayment(
             framework:
               typeof meta.framework === 'string' ? meta.framework : 'nextjs',
             stack: frameworkToStack(meta.framework),
-            status: 'creating',
+            status: autoDeploy ? 'creating' : 'stopped',
             subdomain: `${slug}.${BRAND_DOMAIN}`,
             serverId: server?.id || null,
             sslEnabled: true,
-            autoDeploy: true,
+            autoDeploy,
           },
         })
         projectId = project.id
+      }
+
+      // Manual: the purchase is fulfilled — the project and its subdomain
+      // exist — but nothing is built until the owner presses Deploy. No
+      // Deployment row, so the UI does not show a build that will never run.
+      if (!autoDeploy) {
+        return {
+          provisioned: true,
+          detail: `project ${projectId} created; awaiting a manual deploy`,
+          projectId,
+        }
       }
 
       const deployment = await db.deployment.create({

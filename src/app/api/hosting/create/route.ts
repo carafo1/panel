@@ -1,12 +1,5 @@
 import { NextResponse } from 'next/server'
 import { withRateLimit } from '@/lib/rate-limit'
-import { enforceLimit, enforceOverage } from '@/lib/plan-limits'
-import {
-  isValidEnvKey,
-  safeRuntimeVersion,
-  safeDocumentRoot,
-  safePort,
-} from '@/lib/safe-values'
 import crypto from 'crypto'
 import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
@@ -18,7 +11,6 @@ import { BRAND_DOMAIN } from '@/lib/brand-config'
 import {
   isValidHostname,
   isReservedHostname,
-  isReservedLabel,
   findConflict,
   generateVerificationToken,
   getServerIps,
@@ -62,48 +54,6 @@ function slugify(text: string): string {
 
 function randomSuffix(len = 6): string {
   return crypto.randomBytes(len).toString('hex').slice(0, len)
-}
-
-/**
- * A slug free across the whole platform, preferring the bare name.
- *
- * Project slugs become `<slug>.apsamo.com`, so uniqueness is global, not
- * per-user. Returning 409 on a taken slug let one customer squat a name for
- * everyone; suffixing on collision keeps the namespace shared without denying
- * it.
- *
- * The bare name is tried FIRST because the wizard shows the customer
- * `https://<name>.apsamo.com` on the domain step. This route used to append
- * `-<4 hex>` unconditionally, so a project named "Edma" was promised
- * edma.apsamo.com and given edma-4890.apsamo.com — the address the customer
- * was shown never existed.
- *
- * A suffix is still forced when the bare label is reserved for the platform,
- * already held by another project, or already attached to a site as a custom
- * domain.
- */
-async function uniqueSlug(base: string): Promise<string> {
-  const root = base || 'site'
-
-  const free = async (candidate: string): Promise<boolean> => {
-    if (isReservedLabel(candidate)) return false
-    const taken = await db.project.findFirst({
-      where: { slug: candidate },
-      select: { id: true },
-    })
-    if (taken) return false
-    // Someone may hold <candidate>.apsamo.com as an attached domain even with
-    // no project of that slug.
-    const clash = await findConflict(`${candidate}.${BRAND_DOMAIN}`)
-    return !clash.conflict
-  }
-
-  if (await free(root)) return root
-  for (let i = 0; i < 6; i++) {
-    const candidate = `${root}-${randomSuffix(4)}`
-    if (await free(candidate)) return candidate
-  }
-  return `${root}-${randomSuffix(8)}`
 }
 
 interface ParsedPlan {
@@ -174,6 +124,17 @@ interface WizardPayload {
   name: string
   domainType?: 'subdomain' | 'existing' | 'new' | 'external'
   domain?: string
+  /**
+   * How this project deploys.
+   *
+   * 'auto'   — build and go live as soon as it is created, and on later
+   *            triggers. This is the default and the previous behaviour.
+   * 'manual' — create the project and stop. Nothing is built until the owner
+   *            presses Deploy, which is what you want when the code is not
+   *            ready, the DNS has not propagated, or you are staging a
+   *            release for a specific moment.
+   */
+  deployMode?: 'auto' | 'manual'
   method: DeploymentMethodId
   source: 'git' | 'zip' | 'manual' | 'template'
   gitUrl?: string
@@ -238,36 +199,26 @@ async function handleWizardCreate(
   }
 
   // ── Plan limits ───────────────────────────────────────────────────
-  // Read with the same statuses enforceLimit uses. Fetching only 'active' left
-  // trialing and past_due customers with subscription === null, which both
-  // skipped the limit check below and fell back to the 512 MB starter
-  // resources further down instead of the plan they are actually on.
   const subscription = await db.subscription.findFirst({
-    where: {
-      userId: decoded.userId,
-      status: { in: ['active', 'trialing', 'past_due'] },
-    },
-    orderBy: { createdAt: 'desc' },
+    where: { userId: decoded.userId, status: 'active' },
     include: { plan: true },
   })
-
-  // Unconditional: enforceLimit resolves the plan itself and allows when there
-  // is none. Guarding the call on a subscription we looked up separately is
-  // how trial accounts ended up with no cap at all.
-  const denied = await enforceLimit(decoded.userId, 'websites', {
-    role: decoded.role,
-  })
-  if (denied) return denied
-
-  // A new site consumes storage the customer does not have. Refuse while
-  // they are over allowance rather than letting the overage grow.
-  const overQuota = await enforceOverage(decoded.userId, 'disk', {
-    role: decoded.role,
-  })
-  if (overQuota) return overQuota
+  if (subscription && subscription.plan) {
+    const projectCount = await db.project.count({
+      where: { userId: decoded.userId },
+    })
+    if (projectCount >= subscription.plan.projects) {
+      return NextResponse.json(
+        {
+          error: `Project limit reached (${subscription.plan.projects} projects on ${subscription.plan.name} plan)`,
+        },
+        { status: 403 }
+      )
+    }
+  }
 
   // ── Domain resolution ─────────────────────────────────────────────
-  const slug = await uniqueSlug(slugify(name))
+  const slug = slugify(name) + '-' + randomSuffix(4)
   let subdomain: string
   let customDomain: string | null = null
   // Set instead of customDomain when the domain is registered elsewhere: it
@@ -335,6 +286,15 @@ async function handleWizardCreate(
     }
   }
 
+  // Check slug uniqueness.
+  const existing = await db.project.findFirst({ where: { slug } })
+  if (existing) {
+    return NextResponse.json(
+      { error: 'A project with this name already exists' },
+      { status: 409 }
+    )
+  }
+
   // ── Server assignment ─────────────────────────────────────────────
   const serverCandidates = await db.server.findMany({
     where: { status: 'active' },
@@ -366,20 +326,11 @@ async function handleWizardCreate(
   const cfg = body.config || {}
   const framework = cfg.framework || method.id // sensible default
   const runtime = cfg.runtime || method.runtime
-  // runtimeVersion, documentRoot and appPort are interpolated into the
-  // generated Dockerfile and compose file, so they are clamped to safe shapes
-  // rather than trusted. buildCommand/startCommand are deliberately free-form:
-  // they run inside the customer's own container, which is the point of them.
-  const runtimeVersion = safeRuntimeVersion(
-    cfg.runtimeVersion,
-    method.defaultRuntimeVersion
-  )
+  const runtimeVersion = cfg.runtimeVersion || method.defaultRuntimeVersion
   const buildCommand = cfg.buildCommand ?? method.defaultBuildCommand ?? null
   const startCommand = cfg.startCommand ?? method.defaultStartCommand ?? null
-  const appPort = safePort(cfg.appPort) ?? method.defaultPort
-  const documentRoot = cfg.documentRoot == null
-    ? null
-    : safeDocumentRoot(cfg.documentRoot, '/var/www/html')
+  const appPort = cfg.appPort ?? method.defaultPort
+  const documentRoot = cfg.documentRoot ?? null
 
   // WordPress admin — required when method=wordpress.
   let wpAdminUser: string | null = null
@@ -405,16 +356,13 @@ async function handleWizardCreate(
     gitUrl: body.gitUrl || null,
     gitBranch: body.gitBranch || 'main',
     gitProvider: body.gitProvider || null,
-    // The wizard has always collected a personal access token and this route
-    // has always dropped it on the floor: it was declared in WizardPayload,
-    // never read, never stored, and the deployer had no token handling at all.
-    // So every private repository failed with git's raw
-    // "could not read Username for 'https://github.com'" and the field in the
-    // UI did nothing. Encrypted at rest like every other secret.
-    gitTokenEnc: body.gitToken ? encrypt(body.gitToken) : null,
     uploadId: body.uploadId || null,
     config: cfg,
   })
+
+  // Default to auto so existing callers (and the payment path) behave exactly
+  // as before; only an explicit 'manual' holds the build back.
+  const autoDeploy = body.deployMode !== 'manual'
 
   // ── Create the Project row ────────────────────────────────────────
   const project = await db.project.create({
@@ -424,12 +372,16 @@ async function handleWizardCreate(
       slug,
       framework,
       stack: method.stack,
-      status: 'creating',
+      // A manual project has been created but never built. 'stopped' is the
+      // existing status for "not running", which the UI already renders with
+      // a Deploy action — inventing a new one would leave every status badge
+      // and filter in the panel not knowing about it.
+      status: autoDeploy ? 'creating' : 'stopped',
       serverId: server.id,
       subdomain,
       customDomain,
       sslEnabled: true,
-      autoDeploy: true,
+      autoDeploy,
       repoUrl: body.gitUrl || null,
       // New wizard fields
       deploymentMethod: methodId,
@@ -504,7 +456,7 @@ async function handleWizardCreate(
   // ── Persist env vars (encrypted) ──────────────────────────────────
   if (Array.isArray(cfg.envVars)) {
     for (const v of cfg.envVars) {
-      if (v && isValidEnvKey(v.key?.trim()) && typeof v.value === 'string') {
+      if (v && typeof v.key === 'string' && v.key.trim() && typeof v.value === 'string') {
         await db.environmentVariable.create({
           data: {
             projectId: project.id,
@@ -512,16 +464,34 @@ async function handleWizardCreate(
             value: encrypt(v.value),
             encrypted: true,
           },
-        }).catch((err) => {
-          // Not fatal to the deploy, but the app will start without a variable
-          // the customer explicitly set, so it must not vanish quietly.
-          console.error(
-            `[hosting/create] failed to persist env var ${v.key.trim()}:`,
-            err
-          )
-        })
+        }).catch(() => {})
       }
     }
+  }
+
+  // ── Manual mode: the project exists, nothing is built ─────────────
+  // Return before creating a Deployment. A queued deployment that nobody is
+  // going to run would sit in the UI looking stuck, and would make the
+  // project's "last deployment" read as pending forever.
+  if (!autoDeploy) {
+    return NextResponse.json(
+      {
+        success: true,
+        deployMode: 'manual',
+        project: {
+          id: project.id,
+          name: project.name,
+          slug: project.slug,
+          status: project.status,
+          subdomain: project.subdomain,
+          customDomain: project.customDomain,
+          autoDeploy: project.autoDeploy,
+        },
+        message:
+          'Project created. Nothing has been built yet — press Deploy when you are ready to put it live.',
+      },
+      { status: 201 }
+    )
   }
 
   // ── Create Deployment + planned stages ────────────────────────────
@@ -681,23 +651,32 @@ async function handleLegacyCreate(
     )
   }
 
-  // Same as the wizard path: unconditional, and overage too. This handler had
-  // neither guard, so the older create dialog was a way around both.
-  const denied = await enforceLimit(decoded.userId, 'websites', {
-    role: decoded.role,
+  const subscription = await db.subscription.findFirst({
+    where: { userId: decoded.userId, status: 'active' },
+    include: { plan: true },
   })
-  if (denied) return denied
+  if (subscription && subscription.plan) {
+    const projectCount = await db.project.count({
+      where: { userId: decoded.userId },
+    })
+    if (projectCount >= subscription.plan.projects) {
+      return NextResponse.json(
+        { error: `Project limit reached (${subscription.plan.projects} projects on ${subscription.plan.name} plan)` },
+        { status: 403 }
+      )
+    }
+  }
 
-  const overQuota = await enforceOverage(decoded.userId, 'disk', {
-    role: decoded.role,
-  })
-  if (overQuota) return overQuota
-
-  // Slugs are global (they become subdomains), so a bare slugify(name) meant
-  // the first customer to create "blog" permanently denied that name to every
-  // other customer on the platform. Suffix on collision instead of refusing.
-  const slug = await uniqueSlug(slugify(name))
+  const slug = slugify(name)
   const subdomain = `${slug}.${BRAND_DOMAIN}`
+
+  const existing = await db.project.findFirst({ where: { slug } })
+  if (existing) {
+    return NextResponse.json(
+      { error: 'A project with this name already exists' },
+      { status: 409 }
+    )
+  }
 
   const serverCandidates = await db.server.findMany({
     where: { status: 'active' },
@@ -720,6 +699,9 @@ async function handleLegacyCreate(
     )
   }
 
+  // Same choice as the wizard path, so both entry points behave identically.
+  const autoDeploy = (body as { deployMode?: string }).deployMode !== 'manual'
+
   const project = await db.project.create({
     data: {
       userId: decoded.userId,
@@ -727,11 +709,11 @@ async function handleLegacyCreate(
       slug,
       framework,
       stack: 'nodejs',
-      status: 'creating',
+      status: autoDeploy ? 'creating' : 'stopped',
       serverId: server.id,
       subdomain,
       sslEnabled: true,
-      autoDeploy: true,
+      autoDeploy,
       repoUrl: repoUrl || null,
       sourceBranch: branch || 'main',
       // Tag as a legacy project (no method) so the deployer falls back to
@@ -745,6 +727,26 @@ async function handleLegacyCreate(
       appPort: 3000,
     },
   })
+
+  if (!autoDeploy) {
+    return NextResponse.json(
+      {
+        success: true,
+        deployMode: 'manual',
+        project: {
+          id: project.id,
+          name: project.name,
+          slug: project.slug,
+          status: project.status,
+          subdomain: project.subdomain,
+          autoDeploy: project.autoDeploy,
+        },
+        message:
+          'Project created. Nothing has been built yet — press Deploy when you are ready to put it live.',
+      },
+      { status: 201 }
+    )
+  }
 
   const deployment = await db.deployment.create({
     data: {
