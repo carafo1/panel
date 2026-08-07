@@ -120,36 +120,6 @@ import {
 } from '@/components/ui/tooltip'
 import { toast } from 'sonner'
 
-/**
- * A plan whose `projects` column is 0 (or null) is UNLIMITED. That is how the
- * catalogue stores it -- Enterprise advertises "Unlimited Websites" and carries
- * projects = 0 -- and how lib/plan-limits.ts reads it on the server.
- *
- * Comparing against the raw column instead turns "unlimited" into "none
- * allowed", which is what greyed out the Create button and printed "1/0" for
- * every Enterprise customer before they could send a single request.
- */
-function projectCap(plan?: { projects?: number | null } | null): number | null {
-  const n = plan?.projects
-  return n === null || n === undefined || n <= 0 ? null : n
-}
-
-function isAtProjectLimit(
-  projectCount: number,
-  plan?: { projects?: number | null } | null
-): boolean {
-  const cap = projectCap(plan)
-  return cap !== null && projectCount >= cap
-}
-
-function projectUsageLabel(
-  projectCount: number,
-  plan?: { projects?: number | null } | null
-): string {
-  const cap = projectCap(plan)
-  return cap === null ? `${projectCount} of unlimited` : `${projectCount}/${cap}`
-}
-
 /* ────────────────────────────────────────────────────────────────────────── */
 /*  Types                                                                       */
 /* ────────────────────────────────────────────────────────────────────────── */
@@ -424,7 +394,7 @@ function PlanLimitsPanel({
       </Card>
     )
   }
-  const atLimit = isAtProjectLimit(projectCount, plan)
+  const atLimit = projectCount >= plan.projects
   return (
     <Card className={atLimit ? 'border-destructive/40 bg-destructive/5' : 'border-dashed'}>
       <CardContent className="p-4 space-y-3">
@@ -438,7 +408,7 @@ function PlanLimitsPanel({
           <div className="flex items-center justify-between">
             <span>Websites</span>
             <span className={atLimit ? 'font-semibold text-destructive' : 'text-foreground'}>
-              {projectUsageLabel(projectCount, plan)}
+              {projectCount}/{plan.projects}
             </span>
           </div>
           <div className="flex items-center justify-between">
@@ -469,7 +439,7 @@ function PlanLimitsPanel({
               variant="outline"
               className="mt-2 h-7 w-full border-destructive/40 text-destructive hover:bg-destructive/10"
               onClick={() => {
-                window.location.href = '/?tab=billing'
+                window.location.href = '/dashboard?tab=billing'
               }}
             >
               Upgrade Plan
@@ -811,6 +781,11 @@ export default function CreateWebsiteWizard({
   /* ── Form state ───────────────────────────────────────────────────────── */
   const [name, setName] = useState('')
   const [domainType, setDomainType] = useState<DomainType>('subdomain')
+  /**
+   * Whether creating the project also builds it. Defaults to 'auto' — the
+   * behaviour before this choice existed, and what most people want.
+   */
+  const [deployMode, setDeployMode] = useState<'auto' | 'manual'>('auto')
   const [existingDomain, setExistingDomain] = useState<string>('')
   const [newDomain, setNewDomain] = useState('')
   const [methodId, setMethodId] = useState<DeploymentMethodId | null>(null)
@@ -842,7 +817,8 @@ export default function CreateWebsiteWizard({
   const [stages, setStages] = useState<DeploymentStageInfo[]>([])
   const [deployError, setDeployError] = useState<string | null>(null)
   const [showCloseConfirm, setShowCloseConfirm] = useState(false)
-  const [deployDone, setDeployDone] = useState<'live' | 'failed' | null>(null)
+  // 'manual' means the project was created but deliberately not built yet.
+  const [deployDone, setDeployDone] = useState<'live' | 'failed' | 'manual' | null>(null)
 
   const logEndRef = useRef<HTMLDivElement>(null)
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -866,7 +842,7 @@ export default function CreateWebsiteWizard({
     return source
   }, [selectedMethod, source])
 
-  const atProjectLimit = isAtProjectLimit(projectCount, plan)
+  const atProjectLimit = !!plan && projectCount >= plan.projects
 
   /* ── Reset on open ────────────────────────────────────────────────────── */
   useEffect(() => {
@@ -1086,6 +1062,7 @@ export default function CreateWebsiteWizard({
       name: name.trim(),
       domainType,
       domain,
+      deployMode,
       method: method.id,
       source: effectiveSource,
       gitUrl: effectiveSource === 'git' ? gitUrl.trim() : undefined,
@@ -1112,6 +1089,7 @@ export default function CreateWebsiteWizard({
     gitProvider,
     gitToken,
     upload,
+    deployMode,
   ])
 
   const handleSubmit = useCallback(async () => {
@@ -1149,6 +1127,18 @@ export default function CreateWebsiteWizard({
         customDomain: data.project.customDomain || null,
       }
       setCreatedProject(proj)
+
+      // Manual mode: nothing was built, so there are no stages to poll.
+      // Polling anyway would spin on an empty list and look like a stuck
+      // deployment.
+      if (data.deployMode === 'manual') {
+        setStages([])
+        setDeploymentId(null)
+        setSubmitting(false)
+        setDeployDone('manual')
+        return
+      }
+
       setDeploymentId(data.deployment?.id || null)
       // Seed initial stages from the response if available, else fallback.
       const initialStages: DeploymentStageInfo[] =
@@ -1437,7 +1427,7 @@ export default function CreateWebsiteWizard({
                     <div className="flex-1">
                       <p className="font-medium text-destructive">Project limit reached</p>
                       <p className="mt-0.5 text-xs text-muted-foreground">
-                        You&apos;re using {projectUsageLabel(projectCount, plan)} websites on the {plan?.name} plan.
+                        You&apos;re using {projectCount}/{plan?.projects ?? '—'} websites on the {plan?.name} plan.
                         Upgrade to deploy more.
                       </p>
                       <Button
@@ -1445,7 +1435,7 @@ export default function CreateWebsiteWizard({
                         variant="outline"
                         className="mt-2 h-7 border-destructive/40 text-destructive hover:bg-destructive/10"
                         onClick={() => {
-                          window.location.href = '/?tab=billing'
+                          window.location.href = '/dashboard?tab=billing'
                         }}
                       >
                         Upgrade Plan
@@ -1507,7 +1497,7 @@ export default function CreateWebsiteWizard({
                         variant="link"
                         className="h-auto p-0 text-primary"
                         onClick={() => {
-                          window.location.href = '/?tab=domains'
+                          window.location.href = '/dashboard?tab=domains'
                         }}
                       >
                         Register one in the Domains tab →
@@ -1832,25 +1822,80 @@ export default function CreateWebsiteWizard({
 
           {/* ─── STEP 4 — REVIEW ────────────────────────────────────────── */}
           {step === 4 && !isProgressView && (
-            <ReviewSummary
-              name={name}
-              domain={
-                domainType === 'subdomain'
-                  ? subdomainPreview
-                  : domainType === 'existing'
-                    ? existingDomain
-                    : newDomain
-              }
-              domainType={domainType}
-              method={selectedMethod}
-              source={effectiveSource}
-              gitUrl={gitUrl}
-              upload={upload}
-              fieldValues={fieldValues}
-              envVars={envVars.filter((v) => v.key.trim())}
-              plan={plan}
-              projectCount={projectCount}
-            />
+            <>
+              <ReviewSummary
+                name={name}
+                domain={
+                  domainType === 'subdomain'
+                    ? subdomainPreview
+                    : domainType === 'existing'
+                      ? existingDomain
+                      : newDomain
+                }
+                domainType={domainType}
+                method={selectedMethod}
+                source={effectiveSource}
+                gitUrl={gitUrl}
+                upload={upload}
+                fieldValues={fieldValues}
+                envVars={envVars.filter((v) => v.key.trim())}
+                plan={plan}
+                projectCount={projectCount}
+              />
+
+              {/* ── Deploy now, or later ── */}
+              <div className="mt-4 space-y-2">
+                <p className="text-sm font-medium">When should this go live?</p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {(
+                    [
+                      {
+                        id: 'auto' as const,
+                        title: 'Deploy now',
+                        body: 'Build and publish as soon as the project is created.',
+                      },
+                      {
+                        id: 'manual' as const,
+                        title: 'Create only',
+                        body: 'Set it up but build nothing. You press Deploy when ready.',
+                      },
+                    ]
+                  ).map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => setDeployMode(opt.id)}
+                      className={`text-left rounded-lg border p-3 transition-colors ${
+                        deployMode === opt.id
+                          ? 'border-primary bg-primary/5'
+                          : 'hover:border-primary/40'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`h-3.5 w-3.5 rounded-full border-2 shrink-0 ${
+                            deployMode === opt.id
+                              ? 'border-primary bg-primary'
+                              : 'border-muted-foreground/40'
+                          }`}
+                        />
+                        <span className="font-medium text-sm">{opt.title}</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1 ml-[22px]">
+                        {opt.body}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+                {deployMode === 'manual' && (
+                  <p className="text-xs text-muted-foreground">
+                    Useful when the code isn&apos;t ready, DNS hasn&apos;t propagated, or
+                    you want to launch at a specific moment. You can switch this project
+                    back to automatic at any time in its settings.
+                  </p>
+                )}
+              </div>
+            </>
           )}
 
           {/* ─── PROGRESS VIEW ──────────────────────────────────────────── */}
@@ -1932,7 +1977,11 @@ export default function CreateWebsiteWizard({
                   className="gap-1.5"
                 >
                   <Rocket className="size-4" />
-                  {isWordPress ? 'Install WordPress' : 'Deploy Website'}
+                  {deployMode === 'manual'
+                    ? 'Create Project'
+                    : isWordPress
+                      ? 'Install WordPress'
+                      : 'Deploy Website'}
                 </Button>
               ) : (
                 <Button
@@ -2301,7 +2350,7 @@ function ReviewSummary({
                   {plan.storage}
                 </span>
                 <span className="text-foreground">
-                  {projectUsageLabel(projectCount, plan)} sites
+                  {projectCount}/{plan.projects} sites
                 </span>
               </div>
             )}
@@ -2330,7 +2379,7 @@ function ProgressView({
   onGoToProject,
 }: {
   submitting: boolean
-  deployDone: 'live' | 'failed' | null
+  deployDone: 'live' | 'failed' | 'manual' | null
   stages: DeploymentStageInfo[]
   liveLog: string
   deployError: string | null
@@ -2345,6 +2394,42 @@ function ProgressView({
   onReset: () => void
   onGoToProject: () => void
 }) {
+  // Created but deliberately not built. Distinct from the "live" screen so
+  // nobody goes looking for a URL that is not serving anything yet.
+  if (deployDone === 'manual') {
+    return (
+      <div className="space-y-4 py-2">
+        <div className="flex flex-col items-center text-center">
+          <div className="flex size-14 items-center justify-center rounded-full bg-primary/10 text-primary">
+            <CheckCircle2 className="size-8" />
+          </div>
+          <h3 className="mt-3 text-lg font-semibold">Project created</h3>
+          <p className="mt-1 text-sm text-muted-foreground max-w-sm">
+            Nothing has been built yet, so{' '}
+            <span className="font-medium text-foreground">
+              {projectSubdomain || finalDomain}
+            </span>{' '}
+            is not serving anything. Open the project and press{' '}
+            <span className="font-medium text-foreground">Deploy</span> when you are
+            ready to put it live.
+          </p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Project: <span className="font-medium text-foreground">{projectName}</span>
+          </p>
+        </div>
+        <div className="flex justify-center gap-2">
+          <Button variant="outline" onClick={onReset}>
+            Create another
+          </Button>
+          <Button onClick={onGoToProject} className="gap-1.5">
+            Open project
+            <ArrowRight className="size-4" />
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
   // Success screen.
   if (deployDone === 'live') {
     const liveUrl = `https://${projectSubdomain || finalDomain}`
