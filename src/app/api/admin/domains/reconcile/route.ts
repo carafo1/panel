@@ -21,7 +21,7 @@
  */
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { authenticateRequest } from '@/lib/auth'
+import { requireAdminRole } from '@/lib/auth'
 import { ok, apiError } from '@/lib/api-response'
 import { isAdmin } from '@/lib/security'
 import { listDomains, isDynadotDemoMode } from '@/lib/dynadot'
@@ -37,9 +37,8 @@ interface ReconcileFinding {
 }
 
 export async function POST(request: Request) {
-  const user = await authenticateRequest(request)
-  if (!user) return apiError.unauthorized()
-  if (!isAdmin(user.role)) return apiError.forbidden()
+  const user = await requireAdminRole(request)
+  if (!user) return apiError.forbidden()
 
   if (isDynadotDemoMode()) {
     return apiError.badRequest(

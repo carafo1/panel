@@ -188,6 +188,25 @@ export async function requireAdminRole(
 }
 
 /**
+ * Super-admin only, with the role read from the DATABASE.
+ *
+ * The distinction matters. A raw `decoded.role !== 'super_admin'` trusts a JWT
+ * that stays valid for seven days, so demoting someone — or suspending their
+ * account outright — left them able to change roles and impersonate users
+ * until their token happened to expire. Going through requireRole re-reads the
+ * role and the account status on every call, so a demotion takes effect at
+ * once.
+ *
+ * Use this for anything that can escalate privilege or assume another
+ * identity; `requireAdminRole` remains correct for ordinary operator work.
+ */
+export async function requireSuperAdminRole(
+  request: Request
+): Promise<FreshAuth | null> {
+  return requireRole(request, ['super_admin'])
+}
+
+/**
  * Like `authenticateRequest` (JWT or API key) but with the role and account
  * status re-read from the database.
  */
