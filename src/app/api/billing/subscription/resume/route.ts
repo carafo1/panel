@@ -76,7 +76,16 @@ export async function POST(request: Request) {
 
     const updated = await db.subscription.update({
       where: { id: subscription.id },
-      data: { cancelAtPeriodEnd: false, autoRenew: true, status: 'active' },
+      data: {
+        cancelAtPeriodEnd: false,
+        autoRenew: true,
+        status: 'active',
+        // Clear the cancellation record too, or the account would keep
+        // showing "cancelled on <date> because <reason>" for a subscription
+        // that is running normally again.
+        cancelRequestedAt: null,
+        cancellationReason: null,
+      },
     })
 
     await createNotification({

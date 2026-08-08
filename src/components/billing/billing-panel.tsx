@@ -55,14 +55,11 @@ import {
   Search,
   Settings2,
   Ban,
+  RefreshCw,
   ShieldCheck,
   AlertTriangle,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import {
-  PlanChangeDialog,
-  PlanDirectionBadge,
-} from '@/components/billing/plan-change-dialog'
 
 // ── Types ──────────────────────────────────────────────────────────────
 interface Plan {
@@ -94,6 +91,18 @@ interface Subscription {
   currentPeriodStart: string
   currentPeriodEnd: string
   cancelAtPeriodEnd?: boolean
+  /** Set when a cancellation is scheduled — the date service actually stops. */
+  endsOn?: string | null
+  canResume?: boolean
+  autoRenew?: boolean
+  cancellationReason?: string | null
+  nextCharge?: {
+    amount: number
+    currency: string
+    on: string
+  } | null
+  /** Set when auto-renew is off: the date the plan simply runs out. */
+  lapsesOn?: string | null
   stripeSubId?: string | null
   stripeCustomerId?: string | null
   plan?: { name: string; price: number; slug: string; id: string }
@@ -923,10 +932,6 @@ export function BillingPanel() {
 
   // Checkout dialog state
   const [checkoutOpen, setCheckoutOpen] = useState(false)
-  // Changing an existing plan is a different transaction from buying one:
-  // it prorates, it can issue credit, and it can be refused.
-  const [planChangeOpen, setPlanChangeOpen] = useState(false)
-  const [planChangeTarget, setPlanChangeTarget] = useState<Plan | null>(null)
   const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null)
   const [selectedPlanIndex, setSelectedPlanIndex] = useState(0)
 
@@ -966,14 +971,6 @@ export function BillingPanel() {
   }, [fetchData])
 
   const handleSelectPlan = (plan: Plan, index: number) => {
-    // An existing subscriber is CHANGING plan, not buying one. Sending them to
-    // checkout raised a second subscription alongside the first and left them
-    // paying twice.
-    if (subscription && subscription.plan?.id !== plan.id) {
-      setPlanChangeTarget(plan)
-      setPlanChangeOpen(true)
-      return
-    }
     setSelectedPlan(plan)
     setSelectedPlanIndex(index)
     setCheckoutOpen(true)
@@ -1013,22 +1010,71 @@ export function BillingPanel() {
   // ── Cancel the user's active subscription ────────────────────
   const handleCancelSubscription = async () => {
     if (!subscription) return
+    const endsOn = new Date(subscription.currentPeriodEnd).toLocaleDateString()
     const confirmed = window.confirm(
-      `Cancel your ${subscription.plan?.name || 'current'} subscription? ` +
-      `You'll retain access until ${new Date(subscription.currentPeriodEnd).toLocaleDateString()}.`
+      `Cancel your ${subscription.plan?.name || 'current'} subscription?\n\n` +
+        `Everything keeps working until ${endsOn} — you have already paid for that time. ` +
+        `You can undo this at any point before then.`
     )
     if (!confirmed) return
 
+    // Asked after the decision, never as a gate on it.
+    const reason = window.prompt(
+      'Anything we could have done better? (optional — leave blank to skip)'
+    )
+
     setCancelLoading(true)
     try {
-      await apiFetch<{ cancelled: boolean; cancelledViaStripe: boolean; activeUntil: string }>(
-        '/billing/subscription',
-        { method: 'DELETE' }
+      const res = await apiFetch<{
+        cancelled: boolean
+        immediate: boolean
+        activeUntil: string
+      }>('/billing/subscription', {
+        method: 'DELETE',
+        body: JSON.stringify(reason?.trim() ? { reason: reason.trim() } : {}),
+      })
+      toast.success(
+        res.immediate
+          ? 'Subscription cancelled.'
+          : `Subscription will end on ${endsOn}. Everything keeps working until then — you can undo this from here.`
       )
-      toast.success('Subscription cancelled. Access remains until the end of the current period.')
       await fetchData()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to cancel subscription')
+    } finally {
+      setCancelLoading(false)
+    }
+  }
+
+  // ── Undo a scheduled cancellation ────────────────────────────
+  const handleResumeSubscription = async () => {
+    setCancelLoading(true)
+    try {
+      await apiFetch<{ resumed: boolean; renewsOn: string }>(
+        '/billing/subscription/resume',
+        { method: 'POST' }
+      )
+      toast.success('Subscription resumed — it will renew as normal.')
+      await fetchData()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not resume the subscription')
+    } finally {
+      setCancelLoading(false)
+    }
+  }
+
+  // ── Turn automatic renewal on or off ─────────────────────────
+  const handleToggleAutoRenew = async (next: boolean) => {
+    setCancelLoading(true)
+    try {
+      const res = await apiFetch<{ autoRenew: boolean; message: string }>(
+        '/billing/subscription/auto-renew',
+        { method: 'PATCH', body: JSON.stringify({ autoRenew: next }) }
+      )
+      toast.success(res.message)
+      await fetchData()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not change automatic renewal')
     } finally {
       setCancelLoading(false)
     }
@@ -1132,26 +1178,68 @@ export function BillingPanel() {
                     </span>
                   )}
                 </Button>
-                {!subscription.cancelAtPeriodEnd && (
+                {subscription.cancelAtPeriodEnd ? (
+                  /* Scheduled to end — the way back has to be visible here,
+                     or an accidental cancel means a support ticket. */
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={handleCancelSubscription}
+                    onClick={handleResumeSubscription}
                     disabled={cancelLoading}
-                    className="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+                    className="text-emerald-700 hover:text-emerald-800 hover:bg-emerald-50 border-emerald-200"
                   >
                     {cancelLoading ? (
                       <span className="flex items-center gap-2">
                         <Loader2 className="size-4 animate-spin" />
-                        Cancelling…
+                        Resuming…
                       </span>
                     ) : (
                       <span className="flex items-center gap-2">
-                        <Ban className="size-4" />
-                        Cancel Subscription
+                        <RefreshCw className="size-4" />
+                        Resume Subscription
                       </span>
                     )}
                   </Button>
+                ) : (
+                  <>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleToggleAutoRenew(!subscription.autoRenew)}
+                      disabled={cancelLoading || Boolean(subscription.stripeSubId)}
+                      title={
+                        subscription.stripeSubId
+                          ? 'Renewal for this subscription is managed by Stripe'
+                          : subscription.autoRenew
+                            ? 'Stop this renewing automatically — it stays active until the period ends'
+                            : 'Renew automatically at the end of each period'
+                      }
+                    >
+                      <span className="flex items-center gap-2">
+                        <RefreshCw className="size-4" />
+                        {subscription.autoRenew ? 'Auto-renew: On' : 'Auto-renew: Off'}
+                      </span>
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleCancelSubscription}
+                      disabled={cancelLoading}
+                      className="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+                    >
+                      {cancelLoading ? (
+                        <span className="flex items-center gap-2">
+                          <Loader2 className="size-4 animate-spin" />
+                          Cancelling…
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-2">
+                          <Ban className="size-4" />
+                          Cancel Subscription
+                        </span>
+                      )}
+                    </Button>
+                  </>
                 )}
                 <Button
                   variant="ghost"
@@ -1226,15 +1314,7 @@ export function BillingPanel() {
                       <Icon className="size-5" />
                     </div>
                     <div>
-                      <div className="flex items-center gap-2">
-                        <CardTitle className="text-lg">{plan.name}</CardTitle>
-                        {subscription && !isCurrent ? (
-                          <PlanDirectionBadge
-                            currentPrice={subscription.plan?.price ?? 0}
-                            planPrice={plan.price}
-                          />
-                        ) : null}
-                      </div>
+                      <CardTitle className="text-lg">{plan.name}</CardTitle>
                       <CardDescription>{plan.tagline || plan.description}</CardDescription>
                     </div>
                   </div>
@@ -1280,12 +1360,6 @@ export function BillingPanel() {
                           <span className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
                           Processing…
                         </span>
-                      ) : subscription ? (
-                        plan.price > (subscription.plan?.price ?? 0) ? (
-                          'Upgrade'
-                        ) : (
-                          'Downgrade'
-                        )
                       ) : (
                         'Select Plan'
                       )}
@@ -1372,18 +1446,6 @@ export function BillingPanel() {
           plan={selectedPlan}
           planIndex={selectedPlanIndex}
           onSuccess={handleCheckoutSuccess}
-        />
-      )}
-
-      {/* ── Plan Change Dialog ────────────────────────────────────── */}
-      {planChangeTarget && (
-        <PlanChangeDialog
-          open={planChangeOpen}
-          onOpenChange={setPlanChangeOpen}
-          targetPlanId={planChangeTarget.id}
-          targetPlanName={planChangeTarget.name}
-          onChanged={fetchData}
-          apiFetch={apiFetch}
         />
       )}
     </div>
