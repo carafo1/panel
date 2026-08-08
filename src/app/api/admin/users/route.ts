@@ -7,6 +7,12 @@ import {
 } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { notifyAccountStatusChanged } from '@/lib/billing-notifications'
+import {
+  isSuspendingStatus,
+  suspendAccountServices,
+  restoreAccountServices,
+  type CascadeResult,
+} from '@/lib/account-suspension'
 
 export async function GET(request: Request) {
   try {
@@ -199,6 +205,34 @@ export async function PATCH(request: Request) {
     // than whenever the token happens to expire.
     invalidateUserAuthCache(target.id)
 
+    // Cascade to the customer's actual services.
+    //
+    // Until now this endpoint only blocked the panel login: a suspended — or
+    // outright fraudulent — account kept its websites serving and its mail
+    // flowing. The panel is the least valuable thing to take away, and the
+    // running services are the expensive part being given away.
+    //
+    // Nothing here is destructive: containers stop, mail deactivates, and a
+    // reinstatement brings both back, because most suspensions end with the
+    // customer paying.
+    const wasSuspending = isSuspendingStatus(target.status || 'active')
+    const nowSuspending = isSuspendingStatus(status)
+    let cascade: CascadeResult | null = null
+
+    if (!wasSuspending && nowSuspending) {
+      cascade = await suspendAccountServices(target.id, body.reason).catch(
+        (err) => {
+          console.error('[admin/users] suspend cascade failed:', err)
+          return null
+        }
+      )
+    } else if (wasSuspending && !nowSuspending) {
+      cascade = await restoreAccountServices(target.id).catch((err) => {
+        console.error('[admin/users] restore cascade failed:', err)
+        return null
+      })
+    }
+
     await logAudit({
       userId: decoded.userId,
       action: 'user.set_status',
@@ -210,6 +244,13 @@ export async function PATCH(request: Request) {
         from: target.status || 'active',
         to: status,
         reason: body.reason || null,
+        // What the cascade actually managed to do, so a partial failure is
+        // visible in the audit trail rather than only in a server log.
+        projectsStopped: cascade?.projectsStopped.length ?? 0,
+        projectsRestored: cascade?.projectsRestored.length ?? 0,
+        emailSuspended: cascade?.emailSuspended.length ?? 0,
+        emailRestored: cascade?.emailRestored.length ?? 0,
+        cascadeFailures: cascade?.failures ?? [],
       },
     }).catch(() => {})
 
@@ -219,13 +260,31 @@ export async function PATCH(request: Request) {
       reason: body.reason || null,
     }).catch(() => {})
 
+    const acted = cascade
+      ? [
+          cascade.projectsStopped.length &&
+            `${cascade.projectsStopped.length} website(s) stopped`,
+          cascade.projectsRestored.length &&
+            `${cascade.projectsRestored.length} website(s) rebuilding`,
+          cascade.emailSuspended.length &&
+            `${cascade.emailSuspended.length} mail domain(s) suspended`,
+          cascade.emailRestored.length &&
+            `${cascade.emailRestored.length} mail domain(s) restored`,
+        ].filter(Boolean)
+      : []
+
     return NextResponse.json({
       success: true,
       status,
+      services: cascade,
       message:
-        status === 'active'
+        (status === 'active'
           ? `${target.email} restored — they can sign in again.`
-          : `${target.email} marked ${status}. Sign-in is now blocked and any active session ends on their next page load.`,
+          : `${target.email} marked ${status}. Sign-in is blocked and any active session ends on their next page load.`) +
+        (acted.length ? ` ${acted.join(', ')}.` : '') +
+        (cascade?.failures.length
+          ? ` ${cascade.failures.length} service(s) could not be changed — see the audit log.`
+          : ''),
     })
   } catch (error) {
     console.error('Admin users PATCH error:', error)
