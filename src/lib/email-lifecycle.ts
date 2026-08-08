@@ -229,30 +229,41 @@ export async function reapExpiredEmailServices(): Promise<{
 }
 
 /**
- * Terminate services whose subscription was cancelled outright. The customer
- * asked to stop, so the same retention window applies from cancellation.
+ * Suspend services whose subscription has been cancelled AND whose paid period
+ * has actually run out.
+ *
+ * The period check is the important part. This used to suspend on
+ * `status === 'cancelled'` alone, which cost a real customer their mail: the
+ * old cancel endpoint wrote 'cancelled' the moment they clicked, while they
+ * had paid for another three weeks, and this swept in and deactivated their
+ * domain — Postfix then answered `454 Relay access denied` to every sender.
+ *
+ * Cancel now schedules properly, so that combination should not recur, but the
+ * guard stays regardless: whatever set the status, service the customer has
+ * paid for is not ours to take away. The paid period is the authority, not the
+ * status field.
  */
 export async function terminateCancelledEmailServices(): Promise<string[]> {
+  const now = new Date()
   const cancelledSubs = await db.subscription.findMany({
-    where: { status: 'cancelled' },
+    where: { status: 'cancelled', currentPeriodEnd: { lte: now } },
     select: { id: true },
   })
   if (cancelledSubs.length === 0) return []
 
   const ids = cancelledSubs.map((s) => s.id)
   const services = await db.emailService.findMany({
-    where: { subscriptionId: { in: ids }, status: { in: ['active', 'suspended'] } },
-    select: { id: true, status: true },
+    where: { subscriptionId: { in: ids }, status: 'active' },
+    select: { id: true },
   })
 
   const suspendedNow: string[] = []
   for (const s of services) {
-    // Suspend first so the retention clock starts and the customer keeps the
-    // same "pay and it comes back" window as a non-payment suspension.
-    if (s.status === 'active') {
-      const res = await suspendEmailService(s.id).catch(() => ({ success: false }))
-      if (res.success) suspendedNow.push(s.id)
-    }
+    // Suspend rather than delete, so the retention clock starts and the
+    // customer keeps the same "pay and it comes back" window as a
+    // non-payment suspension.
+    const res = await suspendEmailService(s.id).catch(() => ({ success: false }))
+    if (res.success) suspendedNow.push(s.id)
   }
   return suspendedNow
 }
