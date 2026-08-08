@@ -386,19 +386,41 @@ export async function DELETE(request: Request) {
       }
     }
 
-    // Update local subscription
+    // Immediate only when explicitly asked for; the default is to let the
+    // paid-for period run out.
+    let immediate = false
+    try {
+      const body = await request.json().catch(() => null)
+      immediate = Boolean(body?.immediate)
+    } catch {
+      /* no body — scheduled cancellation */
+    }
+    const periodEnded = new Date(subscription.currentPeriodEnd) <= new Date()
+
+    // Update local subscription.
+    //
+    // Scheduling a cancellation must NOT set status='cancelled'. The customer
+    // has paid to the end of the period and is told so in the message below,
+    // but `cancelled` is a terminal state: the billing sweep only looks at
+    // active/past_due/trialing so the subscription was never revisited, and
+    // email-lifecycle suspends mail for any cancelled subscription — so
+    // cancelling took the service away within the hour while promising it
+    // until the period end. It stays active, flagged, and stops renewing.
     await db.subscription.update({
       where: { id: subscription.id },
-      data: {
-        status: 'cancelled',
-        cancelAtPeriodEnd: true,
-      },
+      data:
+        immediate || periodEnded
+          ? { status: 'cancelled', cancelAtPeriodEnd: true, autoRenew: false }
+          : { cancelAtPeriodEnd: true, autoRenew: false },
     })
 
     await createNotification({
       userId: decoded.userId,
-      title: 'Subscription Cancelled',
-      message: `Your ${subscription.plan.name} subscription has been cancelled. You will retain access until ${new Date(subscription.currentPeriodEnd).toLocaleDateString()}.`,
+      title: immediate || periodEnded ? 'Subscription cancelled' : 'Subscription set to cancel',
+      message:
+        immediate || periodEnded
+          ? `Your ${subscription.plan.name} subscription has been cancelled and the services on it are being wound down.`
+          : `Your ${subscription.plan.name} subscription will end on ${new Date(subscription.currentPeriodEnd).toLocaleDateString()}. Everything keeps working until then, and you can undo this at any point before that date.`,
       type: 'warning',
       link: '/?tab=billing',
     })
@@ -414,13 +436,19 @@ export async function DELETE(request: Request) {
         planName: subscription.plan.name,
         stripeSubId: subscription.stripeSubId,
         cancelledViaStripe,
+        immediate: immediate || periodEnded,
       },
     })
 
     return NextResponse.json({
       cancelled: true,
+      // false when the cancellation is scheduled — the UI needs to say
+      // "ends on X" rather than "cancelled" for those.
+      immediate: immediate || periodEnded,
+      cancelAtPeriodEnd: true,
       cancelledViaStripe,
       activeUntil: subscription.currentPeriodEnd,
+      canResume: !(immediate || periodEnded),
     })
   } catch (error) {
     console.error('Cancel subscription error:', error)

@@ -73,6 +73,13 @@ export async function renewSubscription(opts: {
   if (sub.status === 'cancelled') {
     return { success: false, skipped: 'subscription is cancelled' }
   }
+  // A pending cancellation still looks 'active' — that is deliberate, so the
+  // customer keeps what they paid for. Renewing it anyway would bill them for
+  // a period they explicitly cancelled. `force` still allows an admin to
+  // override, for when the customer has changed their mind by phone.
+  if (sub.cancelAtPeriodEnd && !opts.force) {
+    return { success: false, skipped: 'cancellation scheduled for period end' }
+  }
 
   const days = cycleDays(
     (sub.plan as { billingCycle?: string })?.billingCycle || 'monthly'
