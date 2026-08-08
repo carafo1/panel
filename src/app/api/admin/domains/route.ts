@@ -21,7 +21,7 @@
  * "openprovider") are PURGED during sync so the list only ever shows real,
  * Dynadot data.
  */
-import { authenticateRequest } from '@/lib/auth'
+import { requireAdminRole } from '@/lib/auth'
 import { db } from '@/lib/db'
 import { ok, apiError } from '@/lib/api-response'
 import {
@@ -73,10 +73,8 @@ function mapTransferStatus(t: TransferOrder): {
 }
 
 export async function GET(request: Request) {
-  const user = await authenticateRequest(request)
-  if (!user) return apiError.unauthorized()
-  if (user.role !== 'admin' && user.role !== 'super_admin')
-    return apiError.forbidden(`Admin access required`)
+  const user = await requireAdminRole(request)
+  if (!user) return apiError.forbidden('Admin access required')
 
   try {
     const { searchParams } = new URL(request.url)

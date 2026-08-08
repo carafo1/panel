@@ -85,6 +85,17 @@ export async function GET(request: Request) {
         renewalAttempts: (s as { renewalAttempts?: number }).renewalAttempts ?? 0,
         lastRenewalError:
           (s as { lastRenewalError?: string | null }).lastRenewalError ?? null,
+        // A scheduled cancellation deliberately keeps status='active', so an
+        // operator scanning the list cannot otherwise tell it is leaving.
+        endsOn: s.cancelAtPeriodEnd ? s.currentPeriodEnd : null,
+        canResume:
+          s.cancelAtPeriodEnd &&
+          s.status !== 'cancelled' &&
+          end.getTime() > now,
+        cancelRequestedAt:
+          (s as { cancelRequestedAt?: Date | null }).cancelRequestedAt ?? null,
+        cancellationReason:
+          (s as { cancellationReason?: string | null }).cancellationReason ?? null,
         daysLeft,
         expired: end.getTime() <= now,
       }
@@ -353,8 +364,47 @@ export async function PATCH(request: Request) {
       data = { status: 'suspended' }
       message = 'Subscription suspended.'
     } else if (action === 'cancel') {
-      data = { status: 'cancelled', cancelAtPeriodEnd: true }
-      message = 'Subscription cancelled.'
+      // Schedule, don't terminate. This wrote status='cancelled' AND
+      // cancelAtPeriodEnd=true together, which cannot both be true: 'cancelled'
+      // is terminal, so the customer lost the service they had already paid
+      // for and email-lifecycle suspended their mailboxes within the hour.
+      // `force_cancel` above is the deliberate immediate path; this is the
+      // one an operator reaches for on a normal "please cancel me" request,
+      // and it now behaves exactly like the customer's own Cancel button.
+      const alreadyEnded = new Date(sub.currentPeriodEnd) <= new Date()
+      data = {
+        ...(alreadyEnded ? { status: 'cancelled' } : {}),
+        cancelAtPeriodEnd: true,
+        autoRenew: false,
+        cancelRequestedAt: new Date(),
+        cancellationReason:
+          typeof body.reason === 'string' && body.reason.trim()
+            ? body.reason.trim().slice(0, 500)
+            : 'Cancelled by an administrator',
+      }
+      message = alreadyEnded
+        ? 'Subscription cancelled — its billing period had already ended.'
+        : `Subscription will end on ${new Date(sub.currentPeriodEnd).toDateString()}. Service continues until then, and this can be undone with "resume".`
+    } else if (action === 'resume') {
+      // The way back from a scheduled cancellation. Without it an operator's
+      // only options were to leave it or force_cancel — there was no undo.
+      if (sub.status === 'cancelled') {
+        return NextResponse.json(
+          {
+            error:
+              'This subscription has already ended. Use extend, or have the customer purchase again.',
+          },
+          { status: 409 }
+        )
+      }
+      data = {
+        status: 'active',
+        cancelAtPeriodEnd: false,
+        autoRenew: true,
+        cancelRequestedAt: null,
+        cancellationReason: null,
+      }
+      message = 'Cancellation reversed — the subscription will renew as normal.'
     } else {
       return NextResponse.json({ error: 'Unknown action' }, { status: 400 })
     }

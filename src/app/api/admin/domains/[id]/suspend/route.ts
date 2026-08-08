@@ -2,7 +2,7 @@
  * POST /api/admin/domains/:id/suspend
  * Admin-only. Suspends a domain (sets status=suspended, unlocks, disables DNS).
  */
-import { authenticateRequest } from '@/lib/auth'
+import { requireAdminRole } from '@/lib/auth'
 import { db } from '@/lib/db'
 import { dynadotService } from '@/lib/dynadot-service'
 import { ok, apiError } from '@/lib/api-response'
@@ -11,9 +11,12 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const user = await authenticateRequest(request)
-  if (!user) return apiError.unauthorized()
-  if (user.role !== 'admin' && user.role !== 'super_admin') return apiError.forbidden(`Admin access required`)
+  // requireAdminRole re-reads the role and account status from the database.
+  // authenticateRequest trusts the role baked into a 7-day JWT, so a demoted
+  // or suspended admin kept the ability to suspend customer domains until
+  // their token happened to expire.
+  const user = await requireAdminRole(request)
+  if (!user) return apiError.forbidden('Admin access required')
 
   const { id } = await params
   const domain = await db.domain.findUnique({ where: { id } })

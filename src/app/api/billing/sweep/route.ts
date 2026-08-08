@@ -10,7 +10,7 @@ import {
 } from '@/lib/email-lifecycle'
 import { collectAllUsage } from '@/lib/usage'
 import { pruneAllBackups } from '@/lib/vps/backups'
-import { cleanupAllServers, reapOrphansAllServers } from '@/lib/vps/docker-maintenance'
+import { cleanupAllServers } from '@/lib/vps/docker-maintenance'
 import { recordHeartbeat } from '@/lib/health'
 
 /**
@@ -107,19 +107,12 @@ export async function POST(request: Request) {
       return { servers: 0, reclaimedBytes: 0, orphanVolumes: 0 }
     })
 
-    // Docker's own pruning cannot see these: a deleted project's database
-    // container is running and its image is tagged, so neither looks like
-    // garbage. Left alone they simply accumulate — 172 MB of database and
-    // 301 MB of images had been sitting here for weeks.
-    const orphanReap = await reapOrphansAllServers().catch((err) => {
-      console.error('[billing-sweep] orphan reap failed:', err)
-      return { servers: 0, containers: 0, images: 0, refused: 0 }
-    })
-
     const reminded: string[] = []
     const pastDue: string[] = []
     const suspended: string[] = []
     const emailSuspended: string[] = []
+    /** Cancellations the customer asked for, finalised now the period is up. */
+    const endedByRequest: string[] = []
 
     // Only non-Stripe subscriptions — Stripe drives its own lifecycle.
     const subs = await db.subscription.findMany({
@@ -135,6 +128,32 @@ export async function POST(request: Request) {
 
     for (const sub of subs) {
       const end = new Date(sub.currentPeriodEnd)
+
+      // ── 0. Scheduled cancellation whose period has now run out ──
+      // A customer who cancels keeps the service they paid for until this
+      // moment. Nothing used to read `cancelAtPeriodEnd`, so the flag sat
+      // there and the subscription either renewed anyway or was killed on
+      // the spot. This is where the promise is actually kept.
+      if (sub.cancelAtPeriodEnd && end <= now) {
+        await db.subscription.update({
+          where: { id: sub.id },
+          data: { status: 'cancelled', autoRenew: false },
+        })
+        await createNotification({
+          userId: sub.userId,
+          title: 'Subscription ended',
+          message: `Your ${sub.plan?.name || 'plan'} subscription has ended as scheduled. Choose a plan whenever you want to start again.`,
+          type: 'warning',
+          link: '/?tab=billing',
+        }).catch(() => {})
+        endedByRequest.push(sub.id)
+        continue
+      }
+
+      // A cancellation is pending but the period is still running: leave the
+      // service completely alone. No renewal reminder, no past-due, no
+      // suspension — they are paid up and simply not continuing.
+      if (sub.cancelAtPeriodEnd) continue
 
       // ── 1. Expiring soon → remind once ──────────────────────────
       if (
@@ -252,6 +271,7 @@ export async function POST(request: Request) {
       reminded: reminded.length,
       pastDue: pastDue.length,
       suspended: suspended.length,
+      endedByRequest: endedByRequest.length,
       emailSuspended: emailSuspended.length,
       emailWarned: emailLifecycle.warned.length,
       emailTerminated: emailLifecycle.terminated.length,
@@ -263,6 +283,7 @@ export async function POST(request: Request) {
       reminded.length ||
       pastDue.length ||
       suspended.length ||
+      endedByRequest.length ||
       emailSuspended.length ||
       emailLifecycle.warned.length ||
       emailLifecycle.terminated.length

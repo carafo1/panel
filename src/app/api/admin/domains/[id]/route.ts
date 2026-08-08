@@ -3,7 +3,7 @@
  * POST   /api/admin/domains/:id/suspend  — suspend a domain
  * DELETE /api/admin/domains/:id   — delete a domain (soft: marks status=deleted)
  */
-import { authenticateRequest } from '@/lib/auth'
+import { requireAdminRole } from '@/lib/auth'
 import { db } from '@/lib/db'
 import { ok, apiError } from '@/lib/api-response'
 import { dynadotService } from '@/lib/dynadot-service'
@@ -12,9 +12,8 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const user = await authenticateRequest(request)
-  if (!user) return apiError.unauthorized()
-  if (user.role !== 'admin' && user.role !== 'super_admin') return apiError.forbidden(`Admin access required`)
+  const user = await requireAdminRole(request)
+  if (!user) return apiError.forbidden('Admin access required')
 
   const { id } = await params
   const domain = await db.domain.findUnique({
@@ -49,9 +48,8 @@ export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const user = await authenticateRequest(request)
-  if (!user) return apiError.unauthorized()
-  if (user.role !== 'admin' && user.role !== 'super_admin') return apiError.forbidden(`Admin access required`)
+  const user = await requireAdminRole(request)
+  if (!user) return apiError.forbidden('Admin access required')
 
   const { id } = await params
   const domain = await db.domain.findUnique({ where: { id } })
@@ -76,15 +74,11 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const user = await authenticateRequest(request)
-  if (!user) return apiError.unauthorized()
-  if (user.role !== 'admin' && user.role !== 'super_admin') return apiError.forbidden(`Admin access required`)
+  const user = await requireAdminRole(request)
+  if (!user) return apiError.forbidden('Admin access required')
 
   const { id } = await params
-  const body = await request.json().catch(() => null)
-  if (!body || typeof body !== 'object') {
-    return apiError.badRequest('A JSON body is required')
-  }
+  const body = await request.json()
   const { status } = body
 
   const domain = await db.domain.findUnique({ where: { id } })

@@ -274,6 +274,15 @@ model Subscription {
   // Coupon that keeps applying on each renewal (recurring discounts).
   couponCode       String?
 
+  // ── Cancellation ───────────────────────────────────────────────────
+  /// When the customer asked to cancel. Distinct from when the subscription
+  /// actually ends — for a scheduled cancellation that is `currentPeriodEnd`,
+  /// and the gap between the two is service they have already paid for.
+  cancelRequestedAt  DateTime?
+  /// Why they left, in their words. Optional: never block a cancellation on
+  /// answering, but it is the only churn signal this system captures.
+  cancellationReason String?
+
   user User  @relation(fields: [userId], references: [id])
   plan Plan  @relation(fields: [planId], references: [id])
   payments Payment[]
