@@ -6,6 +6,7 @@ import { processEvent } from '@/lib/automation'
 import { isStripeDemoMode } from '@/lib/stripe'
 import { BRAND_DOMAIN, NS1_HOSTNAME, NS2_HOSTNAME } from '@/lib/brand-config'
 import { getPriceForDomain } from '@/lib/pricing'
+import { dynadotService } from '@/lib/dynadot-service'
 import { requireVerifiedEmail } from '@/lib/require-verified'
 import { assertDomainControl } from '@/lib/domain-verification'
 import {
@@ -49,13 +50,7 @@ async function postHandler(request: Request) {
       )
     }
 
-    const body = await request.json().catch(() => null)
-    if (!body || typeof body !== 'object') {
-      return NextResponse.json(
-        { error: 'A JSON body is required' },
-        { status: 400 }
-      )
-    }
+    const body = await request.json()
     const {
       planId,
       type,
@@ -152,11 +147,49 @@ async function postHandler(request: Request) {
       // and lock the real owner out, since EmailService.domain is unique.
       const control = await assertDomainControl(decoded.userId, emailDomain)
       if (!control.verified) {
+        // Before sending them away to publish a TXT record, work out WHY they
+        // failed. A domain nobody has registered cannot be verified no matter
+        // how long they try — telling such a customer to "prove you control
+        // this domain" is a dead end, when what they actually need is to buy
+        // it. Availability is a read-only registrar lookup and spends nothing.
+        let registerOffer: {
+          available: boolean
+          price: number | null
+          currency: string
+          registerUrl: string
+        } | null = null
+
+        try {
+          const [avail, priced] = await Promise.all([
+            dynadotService.search(emailDomain).catch(() => null),
+            getPriceForDomain(emailDomain).catch(() => null),
+          ])
+          if (avail?.available) {
+            registerOffer = {
+              available: true,
+              price: priced?.registration ?? null,
+              currency: 'USD',
+              // Registration is deliberately NOT done here. That flow collects
+              // the ICANN registrant contact, enforces the plan's domain
+              // allowance, and spends real registrar balance — all of which
+              // already exist and are tested in the domain checkout. A second
+              // copy of that inside email checkout would be one more place to
+              // get irreversible spending wrong.
+              registerUrl: `/?tab=domains&register=${encodeURIComponent(emailDomain)}`,
+            }
+          }
+        } catch {
+          /* offer is a nicety; the verification result still stands */
+        }
+
         return NextResponse.json(
           {
-            error: control.reason || 'Verify that you control this domain first',
-            code: 'DOMAIN_UNVERIFIED',
+            error: registerOffer
+              ? `Nobody owns ${emailDomain} yet — you need to register it before you can host mail on it.`
+              : control.reason || 'Verify that you control this domain first',
+            code: registerOffer ? 'DOMAIN_AVAILABLE' : 'DOMAIN_UNVERIFIED',
             verification: control.record,
+            registerOffer,
           },
           { status: 428 }
         )
