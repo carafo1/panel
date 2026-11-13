@@ -8,6 +8,7 @@ import { logAudit } from '@/lib/audit'
 import { deployProject } from '@/lib/vps'
 import { getDeploymentMethod, type DeploymentMethodId } from '@/lib/deployment-methods'
 import { BRAND_DOMAIN } from '@/lib/brand-config'
+import { emitWebhookEvent } from '@/lib/webhook-delivery'
 import {
   isValidHostname,
   isReservedHostname,
@@ -403,6 +404,7 @@ async function handleWizardCreate(
       installSettings,
     },
   })
+  void emitWebhookEvent(decoded.userId, 'project.created', { project: { id: project.id, name: project.name, subdomain: project.subdomain } }, { projectId: project.id })
 
   // ── External domain: attach as PENDING ────────────────────────────
   // Hosting is provisioned immediately and serves on the subdomain. The
@@ -727,6 +729,7 @@ async function handleLegacyCreate(
       appPort: 3000,
     },
   })
+  void emitWebhookEvent(decoded.userId, 'project.created', { project: { id: project.id, name: project.name, subdomain: project.subdomain } }, { projectId: project.id })
 
   if (!autoDeploy) {
     return NextResponse.json(

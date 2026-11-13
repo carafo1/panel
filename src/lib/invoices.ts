@@ -278,6 +278,12 @@ export async function markInvoicePaid(
     method: opts.gateway,
   }).catch(() => {})
 
+  // A paid renewal invoice is what brings a past-due or suspended
+  // subscription back. Imported lazily: enforcement pulls in the server and
+  // mail layers, which must not load whenever an invoice is touched.
+  const { onInvoiceSettled } = await import('@/lib/billing-enforcement')
+  await onInvoiceSettled(invoiceId)
+
   return updated
 }
 

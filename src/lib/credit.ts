@@ -133,6 +133,11 @@ export async function applyCreditToInvoice(opts: {
     },
   })
 
+  if (fullyCovered) {
+    const { onInvoiceSettled } = await import('@/lib/billing-enforcement')
+    await onInvoiceSettled(invoice.id)
+  }
+
   return { success: true, applied, balance: spend.balance }
 }
 

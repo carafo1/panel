@@ -201,6 +201,13 @@ export async function POST(request: Request) {
           })
 
           results.push({ id: project.id, success: true })
+        } else if (action === 'restart' && project.status === 'suspended') {
+          results.push({
+            id: project.id,
+            success: false,
+            error: 'Suspended for non-payment — pay the outstanding invoice to restore it',
+          })
+          continue
         } else if (action === 'restart') {
           // Real container restart. This used to flip the status to "running"
           // and write a fabricated "live" deployment with a Math.random()

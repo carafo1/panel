@@ -297,13 +297,31 @@ class LocalStream extends EventEmitter {
   /** Attach a spawned child process and forward its I/O to our listeners. */
   _attach(child: ChildProcess): void {
     this._child = child
+    let closed = false
+    const close = (code: number | null, signal?: string) => {
+      if (closed) return
+      closed = true
+      this.emit('close', code, signal)
+    }
     child.stdout?.on('data', (c: Buffer) => this.emit('data', c))
     child.stderr?.on('data', (c: Buffer) => this._stderrBus.emit('data', c))
-    child.on('close', (code: number | null, signal?: string) => {
-      this.emit('close', code, signal)
-    })
+    child.on('close', (code: number | null, signal?: string) => close(code, signal))
     child.on('error', (err: Error) => {
-      this.emit('error', err)
+      // A spawn failure (e.g. no bash on this host) fires on the tick right
+      // after spawn() — before the exec callback has attached its listeners.
+      // Re-emitting it then hit nobody, which Node turns into an uncaught
+      // exception that can take the whole panel down, and the caller waited
+      // out its timeout. Defer to setImmediate (after the callback's
+      // nextTick), then report it as 'error' if someone listens, otherwise
+      // the way a shell would: on stderr with exit code 127.
+      setImmediate(() => {
+        if (this.listenerCount('error') > 0) {
+          this.emit('error', err)
+          return
+        }
+        this._stderrBus.emit('data', Buffer.from(`${err.message}\n`))
+        close(127)
+      })
     })
   }
 

@@ -68,11 +68,18 @@ export async function processJob(job: JobRecord): Promise<void> {
  * Process up to `limit` pending jobs. Returns aggregate counts.
  */
 export async function processPendingJobs(limit = 10): Promise<ProcessResult> {
+  // Jobs left 'processing' by a restart were stranded forever; nothing called
+  // this. Ten minutes comfortably exceeds any single action's run time.
+  await recoverStuckJobs(10 * 60 * 1000).catch((err) =>
+    console.error('[worker] stuck-job recovery failed:', err)
+  )
+
+  // 'failed' is terminal (attempts exhausted); the claim in processJob
+  // re-checks status, so a row taken by another tick is skipped safely.
   const pendingJobs = await db.jobQueue.findMany({
     where: {
-      status: { in: ['queued', 'failed'] },
+      status: 'queued',
       runAt: { lte: new Date() },
-      attempts: { lt: 3 },
     },
     orderBy: { runAt: 'asc' },
     take: Math.max(1, Math.min(limit, 100)),

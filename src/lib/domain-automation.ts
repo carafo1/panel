@@ -28,6 +28,7 @@ import {
 import { sendEmail } from './email'
 import { nextInvoiceNumber } from './invoices'
 import { MAIL_SERVER_HOSTNAME, NS1_HOSTNAME, NS2_HOSTNAME } from './brand-config'
+import { emitWebhookEvent } from '@/lib/webhook-delivery'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -280,6 +281,11 @@ export async function runRegistrationPipeline(
       domainId = created.id
     }
     ok('save_database', `Domain record created (id: ${domainId})`)
+    void emitWebhookEvent(input.userId, 'domain.registered', {
+      domain: domainLower,
+      expiresAt: expiry.toISOString(),
+      years: input.duration,
+    })
 
     // ── Step 4: Configure Nameservers ──────────────────────────────────────
     begin('configure_nameservers')

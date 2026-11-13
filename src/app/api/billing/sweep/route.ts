@@ -4,10 +4,15 @@ import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { createNotification } from '@/lib/notifications'
 import { sendEmail } from '@/lib/email'
 import { runAutoRenewals, NOT_STRIPE_MANAGED } from '@/lib/renewals'
+import { runEmailLifecycle } from '@/lib/email-lifecycle'
 import {
-  suspendEmailForSubscription,
-  runEmailLifecycle,
-} from '@/lib/email-lifecycle'
+  OVERDUE_GRACE_DAYS,
+  oldestUnpaidInvoice,
+  suspendSubscriptionForNonPayment,
+  isEmailPlanSlug,
+  hasOtherHostingInGoodStanding,
+} from '@/lib/billing-enforcement'
+import { stopUserWebsites } from '@/lib/account-suspension'
 import { collectAllUsage } from '@/lib/usage'
 import { pruneAllBackups } from '@/lib/vps/backups'
 import { cleanupAllServers } from '@/lib/vps/docker-maintenance'
@@ -74,6 +79,10 @@ export async function POST(request: Request) {
     const suspendBefore = new Date(
       now.getTime() - GRACE_DAYS * 24 * 60 * 60 * 1000
     )
+    const overdueSuspendBefore = new Date(
+      now.getTime() - OVERDUE_GRACE_DAYS * 24 * 60 * 60 * 1000
+    )
+    let websitesStopped = 0
 
     // ── 0. Auto-renew FIRST ──────────────────────────────────────────
     // Must run before the expiry pass, otherwise a subscription that is due
@@ -122,7 +131,7 @@ export async function POST(request: Request) {
       },
       include: {
         user: { select: { id: true, name: true, email: true } },
-        plan: { select: { id: true, name: true, price: true } },
+        plan: { select: { id: true, name: true, price: true, slug: true } },
       },
     })
 
@@ -147,6 +156,17 @@ export async function POST(request: Request) {
           link: '/?tab=billing',
         }).catch(() => {})
         endedByRequest.push(sub.id)
+
+        // The plan has ended, so the websites it paid for go offline too —
+        // unless another hosting plan still covers them. They are stopped,
+        // not deleted, so re-subscribing brings them straight back.
+        if (
+          !isEmailPlanSlug(sub.plan?.slug) &&
+          !(await hasOtherHostingInGoodStanding(sub.userId, sub.id))
+        ) {
+          const cascade = await stopUserWebsites(sub.userId)
+          websitesStopped += cascade.projectsStopped.length
+        }
         continue
       }
 
@@ -154,6 +174,56 @@ export async function POST(request: Request) {
       // service completely alone. No renewal reminder, no past-due, no
       // suspension — they are paid up and simply not continuing.
       if (sub.cancelAtPeriodEnd) continue
+
+      // ── 0b. Renewal invoice not paid by its due date ──────────────
+      // Renewal keeps the service running while the new invoice is inside its
+      // payment window. Nothing used to check it afterwards, so an unpaid
+      // invoice was simply followed by another renewal and the customer kept
+      // their services for free. Overdue → past_due → (grace) → suspended.
+      const overdue = await oldestUnpaidInvoice(sub.id)
+      const dueDate = overdue?.dueDate ?? null
+      if (overdue && dueDate && dueDate <= now) {
+        if (sub.status === 'active' || sub.status === 'trialing') {
+          await db.subscription.update({
+            where: { id: sub.id },
+            data: { status: 'past_due' },
+          })
+          const suspendOn = new Date(
+            dueDate.getTime() + OVERDUE_GRACE_DAYS * 24 * 60 * 60 * 1000
+          )
+          const amount = `${overdue.total.toFixed(2)} ${overdue.currency}`
+          await createNotification({
+            userId: sub.userId,
+            title: 'Invoice Overdue',
+            message: `Invoice ${overdue.number} (${amount}) for your ${sub.plan?.name || 'hosting'} plan is overdue. Pay it by ${suspendOn.toDateString()} to avoid suspension.`,
+            type: 'warning',
+            link: '/?tab=billing',
+          }).catch(() => {})
+          if (sub.user?.email) {
+            await sendEmail({
+              to: sub.user.email,
+              subject: `Invoice ${overdue.number} is overdue`,
+              html: `<p>Hi ${sub.user.name || 'there'},</p>
+<p>Invoice <strong>${overdue.number}</strong> (${amount}) for your <strong>${sub.plan?.name || 'hosting'}</strong> plan was due on ${dueDate.toDateString()}.</p>
+<p>Your services stay online until <strong>${suspendOn.toDateString()}</strong>. Please pay from the Billing page before then to avoid suspension.</p>
+<p>— Apsamo Technology</p>`,
+            }).catch(() => {})
+          }
+          pastDue.push(sub.id)
+        } else if (
+          sub.status === 'past_due' &&
+          dueDate <= overdueSuspendBefore
+        ) {
+          const res = await suspendSubscriptionForNonPayment(
+            sub.id,
+            `invoice ${overdue.number} has not been paid`
+          )
+          suspended.push(sub.id)
+          emailSuspended.push(...Array(res.emailSuspended).fill(sub.id))
+          websitesStopped += res.websitesStopped
+        }
+        continue
+      }
 
       // ── 1. Expiring soon → remind once ──────────────────────────
       if (
@@ -228,29 +298,15 @@ export async function POST(request: Request) {
 
       // ── 3. Past due beyond grace → suspend ──────────────────────
       if (sub.status === 'past_due' && end <= suspendBefore) {
-        await db.subscription.update({
-          where: { id: sub.id },
-          data: { status: 'suspended' },
-        })
-        await createNotification({
-          userId: sub.userId,
-          title: 'Subscription Suspended',
-          message: `Your ${sub.plan?.name || 'hosting'} plan has been suspended for non-payment. Renew to restore your services.`,
-          type: 'error',
-          link: '/?tab=billing',
-        }).catch(() => {})
-        suspended.push(sub.id)
-
-        // Marking the subscription suspended does nothing to the mail server
-        // on its own — without this the customer keeps sending and receiving
-        // mail indefinitely after they stop paying.
-        const stopped = await suspendEmailForSubscription(sub.id).catch(
-          (err) => {
-            console.error('[billing-sweep] email suspend failed:', err)
-            return [] as string[]
-          }
+        // Marking the subscription suspended does nothing on its own — the
+        // websites kept serving and mail kept flowing. This stops both.
+        const res = await suspendSubscriptionForNonPayment(
+          sub.id,
+          'the plan expired and was not renewed'
         )
-        emailSuspended.push(...stopped)
+        suspended.push(sub.id)
+        emailSuspended.push(...Array(res.emailSuspended).fill(sub.id))
+        websitesStopped += res.websitesStopped
       }
     }
 
@@ -273,6 +329,7 @@ export async function POST(request: Request) {
       suspended: suspended.length,
       endedByRequest: endedByRequest.length,
       emailSuspended: emailSuspended.length,
+      websitesStopped,
       emailWarned: emailLifecycle.warned.length,
       emailTerminated: emailLifecycle.terminated.length,
       at: now.toISOString(),
@@ -285,6 +342,7 @@ export async function POST(request: Request) {
       suspended.length ||
       endedByRequest.length ||
       emailSuspended.length ||
+      websitesStopped ||
       emailLifecycle.warned.length ||
       emailLifecycle.terminated.length
     ) {

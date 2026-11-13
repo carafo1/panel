@@ -8,6 +8,7 @@ import {
   cancelSubscription,
   isStripeDemoMode, getSubscriptionPeriod } from '@/lib/stripe'
 import { createNotification } from '@/lib/notifications'
+import { demoPaymentsAllowed } from '@/lib/demo-mode'
 
 export async function GET(request: Request) {
   try {
@@ -194,6 +195,14 @@ export async function POST(request: Request) {
     }
 
     const demoMode = isStripeDemoMode()
+    // Without a real Stripe key this path activates a year of service with a
+    // fabricated payment. Fine for development, never in production.
+    if (demoMode && !demoPaymentsAllowed()) {
+      return NextResponse.json(
+        { error: 'Card payments are not configured on this server. Please choose another payment method.' },
+        { status: 503 }
+      )
+    }
 
     // Create a Stripe customer if the user doesn't have one yet
     if (!stripeCustomerId) {

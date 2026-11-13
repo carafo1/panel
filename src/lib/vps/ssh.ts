@@ -24,6 +24,7 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { writeFile, readFile, unlink } from 'fs/promises'
 import { LocalClient, isLocalHost, execLocal, execStreamLocal } from './local-exec'
+import { isProduction } from '@/lib/demo-mode'
 
 // Union type so TypeScript accepts either ssh2 Client or LocalClient.
 type AnyClient = Client | LocalClient
@@ -539,6 +540,14 @@ export function isServerInDemoMode(
     | undefined
 ): boolean {
   if (isVpsDemoMode()) return true
+  // In production a server we cannot reach is an ERROR, never a simulation.
+  // Treating "no credentials" as demo made every deploy on such a server go
+  // 'live' with a fake container id and an 'issued' certificate, backups and
+  // provisioning report success, and nothing ran at all. Returning false here
+  // sends callers down the real path, which fails with the actual reason
+  // (no server / no SSH credentials). Only an explicit VPS_DEMO_MODE
+  // simulates in production.
+  if (isProduction()) return false
   // No server assigned at all — there is nothing to connect to, so treat it
   // exactly like demo mode. Callers pass `project.server`, which is null
   // whenever a project hasn't been placed on a server yet.

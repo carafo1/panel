@@ -22,6 +22,8 @@ export type ActionType =
   | 'link_domain'
   | 'rollback_deployment'
   | 'deployment_status_check'
+  // Retry of an outbound webhook delivery that failed (see emitWebhookEvent).
+  | 'deliver_webhook'
   // Legacy: no longer produced, but already-queued jobs may still carry it
   // and executeAction still handles it as a no-op.
   | 'create_coolify_project'
@@ -122,6 +124,20 @@ async function executeAction(
   const purchaseType = (payload.purchaseType as string) || 'hosting'
 
   switch (action.type) {
+    case 'deliver_webhook': {
+      // Throwing hands the job back to the queue, which retries with backoff
+      // until maxAttempts; a skipped delivery (webhook deleted, disabled or
+      // unsubscribed since) is final and counts as done.
+      const { deliverWebhook } = await import('@/lib/webhook-delivery')
+      const webhookId = String(payload.webhookId || '')
+      const hookEvent = String(payload.event || '')
+      const r = await deliverWebhook(webhookId, hookEvent, payload.body)
+      if (!r.success && !r.skipped) {
+        throw new Error(`delivery failed: ${r.statusCode ? `HTTP ${r.statusCode}` : 'no response'}`)
+      }
+      return { delivered: r.success, skipped: r.skipped ?? false, statusCode: r.statusCode }
+    }
+
     case 'create_user_workspace': {
       await createNotification({
         userId: event.userId,
@@ -605,14 +621,19 @@ async function executeAction(
 
 // Process a single job from the job queue
 export async function processJob(jobId: string) {
-  const job = await db.jobQueue.findUnique({ where: { id: jobId } })
-  if (!job) return
-
-  // Mark as processing
-  await db.jobQueue.update({
-    where: { id: jobId },
+  // Claim atomically: only a job that is still queued and due can be taken.
+  // Reading it and then marking it processing let two overlapping ticks both
+  // run the same job (a domain registered twice, a deploy started twice).
+  const claimed = await db.jobQueue.updateMany({
+    where: { id: jobId, status: 'queued', runAt: { lte: new Date() } },
     data: { status: 'processing', startedAt: new Date(), attempts: { increment: 1 } },
   })
+  if (claimed.count === 0) return
+
+  // Re-read AFTER the increment: deciding on retries from the old count let
+  // a job stay 'queued' forever once it reached maxAttempts.
+  const job = await db.jobQueue.findUnique({ where: { id: jobId } })
+  if (!job) return
 
   try {
     const payload = JSON.parse(job.payload) as Record<string, unknown>
@@ -638,13 +659,17 @@ export async function processJob(jobId: string) {
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
     const shouldRetry = job.attempts < job.maxAttempts
+    // Back off 30s, 60s, 120s… instead of retrying on every 10-second tick.
+    const backoffMs = 30_000 * 2 ** Math.max(0, job.attempts - 1)
 
     await db.jobQueue.update({
       where: { id: jobId },
       data: {
         status: shouldRetry ? 'queued' : 'failed',
         error: errorMessage,
-        ...(shouldRetry ? { startedAt: null } : { completedAt: new Date() }),
+        ...(shouldRetry
+          ? { startedAt: null, runAt: new Date(Date.now() + backoffMs) }
+          : { completedAt: new Date() }),
       },
     })
   }

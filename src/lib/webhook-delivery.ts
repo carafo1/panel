@@ -34,7 +34,9 @@ interface DeliverWebhookResult {
 export async function deliverWebhook(
   webhookId: string,
   event: string,
-  payload: unknown
+  payload: unknown,
+  /** A test send (the Test button) ignores the active flag and event filter. */
+  opts: { test?: boolean } = {}
 ): Promise<DeliverWebhookResult> {
   // 1. Fetch the webhook
   const webhook = await db.webhook.findUnique({
@@ -58,7 +60,7 @@ export async function deliverWebhook(
   }
 
   // 2. Skip if not active
-  if (!webhook.active) {
+  if (!webhook.active && !opts.test) {
     return {
       id: '',
       webhookId,
@@ -76,7 +78,7 @@ export async function deliverWebhook(
 
   // 3. Skip if event not in webhook's events list
   const webhookEvents: string[] = JSON.parse(webhook.events)
-  if (!webhookEvents.includes(event) && !webhookEvents.includes('*')) {
+  if (!opts.test && !webhookEvents.includes(event) && !webhookEvents.includes('*')) {
     return {
       id: '',
       webhookId,
@@ -193,12 +195,14 @@ export async function triggerWebhookEvent(
   payload: unknown,
   projectId?: string
 ): Promise<DeliverWebhookResult[]> {
-  // Find all active webhooks for this user
+  // Find all active webhooks for this user. A project event goes to that
+  // project's webhooks AND to account-wide ones (projectId null) — filtering
+  // on projectId alone silently skipped every account-wide webhook.
   const webhooks = await db.webhook.findMany({
     where: {
       userId,
       active: true,
-      ...(projectId ? { projectId } : {}),
+      ...(projectId ? { OR: [{ projectId }, { projectId: null }] } : {}),
     },
   })
 
@@ -216,4 +220,97 @@ export async function triggerWebhookEvent(
   }
 
   return results
+}
+
+// ── Event emission with retries ──────────────────────────────────────────
+
+/** Events the platform emits. Customers subscribe to these in Webhooks. */
+export type PlatformEvent =
+  | 'deployment.started'
+  | 'deployment.success'
+  | 'deployment.failed'
+  | 'project.created'
+  | 'project.deleted'
+  | 'domain.registered'
+  | 'domain.expiring'
+  | 'ssl.renewed'
+  | 'payment.success'
+  | 'payment.failed'
+  | 'monitor.down'
+  | 'monitor.up'
+
+/** Total delivery attempts: one immediate, then retries from the job queue. */
+export const WEBHOOK_RETRY_ATTEMPTS = 5
+
+/**
+ * Tell a customer's integrations that something happened.
+ *
+ * Before this, nothing in the platform emitted any event: the only caller of
+ * the delivery code was the manual "trigger" endpoint, so a webhook
+ * subscribed to deployment.failed never fired. Now real code paths call this.
+ *
+ * Each matching webhook gets one immediate attempt. A failed delivery is
+ * queued as a `deliver_webhook` job and retried with backoff (30s, 1m, 2m,
+ * 4m, 8m) by the worker, so a receiver that is briefly down still gets it —
+ * even across a panel restart.
+ *
+ * Never throws and never blocks on a slow receiver for long (5s timeout per
+ * attempt): callers are deploys and payments, which must not fail because a
+ * customer's endpoint did.
+ */
+export async function emitWebhookEvent(
+  userId: string,
+  event: PlatformEvent,
+  data: Record<string, unknown>,
+  opts: { projectId?: string | null } = {}
+): Promise<void> {
+  try {
+    const webhooks = await db.webhook.findMany({
+      where: {
+        userId,
+        active: true,
+        ...(opts.projectId
+          ? { OR: [{ projectId: opts.projectId }, { projectId: null }] }
+          : {}),
+      },
+      select: { id: true, events: true },
+    })
+    const matching = webhooks.filter((w) => {
+      try {
+        const events = JSON.parse(w.events) as string[]
+        return events.includes(event) || events.includes('*')
+      } catch {
+        return false
+      }
+    })
+    if (matching.length === 0) return
+
+    const body = {
+      id: crypto.randomUUID(),
+      event,
+      createdAt: new Date().toISOString(),
+      data,
+    }
+
+    await Promise.all(
+      matching.map(async (w) => {
+        const result = await deliverWebhook(w.id, event, body).catch(() => null)
+        if (result && (result.success || result.skipped)) return
+        await db.jobQueue
+          .create({
+            data: {
+              type: 'deliver_webhook',
+              payload: JSON.stringify({ webhookId: w.id, event, body, userId }),
+              status: 'queued',
+              attempts: 0,
+              maxAttempts: WEBHOOK_RETRY_ATTEMPTS,
+              runAt: new Date(Date.now() + 30_000),
+            },
+          })
+          .catch((err) => console.error('[webhooks] could not queue retry:', err))
+      })
+    )
+  } catch (err) {
+    console.error(`[webhooks] emitting ${event} failed:`, err)
+  }
 }

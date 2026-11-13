@@ -81,13 +81,25 @@ export function joinDeploymentRoom(
   return sock
 }
 
-export function leaveDeploymentRoom(deploymentId: string): void {
+/**
+ * Pass the same handlers given to joinDeploymentRoom. Without them every
+ * listener for these events is removed, including other components' (a
+ * project view subscribed to 'deployment:status' went deaf when a deployment
+ * dialog closed).
+ */
+export function leaveDeploymentRoom(
+  deploymentId: string,
+  onLog?: (data: DeploymentLogData) => void,
+  onStatus?: (data: DeploymentStatusData) => void
+): void {
   const sock = getSocket()
   const room = `deployment:${deploymentId}`
 
   sock.emit('leave-room', room)
-  sock.off('deployment:log')
-  sock.off('deployment:status')
+  if (onLog) sock.off('deployment:log', onLog)
+  else sock.off('deployment:log')
+  if (onStatus) sock.off('deployment:status', onStatus)
+  else sock.off('deployment:status')
 }
 
 export function joinProjectRoom(

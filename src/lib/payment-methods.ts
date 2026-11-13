@@ -15,7 +15,8 @@
  * with X". API routes /checkout and /billing/methods consume it.
  */
 import { db } from '@/lib/db'
-import { createCheckoutSession } from '@/lib/stripe'
+import { createCheckoutSession, isStripeDemoMode } from '@/lib/stripe'
+import { demoPaymentsAllowed } from '@/lib/demo-mode'
 import { createPayment as createWaafiPayment, isWaafiConfigured } from '@/lib/waafi'
 import { BILLING_EMAIL } from '@/lib/brand-config'
 
@@ -175,7 +176,19 @@ export async function getActivePaymentMethods(): Promise<PaymentMethod[]> {
     where: { active: true },
     orderBy: { sortOrder: 'asc' },
   })
-  return rows.map(rowToMethod)
+  return rows.map(rowToMethod).filter((m) => gatewayUsable(m.method))
+}
+
+/**
+ * A card or Waafi gateway without real credentials can only simulate a
+ * payment. That is fine while developing; in production it handed out paid
+ * plans for nothing, so there the method is treated as unavailable.
+ */
+function gatewayUsable(method: string): boolean {
+  if (demoPaymentsAllowed()) return true
+  if (method === 'stripe') return !isStripeDemoMode()
+  if (method === 'waafi') return isWaafiConfigured()
+  return true
 }
 
 /**
@@ -270,6 +283,12 @@ export async function resolveActiveMethod(
   if (!method || typeof method !== 'string') return null
   const m = await getPaymentMethod(method)
   if (!m || !m.active) return null
+  if (!gatewayUsable(m.method)) {
+    console.error(
+      `[payment-methods] "${m.method}" is enabled but has no real credentials — refusing to simulate a payment in production`
+    )
+    return null
+  }
   return m
 }
 

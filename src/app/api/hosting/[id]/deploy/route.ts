@@ -48,6 +48,15 @@ export async function POST(
       'building',
       'deploying',
     ]
+    if (project.status === 'suspended') {
+      return NextResponse.json(
+        {
+          error:
+            'This website is suspended because the plan has an unpaid invoice or has ended. Pay the invoice from Billing and it comes back automatically.',
+        },
+        { status: 402 }
+      )
+    }
     if (!DEPLOYABLE.includes(project.status)) {
       return NextResponse.json(
         { error: `Project cannot be deployed while its status is "${project.status}".` },

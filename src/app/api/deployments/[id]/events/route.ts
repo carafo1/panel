@@ -1,199 +1,117 @@
 import { db } from '@/lib/db'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
-import { BRAND_DOMAIN } from '@/lib/brand-config'
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
+/**
+ * GET /api/deployments/[id]/events — Server-Sent Events stream of a
+ * deployment's real state, polled from the database every 2 seconds until it
+ * reaches a terminal status.
+ *
+ * This route used to *drive* a queued deployment itself: watching one moved
+ * it through invented "building"/"deploying" logs to 'live' with a made-up
+ * duration, whether or not anything was built. It now only reports what the
+ * deployer has written.
+ *
+ * Auth: Authorization header, or `?token=` — the browser's EventSource cannot
+ * set headers, and the panel's SSE fallback sends the token that way, so it
+ * was always rejected with 401.
+ */
+const TERMINAL = new Set(['live', 'failed', 'rolled_back', 'cancelled'])
+const POLL_MS = 2000
+const MAX_STREAM_MS = 30 * 60 * 1000
+
+function json(status: number, body: object): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  })
 }
 
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const authHeader = request.headers.get('Authorization')
-  const token = extractTokenFromHeader(authHeader)
-
-  if (!token) {
-    return new Response(JSON.stringify({ error: 'Authorization token required' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' },
-    })
-  }
+  const token =
+    extractTokenFromHeader(request.headers.get('Authorization')) ||
+    new URL(request.url).searchParams.get('token')
+  if (!token) return json(401, { error: 'Authorization token required' })
 
   const decoded = await verifyTokenFresh(token)
-  if (!decoded) {
-    return new Response(JSON.stringify({ error: 'Invalid or expired token' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' },
-    })
-  }
+  if (!decoded) return json(401, { error: 'Invalid or expired token' })
 
   const { id } = await params
-
-  // Verify the deployment exists and belongs to the user
-  const deployment = await db.deployment.findFirst({
+  const exists = await db.deployment.findFirst({
     where: { id, userId: decoded.userId },
+    select: { id: true },
   })
-
-  if (!deployment) {
-    return new Response(JSON.stringify({ error: 'Deployment not found' }), {
-      status: 404,
-      headers: { 'Content-Type': 'application/json' },
-    })
-  }
+  if (!exists) return json(404, { error: 'Deployment not found' })
 
   const encoder = new TextEncoder()
+  const startedAt = Date.now()
+  let timer: ReturnType<typeof setTimeout> | null = null
+  let closed = false
 
   const stream = new ReadableStream({
-    async start(controller) {
-      const sendData = (data: object) => {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`))
+    start(controller) {
+      const close = () => {
+        if (closed) return
+        closed = true
+        if (timer) clearTimeout(timer)
+        try {
+          controller.close()
+        } catch {
+          /* already closed by the client */
+        }
+      }
+      const send = (chunk: string) => {
+        if (!closed) controller.enqueue(encoder.encode(chunk))
       }
 
-      const sendComment = (comment: string) => {
-        controller.enqueue(encoder.encode(`: ${comment}\n\n`))
-      }
-
-      // Simulated build log lines for demo
-      const buildLogLines = [
-        '📦 Cloning repository...',
-        '📦 Installing dependencies...',
-        '📦 Building application...',
-        '📦 Optimizing production bundle...',
-        '📦 Running linting checks...',
-        '🚀 Starting deployment...',
-        '🚀 Configuring server...',
-        '🚀 Setting up SSL...',
-        '🚀 Running health checks...',
-        '✅ Deployment complete!',
-      ]
-
-      const terminalStatuses = ['live', 'failed', 'rolled_back']
-      let simulationStarted = false
+      // Stop polling the database as soon as the viewer goes away.
+      request.signal.addEventListener('abort', close)
 
       const poll = async () => {
+        if (closed) return
         try {
           const current = await db.deployment.findFirst({
             where: { id, userId: decoded.userId },
+            select: {
+              id: true,
+              status: true,
+              buildLog: true,
+              deployUrl: true,
+              duration: true,
+              updatedAt: true,
+            },
           })
-
           if (!current) {
-            sendData({ error: 'Deployment not found' })
-            controller.close()
-            return
+            send(`data: ${JSON.stringify({ error: 'Deployment not found' })}\n\n`)
+            return close()
           }
-
-          // For demo: simulate progress if deployment is still "queued"
-          if (current.status === 'queued' && !simulationStarted) {
-            simulationStarted = true
-
-            // Kick off simulated progression in the background
-            const simulateProgress = async () => {
-              try {
-                // Move to "building" after a short delay
-                await sleep(2000)
-                await db.deployment.update({
-                  where: { id },
-                  data: {
-                    status: 'building',
-                    buildLog: '📦 Cloning repository...\n📦 Installing dependencies...',
-                  },
-                })
-
-                // Add build log lines progressively
-                for (let i = 2; i < 6; i++) {
-                  await sleep(2000)
-                  const logs = buildLogLines.slice(0, i + 1).join('\n')
-                  await db.deployment.update({
-                    where: { id },
-                    data: { buildLog: logs },
-                  })
-                }
-
-                // Move to "deploying"
-                await sleep(2000)
-                await db.deployment.update({
-                  where: { id },
-                  data: {
-                    status: 'deploying',
-                    buildLog: buildLogLines.slice(0, 7).join('\n'),
-                  },
-                })
-
-                // More deploy logs
-                for (let i = 7; i < 9; i++) {
-                  await sleep(2000)
-                  const logs = buildLogLines.slice(0, i + 1).join('\n')
-                  await db.deployment.update({
-                    where: { id },
-                    data: { buildLog: logs },
-                  })
-                }
-
-                // Move to "live"
-                await sleep(2000)
-                const project = await db.project.findUnique({
-                  where: { id: current.projectId },
-                })
-                // project.subdomain is already a full hostname (slug.<brand>).
-                const deployUrl = project?.subdomain
-                  ? `https://${project.subdomain}`
-                  : `https://${current.projectId}.${BRAND_DOMAIN}`
-
-                await db.deployment.update({
-                  where: { id },
-                  data: {
-                    status: 'live',
-                    buildLog: buildLogLines.join('\n'),
-                    deployUrl,
-                    duration: 45,
-                  },
-                })
-              } catch (err) {
-                console.error('Simulation error:', err)
-              }
-            }
-
-            simulateProgress()
+          send(`data: ${JSON.stringify(current)}\n\n`)
+          if (TERMINAL.has(current.status) || Date.now() - startedAt > MAX_STREAM_MS) {
+            return close()
           }
-
-          // Send current state
-          sendData({
-            id: current.id,
-            status: current.status,
-            buildLog: current.buildLog,
-            deployUrl: current.deployUrl,
-            duration: current.duration,
-            updatedAt: current.updatedAt,
-          })
-
-          // If terminal status, close the stream
-          if (terminalStatuses.includes(current.status)) {
-            controller.close()
-            return
-          }
-
-          // Schedule next poll
-          setTimeout(poll, 2000)
+          timer = setTimeout(poll, POLL_MS)
         } catch (error) {
-          console.error('SSE poll error:', error)
-          sendComment('error')
-          controller.close()
+          console.error('[deployments/events] poll failed:', error)
+          send(': error\n\n')
+          close()
         }
       }
 
-      // Send initial comment to establish connection
-      sendComment('connected')
-
-      // Start polling
-      poll()
+      send(': connected\n\n')
+      void poll()
+    },
+    cancel() {
+      closed = true
+      if (timer) clearTimeout(timer)
     },
   })
 
   return new Response(stream, {
     headers: {
       'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
+      'Cache-Control': 'no-cache, no-transform',
       Connection: 'keep-alive',
     },
   })

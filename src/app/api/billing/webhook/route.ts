@@ -9,6 +9,14 @@ import {
   getInvoiceChargeId,
 } from '@/lib/stripe'
 import { createNotification } from '@/lib/notifications'
+import { notifyPaymentFailed } from '@/lib/billing-notifications'
+import {
+  suspendSubscriptionForNonPayment,
+  reactivateSubscriptionIfSettled,
+  hasOtherHostingInGoodStanding,
+  isEmailPlanSlug,
+} from '@/lib/billing-enforcement'
+import { stopUserWebsites } from '@/lib/account-suspension'
 import type Stripe from 'stripe'
 
 /**
@@ -165,16 +173,33 @@ export async function POST(request: Request) {
           const { start: periodStart, end: periodEnd } =
             getSubscriptionPeriod(sub)
           const cancelAtPeriodEnd = !!sub?.cancel_at_period_end
+          // Recovering from past_due/suspended goes through
+          // reactivateSubscriptionIfSettled, which needs to see the old
+          // status — so leave it in place and let that set 'active'.
+          const recovering =
+            mappedStatus === 'active' &&
+            (local.status === 'past_due' || local.status === 'suspended')
 
           await db.subscription.update({
             where: { id: local.id },
             data: {
-              status: mappedStatus,
+              ...(recovering ? {} : { status: mappedStatus }),
               ...(periodStart ? { currentPeriodStart: periodStart } : {}),
               ...(periodEnd ? { currentPeriodEnd: periodEnd } : {}),
               cancelAtPeriodEnd,
             },
           })
+
+          // Stripe's status alone changed a label: sites stayed up after
+          // Stripe gave up on the card, and stayed down after it recovered.
+          if (status === 'unpaid') {
+            await suspendSubscriptionForNonPayment(
+              local.id,
+              'card payments for this plan kept failing'
+            )
+          } else if (recovering) {
+            await reactivateSubscriptionIfSettled(local.id)
+          }
 
           await createNotification({
             userId: local.userId,
@@ -210,6 +235,21 @@ export async function POST(request: Request) {
             userId: local.userId,
             payload: { subscriptionId: local.id },
           })
+
+          // The plan is gone, so are the websites it paid for — unless
+          // another hosting plan still covers them. Stopped, not deleted.
+          const plan = await db.plan.findUnique({
+            where: { id: local.planId },
+            select: { slug: true },
+          })
+          if (
+            !isEmailPlanSlug(plan?.slug) &&
+            !(await hasOtherHostingInGoodStanding(local.userId, local.id))
+          ) {
+            await stopUserWebsites(local.userId).catch((err) =>
+              console.error('[stripe-webhook] stopping websites failed:', err)
+            )
+          }
 
           await createNotification({
             userId: local.userId,
@@ -335,13 +375,15 @@ export async function POST(request: Request) {
           payload: { subscriptionId: subId },
         })
 
-        await createNotification({
+        // In-app AND email: a customer whose card fails rarely has the panel
+        // open, and only finds out when the site goes down.
+        await notifyPaymentFailed({
           userId,
-          title: 'Payment Failed',
-          message: `Your payment of $${amountDue.toFixed(2)} failed (attempt #${attemptCount}). Please update your payment method.`,
-          type: 'error',
-          link: '/?tab=billing',
-        })
+          amount: amountDue,
+          currency: (invoice?.currency || 'usd').toUpperCase(),
+          method: 'card',
+          reason: `attempt #${attemptCount} — please update your payment method`,
+        }).catch(() => {})
       }
     }
 

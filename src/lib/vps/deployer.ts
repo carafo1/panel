@@ -46,6 +46,7 @@ import { runPreDeployChecks } from '@/lib/pipeline-runner'
 import { getDeploymentMethod, type DeploymentMethodId } from '@/lib/deployment-methods'
 import { encrypt, decrypt } from '@/lib/encryption'
 import { broadcastDeploymentLog, broadcastDeploymentStatus } from '@/lib/realtime'
+import { announceDeployment } from '@/lib/deploy-events'
 import {
   withConnection,
   exec,
@@ -263,6 +264,7 @@ export async function deployProject(req: DeployRequest): Promise<DeployResult> {
     data: { status: 'building' },
   }).catch(() => {})
   broadcastDeploymentStatus(deploymentId, projectId, 'building')
+  void announceDeployment({ projectId, deploymentId, phase: 'started' })
 
   // Stage runner: writes a DeploymentStage row, runs fn, marks completed/failed.
   const buildLog: string[] = []
@@ -367,6 +369,13 @@ export async function deployProject(req: DeployRequest): Promise<DeployResult> {
         ? await deployMethodProject(req, project, method, runStage, stageLog, buildLog, start)
         : await deployLegacyProject(req, project, runStage, stageLog, buildLog, start)
     broadcastDeploymentStatus(deploymentId, projectId, result.ok ? 'live' : 'failed')
+    void announceDeployment({
+      projectId,
+      deploymentId,
+      phase: result.ok ? 'success' : 'failed',
+      error: result.ok ? null : result.error,
+      durationMs: Date.now() - start,
+    })
     return result
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
@@ -385,6 +394,13 @@ export async function deployProject(req: DeployRequest): Promise<DeployResult> {
       },
     })
     broadcastDeploymentStatus(deploymentId, projectId, 'failed')
+    void announceDeployment({
+      projectId,
+      deploymentId,
+      phase: 'failed',
+      error: message,
+      durationMs: Date.now() - start,
+    })
     return {
       ok: false,
       projectId,

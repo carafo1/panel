@@ -143,6 +143,21 @@ export async function activatePayment(
       await resumeEmailForSubscription(subscription.id).catch((err) =>
         console.error('[payment-activation] email resume failed:', err)
       )
+
+      // Websites a lapsed or suspended plan took offline come back with the
+      // new plan. Only sites marked 'suspended' are touched, so anything the
+      // customer stopped themselves stays stopped. Lazy import: this pulls in
+      // the deploy layer.
+      const { isEmailPlanSlug } = await import('@/lib/billing-enforcement')
+      const plan = await db.plan
+        .findUnique({ where: { id: subscription.planId }, select: { slug: true } })
+        .catch(() => null)
+      if (!isEmailPlanSlug(plan?.slug)) {
+        const { restoreUserWebsites } = await import('@/lib/account-suspension')
+        await restoreUserWebsites(subscription.userId).catch((err) =>
+          console.error('[payment-activation] website restore failed:', err)
+        )
+      }
     }
   }
 

@@ -19,6 +19,7 @@
  * No external packages are required - uses the global `fetch` shipped
  * with Node.js 18+ and Bun.
  */
+import { demoPaymentsAllowed } from '@/lib/demo-mode'
 
 /**
  * Read a Waafi env var, treating the shipped placeholders as unset.
@@ -224,6 +225,15 @@ export async function verifyPayment(
 ): Promise<VerifyPaymentResult> {
   // ── DEMO MODE ──────────────────────────────────────────────────
   if (isWaafiDemoMode()) {
+    // Never report money as received in production when nothing could
+    // have been charged.
+    if (!demoPaymentsAllowed()) {
+      return {
+        success: false,
+        status: 'failed',
+        error: 'Waafi Pay is not configured on this server',
+      } as VerifyPaymentResult
+    }
     console.log('[waafi] DEMO MODE: verifyPayment', transactionId)
     // Simulate a successful verification for demo transactions.
     return {
