@@ -1,0 +1,22 @@
+/**
+ * Next.js startup hook — runs once when the server process starts.
+ *
+ * Customer cron jobs run on the panel's in-process scheduler (node-cron),
+ * which used to start only on the first use of a Cron tab. After every panel
+ * restart or deploy, no customer cron job fired until somebody happened to
+ * open that tab. Start it at boot instead.
+ *
+ * Delayed slightly and not awaited, so a slow database never holds up the
+ * server accepting requests; startCronScheduler is idempotent and never
+ * throws.
+ */
+export async function register() {
+  if (process.env.NEXT_RUNTIME !== 'nodejs') return
+  if (process.env.DISABLE_CRON_SCHEDULER === '1') return
+
+  setTimeout(() => {
+    import('./lib/vps/cron')
+      .then(({ startCronScheduler }) => startCronScheduler())
+      .catch((err) => console.error('[instrumentation] cron scheduler failed to start:', err))
+  }, 3000)
+}
