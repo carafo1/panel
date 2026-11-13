@@ -9,6 +9,12 @@
 #     apsamo update --tag v1.2   # checkout specific tag
 #     apsamo update --no-backup  # skip pre-update backup (faster, risky)
 #
+#   Billing safety: the worker (which runs the billing sweep) is stopped for
+#   the update, and scripts/billing-preview.ts runs against the new code
+#   before it starts again. If the sweep would suspend anyone or take a
+#   cancelled plan's websites offline, the worker is HELD (left stopped) so
+#   the list can be checked first; start it with: systemctl start apsamo-worker
+#
 #   The script will:
 #     1. Create a pre-update backup (DB + .env + storage)
 #     2. git pull (or checkout to specified branch/tag)
@@ -24,7 +30,7 @@
 # ════════════════════════════════════════════════════════════════════════════
 set -euo pipefail
 
-INSTALL_DIR="/opt/apsamo"
+INSTALL_DIR="${APSAMO_DIR:-/opt/apsamo}"
 BRANCH=""
 TAG=""
 BACKUP=1
@@ -48,6 +54,14 @@ err()  { echo "${RED}✗${NC} $*" >&2; }
 step() { echo ""; echo "${BLUE}${BOLD}── $* ──${NC}"; }
 
 cd "$INSTALL_DIR"
+
+# ── Pause background jobs ─────────────────────────────────────────────────
+# The worker drives the billing sweep. Keep it stopped until the new code
+# has been checked (see "Billing preview" below), so new billing rules never
+# act on customers before anyone has seen what they will do.
+step "Pausing background worker"
+systemctl stop apsamo-worker 2>/dev/null || true
+ok "Worker paused"
 
 # ── Pre-update backup ─────────────────────────────────────────────────────
 if [[ "$BACKUP" == "1" ]]; then
@@ -103,9 +117,33 @@ ok "Restarting realtime..."
 systemctl restart apsamo-realtime
 sleep 2
 
-ok "Restarting worker..."
-systemctl restart apsamo-worker
-sleep 2
+# ── Billing preview (read only) ───────────────────────────────────────────
+HOLD_WORKER=0
+if [[ -f scripts/billing-preview.ts ]]; then
+  step "Billing preview — what the next sweep would do"
+  PREVIEW_JSON="$(mktemp)"
+  if bun run scripts/billing-preview.ts --json > "$PREVIEW_JSON" 2>/dev/null; then
+    bun run scripts/billing-preview.ts || true
+    # Hold only for actions that take websites offline.
+    IMPACT=$(bun -e "const r=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).rows||[];console.log(r.filter(x=>x.action==='suspend'||x.action==='end_cancelled').length)" "$PREVIEW_JSON" 2>/dev/null || echo "?")
+    if [[ "$IMPACT" != "0" ]]; then
+      HOLD_WORKER=1
+      warn "The billing sweep would take websites offline for $IMPACT subscription(s) (listed above)."
+    fi
+  else
+    HOLD_WORKER=1
+    warn "Billing preview could not run — holding the worker to be safe."
+  fi
+  rm -f "$PREVIEW_JSON"
+fi
+
+if [[ "$HOLD_WORKER" == "1" ]]; then
+  warn "Worker HELD (stopped): no renewals, suspensions, monitors or deploy sweeps until you start it."
+else
+  ok "Starting worker..."
+  systemctl start apsamo-worker
+  sleep 2
+fi
 
 ok "Restarting panel..."
 systemctl restart apsamo-panel
@@ -114,7 +152,9 @@ sleep 5
 # ── Verify ────────────────────────────────────────────────────────────────
 step "Verifying"
 
-for svc in apsamo-panel apsamo-realtime apsamo-worker; do
+SERVICES="apsamo-panel apsamo-realtime"
+[[ "$HOLD_WORKER" == "1" ]] || SERVICES="$SERVICES apsamo-worker"
+for svc in $SERVICES; do
   status=$(systemctl is-active "$svc")
   if [[ "$status" == "active" ]]; then
     ok "$svc: active"
@@ -137,4 +177,11 @@ ok "Update complete!"
 echo "  Commit:   $CURRENT"
 echo "  Backup:   $INSTALL_DIR/backups/pre-update-*.tar.gz"
 echo "  Rollback: apsamo restore <pre-update-backup>"
+if [[ "$HOLD_WORKER" == "1" ]]; then
+  echo ""
+  warn "Background worker is HELD. Review the billing preview above; mark any"
+  warn "invoice that was actually paid as paid in Admin -> Invoices, re-check with:"
+  echo "      cd $INSTALL_DIR && bun run scripts/billing-preview.ts"
+  warn "then start it:  systemctl start apsamo-worker"
+fi
 echo ""
