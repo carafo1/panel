@@ -5,6 +5,7 @@ import { logAudit } from '@/lib/audit'
 import { encrypt } from '@/lib/encryption'
 import { withConnection, exec, isServerInDemoMode } from '@/lib/vps/ssh'
 import { getServerCredentials } from '@/lib/vps/provisioner'
+import { isLocalHost } from '@/lib/vps/local-exec'
 
 /**
  * Overlay LIVE CPU / RAM / disk (pulled over SSH) onto a server row so the
@@ -274,6 +275,19 @@ export async function POST(request: Request) {
     // ── Build the create payload ───────────────────────────────────────
     const resolvedSshHost =
       typeof sshHost === 'string' && sshHost.trim() ? sshHost.trim() : String(ip).trim()
+
+    // A remote server saved without credentials cannot run anything. It used
+    // to be stored as 'active' anyway, and every deploy placed on it was then
+    // simulated. Require a way in (the panel's own host needs none).
+    const hasCredentials =
+      (typeof sshPassword === 'string' && sshPassword.length > 0) ||
+      (typeof sshPrivateKey === 'string' && sshPrivateKey.length > 0)
+    if (!hasCredentials && !isLocalHost(resolvedSshHost)) {
+      return NextResponse.json(
+        { error: 'Add an SSH private key or password so the panel can reach this server.' },
+        { status: 400 }
+      )
+    }
 
     const data: Record<string, unknown> = {
       name: String(name).trim(),
