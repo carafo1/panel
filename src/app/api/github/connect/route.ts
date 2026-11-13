@@ -3,6 +3,39 @@ import { db } from '@/lib/db'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { isGithubDemoMode } from '@/lib/github'
 import crypto from 'crypto'
+import { isProduction } from '@/lib/demo-mode'
+
+/**
+ * Confirm a pasted personal access token is real and can read the repo.
+ * Messages are written for the customer; the token itself is never logged.
+ */
+async function verifyPersonalToken(
+  token: string,
+  repoFullName: string
+): Promise<{ ok: true; login: string; githubId: number } | { ok: false; error: string }> {
+  if (!/^(gh[pousr]_|github_pat_)[A-Za-z0-9_]{20,}$/.test(token)) {
+    return { ok: false, error: 'That does not look like a GitHub personal access token.' }
+  }
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    Accept: 'application/vnd.github+json',
+    'User-Agent': 'apsamo-panel',
+  }
+  try {
+    const me = await fetch('https://api.github.com/user', { headers, signal: AbortSignal.timeout(10_000) })
+    if (me.status === 401) return { ok: false, error: 'GitHub rejected this token. It may be expired or revoked.' }
+    if (!me.ok) return { ok: false, error: `GitHub answered ${me.status} when checking the token. Try again shortly.` }
+    const user = (await me.json()) as { login: string; id: number }
+    const repo = await fetch(`https://api.github.com/repos/${repoFullName}`, { headers, signal: AbortSignal.timeout(10_000) })
+    if (repo.status === 404) {
+      return { ok: false, error: `This token cannot see ${repoFullName}. Check the repository name, or give the token access to it.` }
+    }
+    if (!repo.ok) return { ok: false, error: `GitHub answered ${repo.status} when checking the repository.` }
+    return { ok: true, login: user.login, githubId: user.id }
+  } catch {
+    return { ok: false, error: 'Could not reach GitHub to check the token. Try again shortly.' }
+  }
+}
 
 /**
  * POST /api/github/connect
@@ -45,6 +78,8 @@ export async function POST(req: NextRequest) {
       )
     }
     const { projectId, repoUrl, branch } = body
+    const pastedToken =
+      typeof body.accessToken === 'string' ? body.accessToken.trim() : ''
 
     if (!projectId || !repoUrl) {
       return NextResponse.json(
@@ -95,13 +130,26 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const demoMode = isGithubDemoMode()
+    // Simulated tokens only outside production. In production a missing
+    // OAuth app used to mint a 'ghp_demo_' token here, and the panel then
+    // showed invented commits under the customer's real repository name.
+    const demoMode = isGithubDemoMode() && !isProduction()
     let accessToken = ''
     let githubId = ''
     let webhookId: string | null = null
     let oauthConnected = false
 
-    if (!demoMode) {
+    if (pastedToken) {
+      // A personal access token pasted by the customer: check it works and
+      // can see this repository before storing it.
+      const check = await verifyPersonalToken(pastedToken, repoFullName)
+      if (!check.ok) {
+        return NextResponse.json({ error: check.error }, { status: 400 })
+      }
+      accessToken = pastedToken
+      githubId = String(check.githubId)
+      username = username || check.login
+    } else if (!isGithubDemoMode()) {
       // OAuth mode: reuse the user's user-level OAuth integration token.
       const oauthIntegration = await db.githubIntegration.findFirst({
         where: {
@@ -127,8 +175,17 @@ export async function POST(req: NextRequest) {
       username = username || oauthIntegration.username
       webhookId = oauthIntegration.webhookId
       oauthConnected = true
+    } else if (!demoMode) {
+      return NextResponse.json(
+        {
+          error:
+            'Paste a GitHub personal access token with read access to this repository (GitHub → Settings → Developer settings → Personal access tokens).',
+          requiresToken: true,
+        },
+        { status: 400 }
+      )
     } else {
-      // Demo mode: simulate a token (legacy behavior).
+      // Development only: simulate a token (legacy behavior).
       accessToken = `ghp_demo_${crypto.randomBytes(12).toString('hex')}`
       githubId = `gh_${crypto.randomBytes(8).toString('hex')}`
       webhookId = `wh_${crypto.randomBytes(8).toString('hex')}`

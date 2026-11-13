@@ -94,7 +94,9 @@ async function getHandler(request: Request) {
         }
       })
     } catch {
-      suggestions = suggestionDomains.map((d) => ({
+      // Never claim availability we could not check: outside demo mode a
+      // failed lookup means no suggestions, not "everything is free".
+      suggestions = !isDynadotDemoMode() ? [] : suggestionDomains.map((d) => ({
         domain: d,
         available: true,
         premium: false,
@@ -200,6 +202,19 @@ async function postHandler(request: Request) {
       }
     }
 
+    // The registrar answered but said nothing about this domain. Guessing
+    // "available" from the name sent customers to checkout for domains that
+    // could not be registered. Outside demo mode, say we could not confirm.
+    if (dynadotAvailable === null && !isDynadotDemoMode()) {
+      return NextResponse.json(
+        {
+          error: 'We could not confirm whether this domain is available. Please try again.',
+          provider: 'apsamo',
+        },
+        { status: 502 }
+      )
+    }
+
     // Demo-mode fallback only — real mode already returned above on error.
     const simulatedTaken =
       domainLower.includes('taken') || domainLower.includes('unavailable')
@@ -239,13 +254,17 @@ async function postHandler(request: Request) {
     try {
       const sugResults = await searchDomains(suggestionDomains)
       const sugByDomain = new Map(sugResults.map((r) => [r.domain.toLowerCase(), r]))
-      suggestions = suggestionDomains.map((d) => ({
-        domain: d,
-        available: sugByDomain.get(d)?.available ?? true,
-        price: sellingFor(d),
-      }))
+      // A suggestion the registrar did not report on is left out rather
+      // than shown as available (`?? true` did that).
+      suggestions = suggestionDomains
+        .filter((d) => sugByDomain.has(d) || isDynadotDemoMode())
+        .map((d) => ({
+          domain: d,
+          available: sugByDomain.get(d)?.available ?? true,
+          price: sellingFor(d),
+        }))
     } catch {
-      suggestions = suggestionDomains.map((d) => ({
+      suggestions = !isDynadotDemoMode() ? [] : suggestionDomains.map((d) => ({
         domain: d,
         available: true,
         price: sellingFor(d),

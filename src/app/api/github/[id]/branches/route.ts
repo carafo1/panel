@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { isProduction } from '@/lib/demo-mode'
 import { db } from '@/lib/db'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { getBranches, isGithubDemoMode } from '@/lib/github'
@@ -42,14 +43,23 @@ export async function GET(
       )
     }
 
-    const demoMode = isGithubDemoMode()
-    const hasRealToken =
-      !!integration.accessToken &&
-      !integration.accessToken.startsWith('ghp_sim_') // legacy simulated tokens
+    // Decide by the TOKEN, not by whether OAuth is configured: a pasted
+    // personal access token is real even without an OAuth app. Only a demo
+    // token, outside production, gets simulated data.
+    const ghToken = integration.accessToken || ''
+    const simulated = ghToken.startsWith('ghp_demo_') && isGithubDemoMode() && !isProduction()
+    const hasRealToken = !!ghToken && !ghToken.startsWith('ghp_sim_') && !simulated
     const repoFullName = integration.repoFullName || ''
 
-    // Fallback to demo branches if no real OAuth setup or no repo chosen.
-    if (demoMode || !hasRealToken || !repoFullName) {
+    if (!simulated && (!hasRealToken || !repoFullName)) {
+      return NextResponse.json(
+        { error: 'This repository is not connected with a valid GitHub token. Reconnect it.', branches: [] },
+        { status: 400 }
+      )
+    }
+
+    // Development demo data only.
+    if (simulated) {
       const [owner, repo] = repoFullName
         ? repoFullName.split('/')
         : [integration.username || 'demo-user', 'demo-repo']

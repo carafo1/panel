@@ -219,3 +219,142 @@ function escapeHtml(s: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
 }
+
+// ── Preview (read-only) ──────────────────────────────────────────────────
+
+/** Days past the period end before a lapsed, non-renewing plan is suspended. */
+export const EXPIRY_GRACE_DAYS = 7
+
+export type PreviewAction =
+  | 'renew' // period ended; a renewal invoice will be raised (customer emailed)
+  | 'past_due' // invoice overdue or period expired: warning sent, still online
+  | 'suspend' // websites stopped, mail paused
+  | 'end_cancelled' // scheduled cancellation completes; websites stopped
+
+export interface PreviewRow {
+  subscriptionId: string
+  userId: string
+  email: string | null
+  name: string | null
+  plan: string
+  status: string
+  action: PreviewAction
+  reason: string
+  invoiceNumber: string | null
+  amountDue: string | null
+  dueDate: string | null
+  /** Websites that would go offline (0 for email plans / other plan covers them). */
+  websitesAffected: number
+}
+
+/**
+ * What the next billing sweep would do, without doing any of it.
+ *
+ * Mirrors the order of decisions in /api/billing/sweep (auto-renew first,
+ * then cancellations, overdue invoices, expiry). Used by the sweep's GET
+ * dry-run and by scripts/billing-preview.ts, so an operator can see who will
+ * be warned or suspended BEFORE deploying a change to these rules.
+ */
+export async function previewEnforcement(now = new Date()): Promise<PreviewRow[]> {
+  const { NOT_STRIPE_MANAGED } = await import('@/lib/renewals')
+  const DAY = 24 * 60 * 60 * 1000
+  const rows: PreviewRow[] = []
+
+  const subs = await db.subscription.findMany({
+    where: { status: { in: ['active', 'past_due', 'trialing'] }, ...NOT_STRIPE_MANAGED },
+    include: {
+      plan: { select: { name: true, slug: true, billingCycle: true } },
+      user: { select: { id: true, email: true, name: true } },
+    },
+    orderBy: { currentPeriodEnd: 'asc' },
+  })
+
+  const websitesAt = async (sub: (typeof subs)[number]) => {
+    if (isEmailPlanSlug(sub.plan?.slug)) return 0
+    if (await hasOtherHostingInGoodStanding(sub.userId, sub.id)) return 0
+    return db.project.count({
+      where: { userId: sub.userId, status: { in: ['running', 'deploying', 'creating', 'error'] } },
+    })
+  }
+
+  for (const sub of subs) {
+    const end = new Date(sub.currentPeriodEnd)
+    const base = {
+      subscriptionId: sub.id,
+      userId: sub.userId,
+      email: sub.user?.email ?? null,
+      name: sub.user?.name ?? null,
+      plan: sub.plan?.name ?? '(no plan)',
+      status: sub.status,
+      invoiceNumber: null as string | null,
+      amountDue: null as string | null,
+      dueDate: null as string | null,
+      websitesAffected: 0,
+    }
+
+    if (sub.cancelAtPeriodEnd) {
+      if (end <= now) {
+        rows.push({
+          ...base,
+          action: 'end_cancelled',
+          reason: `cancellation requested; period ended ${end.toDateString()}`,
+          websitesAffected: await websitesAt(sub),
+        })
+      }
+      continue
+    }
+
+    const overdue = await oldestUnpaidInvoice(sub.id)
+    const due = overdue?.dueDate ?? null
+
+    // Auto-renew runs first in the sweep: a lapsed plan with nothing unpaid
+    // gets a new invoice instead of a past-due notice.
+    const lifetime = (sub.plan?.billingCycle || 'monthly') === 'lifetime'
+    if (
+      end <= now &&
+      sub.autoRenew &&
+      !lifetime &&
+      sub.renewalAttempts < 3 &&
+      !overdue
+    ) {
+      rows.push({
+        ...base,
+        action: 'renew',
+        reason: `period ended ${end.toDateString()}; renewal invoice will be raised`,
+      })
+      continue
+    }
+
+    if (overdue && due && due <= now) {
+      const inv = {
+        invoiceNumber: overdue.number,
+        amountDue: `${overdue.total.toFixed(2)} ${overdue.currency}`,
+        dueDate: due.toISOString().slice(0, 10),
+      }
+      if (sub.status === 'active' || sub.status === 'trialing') {
+        rows.push({ ...base, ...inv, action: 'past_due', reason: `invoice ${overdue.number} overdue since ${due.toDateString()}` })
+      } else if (sub.status === 'past_due' && due.getTime() <= now.getTime() - OVERDUE_GRACE_DAYS * DAY) {
+        rows.push({
+          ...base,
+          ...inv,
+          action: 'suspend',
+          reason: `invoice ${overdue.number} unpaid more than ${OVERDUE_GRACE_DAYS} days past due`,
+          websitesAffected: await websitesAt(sub),
+        })
+      }
+      continue
+    }
+
+    if ((sub.status === 'active' || sub.status === 'trialing') && end <= now) {
+      rows.push({ ...base, action: 'past_due', reason: `plan expired ${end.toDateString()} and will not renew` })
+    } else if (sub.status === 'past_due' && end.getTime() <= now.getTime() - EXPIRY_GRACE_DAYS * DAY) {
+      rows.push({
+        ...base,
+        action: 'suspend',
+        reason: `plan expired ${end.toDateString()} and was not renewed`,
+        websitesAffected: await websitesAt(sub),
+      })
+    }
+  }
+  return rows
+}

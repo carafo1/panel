@@ -11,6 +11,8 @@ import {
   suspendSubscriptionForNonPayment,
   isEmailPlanSlug,
   hasOtherHostingInGoodStanding,
+  EXPIRY_GRACE_DAYS,
+  previewEnforcement,
 } from '@/lib/billing-enforcement'
 import { stopUserWebsites } from '@/lib/account-suspension'
 import { collectAllUsage } from '@/lib/usage'
@@ -37,7 +39,7 @@ import { recordHeartbeat } from '@/lib/health'
  */
 
 const REMIND_DAYS = 5 // notify this many days before expiry
-const GRACE_DAYS = 7 // days after expiry before suspending
+const GRACE_DAYS = EXPIRY_GRACE_DAYS // days after expiry before suspending
 
 const CRON_API_KEY =
   process.env.CRON_API_KEY &&
@@ -368,46 +370,31 @@ export async function POST(request: Request) {
   }
 }
 
-/** GET → dry-run summary of what the next sweep would do. */
+/**
+ * GET → dry run: exactly what the next sweep would do, per subscription,
+ * without doing any of it. Uses the same rules as POST (previewEnforcement),
+ * so it can be checked before a change to those rules goes live.
+ */
 export async function GET(request: Request) {
   try {
     if (!await authorise(request)) {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 403 })
     }
-    const now = new Date()
-    const remindBefore = new Date(
-      now.getTime() + REMIND_DAYS * 24 * 60 * 60 * 1000
-    )
-    const suspendBefore = new Date(
-      now.getTime() - GRACE_DAYS * 24 * 60 * 60 * 1000
-    )
-    const subs = await db.subscription.findMany({
-      where: {
-        status: { in: ['active', 'past_due', 'trialing'] },
-        ...NOT_STRIPE_MANAGED,
-      },
-      select: { id: true, status: true, currentPeriodEnd: true },
-    })
+    const rows = await previewEnforcement()
+    const count = (a: string) => rows.filter((r) => r.action === a).length
     return NextResponse.json({
       dryRun: true,
-      config: { remindDays: REMIND_DAYS, graceDays: GRACE_DAYS },
-      scanned: subs.length,
-      wouldRemind: subs.filter(
-        (s) =>
-          (s.status === 'active' || s.status === 'trialing') &&
-          new Date(s.currentPeriodEnd) > now &&
-          new Date(s.currentPeriodEnd) <= remindBefore
-      ).length,
-      wouldMarkPastDue: subs.filter(
-        (s) =>
-          (s.status === 'active' || s.status === 'trialing') &&
-          new Date(s.currentPeriodEnd) <= now
-      ).length,
-      wouldSuspend: subs.filter(
-        (s) =>
-          s.status === 'past_due' &&
-          new Date(s.currentPeriodEnd) <= suspendBefore
-      ).length,
+      config: {
+        remindDays: REMIND_DAYS,
+        expiryGraceDays: GRACE_DAYS,
+        overdueGraceDays: OVERDUE_GRACE_DAYS,
+      },
+      wouldRenew: count('renew'),
+      wouldMarkPastDue: count('past_due'),
+      wouldSuspend: count('suspend'),
+      wouldEndCancelled: count('end_cancelled'),
+      websitesWouldStop: rows.reduce((n, r) => n + r.websitesAffected, 0),
+      subscriptions: rows,
     })
   } catch (error) {
     console.error('[billing-sweep] dry-run failed:', error)
