@@ -107,13 +107,69 @@ const internalServer = createServer(
   }
 )
 
+// ── Authorization ─────────────────────────────────────────────────────
+// Rooms carry live build logs (which can contain secrets), import progress
+// and per-user notifications. Anyone could join any room, so knowing an id
+// was enough to read another customer's logs. Now:
+//   1. a connection must present the user's login token (handshake.auth.token)
+//   2. every join is checked by the panel (/api/realtime/authorize), which
+//      applies the same project/team rules as the REST API
+// The token is forwarded, never interpreted here: no JWT secret or database
+// access lives in this service.
+const PANEL_API_BASE = process.env.NEXT_API_BASE || 'http://127.0.0.1:3000'
+const AUTHORIZE_TIMEOUT_MS = 5000
+
+async function authorizeRoom(
+  token: string,
+  room: string
+): Promise<{ ok: boolean; status: number; userId?: string }> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), AUTHORIZE_TIMEOUT_MS)
+  try {
+    const res = await fetch(`${PANEL_API_BASE}/api/realtime/authorize`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room }),
+      signal: controller.signal,
+    })
+    const body = (await res.json().catch(() => ({}))) as { userId?: string }
+    return { ok: res.ok, status: res.status, userId: body.userId }
+  } catch {
+    // Panel unreachable: fail closed.
+    return { ok: false, status: 0 }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+function tokenOf(socket: Socket): string | null {
+  const t = (socket.handshake.auth as { token?: unknown } | undefined)?.token
+  return typeof t === 'string' && t.length > 0 && t.length < 4096 ? t : null
+}
+
+// Refuse connections without a token up front; the token itself is checked
+// on every join (so expiry, logout and role changes apply immediately).
+io.use((socket, next) => {
+  if (!tokenOf(socket)) return next(new Error('unauthorized'))
+  next()
+})
+
 // ── Socket.io connection handling ─────────────────────────────────────
 io.on('connection', (socket: Socket) => {
   console.log(
     `[realtime] Client connected: ${socket.id} (total: ${io.sockets.sockets.size})`
   )
 
-  socket.on('join-room', (room: string) => {
+  socket.on('join-room', async (room: unknown) => {
+    if (typeof room !== 'string' || room.length > 100) return
+    const token = tokenOf(socket)
+    const verdict = token ? await authorizeRoom(token, room) : { ok: false, status: 401 }
+    if (!verdict.ok) {
+      socket.emit('room-denied', { room, status: verdict.status })
+      console.warn(`[realtime] ${socket.id} denied room ${room} (${verdict.status})`)
+      if (verdict.status === 401) socket.disconnect(true)
+      return
+    }
     socket.join(room)
     console.log(`[realtime] ${socket.id} joined room: ${room}`)
   })
