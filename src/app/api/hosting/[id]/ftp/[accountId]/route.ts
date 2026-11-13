@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
+import { requireProjectAccess } from '@/lib/project-access'
 import { logAudit } from '@/lib/audit'
 import { getFtpAccount, updateFtpAccount, deleteFtpAccount } from '@/lib/vps'
 
@@ -24,12 +25,8 @@ export async function GET(
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 })
     }
     const { id: projectId, accountId } = await params
-    const project = await db.project.findFirst({
-      where: { id: projectId, userId: decoded.userId },
-    })
-    if (!project) {
-      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
-    }
+    const access = await requireProjectAccess(decoded, projectId, 'data')
+    if (!access.ok) return access.response
     const url = new URL(request.url)
     const reveal = url.searchParams.get('reveal') === 'true'
     const account = await getFtpAccount(projectId, accountId, reveal)
@@ -53,12 +50,8 @@ export async function PATCH(
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 })
     }
     const { id: projectId, accountId } = await params
-    const project = await db.project.findFirst({
-      where: { id: projectId, userId: decoded.userId },
-    })
-    if (!project) {
-      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
-    }
+    const access = await requireProjectAccess(decoded, projectId, 'data')
+    if (!access.ok) return access.response
 
     const body = await request.json().catch(() => ({}))
     const patch: Record<string, unknown> = {}
@@ -102,12 +95,8 @@ export async function DELETE(
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 })
     }
     const { id: projectId, accountId } = await params
-    const project = await db.project.findFirst({
-      where: { id: projectId, userId: decoded.userId },
-    })
-    if (!project) {
-      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
-    }
+    const access = await requireProjectAccess(decoded, projectId, 'data')
+    if (!access.ok) return access.response
     const existing = await db.ftpAccount.findFirst({
       where: { id: accountId, projectId },
     })

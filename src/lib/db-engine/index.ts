@@ -3,14 +3,15 @@
  * ================================================
  *
  * `resolveTenantDatabase` is the single security choke point for the whole
- * module: it authenticates the request, enforces project ownership (a non-admin
- * may only reach their OWN project's databases), loads the WebsiteDatabase row,
+ * module: it authenticates the request, enforces project access (the caller
+ * needs the 'data' permission: the project owner, a platform admin, or a team
+ * owner/admin — see '@/lib/project-access'), loads the WebsiteDatabase row,
  * decrypts the tenant's non-root credentials, and returns a ready connection.
  * Every Studio API route MUST go through it before touching a database.
  */
 import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
-import { isAdmin } from '@/lib/security'
+import { getProjectAccess } from '@/lib/project-access'
 import { decrypt } from '@/lib/encryption'
 import { isLocalHost } from '@/lib/vps/local-exec'
 import type { DbEngine, TenantDbConnection } from './types'
@@ -54,11 +55,19 @@ export async function resolveTenantDatabase(
   const auth = await authenticateRequest(request)
   if (!auth) throw new DbAccessError('Invalid or expired token', 401)
 
-  // Ownership: admins may reach any project; everyone else only their own.
-  const project = await db.project.findFirst({
-    where: isAdmin(auth.role)
-      ? { id: projectId }
-      : { id: projectId, userId: auth.userId },
+  // Access: project owner, platform admins and team owners/admins ('data').
+  // No relationship at all answers 404 so a project's existence never leaks.
+  const access = await getProjectAccess(auth, projectId)
+  if (!access) throw new DbAccessError('Project not found', 404)
+  if (!access.can('data')) {
+    throw new DbAccessError(
+      "Your team role does not allow access to this project's databases. Ask a team admin.",
+      403
+    )
+  }
+
+  const project = await db.project.findUnique({
+    where: { id: projectId },
     include: { server: true },
   })
   if (!project) throw new DbAccessError('Project not found', 404)

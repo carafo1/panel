@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
-import { isAdmin } from '@/lib/security'
+import { requireProjectAccess } from '@/lib/project-access'
 import { logAudit } from '@/lib/audit'
 import { assertPublicUrl } from '@/lib/ssrf'
 import {
@@ -43,10 +43,10 @@ export async function GET(
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 })
     }
     const { id: projectId } = await params
-    const project = await db.project.findFirst({
-      where: isAdmin(decoded.role)
-        ? { id: projectId }
-        : { id: projectId, userId: decoded.userId },
+    const access = await requireProjectAccess(decoded, projectId, 'data')
+    if (!access.ok) return access.response
+    const project = await db.project.findUnique({
+      where: { id: projectId },
       select: { id: true, name: true, slug: true },
     })
     if (!project) {
@@ -101,10 +101,10 @@ export async function POST(
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 })
     }
     const { id: projectId } = await params
-    const project = await db.project.findFirst({
-      where: isAdmin(decoded.role)
-        ? { id: projectId }
-        : { id: projectId, userId: decoded.userId },
+    const access = await requireProjectAccess(decoded, projectId, 'data')
+    if (!access.ok) return access.response
+    const project = await db.project.findUnique({
+      where: { id: projectId },
     })
     if (!project) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
@@ -237,6 +237,8 @@ export async function POST(
     // ── Create + launch ──────────────────────────────────────────────
     const { migrationId } = await createMigration({
       projectId,
+      // The person who started the import: their uploads are checked against
+      // this id, and the completion notification goes to them.
       userId: decoded.userId,
       sourceType: source.id,
       sourceMode: mode,

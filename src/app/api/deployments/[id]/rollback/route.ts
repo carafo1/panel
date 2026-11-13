@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { processEvent } from '@/lib/automation'
+import { requireProjectAccess } from '@/lib/project-access'
 
 export async function POST(
   request: Request,
@@ -28,8 +29,8 @@ export async function POST(
 
     const { id } = await params
 
-    const deployment = await db.deployment.findFirst({
-      where: { id, userId: decoded.userId },
+    const deployment = await db.deployment.findUnique({
+      where: { id },
       include: { project: true },
     })
 
@@ -39,6 +40,9 @@ export async function POST(
         { status: 404 }
       )
     }
+
+    const access = await requireProjectAccess(decoded, deployment.projectId, 'deploy')
+    if (!access.ok) return access.response
 
     if (deployment.status !== 'live') {
       return NextResponse.json(
@@ -69,7 +73,9 @@ export async function POST(
     const rollbackDeployment = await db.deployment.create({
       data: {
         projectId: deployment.projectId,
-        userId: decoded.userId,
+        // Deployment.userId is the project OWNER (lists and counts read it
+        // that way); the actor is in triggeredBy / the automation log.
+        userId: access.ownerId,
         commit: deployment.commit,
         branch: deployment.branch,
         status: 'live',

@@ -4,6 +4,7 @@ import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { purgeProject } from '@/lib/project-teardown'
 import { isAdmin } from '@/lib/security'
+import { requireProjectAccess } from '@/lib/project-access'
 import { emitWebhookEvent } from '@/lib/webhook-delivery'
 
 export async function GET(
@@ -33,6 +34,11 @@ export async function GET(
 
     const { id } = await params
 
+    // Owner, platform admin, or a member of the team the project is shared
+    // with (any team role can view). See lib/project-access.
+    const access = await requireProjectAccess(decoded, id, 'view')
+    if (!access.ok) return access.response
+
     const project = await db.project.findFirst({
       // Admins may open any project; everyone else only their own. This route
       // already tailors its response for admins (the server IP and the other
@@ -44,7 +50,7 @@ export async function GET(
       // Read only: PATCH and DELETE below stay owner-scoped on purpose, so
       // support can inspect a project without being able to change or destroy
       // it by accident. Admin mutation belongs under /api/admin/*.
-      where: userIsAdmin ? { id } : { id, userId: decoded.userId },
+      where: { id },
       include: {
         server: true,
         deployments: {
@@ -224,6 +230,16 @@ export async function GET(
         } : null,
         createdAt: project.createdAt.toISOString(),
         updatedAt: project.updatedAt.toISOString(),
+        teamId: project.teamId,
+        // What the caller may do, so the UI can hide controls that would
+        // only answer 403. The server still enforces every one of them.
+        access: {
+          role: access.role,
+          canDeploy: access.can('deploy'),
+          canConfigure: access.can('configure'),
+          canAccessData: access.can('data'),
+          isOwner: access.role === 'owner',
+        },
       },
     })
   } catch (error) {
@@ -289,10 +305,14 @@ export async function PATCH(
       )
     }
 
-    const project = await db.project.findFirst({
-      where: { id, userId: decoded.userId },
-    })
-
+    const access = await requireProjectAccess(decoded, id, 'configure')
+    if (!access.ok) return access.response
+    // Platform admins may inspect a project here but not change it (see GET);
+    // admin mutation belongs under /api/admin/*.
+    if (access.role === 'platform_admin') {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+    }
+    const project = await db.project.findUnique({ where: { id } })
     if (!project) {
       return NextResponse.json(
         { error: 'Project not found' },
@@ -375,10 +395,17 @@ export async function DELETE(
 
     const { id } = await params
 
-    const project = await db.project.findFirst({
-      where: { id, userId: decoded.userId },
-    })
-
+    // Only the project owner may delete it — not team members of any role,
+    // and not platform admins through this route.
+    const access = await requireProjectAccess(decoded, id, 'view')
+    if (!access.ok) return access.response
+    if (access.role !== 'owner') {
+      return NextResponse.json(
+        { error: 'Only the project owner can delete this project.' },
+        { status: access.role === 'platform_admin' ? 404 : 403 }
+      )
+    }
+    const project = await db.project.findUnique({ where: { id } })
     if (!project) {
       return NextResponse.json(
         { error: 'Project not found' },

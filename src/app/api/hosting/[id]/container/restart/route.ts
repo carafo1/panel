@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
+import { requireProjectAccess } from '@/lib/project-access'
 import { logAudit } from '@/lib/audit'
 import { restartProject } from '@/lib/vps/deployer'
 
@@ -8,7 +9,7 @@ import { restartProject } from '@/lib/vps/deployer'
  * POST /api/hosting/[id]/container/restart
  *
  * Restarts the project's Docker container via `docker compose restart`.
- * Auth: owner or admin/super_admin.
+ * Auth: 'deploy' project access.
  */
 export async function POST(
   request: Request,
@@ -32,6 +33,9 @@ export async function POST(
     }
 
     const { id } = await params
+    const access = await requireProjectAccess(decoded, id, 'deploy')
+    if (!access.ok) return access.response
+
     const project = await db.project.findUnique({
       where: { id },
       select: { id: true, userId: true, name: true, containerName: true, status: true },
@@ -40,15 +44,6 @@ export async function POST(
       return NextResponse.json(
         { error: 'Project not found' },
         { status: 404 }
-      )
-    }
-
-    const isOwner = project.userId === decoded.userId
-    const isAdmin = decoded.role === 'admin' || decoded.role === 'super_admin'
-    if (!isOwner && !isAdmin) {
-      return NextResponse.json(
-        { error: 'You do not have access to this project' },
-        { status: 403 }
       )
     }
 

@@ -695,7 +695,7 @@ model TeamMember {
   id       String   @id @default(cuid())
   teamId   String
   userId   String
-  role     String   @default("developer") // owner, admin, developer
+  role     String   @default("developer") // owner, admin, developer, viewer — permissions in src/lib/project-access.ts
   joinedAt DateTime @default(now())
 
   team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
 import { isAdmin } from '@/lib/security'
+import { accessibleProjectsWhere } from '@/lib/project-access'
 
 export async function GET(request: Request) {
   try {
@@ -21,12 +22,11 @@ export async function GET(request: Request) {
     const sort = (searchParams.get('sort') || 'created').toLowerCase()
 
     // Build the Prisma `where` clause
+    // Own projects plus those shared with any team the user belongs to.
     const where: {
-      userId: string
       AND: Array<Record<string, unknown>>
     } = {
-      userId: decoded.userId,
-      AND: [],
+      AND: [accessibleProjectsWhere(decoded.userId)],
     }
 
     if (search) {
@@ -76,6 +76,7 @@ export async function GET(request: Request) {
           take: 1,
         },
         domains: true,
+        team: { select: { id: true, name: true } },
       },
       orderBy,
     })
@@ -117,6 +118,9 @@ export async function GET(request: Request) {
         : null,
       lastDeployment: p.deployments[0] || null,
       domains: p.domains,
+      // Shared projects are labelled so members can tell them from their own.
+      team: p.team ? { id: p.team.id, name: p.team.name } : null,
+      ownedByMe: p.userId === decoded.userId,
       createdAt: p.createdAt,
       updatedAt: p.updatedAt,
     }))

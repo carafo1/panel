@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
+import { getProjectAccess, type ProjectPermission } from '@/lib/project-access'
 import { purgeProject } from '@/lib/project-teardown'
 import { deployProject, stopProject, restartProject } from '@/lib/vps'
 
@@ -72,12 +73,38 @@ export async function POST(request: Request) {
       )
     }
 
-    // ── Verify ownership of all projects in a single query ───────────
+    // ── Check access to each project ─────────────────────────────────
+    // Team members may act on their team's projects too, so access is decided
+    // per project: deploy/stop/restart need 'deploy', delete is owner-only.
+    const required: ProjectPermission = action === 'delete' ? 'owner' : 'deploy'
+    const results: BulkResultItem[] = []
+    const allowed = new Map<string, string>() // projectId → owner's user id
+
+    for (const id of new Set(projectIds)) {
+      const access =
+        typeof id === 'string' ? await getProjectAccess(decoded, id) : null
+      if (!access) {
+        results.push({
+          id: String(id),
+          success: false,
+          error: 'Project not found or access denied',
+        })
+      } else if (!access.can(required)) {
+        results.push({
+          id,
+          success: false,
+          error:
+            required === 'owner'
+              ? 'Only the project owner can delete this project'
+              : 'Your team role does not allow deploying, stopping or restarting this project',
+        })
+      } else {
+        allowed.set(id, access.ownerId)
+      }
+    }
+
     const projects = await db.project.findMany({
-      where: {
-        id: { in: projectIds },
-        userId: decoded.userId,
-      },
+      where: { id: { in: [...allowed.keys()] } },
       select: {
         id: true,
         name: true,
@@ -86,20 +113,6 @@ export async function POST(request: Request) {
         subdomain: true,
       },
     })
-
-    const ownedIds = new Set(projects.map((p) => p.id))
-    const notFoundIds = projectIds.filter((id) => !ownedIds.has(id))
-
-    const results: BulkResultItem[] = []
-
-    // Mark projects that don't belong to the user as failed
-    for (const id of notFoundIds) {
-      results.push({
-        id,
-        success: false,
-        error: 'Project not found or access denied',
-      })
-    }
 
     // ── Execute the requested action on each owned project ───────────
     for (const project of projects) {
@@ -122,7 +135,8 @@ export async function POST(request: Request) {
           const deployment = await db.deployment.create({
             data: {
               projectId: project.id,
-              userId: decoded.userId,
+              // Deployment.userId is the project owner; the actor is audited below.
+              userId: allowed.get(project.id)!,
               commit: `bulk-${Date.now()}`,
               branch: 'main',
               status: 'queued',

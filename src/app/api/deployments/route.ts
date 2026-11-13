@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
+import { accessibleProjectsWhere } from '@/lib/project-access'
 
 export async function GET(request: Request) {
   try {
@@ -13,7 +14,9 @@ export async function GET(request: Request) {
     }
 
     const deployments = await db.deployment.findMany({
-      where: { userId: decoded.userId },
+      // Deployments of every project the caller can see — their own and those
+      // of every team they belong to.
+      where: { project: accessibleProjectsWhere(decoded.userId) },
       include: {
         project: {
           select: {

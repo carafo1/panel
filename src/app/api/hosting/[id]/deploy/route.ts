@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
+import { requireProjectAccess } from '@/lib/project-access'
 import { logAudit } from '@/lib/audit'
 import { createMonitor } from '@/lib/monitor'
 import { deployProject } from '@/lib/vps'
@@ -21,8 +22,11 @@ export async function POST(
 
     const { id } = await params
 
-    const project = await db.project.findFirst({
-      where: { id, userId: decoded.userId },
+    const access = await requireProjectAccess(decoded, id, 'deploy')
+    if (!access.ok) return access.response
+
+    const project = await db.project.findUnique({
+      where: { id },
     })
 
     if (!project) {
@@ -90,7 +94,10 @@ export async function POST(
     // recorded stage timings disagree with its own build log.
     const claim = await claimDeploySlot({
       projectId: project.id,
-      userId: decoded.userId,
+      // Deployment.userId is read as the project OWNER (deployment lists,
+      // failed-deploy counts, reinstatement), so it is the owner even when a
+      // team member clicked Deploy; the actor is in the audit log below.
+      userId: access.ownerId,
       branch,
       commit,
       triggeredBy: 'user',

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
+import { requireProjectAccess } from '@/lib/project-access'
 
 /**
  * Honest empty analytics — returned when a project has no recorded events yet.
@@ -51,13 +52,9 @@ export async function GET(
 
     const { projectId } = await params
 
-    // Verify project ownership
-    const project = await db.project.findUnique({
-      where: { id: projectId },
-    })
-    if (!project || project.userId !== payload.userId) {
-      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
-    }
+    // Verify project access (owner, any team member, admin)
+    const access = await requireProjectAccess(payload, projectId, 'view')
+    if (!access.ok) return access.response
 
     const period = req.nextUrl.searchParams.get('period') || '7d'
 

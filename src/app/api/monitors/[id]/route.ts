@@ -2,14 +2,17 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { deleteMonitor, setMonitorEnabled } from '@/lib/monitor'
+import { requireProjectAccess, type ProjectPermission } from '@/lib/project-access'
 
 /**
- * Resolve a monitor and verify the caller owns the parent project.
+ * Resolve a monitor and verify the caller has `permission` on the parent
+ * project (owner, team member with that role, or platform admin).
  * Returns either `{ monitor, project }` or a NextResponse error.
  */
 async function resolveOwnedMonitor(
   request: Request,
-  monitorId: string
+  monitorId: string,
+  permission: ProjectPermission
 ): Promise<
   | {
       ok: true
@@ -58,7 +61,7 @@ async function resolveOwnedMonitor(
     },
   })
 
-  if (!monitor || monitor.project.userId !== decoded.userId) {
+  if (!monitor) {
     return {
       ok: false,
       response: NextResponse.json(
@@ -67,6 +70,8 @@ async function resolveOwnedMonitor(
       ),
     }
   }
+  const access = await requireProjectAccess(decoded, monitor.projectId, permission)
+  if (!access.ok) return { ok: false, response: access.response }
   return { ok: true, monitor }
 }
 
@@ -80,7 +85,7 @@ export async function GET(
 ) {
   try {
     const { id } = await params
-    const resolved = await resolveOwnedMonitor(request, id)
+    const resolved = await resolveOwnedMonitor(request, id, 'view')
     if (!resolved.ok) return resolved.response
     const monitor = resolved.monitor
 
@@ -132,7 +137,7 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params
-    const resolved = await resolveOwnedMonitor(request, id)
+    const resolved = await resolveOwnedMonitor(request, id, 'configure')
     if (!resolved.ok) return resolved.response
 
     const body = await request.json().catch(() => null)
@@ -234,7 +239,7 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params
-    const resolved = await resolveOwnedMonitor(request, id)
+    const resolved = await resolveOwnedMonitor(request, id, 'configure')
     if (!resolved.ok) return resolved.response
 
     const ok = await deleteMonitor(id)

@@ -28,8 +28,8 @@ export async function PATCH(
     }
     const { role } = body
 
-    if (!role || !['admin', 'developer'].includes(role)) {
-      return NextResponse.json({ error: 'Valid role is required (admin, developer)' }, { status: 400 })
+    if (!role || !['admin', 'developer', 'viewer'].includes(role)) {
+      return NextResponse.json({ error: 'Valid role is required (admin, developer, viewer)' }, { status: 400 })
     }
 
     // Check if user is team owner

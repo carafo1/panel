@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server'
-import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
-import { isAdmin } from '@/lib/security'
+import { requireProjectAccess } from '@/lib/project-access'
 import {
   downloadFile,
   getFileContent,
@@ -33,10 +32,8 @@ export async function GET(
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 })
     }
     const { id: projectId, path: pathSegments } = await params
-    const project = await db.project.findFirst({ where: isAdmin(decoded.role) ? { id: projectId } : { id: projectId, userId: decoded.userId } })
-    if (!project) {
-      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
-    }
+    const access = await requireProjectAccess(decoded, projectId, 'configure')
+    if (!access.ok) return access.response
     const filePath = pathSegments.join('/')
     const url = new URL(request.url)
     const action = url.searchParams.get('action') || 'download'
@@ -82,10 +79,8 @@ export async function PUT(
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 })
     }
     const { id: projectId, path: pathSegments } = await params
-    const project = await db.project.findFirst({ where: isAdmin(decoded.role) ? { id: projectId } : { id: projectId, userId: decoded.userId } })
-    if (!project) {
-      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
-    }
+    const access = await requireProjectAccess(decoded, projectId, 'configure')
+    if (!access.ok) return access.response
     const filePath = pathSegments.join('/')
     const body = await request.json().catch(() => null)
     if (!body || typeof body.content !== 'string') {
@@ -114,10 +109,8 @@ export async function DELETE(
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 })
     }
     const { id: projectId, path: pathSegments } = await params
-    const project = await db.project.findFirst({ where: isAdmin(decoded.role) ? { id: projectId } : { id: projectId, userId: decoded.userId } })
-    if (!project) {
-      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
-    }
+    const access = await requireProjectAccess(decoded, projectId, 'configure')
+    if (!access.ok) return access.response
     const filePath = pathSegments.join('/')
     try {
       const result = await deleteFile(projectId, filePath)
@@ -142,10 +135,8 @@ export async function POST(
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 })
     }
     const { id: projectId, path: pathSegments } = await params
-    const project = await db.project.findFirst({ where: isAdmin(decoded.role) ? { id: projectId } : { id: projectId, userId: decoded.userId } })
-    if (!project) {
-      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
-    }
+    const access = await requireProjectAccess(decoded, projectId, 'configure')
+    if (!access.ok) return access.response
     const filePath = pathSegments.join('/')
     const body = await request.json().catch(() => ({}))
     if (body.action === 'rename' && typeof body.newPath === 'string') {

@@ -21,8 +21,8 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
-import { isAdmin } from '@/lib/security'
 import { logAudit } from '@/lib/audit'
+import { requireProjectAccess } from '@/lib/project-access'
 import { withRateLimit } from '@/lib/rate-limit'
 
 async function deleteHandler(
@@ -43,18 +43,18 @@ async function deleteHandler(
       status: true,
       projectId: true,
       createdAt: true,
-      project: { select: { userId: true, name: true } },
+      project: { select: { name: true } },
     },
   })
   if (!deployment) {
     return NextResponse.json({ error: 'Deployment not found' }, { status: 404 })
   }
 
-  // Scoped to the owner unless an admin. Without this, any authenticated user
-  // could delete another customer's deployment history by guessing an id.
-  if (!isAdmin(user.role) && deployment.project?.userId !== user.userId) {
-    return NextResponse.json({ error: 'Deployment not found' }, { status: 404 })
-  }
+  // Scoped to the project (owner, team members with deploy rights, admins).
+  // Without this, any authenticated user could delete another customer's
+  // deployment history by guessing an id.
+  const access = await requireProjectAccess(user, deployment.projectId, 'deploy')
+  if (!access.ok) return access.response
 
   if (deployment.status === 'live') {
     return NextResponse.json(

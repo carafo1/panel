@@ -1,13 +1,14 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
+import { requireProjectAccess } from '@/lib/project-access'
 import { getContainerStatus } from '@/lib/vps/deployer'
 
 /**
  * GET /api/hosting/[id]/container
  *
- * Returns the live Docker container status for a project. The caller must be
- * the project owner OR an admin/super_admin.
+ * Returns the live Docker container status for a project. Requires 'view'
+ * access (owner, platform admin, or any team member).
  *
  * Calls `getContainerStatus(projectId)` from src/lib/vps/deployer.ts, which:
  *   - in demo mode → returns a simulated status row
@@ -35,6 +36,9 @@ export async function GET(
     }
 
     const { id } = await params
+    const access = await requireProjectAccess(decoded, id, 'view')
+    if (!access.ok) return access.response
+
     const project = await db.project.findUnique({
       where: { id },
       select: { id: true, userId: true, name: true, status: true },
@@ -43,16 +47,6 @@ export async function GET(
       return NextResponse.json(
         { error: 'Project not found' },
         { status: 404 }
-      )
-    }
-
-    // ── Ownership check: owner OR admin/super_admin ────────────────────
-    const isOwner = project.userId === decoded.userId
-    const isAdmin = decoded.role === 'admin' || decoded.role === 'super_admin'
-    if (!isOwner && !isAdmin) {
-      return NextResponse.json(
-        { error: 'You do not have access to this project' },
-        { status: 403 }
       )
     }
 

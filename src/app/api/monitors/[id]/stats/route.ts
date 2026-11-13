@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { getMonitorStats } from '@/lib/monitor'
+import { requireProjectAccess } from '@/lib/project-access'
 
 /**
  * GET /api/monitors/[id]/stats?hours=24
@@ -33,17 +34,19 @@ export async function GET(
       )
     }
 
-    // Verify ownership.
+    // Verify access to the monitor's project.
     const monitor = await db.uptimeMonitor.findUnique({
       where: { id },
-      include: { project: { select: { userId: true } } },
+      select: { projectId: true },
     })
-    if (!monitor || monitor.project.userId !== decoded.userId) {
+    if (!monitor) {
       return NextResponse.json(
         { error: 'Monitor not found' },
         { status: 404 }
       )
     }
+    const access = await requireProjectAccess(decoded, monitor.projectId, 'view')
+    if (!access.ok) return access.response
 
     // Parse hours (1..720h / 30 days).
     const url = new URL(request.url)

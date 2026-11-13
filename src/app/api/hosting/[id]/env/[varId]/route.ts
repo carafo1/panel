@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
+import { requireProjectAccess } from '@/lib/project-access'
 import { isValidEnvKey, ENV_KEY_ERROR } from '@/lib/safe-values'
 import { encrypt, decrypt } from '@/lib/encryption'
 
@@ -55,17 +56,8 @@ export async function PATCH(
     }
     const { key, value } = body
 
-    // Verify project ownership
-    const project = await db.project.findFirst({
-      where: { id: projectId, userId: decoded.userId },
-    })
-
-    if (!project) {
-      return NextResponse.json(
-        { error: 'Project not found' },
-        { status: 404 }
-      )
-    }
+    const access = await requireProjectAccess(decoded, projectId, 'configure')
+    if (!access.ok) return access.response
 
     // Find the env var
     const envVar = await db.environmentVariable.findFirst({
@@ -148,17 +140,8 @@ export async function DELETE(
 
     const { id: projectId, varId } = await params
 
-    // Verify project ownership
-    const project = await db.project.findFirst({
-      where: { id: projectId, userId: decoded.userId },
-    })
-
-    if (!project) {
-      return NextResponse.json(
-        { error: 'Project not found' },
-        { status: 404 }
-      )
-    }
+    const access = await requireProjectAccess(decoded, projectId, 'configure')
+    if (!access.ok) return access.response
 
     // Find the env var
     const envVar = await db.environmentVariable.findFirst({
