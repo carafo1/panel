@@ -4,6 +4,7 @@ import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { purgeProject } from '@/lib/project-teardown'
 import { isAdmin } from '@/lib/security'
+import { emitWebhookEvent } from '@/lib/webhook-delivery'
 
 export async function GET(
   request: Request,
@@ -391,6 +392,9 @@ export async function DELETE(
     // Server-side cleanup is best-effort and never blocks the row deletion —
     // anything that could not be removed comes back in `warnings`.
     const { warnings } = await purgeProject(id)
+    void emitWebhookEvent(decoded.userId, 'project.deleted', {
+      project: { id, name: project.name, subdomain: project.subdomain },
+    })
 
     // Audit the delete. This AuditLog row is not FK'd to the Project, so it
     // survives the deletion and is the durable record of what was removed.

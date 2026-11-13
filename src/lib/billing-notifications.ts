@@ -20,6 +20,7 @@ import { db } from '@/lib/db'
 import { sendEmail } from '@/lib/email'
 import { createNotification } from '@/lib/notifications'
 import { FROM_NAME, BILLING_EMAIL } from '@/lib/brand-config'
+import { emitWebhookEvent } from '@/lib/webhook-delivery'
 
 type NotifyType = 'info' | 'success' | 'warning' | 'error'
 
@@ -137,6 +138,14 @@ export async function notifyPaymentReceived(opts: {
   const partial = (opts.balanceDue ?? 0) > 0.009
   const remaining = partial ? money(opts.balanceDue!, opts.currency) : null
 
+  await emitWebhookEvent(opts.userId, 'payment.success', {
+    invoiceNumber: opts.invoiceNumber,
+    amount: opts.amount,
+    currency: (opts.currency || 'USD').toUpperCase(),
+    balanceDue: opts.balanceDue ?? 0,
+    method: opts.method ?? null,
+  })
+
   await deliver({
     userId: opts.userId,
     title: partial ? 'Partial Payment Received' : 'Payment Received',
@@ -171,6 +180,13 @@ export async function notifyPaymentFailed(opts: {
 }): Promise<void> {
   const amount = money(opts.amount, opts.currency)
   const forInvoice = opts.invoiceNumber ? ` for invoice ${opts.invoiceNumber}` : ''
+  await emitWebhookEvent(opts.userId, 'payment.failed', {
+    invoiceNumber: opts.invoiceNumber ?? null,
+    amount: opts.amount,
+    currency: (opts.currency || 'USD').toUpperCase(),
+    method: opts.method ?? null,
+    reason: opts.reason ?? null,
+  })
   await deliver({
     userId: opts.userId,
     title: 'Payment Failed',

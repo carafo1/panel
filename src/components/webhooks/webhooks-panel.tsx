@@ -124,6 +124,8 @@ const WEBHOOK_EVENTS = [
   { id: 'ssl.renewed', label: 'SSL Renewed', description: 'When an SSL certificate is renewed' },
   { id: 'payment.success', label: 'Payment Success', description: 'When a payment succeeds' },
   { id: 'payment.failed', label: 'Payment Failed', description: 'When a payment fails' },
+  { id: 'monitor.down', label: 'Site Down', description: 'When an uptime monitor detects an outage' },
+  { id: 'monitor.up', label: 'Site Recovered', description: 'When a monitored site is back up' },
 ]
 
 // ── Helper ───────────────────────────────────────────────────────────────
