@@ -34,7 +34,7 @@ export async function POST(
     const { id } = await params
     const project = await db.project.findUnique({
       where: { id },
-      select: { id: true, userId: true, name: true, containerName: true },
+      select: { id: true, userId: true, name: true, containerName: true, status: true },
     })
     if (!project) {
       return NextResponse.json(
@@ -49,6 +49,13 @@ export async function POST(
       return NextResponse.json(
         { error: 'You do not have access to this project' },
         { status: 403 }
+      )
+    }
+
+    if (project.status === 'suspended') {
+      return NextResponse.json(
+        { error: 'This website is suspended. Pay the outstanding invoice from Billing to restore it.' },
+        { status: 402 }
       )
     }
 

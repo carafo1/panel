@@ -17,7 +17,6 @@
 import { db } from '@/lib/db'
 import { createSubscriptionInvoice, cycleDays } from '@/lib/invoices'
 import { applyCreditToInvoice } from '@/lib/credit'
-import { resumeEmailForSubscription } from '@/lib/email-lifecycle'
 import { emailAddonCostForSubscription } from '@/lib/email-hosting'
 import {
   notifySubscriptionRenewed,
@@ -95,6 +94,20 @@ export async function renewSubscription(opts: {
     return { success: false, skipped: 'period has not ended yet' }
   }
 
+  // Never stack a new period on top of an unpaid one. Renewing again used to
+  // reset the subscription to 'active' every period, so a customer who never
+  // paid was never suspended. The overdue invoice is the billing sweep's job
+  // now (see billing-enforcement); an admin can still force a renewal.
+  if (!opts.force) {
+    const unpaid = await db.invoice.findFirst({
+      where: { subscriptionId: sub.id, status: 'unpaid' },
+      select: { number: true },
+    })
+    if (unpaid) {
+      return { success: false, skipped: `invoice ${unpaid.number} is still unpaid` }
+    }
+  }
+
   // Roll forward from the old period end so periods stay contiguous — unless
   // it lapsed long ago, in which case start from today rather than
   // back-dating a period the customer never had.
@@ -134,27 +147,26 @@ export async function renewSubscription(opts: {
         (addons.lines.length ? ` (incl. add-ons — ${addons.lines.join('; ')})` : ''),
     })
 
-    // 2. Move the period forward and reset the failure counter.
+    // 2. Move the period forward and reset the failure counter. The service
+    // carries on while the new invoice is inside its payment window, but a
+    // past-due or suspended subscription is NOT reinstated by raising an
+    // invoice — only by paying it (billing-enforcement.onInvoiceSettled).
+    const nextStatus =
+      sub.status === 'past_due' || sub.status === 'suspended' ? sub.status : 'active'
     await db.subscription.update({
       where: { id: sub.id },
       data: {
         currentPeriodStart: newStart,
         currentPeriodEnd: newEnd,
-        status: 'active',
+        status: nextStatus,
         lastRenewedAt: now,
         renewalAttempts: 0,
         lastRenewalError: null,
       },
     })
 
-    // Renewal reactivates the subscription directly rather than going through
-    // activatePayment, so email has to be restored here too — otherwise a
-    // renewed customer stays cut off at the mail server.
-    await resumeEmailForSubscription(sub.id).catch((err) =>
-      console.error('[renewals] email resume failed:', err)
-    )
-
     // 3. Auto-settle from wallet credit when they have the balance.
+    // Settling triggers onInvoiceSettled, which restores mail and websites.
     let paidFromCredit = false
     if (invoice) {
       const credit = await applyCreditToInvoice({

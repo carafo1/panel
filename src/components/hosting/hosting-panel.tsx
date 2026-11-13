@@ -324,6 +324,8 @@ function statusColor(status: string) {
     case 'error':
     case 'failed':
       return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+    case 'suspended':
+      return 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
     default:
       return 'bg-gray-100 text-gray-600 dark:bg-gray-800/30 dark:text-gray-400'
   }

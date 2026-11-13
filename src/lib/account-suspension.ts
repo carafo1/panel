@@ -51,16 +51,22 @@ export function isSuspendingStatus(status: string): boolean {
  * than purged — a suspension is usually a billing dispute, and the customer is
  * expected back. Their data stays exactly where it is.
  */
-export async function suspendAccountServices(
-  userId: string,
-  reason?: string | null
-): Promise<CascadeResult> {
-  const result = empty()
+/**
+ * Project status for a site taken offline by a suspension. Distinct from
+ * 'stopped' (which the customer chose) so a reinstatement brings back exactly
+ * the sites the suspension took down, and the customer cannot simply redeploy
+ * a site their unpaid account is no longer entitled to.
+ */
+export const SUSPENDED_PROJECT_STATUS = 'suspended'
 
-  // ── Websites ──
+/** Stop every live website a user owns and mark it suspended. */
+export async function stopUserWebsites(
+  userId: string,
+  result: CascadeResult = empty()
+): Promise<CascadeResult> {
   const projects = await db.project
     .findMany({
-      where: { userId, status: { in: ['running', 'deploying', 'creating'] } },
+      where: { userId, status: { in: ['running', 'deploying', 'creating', 'error'] } },
       select: { id: true, name: true },
     })
     .catch(() => [])
@@ -68,20 +74,31 @@ export async function suspendAccountServices(
   for (const p of projects) {
     try {
       const stopped = await stopProject(p.id)
-      if (stopped.ok) {
-        await db.project
-          .update({ where: { id: p.id }, data: { status: 'stopped' } })
-          .catch(() => {})
-        result.projectsStopped.push(p.id)
-      } else {
-        result.failures.push(`project ${p.name}: ${stopped.message}`)
-      }
+      if (stopped.ok) result.projectsStopped.push(p.id)
+      else result.failures.push(`project ${p.name}: ${stopped.message}`)
     } catch (err) {
       result.failures.push(
         `project ${p.name}: ${err instanceof Error ? err.message : 'stop threw'}`
       )
     }
+    // Mark it suspended even when the stop failed (no container left, server
+    // unreachable): the status is what stops the customer redeploying it and
+    // what tells reinstatement to bring it back. The failure is reported.
+    await db.project
+      .update({ where: { id: p.id }, data: { status: SUSPENDED_PROJECT_STATUS } })
+      .catch(() => {})
   }
+  return result
+}
+
+export async function suspendAccountServices(
+  userId: string,
+  reason?: string | null
+): Promise<CascadeResult> {
+  const result = empty()
+
+  // ── Websites ──
+  await stopUserWebsites(userId, result)
 
   // ── Email ──
   const services = await db.emailService
@@ -126,7 +143,8 @@ export async function suspendAccountServices(
  * project the customer had deliberately stopped stays stopped.
  */
 export async function restoreAccountServices(
-  userId: string
+  userId: string,
+  opts: { includeStopped?: boolean } = {}
 ): Promise<CascadeResult> {
   const result = empty()
 
@@ -146,11 +164,42 @@ export async function restoreAccountServices(
     }
   }
 
+  await restoreUserWebsites(userId, result, opts)
+
+  if (result.projectsRestored.length || result.emailRestored.length) {
+    await createNotification({
+      userId,
+      title: 'Your services have been restored',
+      message:
+        'Your account is active again. Email works immediately; any websites are being rebuilt and will be back online shortly.',
+      type: 'success',
+      link: '/?tab=hosting',
+    }).catch(() => {})
+  }
+
+  return result
+}
+
+/**
+ * Rebuild the websites a suspension took offline.
+ *
+ * `includeStopped` also brings back plain 'stopped' sites. Suspensions made
+ * before SUSPENDED_PROJECT_STATUS existed marked their sites 'stopped', so the
+ * admin reinstatement path passes it to stay compatible with those accounts.
+ */
+export async function restoreUserWebsites(
+  userId: string,
+  result: CascadeResult = empty(),
+  opts: { includeStopped?: boolean } = {}
+): Promise<CascadeResult> {
+  const statuses = opts.includeStopped
+    ? [SUSPENDED_PROJECT_STATUS, 'stopped']
+    : [SUSPENDED_PROJECT_STATUS]
   // Only projects that actually have something deployed are worth rebuilding.
   const projects = await db.project
     .findMany({
-      where: { userId, status: 'stopped', deployPath: { not: null } },
-      select: { id: true, name: true },
+      where: { userId, status: { in: statuses }, deployPath: { not: null } },
+      select: { id: true, name: true, sourceBranch: true },
     })
     .catch(() => [])
 
@@ -161,7 +210,7 @@ export async function restoreAccountServices(
           projectId: p.id,
           userId,
           commit: `reinstate-${Date.now()}`,
-          branch: 'main',
+          branch: p.sourceBranch || 'main',
           status: 'queued',
           triggeredBy: 'admin',
           buildLog: '🔄 Account reinstated — bringing this site back online…',
@@ -181,17 +230,6 @@ export async function restoreAccountServices(
         `project ${p.name}: ${err instanceof Error ? err.message : 'redeploy threw'}`
       )
     }
-  }
-
-  if (result.projectsRestored.length || result.emailRestored.length) {
-    await createNotification({
-      userId,
-      title: 'Your services have been restored',
-      message:
-        'Your account is active again. Email works immediately; any websites are being rebuilt and will be back online shortly.',
-      type: 'success',
-      link: '/?tab=hosting',
-    }).catch(() => {})
   }
 
   return result

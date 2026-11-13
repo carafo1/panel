@@ -227,7 +227,9 @@ export async function PATCH(request: Request) {
         }
       )
     } else if (wasSuspending && !nowSuspending) {
-      cascade = await restoreAccountServices(target.id).catch((err) => {
+      // includeStopped: suspensions made before sites were marked
+      // 'suspended' left them 'stopped'; still bring those back.
+      cascade = await restoreAccountServices(target.id, { includeStopped: true }).catch((err) => {
         console.error('[admin/users] restore cascade failed:', err)
         return null
       })
