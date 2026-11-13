@@ -64,7 +64,10 @@ export async function logAudit(opts: AuditLogOptions): Promise<void> {
       resourceId: opts.resourceId || null,
       ip: ip || null,
       userAgent: userAgent || null,
-      metadata: opts.metadata ? JSON.stringify(opts.metadata) : null,
+      // AuditLog.metadata is a required column. Writing null made Prisma
+      // reject the whole row (with a misleading "Unknown argument userId"),
+      // so every audit entry logged without metadata was silently lost.
+      metadata: JSON.stringify(opts.metadata ?? {}),
       status: opts.status || 'success',
     }
 
