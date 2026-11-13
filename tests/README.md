@@ -8,6 +8,9 @@
 # Run unit tests only (no panel required)
 bun run test
 
+# Run scenario tests (no panel required — builds a throwaway SQLite database)
+bun run test:scenarios
+
 # Run integration tests (requires panel running on localhost:3000)
 bun run test:integration
 
@@ -25,6 +28,12 @@ tests/
 ├── unit/                    # Unit tests (no external dependencies)
 │   ├── security.test.ts     # Tests for src/lib/security.ts
 │   └── auth.test.ts         # Tests for src/lib/auth.ts
+├── scenarios/               # End-to-end behaviour through the real code, no panel needed
+│   ├── preload.ts           # Throwaway SQLite DB from prisma/schema.prisma + test secrets
+│   ├── billing-enforcement  # renewal → overdue → suspended → paid; billing preview
+│   ├── team-access          # role matrix, sharing, .env import + live-log room security
+│   ├── automation           # job queue, webhook retries, uptime alerts (local servers)
+│   └── services             # pipeline runner, worker + realtime services as processes
 ├── integration/             # Integration tests (require running panel)
 │   └── api-security.test.ts # End-to-end API security tests
 ├── load/                    # Load tests (require k6)
