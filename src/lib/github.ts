@@ -10,6 +10,7 @@
  *
  * Docs: https://docs.github.com/en/rest
  */
+import { isProduction } from '@/lib/demo-mode'
 
 function getCredentials(): { clientId: string; clientSecret: string } | null {
   const clientId = process.env.GITHUB_CLIENT_ID
@@ -20,6 +21,15 @@ function getCredentials(): { clientId: string; clientSecret: string } | null {
 
 export function isGithubDemoMode(): boolean {
   return !getCredentials()
+}
+
+/**
+ * A token minted by demo mode. Its fake users, repos and commits are served
+ * only outside production: in production a leftover demo token must fail
+ * like any bad token rather than show invented data under a real repo name.
+ */
+function isSimulatedToken(token: string): boolean {
+  return isGithubDemoMode() && !isProduction() && token.startsWith('ghp_demo_')
 }
 
 const API_BASE = 'https://api.github.com'
@@ -75,7 +85,10 @@ export async function exchangeCodeForToken(
 ): Promise<TokenResult> {
   const creds = getCredentials()
   if (!creds) {
-    // Demo mode - return a fake token
+    if (isProduction()) {
+      throw new Error('GitHub sign-in is not configured on this server (GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET).')
+    }
+    // Development only - return a fake token
      
     console.log('[github] DEMO MODE: exchangeCodeForToken', code)
     return {
@@ -130,7 +143,7 @@ interface UserProfile {
  * Get the authenticated user's profile.
  */
 export async function getUserProfile(token: string): Promise<UserProfile> {
-  if (isGithubDemoMode() && token.startsWith('ghp_demo_')) {
+  if (isSimulatedToken(token)) {
      
     console.log('[github] DEMO MODE: getUserProfile')
     return {
@@ -172,7 +185,7 @@ interface Repository {
  * List repositories accessible to the authenticated user.
  */
 export async function listRepositories(token: string): Promise<Repository[]> {
-  if (isGithubDemoMode() && token.startsWith('ghp_demo_')) {
+  if (isSimulatedToken(token)) {
      
     console.log('[github] DEMO MODE: listRepositories')
     return [
@@ -249,7 +262,7 @@ export async function listCommits(
   branch: string,
   perPage = 10
 ): Promise<Commit[]> {
-  if (isGithubDemoMode() && token.startsWith('ghp_demo_')) {
+  if (isSimulatedToken(token)) {
      
     console.log('[github] DEMO MODE: listCommits', owner, repo, branch)
     const now = Date.now()
@@ -310,7 +323,7 @@ export async function getBranches(
   owner: string,
   repo: string
 ): Promise<Branch[]> {
-  if (isGithubDemoMode() && token.startsWith('ghp_demo_')) {
+  if (isSimulatedToken(token)) {
      
     console.log('[github] DEMO MODE: getBranches', owner, repo)
     return [
@@ -341,7 +354,7 @@ export async function createWebhook(
   repo: string,
   config: { url: string; content_type?: 'json' | 'form'; secret?: string; events: string[] }
 ): Promise<WebhookResult> {
-  if (isGithubDemoMode() && token.startsWith('ghp_demo_')) {
+  if (isSimulatedToken(token)) {
      
     console.log('[github] DEMO MODE: createWebhook', owner, repo, config.url)
     return {
@@ -379,7 +392,7 @@ export async function deleteWebhook(
   repo: string,
   hookId: number
 ): Promise<boolean> {
-  if (isGithubDemoMode() && token.startsWith('ghp_demo_')) {
+  if (isSimulatedToken(token)) {
     return true
   }
   await githubFetch(`/repos/${owner}/${repo}/hooks/${hookId}`, token, {

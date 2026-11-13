@@ -319,6 +319,7 @@ function ConnectRepositoryDialog({
   const [projectId, setProjectId] = useState('')
   const [repoUrl, setRepoUrl] = useState('')
   const [branch, setBranch] = useState('main')
+  const [accessToken, setAccessToken] = useState('')
   const [connecting, setConnecting] = useState(false)
   const [oauthStarting, setOauthStarting] = useState(false)
 
@@ -330,6 +331,7 @@ function ConnectRepositoryDialog({
       setProjectId('')
       setRepoUrl('')
       setBranch('main')
+      setAccessToken('')
     }
   }, [open])
 
@@ -351,6 +353,7 @@ function ConnectRepositoryDialog({
           projectId,
           repoUrl: repoUrl.trim(),
           branch: branch || 'main',
+          ...(accessToken.trim() ? { accessToken: accessToken.trim() } : {}),
         }),
       })
       if (data.oauthConnected) {
@@ -536,6 +539,24 @@ function ConnectRepositoryDialog({
                 <SelectItem value="production">production</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+
+          {/* Personal access token — required unless GitHub sign-in is set up */}
+          <div className="grid gap-2">
+            <Label htmlFor="gh-pat">Personal access token</Label>
+            <Input
+              id="gh-pat"
+              type="password"
+              autoComplete="off"
+              placeholder="github_pat_… or ghp_…"
+              value={accessToken}
+              onChange={(e) => setAccessToken(e.target.value)}
+              className="font-mono text-sm"
+            />
+            <p className="text-xs text-muted-foreground">
+              Needed if you have not connected with GitHub sign-in. Create one under GitHub → Settings →
+              Developer settings, with read access to this repository. We check it before saving.
+            </p>
           </div>
         </div>
 

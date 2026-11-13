@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { isProduction } from '@/lib/demo-mode'
 import { db } from '@/lib/db'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { listRepositories, isGithubDemoMode } from '@/lib/github'
@@ -47,13 +48,15 @@ export async function GET(
       )
     }
 
-    const demoMode = isGithubDemoMode()
-    const hasRealToken =
-      !!integration.accessToken &&
-      !integration.accessToken.startsWith('ghp_sim_')
+    // Decide by the TOKEN, not by whether OAuth is configured: a pasted
+    // personal access token is real even when the OAuth app is not set up.
+    // Only a demo token, outside production, gets simulated data.
+    const ghToken = integration.accessToken || ''
+    const simulated = ghToken.startsWith('ghp_demo_') && isGithubDemoMode() && !isProduction()
+    const hasRealToken = !!ghToken && !ghToken.startsWith('ghp_sim_') && !simulated
 
     // ── Real mode ───────────────────────────────────────────────
-    if (!demoMode && hasRealToken) {
+    if (hasRealToken) {
       try {
         const ghRepos = await listRepositories(integration.accessToken)
         const repos = ghRepos.map((r) => ({
@@ -74,9 +77,21 @@ export async function GET(
         }))
         return NextResponse.json({ repos, demoMode: false })
       } catch (err) {
-        console.error('GitHub listRepositories failed:', err)
-        // Fall through to demo data on API error so the UI keeps working.
+        console.error('GitHub listRepositories failed:', err instanceof Error ? err.message : err)
+        // Falling back to demo data here showed invented repositories when
+        // GitHub was unreachable or the token had been revoked.
+        return NextResponse.json(
+          { error: 'Could not load repositories from GitHub. The token may have expired — reconnect the repository.' },
+          { status: 502 }
+        )
       }
+    }
+
+    if (!simulated) {
+      return NextResponse.json(
+        { error: 'This repository is not connected with a valid GitHub token. Reconnect it.' },
+        { status: 400 }
+      )
     }
 
     // ── Demo fallback ───────────────────────────────────────────
@@ -94,13 +109,9 @@ export async function GET(
       defaultBranch: r.defaultBranch,
       htmlUrl: r.htmlUrl,
       description: r.description,
-      stars: Math.floor(Math.random() * 300) + 5,
-      language: ['TypeScript', 'JavaScript', 'Python', 'Go', 'Rust'][
-        Math.floor(Math.random() * 5)
-      ],
-      updatedAt: new Date(
-        Date.now() - Math.floor(Math.random() * 7) * 86400000
-      ).toISOString(),
+      stars: undefined,
+      language: undefined,
+      updatedAt: undefined,
       connected: integration.repoFullName === r.fullName,
     }))
 

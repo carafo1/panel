@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { isProduction } from '@/lib/demo-mode'
 import { db } from '@/lib/db'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { listCommits, isGithubDemoMode } from '@/lib/github'
@@ -51,10 +52,12 @@ export async function GET(
       )
     }
 
-    const demoMode = isGithubDemoMode()
-    const hasRealToken =
-      !!integration.accessToken &&
-      !integration.accessToken.startsWith('ghp_sim_')
+    // Decide by the TOKEN, not by whether OAuth is configured: a pasted
+    // personal access token is real even without an OAuth app. Only a demo
+    // token, outside production, gets simulated data.
+    const ghToken = integration.accessToken || ''
+    const simulated = ghToken.startsWith('ghp_demo_') && isGithubDemoMode() && !isProduction()
+    const hasRealToken = !!ghToken && !ghToken.startsWith('ghp_sim_') && !simulated
     const repoFullName = integration.repoFullName || ''
     const branch = branchOverride || integration.branch || 'main'
 
@@ -63,7 +66,7 @@ export async function GET(
       : [integration.username || 'demo-user', 'demo-repo']
 
     // ── Real mode ───────────────────────────────────────────────
-    if (!demoMode && hasRealToken && repoFullName) {
+    if (hasRealToken && repoFullName) {
       try {
         const ghCommits = await listCommits(
           integration.accessToken,
@@ -85,9 +88,21 @@ export async function GET(
         }))
         return NextResponse.json({ commits, demoMode: false })
       } catch (err) {
-        console.error('GitHub listCommits failed:', err)
-        // Fall through to demo data on API error so the UI keeps working.
+        console.error('GitHub listCommits failed:', err instanceof Error ? err.message : err)
+        // Falling back to demo data here showed invented commits ("Alice
+        // Johnson", "Bob Smith") under the real repository name.
+        return NextResponse.json(
+          { error: 'Could not load commits from GitHub. The token may have expired — reconnect the repository.' },
+          { status: 502 }
+        )
       }
+    }
+
+    if (!simulated) {
+      return NextResponse.json(
+        { error: 'This repository is not connected with a valid GitHub token. Reconnect it.' },
+        { status: 400 }
+      )
     }
 
     // ── Demo fallback ───────────────────────────────────────────
