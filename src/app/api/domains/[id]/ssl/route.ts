@@ -64,6 +64,15 @@ function unreachable(domain: string, message: string): LiveCertificate {
 }
 
 /**
+ * A certificate name field (O, CN, …) is an array when the certificate carries
+ * that attribute more than once. Join them so the value is reported in full.
+ */
+function certName(value: string | string[] | undefined): string | null {
+  const text = Array.isArray(value) ? value.filter(Boolean).join(', ') : value
+  return text || null
+}
+
+/**
  * Open a TLS connection and read the served certificate.
  *
  * `rejectUnauthorized: false` so we can still REPORT an expired or mismatched
@@ -133,8 +142,8 @@ async function probeCertificate(domain: string): Promise<LiveCertificate> {
           domain,
           reachable: true,
           status,
-          issuer: cert.issuer?.O || cert.issuer?.CN || null,
-          subject: cert.subject?.CN || null,
+          issuer: certName(cert.issuer?.O) || certName(cert.issuer?.CN),
+          subject: certName(cert.subject?.CN),
           issuedAt: validFrom ? validFrom.toISOString() : null,
           expiresAt: validTo ? validTo.toISOString() : null,
           daysRemaining,
