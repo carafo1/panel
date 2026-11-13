@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
+import { requireProjectAccess } from '@/lib/project-access'
 import { isValidEnvKey, ENV_KEY_ERROR } from '@/lib/safe-values'
 import { parseDotenv } from '@/lib/dotenv-parse'
 
@@ -55,9 +56,12 @@ export async function GET(
 
     const { id: projectId } = await params
 
-    // Verify project ownership
-    const project = await db.project.findFirst({
-      where: { id: projectId, userId: decoded.userId },
+    // Values are secrets, so reading them needs the same permission as writing.
+    const access = await requireProjectAccess(decoded, projectId, 'configure')
+    if (!access.ok) return access.response
+
+    const project = await db.project.findUnique({
+      where: { id: projectId },
     })
 
     if (!project) {
@@ -137,6 +141,11 @@ export async function POST(
     }
 
     const { id: projectId } = await params
+    // Checked before anything else: the .env import branch below used to run
+    // before any ownership check at all.
+    const access = await requireProjectAccess(decoded, projectId, 'configure')
+    if (!access.ok) return access.response
+
     const body = await request.json().catch(() => null)
     if (!body || typeof body !== 'object') {
       return NextResponse.json(
@@ -257,18 +266,6 @@ export async function POST(
       return NextResponse.json(
         { error: 'Value is required' },
         { status: 400 }
-      )
-    }
-
-    // Verify project ownership
-    const project = await db.project.findFirst({
-      where: { id: projectId, userId: decoded.userId },
-    })
-
-    if (!project) {
-      return NextResponse.json(
-        { error: 'Project not found' },
-        { status: 404 }
       )
     }
 

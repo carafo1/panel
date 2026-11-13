@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
+import { requireProjectAccess } from '@/lib/project-access'
 import { logAudit } from '@/lib/audit'
 import { getProjectCertInfo, forceRenew, toggleSsl } from '@/lib/vps/ssl'
 
@@ -12,7 +13,7 @@ import { getProjectCertInfo, forceRenew, toggleSsl } from '@/lib/vps/ssl'
  *          - action='renew'  → forceRenew(projectId) — re-issues the cert
  *          - action='toggle' → toggleSsl(projectId, !!enabled) — enable/disable
  *
- * Auth: owner or admin/super_admin.
+ * Auth: GET needs 'view', POST needs 'configure' project access.
  */
 export async function GET(
   request: Request,
@@ -36,6 +37,9 @@ export async function GET(
     }
 
     const { id } = await params
+    const access = await requireProjectAccess(decoded, id, 'view')
+    if (!access.ok) return access.response
+
     const project = await db.project.findUnique({
       where: { id },
       select: {
@@ -53,15 +57,6 @@ export async function GET(
       return NextResponse.json(
         { error: 'Project not found' },
         { status: 404 }
-      )
-    }
-
-    const isOwner = project.userId === decoded.userId
-    const isAdmin = decoded.role === 'admin' || decoded.role === 'super_admin'
-    if (!isOwner && !isAdmin) {
-      return NextResponse.json(
-        { error: 'You do not have access to this project' },
-        { status: 403 }
       )
     }
 
@@ -110,6 +105,9 @@ export async function POST(
     }
 
     const { id } = await params
+    const access = await requireProjectAccess(decoded, id, 'configure')
+    if (!access.ok) return access.response
+
     const project = await db.project.findUnique({
       where: { id },
       select: { id: true, userId: true, name: true, subdomain: true, customDomain: true },
@@ -118,15 +116,6 @@ export async function POST(
       return NextResponse.json(
         { error: 'Project not found' },
         { status: 404 }
-      )
-    }
-
-    const isOwner = project.userId === decoded.userId
-    const isAdmin = decoded.role === 'admin' || decoded.role === 'super_admin'
-    if (!isOwner && !isAdmin) {
-      return NextResponse.json(
-        { error: 'You do not have access to this project' },
-        { status: 403 }
       )
     }
 

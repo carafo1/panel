@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
+import { requireProjectAccess } from '@/lib/project-access'
 import {
   executePipelineRun,
   queuedStageResults,
@@ -33,9 +34,9 @@ export async function GET(
 
     const { id } = await params
 
-    // Verify pipeline belongs to user
-    const pipeline = await db.pipeline.findFirst({
-      where: { id, userId: decoded.userId },
+    // Verify the caller may access the pipeline's project
+    const pipeline = await db.pipeline.findUnique({
+      where: { id },
     })
 
     if (!pipeline) {
@@ -44,6 +45,9 @@ export async function GET(
         { status: 404 }
       )
     }
+
+    const access = await requireProjectAccess(decoded, pipeline.projectId, 'view')
+    if (!access.ok) return access.response
 
     // Rescue any runs orphaned by a restart before returning current status.
     await reconcileStaleRuns(id)
@@ -101,9 +105,9 @@ export async function POST(
 
     const { id } = await params
 
-    // Verify pipeline belongs to user
-    const pipeline = await db.pipeline.findFirst({
-      where: { id, userId: decoded.userId },
+    // Verify the caller may access the pipeline's project
+    const pipeline = await db.pipeline.findUnique({
+      where: { id },
     })
 
     if (!pipeline) {
@@ -112,6 +116,9 @@ export async function POST(
         { status: 404 }
       )
     }
+
+    const access = await requireProjectAccess(decoded, pipeline.projectId, 'deploy')
+    if (!access.ok) return access.response
 
     if (pipeline.status !== 'active') {
       return NextResponse.json(

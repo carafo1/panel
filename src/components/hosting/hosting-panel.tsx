@@ -59,6 +59,7 @@ import {
   ArrowRightLeft,
   Ban,
   LayoutDashboard,
+  Users,
 } from 'lucide-react'
 import {
   Card,
@@ -181,12 +182,23 @@ interface Project {
     deployUrl?: string
   } | null
   domains?: { id: string; name: string; status: string }[]
+  /** Set when the project is shared with a team (lib/project-access). */
+  team?: { id: string; name: string } | null
+  ownedByMe?: boolean
   createdAt: string
   updatedAt: string
 }
 
 interface ProjectDetail extends Project {
   repoUrl?: string
+  /** What the viewer may do; absent from older API responses (treat as owner). */
+  access?: {
+    role: string
+    canDeploy: boolean
+    canConfigure: boolean
+    canAccessData: boolean
+    isOwner: boolean
+  }
   deployments: Deployment[]
   domains: { id: string; name: string; status: string; dnsRecords?: unknown[] }[]
   server?: {
@@ -534,6 +546,12 @@ function ProjectCard({
           <Badge variant="outline" className={statusColor(project.status)}>
             {project.status}
           </Badge>
+          {project.team && (
+            <Badge variant="outline" className="text-xs" title={project.ownedByMe === false ? `Shared with you through ${project.team.name}` : `Shared with ${project.team.name}`}>
+              <Users className="size-3 mr-1" />
+              {project.team.name}
+            </Badge>
+          )}
           {project.sslEnabled && (
             <Badge variant="outline" className="bg-indigo-50 text-indigo-600 dark:bg-indigo-900/20 dark:text-indigo-400 text-xs">
               <Shield className="size-3 mr-1" />
@@ -1715,10 +1733,14 @@ function ProjectDetailView({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem className="text-red-600 focus:text-red-600" onClick={() => setDeleteDialogOpen(true)}>
-                <Trash2 className="size-4 mr-2" />
-                Delete Project
-              </DropdownMenuItem>
+              {project.access?.isOwner !== false ? (
+                <DropdownMenuItem className="text-red-600 focus:text-red-600" onClick={() => setDeleteDialogOpen(true)}>
+                  <Trash2 className="size-4 mr-2" />
+                  Delete Project
+                </DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem disabled>Only the owner can delete this project</DropdownMenuItem>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -2982,6 +3004,8 @@ function ProjectDetailView({
               variant="destructive"
               size="sm"
               onClick={() => setDeleteDialogOpen(true)}
+              disabled={project.access?.isOwner === false}
+              title={project.access?.isOwner === false ? 'Only the project owner can delete it' : undefined}
             >
               <Trash2 className="size-4 mr-2" />
               Delete Project

@@ -1,5 +1,6 @@
 import { db } from '@/lib/db'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
+import { requireProjectAccess } from '@/lib/project-access'
 
 /**
  * GET /api/deployments/[id]/events — Server-Sent Events stream of a
@@ -39,11 +40,16 @@ export async function GET(
   if (!decoded) return json(401, { error: 'Invalid or expired token' })
 
   const { id } = await params
-  const exists = await db.deployment.findFirst({
-    where: { id, userId: decoded.userId },
-    select: { id: true },
+  const exists = await db.deployment.findUnique({
+    where: { id },
+    select: { id: true, projectId: true },
   })
   if (!exists) return json(404, { error: 'Deployment not found' })
+
+  // Access is checked once, when the stream opens; the poll below reads the
+  // row by id only.
+  const access = await requireProjectAccess(decoded, exists.projectId, 'view')
+  if (!access.ok) return access.response
 
   const encoder = new TextEncoder()
   const startedAt = Date.now()
@@ -72,8 +78,8 @@ export async function GET(
       const poll = async () => {
         if (closed) return
         try {
-          const current = await db.deployment.findFirst({
-            where: { id, userId: decoded.userId },
+          const current = await db.deployment.findUnique({
+            where: { id },
             select: {
               id: true,
               status: true,

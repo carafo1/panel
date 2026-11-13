@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { authenticateRequest } from '@/lib/auth'
-import { isAdmin } from '@/lib/security'
 import { logAudit } from '@/lib/audit'
+import { requireProjectAccess } from '@/lib/project-access'
 import { rollbackMigration } from '@/lib/migration'
 import { loadMigrationFor, toMigrationView } from '@/lib/migration/view'
 
@@ -34,10 +34,15 @@ export async function POST(
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 })
     }
     const { id } = await params
-    const row = await loadMigrationFor(id, decoded, isAdmin(decoded.role))
+    // Loaded by id alone (loadMigrationFor's unscoped mode); who may act on it
+    // is decided by the project check below.
+    const row = await loadMigrationFor(id, decoded, true)
     if (!row) {
       return NextResponse.json({ error: 'Import not found' }, { status: 404 })
     }
+    // Site imports replace files and databases: 'data' on the target project.
+    const access = await requireProjectAccess(decoded, row.projectId, 'data')
+    if (!access.ok) return access.response
 
     const logLines: string[] = []
     const result = await rollbackMigration(id, {
@@ -56,7 +61,7 @@ export async function POST(
       metadata: { projectId: row.projectId, ok: result.ok },
     })
 
-    const updated = await loadMigrationFor(id, decoded, isAdmin(decoded.role))
+    const updated = await loadMigrationFor(id, decoded, true)
 
     return NextResponse.json(
       {

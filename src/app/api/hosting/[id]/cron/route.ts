@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
-import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
+import { requireProjectAccess } from '@/lib/project-access'
 import { enforceLimit } from '@/lib/plan-limits'
 import { logAudit } from '@/lib/audit'
 import { listCronJobs, createCronJob, validateCronExpression } from '@/lib/vps'
@@ -24,12 +24,8 @@ export async function GET(
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 })
     }
     const { id: projectId } = await params
-    const project = await db.project.findFirst({
-      where: { id: projectId, userId: decoded.userId },
-    })
-    if (!project) {
-      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
-    }
+    const access = await requireProjectAccess(decoded, projectId, 'configure')
+    if (!access.ok) return access.response
     const jobs = await listCronJobs(projectId)
     return NextResponse.json({ jobs })
   } catch (error) {
@@ -48,17 +44,14 @@ export async function POST(
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 })
     }
     const { id: projectId } = await params
-    const project = await db.project.findFirst({
-      where: { id: projectId, userId: decoded.userId },
-    })
-    if (!project) {
-      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
-    }
+    const access = await requireProjectAccess(decoded, projectId, 'configure')
+    if (!access.ok) return access.response
 
     // Plan limit. The quota for cron jobs was computed for the usage bar but
     // never enforced, so a customer could create them without limit while the
     // bar sat past 100%. Checked before creating anything.
-    const denied = await enforceLimit(decoded.userId, 'cronJobs', { role: decoded.role })
+    // Counted against the project owner's plan, not the caller's (team members).
+    const denied = await enforceLimit(access.ownerId, 'cronJobs', { role: decoded.role })
     if (denied) return denied
 
     const body = await request.json().catch(() => ({}))

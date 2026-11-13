@@ -1234,10 +1234,17 @@ const stageDeploy: StageFn = async (ctx) => {
     // which builds an image from the files we just placed. `deploymentSource`
     // is 'imported', so its source stage leaves them alone.
     ctx.log(`Handing off to the ${ctx.detection!.stack} build pipeline…`)
+    // Deployment.userId means the project OWNER (lists, reinstatement and the
+    // assistant read it that way). ctx.userId is whoever started the import,
+    // which for a shared project may be a team member.
+    const owner = await db.project.findUnique({
+      where: { id: ctx.projectId },
+      select: { userId: true },
+    })
     const deployment = await db.deployment.create({
       data: {
         projectId: ctx.projectId,
-        userId: ctx.userId,
+        userId: owner?.userId ?? ctx.userId,
         commit: `import-${ctx.migrationId.slice(0, 8)}`,
         branch: ctx.opts.gitBranch || 'main',
         status: 'queued',

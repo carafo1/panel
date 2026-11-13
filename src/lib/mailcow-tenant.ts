@@ -10,8 +10,8 @@
  * Nothing in the email API may call Mailcow without going through this first.
  */
 import { db } from '@/lib/db'
+import { getProjectAccess, type ProjectPermission } from '@/lib/project-access'
 import { authenticateRequest } from '@/lib/auth'
-import { isAdmin } from '@/lib/security'
 import { isMailcowConfigured } from '@/lib/mailcow-manage'
 
 export class MailAccessError extends Error {
@@ -41,7 +41,9 @@ const normalise = (d: string) => (d || '').trim().toLowerCase().replace(/\.$/, '
  */
 export async function resolveMailTenant(
   request: Request,
-  projectId: string
+  projectId: string,
+  /** Team permission needed (lib/project-access). Mail settings are "data". */
+  permission: ProjectPermission = 'data'
 ): Promise<MailTenant> {
   if (!isMailcowConfigured()) {
     throw new MailAccessError('Email hosting is not configured on this server', 503)
@@ -50,10 +52,17 @@ export async function resolveMailTenant(
   const auth = await authenticateRequest(request)
   if (!auth) throw new MailAccessError('Invalid or expired token', 401)
 
-  const project = await db.project.findFirst({
-    where: isAdmin(auth.role)
-      ? { id: projectId }
-      : { id: projectId, userId: auth.userId },
+  // Owner, platform admin, or a team member whose role allows `permission`.
+  const access = await getProjectAccess(auth, projectId)
+  if (!access) throw new MailAccessError('Project not found', 404)
+  if (!access.can(permission)) {
+    throw new MailAccessError(
+      "Your team role does not allow managing this project's email. Ask a team admin.",
+      403
+    )
+  }
+  const project = await db.project.findUnique({
+    where: { id: projectId },
     select: { id: true, name: true, userId: true, customDomain: true },
   })
   if (!project) throw new MailAccessError('Project not found', 404)

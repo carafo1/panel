@@ -69,7 +69,8 @@ export async function POST(
       return NextResponse.json({ error: 'User is already a member of this team' }, { status: 409 })
     }
 
-    const memberRole = role === 'admin' ? 'admin' : 'developer'
+    // viewer: read-only access to the team's projects (see lib/project-access).
+    const memberRole = role === 'admin' || role === 'viewer' ? role : 'developer'
 
     const newMember = await db.teamMember.create({
       data: {

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
-import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
+import { requireProjectAccess } from '@/lib/project-access'
 import { generateEmailDnsRecords, type MailcowDkimInput } from '@/lib/email-dns'
 import { getDomain, isMailcowConfigured } from '@/lib/mailcow'
 
@@ -66,12 +66,9 @@ export async function GET(
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 })
     }
     const { id: projectId } = await params
-    const project = await db.project.findFirst({
-      where: { id: projectId, userId: decoded.userId },
-    })
-    if (!project) {
-      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
-    }
+    // Public DNS records only — any project member may read them.
+    const access = await requireProjectAccess(decoded, projectId, 'view')
+    if (!access.ok) return access.response
 
     const url = new URL(request.url)
     const domainParam = normaliseDomain(url.searchParams.get('domain') || '')

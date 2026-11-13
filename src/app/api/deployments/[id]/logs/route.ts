@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
+import { requireProjectAccess } from '@/lib/project-access'
 
 export async function GET(
   request: Request,
@@ -17,8 +18,8 @@ export async function GET(
 
     const { id } = await params
 
-    const deployment = await db.deployment.findFirst({
-      where: { id, userId: decoded.userId },
+    const deployment = await db.deployment.findUnique({
+      where: { id },
       include: {
         project: {
           select: {
@@ -38,6 +39,9 @@ export async function GET(
         { status: 404 }
       )
     }
+
+    const access = await requireProjectAccess(decoded, deployment.projectId, 'view')
+    if (!access.ok) return access.response
 
     return NextResponse.json({
       deployment: {

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
+import { requireProjectAccess } from '@/lib/project-access'
 
 /**
  * Deployment Stages Endpoint
@@ -28,15 +29,8 @@ export async function GET(
 
     const { id: projectId } = await params
 
-    const project = await db.project.findFirst({
-      where: { id: projectId, userId: decoded.userId },
-    })
-    if (!project) {
-      return NextResponse.json(
-        { error: 'Project not found' },
-        { status: 404 }
-      )
-    }
+    const access = await requireProjectAccess(decoded, projectId, 'view')
+    if (!access.ok) return access.response
 
     const url = new URL(request.url)
     const explicitDeploymentId = url.searchParams.get('deploymentId')

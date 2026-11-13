@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
+import { requireProjectAccess } from '@/lib/project-access'
 
 export async function GET(
   request: Request,
@@ -27,8 +28,8 @@ export async function GET(
 
     const { id } = await params
 
-    const pipeline = await db.pipeline.findFirst({
-      where: { id, userId: decoded.userId },
+    const pipeline = await db.pipeline.findUnique({
+      where: { id },
       include: {
         project: {
           select: {
@@ -52,6 +53,9 @@ export async function GET(
         { status: 404 }
       )
     }
+
+    const access = await requireProjectAccess(decoded, pipeline.projectId, 'view')
+    if (!access.ok) return access.response
 
     return NextResponse.json({
       pipeline: {
@@ -122,8 +126,8 @@ export async function PATCH(
     }
     const { name, description, stages, status, triggerBranch, triggerEvents } = body
 
-    const pipeline = await db.pipeline.findFirst({
-      where: { id, userId: decoded.userId },
+    const pipeline = await db.pipeline.findUnique({
+      where: { id },
     })
 
     if (!pipeline) {
@@ -132,6 +136,9 @@ export async function PATCH(
         { status: 404 }
       )
     }
+
+    const access = await requireProjectAccess(decoded, pipeline.projectId, 'configure')
+    if (!access.ok) return access.response
 
     const updateData: Record<string, unknown> = {}
 
@@ -248,8 +255,8 @@ export async function DELETE(
 
     const { id } = await params
 
-    const pipeline = await db.pipeline.findFirst({
-      where: { id, userId: decoded.userId },
+    const pipeline = await db.pipeline.findUnique({
+      where: { id },
     })
 
     if (!pipeline) {
@@ -258,6 +265,9 @@ export async function DELETE(
         { status: 404 }
       )
     }
+
+    const access = await requireProjectAccess(decoded, pipeline.projectId, 'configure')
+    if (!access.ok) return access.response
 
     await db.pipeline.delete({
       where: { id },

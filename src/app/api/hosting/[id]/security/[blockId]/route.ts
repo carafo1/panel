@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
+import { requireProjectAccess } from '@/lib/project-access'
 import { logAudit } from '@/lib/audit'
 import { updateIpBlock, deleteIpBlock } from '@/lib/vps'
 
@@ -23,12 +24,8 @@ export async function PATCH(
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 })
     }
     const { id: projectId, blockId } = await params
-    const project = await db.project.findFirst({
-      where: { id: projectId, userId: decoded.userId },
-    })
-    if (!project) {
-      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
-    }
+    const access = await requireProjectAccess(decoded, projectId, 'configure')
+    if (!access.ok) return access.response
     const existing = await db.ipBlock.findFirst({
       where: { id: blockId, projectId },
     })
@@ -81,12 +78,8 @@ export async function DELETE(
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 })
     }
     const { id: projectId, blockId } = await params
-    const project = await db.project.findFirst({
-      where: { id: projectId, userId: decoded.userId },
-    })
-    if (!project) {
-      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
-    }
+    const access = await requireProjectAccess(decoded, projectId, 'configure')
+    if (!access.ok) return access.response
     const existing = await db.ipBlock.findFirst({
       where: { id: blockId, projectId },
     })

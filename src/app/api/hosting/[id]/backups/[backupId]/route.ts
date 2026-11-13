@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server'
-import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
-import { isAdmin } from '@/lib/security'
+import { requireProjectAccess } from '@/lib/project-access'
 import { logAudit } from '@/lib/audit'
 import { downloadBackup, deleteBackup, restoreBackup } from '@/lib/vps'
 
@@ -25,10 +24,8 @@ export async function GET(
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 })
     }
     const { id: projectId, backupId } = await params
-    const project = await db.project.findFirst({ where: isAdmin(decoded.role) ? { id: projectId } : { id: projectId, userId: decoded.userId } })
-    if (!project) {
-      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
-    }
+    const access = await requireProjectAccess(decoded, projectId, 'data')
+    if (!access.ok) return access.response
 
     const { content, filename, size } = await downloadBackup(projectId, backupId)
     return new NextResponse(new Uint8Array(content), {
@@ -56,10 +53,8 @@ export async function DELETE(
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 })
     }
     const { id: projectId, backupId } = await params
-    const project = await db.project.findFirst({ where: isAdmin(decoded.role) ? { id: projectId } : { id: projectId, userId: decoded.userId } })
-    if (!project) {
-      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
-    }
+    const access = await requireProjectAccess(decoded, projectId, 'data')
+    if (!access.ok) return access.response
     const result = await deleteBackup(projectId, backupId)
     if (!result.ok) {
       return NextResponse.json({ error: result.message }, { status: 400 })
@@ -89,10 +84,8 @@ export async function POST(
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 })
     }
     const { id: projectId, backupId } = await params
-    const project = await db.project.findFirst({ where: isAdmin(decoded.role) ? { id: projectId } : { id: projectId, userId: decoded.userId } })
-    if (!project) {
-      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
-    }
+    const access = await requireProjectAccess(decoded, projectId, 'data')
+    if (!access.ok) return access.response
     const body = await request.json().catch(() => ({}))
     if (body?.action !== 'restore') {
       return NextResponse.json(

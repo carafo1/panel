@@ -13,7 +13,7 @@ export async function GET(
 ) {
   const { id } = await params
   try {
-    const { domains } = await resolveMailTenant(request, id)
+    const { domains } = await resolveMailTenant(request, id, 'view')
     const stats = await getMailStats(domains)
     return NextResponse.json({ stats, domains })
   } catch (err) {

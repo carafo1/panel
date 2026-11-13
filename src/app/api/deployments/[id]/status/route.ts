@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
+import { requireProjectAccess } from '@/lib/project-access'
 
 /**
  * GET /api/deployments/[id]/status
@@ -47,8 +48,8 @@ export async function GET(
 
     const { id } = await params
 
-    const deployment = await db.deployment.findFirst({
-      where: { id, userId: decoded.userId },
+    const deployment = await db.deployment.findUnique({
+      where: { id },
       include: { project: true },
     })
 
@@ -58,6 +59,9 @@ export async function GET(
         { status: 404 }
       )
     }
+
+    const access = await requireProjectAccess(decoded, deployment.projectId, 'view')
+    if (!access.ok) return access.response
 
     const url =
       deployment.deployUrl ||

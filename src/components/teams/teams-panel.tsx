@@ -62,6 +62,7 @@ import {
   ArrowLeft,
   MoreVertical,
   Loader2,
+  X,
 } from 'lucide-react'
 
 // ── Types ────────────────────────────────────────────────────────────────
@@ -122,7 +123,17 @@ function RoleBadge({ role }: { role: string }) {
   if (role === 'admin') {
     return <Badge className="bg-amber-100 text-amber-700 border-amber-200 hover:bg-amber-100"><Shield className="size-3 mr-1" />Admin</Badge>
   }
+  if (role === 'viewer') {
+    return <Badge variant="outline">Viewer</Badge>
+  }
   return <Badge variant="secondary">Developer</Badge>
+}
+
+/** What each team role may do on the team's projects (enforced server-side). */
+const ROLE_HELP: Record<string, string> = {
+  admin: 'Everything except deleting projects: deploy, settings, databases, backups, terminal, and managing members.',
+  developer: 'Deploy, restart, and change settings, environment variables, files and cron. No databases, backups or terminal.',
+  viewer: 'Read-only: status, deployments, logs and monitoring.',
 }
 
 function ProjectStatusBadge({ status }: { status: string }) {
@@ -161,6 +172,11 @@ export default function TeamsPanel() {
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false)
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteRole, setInviteRole] = useState('developer')
+
+  // Sharing projects with the team
+  const [myProjects, setMyProjects] = useState<Array<{ id: string; name: string; teamId: string | null }>>([])
+  const [projectToAdd, setProjectToAdd] = useState('')
+  const [sharing, setSharing] = useState(false)
   const [inviting, setInviting] = useState(false)
 
   const [deleteTeamDialogOpen, setDeleteTeamDialogOpen] = useState(false)
@@ -303,6 +319,59 @@ export default function TeamsPanel() {
       fetchTeamDetail(selectedTeam.id)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to remove member')
+    }
+  }
+
+  // ── Share / unshare projects ─────────────────────────────────────────
+  const loadMyProjects = useCallback(async () => {
+    try {
+      const data = await apiFetch<{ projects: Array<{ id: string; name: string; ownedByMe?: boolean; team?: { id: string } | null }> }>(
+        '/hosting'
+      )
+      setMyProjects(
+        data.projects
+          .filter((p) => p.ownedByMe !== false)
+          .map((p) => ({ id: p.id, name: p.name, teamId: p.team?.id ?? null }))
+      )
+    } catch {
+      setMyProjects([])
+    }
+  }, [])
+
+  useEffect(() => {
+    if (selectedTeam) loadMyProjects()
+  }, [selectedTeam, loadMyProjects])
+
+  const handleShareProject = async () => {
+    if (!selectedTeam || !projectToAdd) return
+    setSharing(true)
+    try {
+      await apiFetch(`/teams/${selectedTeam.id}/projects`, {
+        method: 'POST',
+        body: JSON.stringify({ projectId: projectToAdd }),
+      })
+      toast.success('Project shared with the team')
+      setProjectToAdd('')
+      fetchTeamDetail(selectedTeam.id)
+      loadMyProjects()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to share project')
+    } finally {
+      setSharing(false)
+    }
+  }
+
+  const handleUnshareProject = async (projectId: string) => {
+    if (!selectedTeam) return
+    try {
+      await apiFetch(`/teams/${selectedTeam.id}/projects?projectId=${encodeURIComponent(projectId)}`, {
+        method: 'DELETE',
+      })
+      toast.success('Project removed from the team')
+      fetchTeamDetail(selectedTeam.id)
+      loadMyProjects()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to remove project')
     }
   }
 
@@ -518,6 +587,12 @@ export default function TeamsPanel() {
                               >
                                 <Users className="size-3.5 mr-2" /> Developer
                               </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => handleChangeRole(member.id, 'viewer')}
+                                disabled={member.role === 'viewer'}
+                              >
+                                <Users className="size-3.5 mr-2" /> Viewer (read-only)
+                              </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
                         )}
@@ -553,14 +628,45 @@ export default function TeamsPanel() {
               <Shield className="size-5" />
               Team Projects
             </CardTitle>
-            <CardDescription>Projects owned by this team</CardDescription>
+            <CardDescription>
+              Projects shared with this team. Members get access according to their role; billing and deletion stay with each project's owner.
+            </CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
+            {canManage && (
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                <div className="flex-1 grid gap-1.5">
+                  <Label htmlFor="share-project">Share one of your projects</Label>
+                  <Select value={projectToAdd} onValueChange={setProjectToAdd}>
+                    <SelectTrigger id="share-project">
+                      <SelectValue placeholder={myProjects.some((p) => p.teamId !== selectedTeam.id) ? 'Choose a project' : 'No projects left to share'} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {myProjects
+                        .filter((p) => p.teamId !== selectedTeam.id)
+                        .map((p) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.name}{p.teamId ? ' (moves from its current team)' : ''}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button onClick={handleShareProject} disabled={!projectToAdd || sharing} className="gap-1.5">
+                  <Plus className="size-4" />
+                  {sharing ? 'Sharing…' : 'Share project'}
+                </Button>
+              </div>
+            )}
             {selectedTeam.projects.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">
                 <Shield className="size-10 mx-auto mb-3 opacity-30" />
                 <p>No projects yet</p>
-                <p className="text-sm">Projects can be assigned to this team from the Hosting panel</p>
+                <p className="text-sm">
+                  {canManage
+                    ? 'Share one of your projects above to give the team access.'
+                    : 'A team owner or admin can share projects with this team.'}
+                </p>
               </div>
             ) : (
               <div className="grid gap-3 sm:grid-cols-2">
@@ -573,7 +679,20 @@ export default function TeamsPanel() {
                       <div className="font-medium">{project.name}</div>
                       <div className="text-sm text-muted-foreground">{project.subdomain}</div>
                     </div>
-                    <ProjectStatusBadge status={project.status} />
+                    <div className="flex items-center gap-2">
+                      <ProjectStatusBadge status={project.status} />
+                      {canManage && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                          onClick={() => handleUnshareProject(project.id)}
+                          aria-label={`Stop sharing ${project.name} with this team`}
+                        >
+                          <X className="size-4" />
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -645,8 +764,10 @@ export default function TeamsPanel() {
                   <SelectContent>
                     <SelectItem value="developer">Developer</SelectItem>
                     <SelectItem value="admin">Admin</SelectItem>
+                    <SelectItem value="viewer">Viewer (read-only)</SelectItem>
                   </SelectContent>
                 </Select>
+                <p className="text-xs text-muted-foreground mt-1.5">{ROLE_HELP[inviteRole]}</p>
               </div>
             </div>
             <DialogFooter>

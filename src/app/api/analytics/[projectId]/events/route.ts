@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
+import { requireProjectAccess } from '@/lib/project-access'
 
 export async function POST(
   req: NextRequest,
@@ -19,13 +20,10 @@ export async function POST(
 
     const { projectId } = await params
 
-    // Verify project ownership
-    const project = await db.project.findUnique({
-      where: { id: projectId },
-    })
-    if (!project || project.userId !== payload.userId) {
-      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
-    }
+    // Recording events was owner-only; it is now a 'configure' write
+    // (owner, team developer+, admin).
+    const access = await requireProjectAccess(payload, projectId, 'configure')
+    if (!access.ok) return access.response
 
     const body = await req.json().catch(() => null)
     if (!body || typeof body !== 'object') {

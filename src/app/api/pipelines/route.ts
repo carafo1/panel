@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
+import { accessibleProjectsWhere, requireProjectAccess } from '@/lib/project-access'
 
 export async function GET(request: Request) {
   try {
@@ -23,7 +24,8 @@ export async function GET(request: Request) {
     }
 
     const pipelines = await db.pipeline.findMany({
-      where: { userId: decoded.userId },
+      // Pipelines of every project the caller can see (own + team projects).
+      where: { project: accessibleProjectsWhere(decoded.userId) },
       include: {
         project: {
           select: {
@@ -112,17 +114,9 @@ export async function POST(request: Request) {
       )
     }
 
-    // Verify project belongs to user
-    const project = await db.project.findFirst({
-      where: { id: projectId, userId: decoded.userId },
-    })
-
-    if (!project) {
-      return NextResponse.json(
-        { error: 'Project not found' },
-        { status: 404 }
-      )
-    }
+    // Verify the user may configure the project (owner, team developer+, admin)
+    const access = await requireProjectAccess(decoded, String(projectId), 'configure')
+    if (!access.ok) return access.response
 
     // Validate stages is a valid JSON array
     let stagesJson: string
@@ -175,7 +169,8 @@ export async function POST(request: Request) {
 
     const pipeline = await db.pipeline.create({
       data: {
-        userId: decoded.userId,
+        // Pipeline.userId is the project OWNER, not whoever created it.
+        userId: access.ownerId,
         projectId,
         name,
         description: description || null,

@@ -1,16 +1,21 @@
 /**
  * GET /api/hosting/[id]/databases/[dbId]/pgadmin
  *
- * "Open pgAdmin" — verifies the caller owns this database, provisions their
- * pgAdmin account with EVERY PostgreSQL database they own (so the tree always
- * reflects reality), then hands off to pgAdmin with a short-lived token.
+ * "Open pgAdmin" — verifies the caller has 'data' access to this database's
+ * project, provisions their pgAdmin account with EVERY PostgreSQL database they
+ * may reach (so the tree always reflects reality), then hands off to pgAdmin
+ * with a short-lived token.
  *
  * `?json=1` returns `{ url }` so the panel can open it in a new tab.
  */
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
-import { isAdmin } from '@/lib/security'
+import {
+  accessibleProjectsWhere,
+  getProjectAccess,
+  requireProjectAccess,
+} from '@/lib/project-access'
 import { decrypt } from '@/lib/encryption'
 import { logAudit } from '@/lib/audit'
 import {
@@ -44,16 +49,9 @@ export async function GET(
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 })
     }
 
-    // Ownership: admins may open any project's database, everyone else only
-    // their own.
-    const project = await db.project.findFirst({
-      where: isAdmin(auth.role)
-        ? { id: projectId }
-        : { id: projectId, userId: auth.userId },
-    })
-    if (!project) {
-      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
-    }
+    // Access: project owner, platform admins and team owners/admins ('data').
+    const access = await requireProjectAccess(auth, projectId, 'data')
+    if (!access.ok) return access.response
 
     const target = await db.websiteDatabase.findFirst({ where: { id: dbId, projectId } })
     if (!target) {
@@ -68,9 +66,31 @@ export async function GET(
 
     // Register every PostgreSQL database owned by the database's owner, so the
     // tenant sees their whole estate rather than one server at a time.
-    const ownerId = project.userId
+    //
+    // Whose pgAdmin account is opened, and with what in it:
+    //   - platform admin on someone else's project → the owner's account with
+    //     the owner's whole estate (as before);
+    //   - everyone else (the owner, or a team member) → the CALLER's own
+    //     account, holding every PostgreSQL database of every project the
+    //     caller has 'data' on. A team member must never be dropped into the
+    //     owner's account: it lists the owner's databases of every project,
+    //     including ones the team cannot reach.
+    const asOwner = access.role === 'platform_admin'
+    const accountUserId = asOwner ? access.ownerId : auth.userId
+    let dbScope: { project: { userId: string } } | { projectId: { in: string[] } }
+    if (asOwner) {
+      dbScope = { project: { userId: access.ownerId } }
+    } else {
+      const candidates = await db.project.findMany({
+        where: accessibleProjectsWhere(auth.userId),
+        select: { id: true },
+      })
+      const grants = await Promise.all(candidates.map((p) => getProjectAccess(auth, p.id)))
+      const projectIds = grants.filter((g) => g?.can('data')).map((g) => g!.projectId)
+      dbScope = { projectId: { in: projectIds } }
+    }
     const rows = await db.websiteDatabase.findMany({
-      where: { project: { userId: ownerId } },
+      where: dbScope,
       include: { project: { select: { name: true, slug: true } } },
       orderBy: { createdAt: 'asc' },
     })
@@ -105,7 +125,7 @@ export async function GET(
       )
     }
 
-    const username = pgAdminUsernameFor(ownerId)
+    const username = pgAdminUsernameFor(accountUserId)
     const prov = await provisionPgAdminTenant(username, servers)
     if (!prov.ok) {
       await logAudit({
@@ -122,7 +142,9 @@ export async function GET(
       return NextResponse.json({ error: prov.message }, { status: 503 })
     }
 
-    const token = mintHandoffToken(username, ownerId)
+    // `uid` is the panel user recorded in the pgAdmin session audit — the
+    // person who opened it, not the account owner.
+    const token = mintHandoffToken(username, auth.userId)
     const url = `${pgAdminBaseUrl()}/apsamo-sso?token=${encodeURIComponent(token)}`
 
     await logAudit({

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { createMonitor } from '@/lib/monitor'
+import { accessibleProjectsWhere, requireProjectAccess } from '@/lib/project-access'
 
 /**
  * GET /api/monitors
@@ -31,7 +32,8 @@ export async function GET(request: Request) {
 
     const monitors = await db.uptimeMonitor.findMany({
       where: {
-        project: { userId: decoded.userId },
+        // Own projects plus those of every team the caller belongs to.
+        project: accessibleProjectsWhere(decoded.userId),
       },
       include: {
         project: {
@@ -133,17 +135,9 @@ export async function POST(request: Request) {
       )
     }
 
-    // Verify the user owns the project.
-    const project = await db.project.findFirst({
-      where: { id: projectId, userId: decoded.userId },
-      select: { id: true, name: true },
-    })
-    if (!project) {
-      return NextResponse.json(
-        { error: 'Project not found' },
-        { status: 404 }
-      )
-    }
+    // Verify the user may configure the project (owner, team developer+, admin).
+    const access = await requireProjectAccess(decoded, projectId, 'configure')
+    if (!access.ok) return access.response
 
     // Validate interval (min 10s, max 1 day).
     const interval =

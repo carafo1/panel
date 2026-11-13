@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { authenticateRequestFresh } from '@/lib/auth'
-import { isAdmin } from '@/lib/security'
+import { requireProjectAccess } from '@/lib/project-access'
 import { logAudit } from '@/lib/audit'
 import {
   checkOwnership,
@@ -39,14 +39,8 @@ export async function POST(
     }
     const { id: projectId, domainId } = await params
 
-    const project = await db.project.findFirst({
-      where: isAdmin(decoded.role)
-        ? { id: projectId }
-        : { id: projectId, userId: decoded.userId },
-    })
-    if (!project) {
-      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
-    }
+    const access = await requireProjectAccess(decoded, projectId, 'configure')
+    if (!access.ok) return access.response
 
     const row = await db.websiteDomain.findFirst({
       where: { id: domainId, projectId },

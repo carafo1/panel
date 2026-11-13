@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
 import { isAdmin } from '@/lib/security'
+import { accessibleProjectsWhere } from '@/lib/project-access'
 import { IMPORT_SOURCES } from '@/lib/migration'
 import { toMigrationView } from '@/lib/migration/view'
 
@@ -13,7 +14,7 @@ import { toMigrationView } from '@/lib/migration/view'
  *
  * Returns every import the caller can see, newest first, plus the counters the
  * dashboard header shows. Admins see the whole platform; everyone else sees
- * imports for the projects they own.
+ * imports for the projects they own or that belong to one of their teams.
  */
 
 export const runtime = 'nodejs'
@@ -32,7 +33,7 @@ export async function GET(request: Request) {
 
     const scope = isAdmin(decoded.role)
       ? {}
-      : { project: { userId: decoded.userId } }
+      : { project: accessibleProjectsWhere(decoded.userId) }
 
     // "running" in the UI means anything not yet finished, which spans four
     // stored statuses — filtering on the literal string would hide an import

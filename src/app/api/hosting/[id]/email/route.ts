@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
+import { requireProjectAccess } from '@/lib/project-access'
 import { encrypt } from '@/lib/encryption'
 import {
   addDomain as mailcowAddDomain,
@@ -96,19 +97,15 @@ export async function GET(
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 })
     }
     const { id: projectId } = await params
-    const project = await db.project.findFirst({
-      where: { id: projectId, userId: decoded.userId },
-    })
-    if (!project) {
-      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
-    }
+    const access = await requireProjectAccess(decoded, projectId, 'data')
+    if (!access.ok) return access.response
 
     // Resolve every domain name that belongs to this project, then find the
-    // Domain rows owned by this user that match those names.
+    // Domain rows owned by the project's owner that match those names.
     const domainNames = await collectProjectDomainNames(projectId)
     const domainRows = domainNames.length
       ? await db.domain.findMany({
-          where: { userId: decoded.userId, name: { in: domainNames } },
+          where: { userId: access.ownerId, name: { in: domainNames } },
           select: { id: true, name: true },
         })
       : []
@@ -156,12 +153,8 @@ export async function POST(
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 })
     }
     const { id: projectId } = await params
-    const project = await db.project.findFirst({
-      where: { id: projectId, userId: decoded.userId },
-    })
-    if (!project) {
-      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
-    }
+    const access = await requireProjectAccess(decoded, projectId, 'data')
+    if (!access.ok) return access.response
 
     const body = await request.json().catch(() => null)
     if (!body) {
@@ -205,7 +198,8 @@ export async function POST(
       )
     }
 
-    // Find-or-create the Domain row owned by this user. The domain must be one
+    // Find-or-create the Domain row owned by the PROJECT OWNER (a team member
+    // adding a mailbox must not end up owning the domain). The domain must be one
     // the user manages — we accept either an existing Domain row, or a name
     // that matches one of the project's domains (customDomain or a
     // WebsiteDomain row), creating a fresh Domain row on the fly when needed.
@@ -218,15 +212,15 @@ export async function POST(
         : {},
       create: {
         name: domainName,
-        userId: decoded.userId,
+        userId: access.ownerId,
         projectId: belongsToProject ? projectId : null,
         status: 'active',
         emailHosted: true,
       },
     })
 
-    // Ownership guard — the Domain row must belong to the caller.
-    if (domainRow.userId !== decoded.userId) {
+    // Ownership guard — the Domain row must belong to the project's owner.
+    if (domainRow.userId !== access.ownerId) {
       return NextResponse.json(
         { error: 'You do not own this domain.' },
         { status: 403 }

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
+import { requireProjectAccess } from '@/lib/project-access'
 import { encrypt } from '@/lib/encryption'
 import { deleteMailbox as mailcowDeleteMailbox } from '@/lib/mailcow'
 
@@ -17,25 +18,38 @@ import { deleteMailbox as mailcowDeleteMailbox } from '@/lib/mailcow'
  *   DELETE  /api/hosting/[id]/email/[mailboxId]
  *              — delete the mailbox row and best-effort remove it from Mailcow.
  *
- * Ownership is verified by loading the mailbox → its Domain → checking that
- * Domain.userId === decoded.userId. The projectId in the URL is included for
- * consistency with the other hosting endpoints and for audit logging, but
- * the actual ownership check is on the Domain row (so mailboxes created
- * against a project's customDomain still work after a project is moved).
+ * Access: the caller needs 'data' on the project in the URL (owner, platform
+ * admin, team owner/admin). The mailbox is then verified to belong to that
+ * project: its Domain must be owned by the project's owner (Domain.userId)
+ * AND be linked to the project — either Domain.projectId, or its name is one
+ * of the project's domains (customDomain / WebsiteDomain rows), the same set
+ * the list endpoint shows. Without the project check a team member with
+ * access to one project could reach the owner's mailboxes on every domain.
  */
 
 function maskPassword(_encrypted: string): string {
   return '••••••••'
 }
 
-async function loadOwnedMailbox(mailboxId: string, userId: string) {
+const normaliseDomain = (value: string) => value.toLowerCase().trim().replace(/\.+$/, '')
+
+async function loadProjectMailbox(mailboxId: string, projectId: string, ownerId: string) {
   const mailbox = await db.emailMailbox.findUnique({
     where: { id: mailboxId },
-    include: { domain: { select: { id: true, userId: true, name: true } } },
+    include: { domain: { select: { id: true, userId: true, name: true, projectId: true } } },
   })
   if (!mailbox) return null
-  if (!mailbox.domain || mailbox.domain.userId !== userId) return null
-  return mailbox
+  if (!mailbox.domain || mailbox.domain.userId !== ownerId) return null
+  if (mailbox.domain.projectId === projectId) return mailbox
+
+  const [project, websiteDomains] = await Promise.all([
+    db.project.findUnique({ where: { id: projectId }, select: { customDomain: true } }),
+    db.websiteDomain.findMany({ where: { projectId }, select: { domain: true } }),
+  ])
+  const names = new Set<string>()
+  if (project?.customDomain) names.add(normaliseDomain(project.customDomain))
+  for (const r of websiteDomains) if (r.domain) names.add(normaliseDomain(r.domain))
+  return names.has(normaliseDomain(mailbox.domain.name)) ? mailbox : null
 }
 
 export async function PATCH(
@@ -49,7 +63,10 @@ export async function PATCH(
     }
     const { id: projectId, mailboxId } = await params
 
-    const mailbox = await loadOwnedMailbox(mailboxId, decoded.userId)
+    const access = await requireProjectAccess(decoded, projectId, 'data')
+    if (!access.ok) return access.response
+
+    const mailbox = await loadProjectMailbox(mailboxId, projectId, access.ownerId)
     if (!mailbox) {
       return NextResponse.json({ error: 'Mailbox not found' }, { status: 404 })
     }
@@ -154,7 +171,10 @@ export async function DELETE(
     }
     const { id: projectId, mailboxId } = await params
 
-    const mailbox = await loadOwnedMailbox(mailboxId, decoded.userId)
+    const access = await requireProjectAccess(decoded, projectId, 'data')
+    if (!access.ok) return access.response
+
+    const mailbox = await loadProjectMailbox(mailboxId, projectId, access.ownerId)
     if (!mailbox) {
       return NextResponse.json({ error: 'Mailbox not found' }, { status: 404 })
     }

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
+import { requireProjectAccess } from '@/lib/project-access'
 import { getContainerLogs } from '@/lib/vps/deployer'
 
 /**
@@ -11,7 +12,7 @@ import { getContainerLogs } from '@/lib/vps/deployer'
  *   tail  — number of lines from the end (default 200, capped at 5000)
  *   since — relative time like "1h", "30m", "2h" passed straight to docker
  *
- * Auth: owner or admin/super_admin.
+ * Auth: 'view' project access.
  */
 export async function GET(
   request: Request,
@@ -35,6 +36,9 @@ export async function GET(
     }
 
     const { id } = await params
+    const access = await requireProjectAccess(decoded, id, 'view')
+    if (!access.ok) return access.response
+
     const project = await db.project.findUnique({
       where: { id },
       select: { id: true, userId: true, name: true, containerName: true },
@@ -43,15 +47,6 @@ export async function GET(
       return NextResponse.json(
         { error: 'Project not found' },
         { status: 404 }
-      )
-    }
-
-    const isOwner = project.userId === decoded.userId
-    const isAdmin = decoded.role === 'admin' || decoded.role === 'super_admin'
-    if (!isOwner && !isAdmin) {
-      return NextResponse.json(
-        { error: 'You do not have access to this project' },
-        { status: 403 }
       )
     }
 
