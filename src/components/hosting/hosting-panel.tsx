@@ -418,40 +418,11 @@ function formatDate(dateStr: string) {
   }
 }
 
-function generateSimulatedBuildLog(project: ProjectDetail, deployment: Deployment): string {
-  const isFailed = deployment.status === 'failed'
-  const fw = project.framework === 'nextjs' ? 'next' : project.framework
-  const now = new Date(deployment.createdAt)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  const ts = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`
-
-  if (isFailed) {
-    return `${ts} > Cloning repository...
-${ts} > Installing dependencies...
-${ts} > npm install --production
-${ts} > Building application...
-${ts} > ${fw} build
-${ts} ✗ Type error: Property 'fetchData' does not exist on type 'never'.
-${ts} ✗ Build failed with 1 error
-${ts} > Error: Build process exited with code 1
-${ts} > Deployment failed!`
-  }
-
-  return `${ts} > Cloning repository...
-${ts} ✓ Repository cloned successfully
-${ts} > Installing dependencies...
-${ts} > npm install --production
-${ts} ✓ Dependencies installed (1.2s)
-${ts} > Building application...
-${ts} > ${fw} build
-${ts} ✓ Compiled successfully
-${ts} ✓ Linting and checking validity of types
-${ts} ✓ Collecting page data
-${ts} ✓ Generating static pages (8/8)
-${ts} ✓ Finalizing page optimization
-${ts} > Deploying to server...
-${ts} ✓ Deployment successful!
-${ts} > Live at https://${project.subdomain}`
+/** What to show when a deployment has no stored log — never an invented one. */
+function emptyLogMessage(status: string | undefined): string {
+  return status === 'building' || status === 'deploying' || status === 'queued'
+    ? 'Waiting for build output…'
+    : 'No build log was recorded for this deployment.'
 }
 
 function colorizeLogLine(line: string): React.ReactNode {
@@ -780,7 +751,7 @@ function BuildLogsDialog({
 
   const displayLog = loading
     ? 'Loading build logs...'
-    : logContent || (deployment && project ? generateSimulatedBuildLog(project, deployment) : 'No build logs available')
+    : logContent || (deployment ? emptyLogMessage(deployment.status) : 'No build logs available')
 
   const isAnimating = deployment?.status === 'building' || deployment?.status === 'deploying'
 

@@ -150,55 +150,11 @@ function triggeredByIcon(trigger: string) {
   }
 }
 
-// ── Simulated build logs ───────────────────────────────────────────────
-function generateSimulatedBuildLog(deployment: DeploymentDetail): string {
-  const isFailed = deployment.status === 'failed'
-  const isBuilding = deployment.status === 'building' || deployment.status === 'deploying'
-  const fw = deployment.project?.framework === 'nextjs' ? 'next' : (deployment.project?.framework || 'node')
-  const now = new Date(deployment.createdAt)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  const ts = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`
-
-  if (isFailed) {
-    return `${ts} > Cloning repository...
-${ts} ✓ Repository cloned successfully
-${ts} > Installing dependencies...
-${ts} > npm install --production
-${ts} ✓ Dependencies installed (1.2s)
-${ts} > Building application...
-${ts} > ${fw} build
-${ts} ✗ Type error: Property 'fetchData' does not exist on type 'never'.
-${ts} ✗ Build failed with 1 error
-${ts} > Error: Build process exited with code 1
-${ts} > Deployment failed!`
-  }
-
-  if (isBuilding) {
-    return `${ts} > Cloning repository...
-${ts} ✓ Repository cloned successfully
-${ts} > Installing dependencies...
-${ts} > npm install --production
-${ts} ✓ Dependencies installed (1.2s)
-${ts} > Building application...
-${ts} > ${fw} build
-${ts} ⠹ Compiling...`
-  }
-
-  return `${ts} > Cloning repository...
-${ts} ✓ Repository cloned successfully
-${ts} > Installing dependencies...
-${ts} > npm install --production
-${ts} ✓ Dependencies installed (1.2s)
-${ts} > Building application...
-${ts} > ${fw} build
-${ts} ✓ Compiled successfully
-${ts} ✓ Linting and checking validity of types
-${ts} ✓ Collecting page data
-${ts} ✓ Generating static pages
-${ts} ✓ Finalizing page optimization
-${ts} > Deploying to server...
-${ts} ✓ Deployment successful!
-${ts} > Live at https://${deployment.project?.subdomain || 'myapp.apsamo.com'}`
+/** What to show when a deployment has no stored log — never an invented one. */
+function emptyLogMessage(status: string | undefined): string {
+  return status === 'building' || status === 'deploying' || status === 'queued'
+    ? 'Waiting for build output…'
+    : 'No build log was recorded for this deployment.'
 }
 
 function colorizeLogLine(line: string): React.ReactNode {
@@ -280,15 +236,24 @@ export function DeploymentsPanel() {
   }, [deployments, fetchDeployments])
 
   // ── WebSocket real-time log streaming with SSE fallback ────────────────
+  // The stream is (re)opened only when the selected deployment changes or
+  // stops being active. It used to depend on liveStatus too: every status
+  // event re-ran the effect, whose cleanup cleared the status and the start
+  // cleared the logs — so each building→deploying step wiped the live log.
+  const fetchDeploymentsRef = useRef(fetchDeployments)
   useEffect(() => {
-    if (!selectedId) return
+    fetchDeploymentsRef.current = fetchDeployments
+  }, [fetchDeployments])
+  const watchingLive =
+    !!selectedId && ['building', 'deploying', 'queued'].includes(detail?.status ?? '')
 
-    const isActive = detail?.status === 'building' || detail?.status === 'deploying' || detail?.status === 'queued' || liveStatus === 'building' || liveStatus === 'deploying' || liveStatus === 'queued'
-
-    if (!isActive) return
+  useEffect(() => {
+    if (!selectedId || !watchingLive) return
+    const fetchDeployments = () => fetchDeploymentsRef.current()
 
     // Clear previous live logs when connecting to a new deployment
     setLiveLogs([])
+    setLiveStatus(null)
     setIsLiveConnected(true)
 
     let cleanupFn: (() => void) | null = null
@@ -318,7 +283,7 @@ export function DeploymentsPanel() {
 
       joinDeploymentRoom(selectedId, handleLog, handleStatus)
       cleanupFn = () => {
-        leaveDeploymentRoom(selectedId)
+        leaveDeploymentRoom(selectedId, handleLog, handleStatus)
       }
     } catch {
       // WebSocket not available, use SSE fallback
@@ -362,9 +327,8 @@ export function DeploymentsPanel() {
     return () => {
       if (cleanupFn) cleanupFn()
       setIsLiveConnected(false)
-      setLiveStatus(null)
     }
-  }, [selectedId, detail?.status, liveStatus, fetchDeployments])
+  }, [selectedId, watchingLive])
 
   // Auto-scroll to bottom when new live logs arrive
   useEffect(() => {
@@ -505,7 +469,7 @@ export function DeploymentsPanel() {
 
     // For active deployments, use live logs if available; for completed ones, use static logs
     const useLiveLogs = isAnimating && liveLogs.length > 0
-    const displayLog = useLiveLogs ? liveLogs.join('\n') : (logs || generateSimulatedBuildLog(detail))
+    const displayLog = useLiveLogs ? liveLogs.join('\n') : (logs || emptyLogMessage(currentStatus))
 
     return (
       <div className="space-y-4">

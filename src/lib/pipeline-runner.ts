@@ -17,11 +17,94 @@ import { db } from '@/lib/db'
 import { withConnection, exec } from '@/lib/vps/ssh'
 import { getServerCredentials } from '@/lib/vps/provisioner'
 
+/**
+ * A stage as stored. Two shapes exist: the original `config.command`, and
+ * the editor's current one with `command`, `workingDir`, `env`, `timeout`
+ * (seconds) and `continueOnError` at the top level. The runner used to read
+ * only `config.command`, so every pipeline saved from the editor failed with
+ * "No command configured" — and a deploy-gated one blocked all deployments.
+ */
 export interface PipelineStageDef {
   name: string
   type: string
   config?: { command?: string } & Record<string, unknown>
+  command?: string
+  workingDir?: string
+  env?: Record<string, string>
+  timeout?: number
+  continueOnError?: boolean
   order: number
+}
+
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
+const MIN_TIMEOUT_S = 10
+const MAX_TIMEOUT_S = 60 * 60
+
+interface ResolvedStage {
+  command: string
+  /** Relative to the app root; null = the container's own WORKDIR. */
+  workingDir: string | null
+  env: Array<[string, string]>
+  timeoutMs: number
+  continueOnError: boolean
+  problem: string | null
+}
+
+/** Normalise either stored shape into what the runner executes. */
+export function resolveStage(stage: PipelineStageDef): ResolvedStage {
+  const command = String(stage.command ?? stage.config?.command ?? '').trim()
+
+  // '/' and '' are the editor's default and mean "wherever the app runs".
+  // Anything else is a path inside the app; '..' could escape it.
+  const rawDir = String(stage.workingDir ?? '').trim()
+  let workingDir: string | null = null
+  let problem: string | null = null
+  if (rawDir && rawDir !== '/' && rawDir !== '.') {
+    if (rawDir.split('/').includes('..')) problem = `Working directory "${rawDir}" may not contain "..".`
+    else workingDir = rawDir.replace(/^\/+/, '')
+  }
+
+  const env: Array<[string, string]> = []
+  for (const [k, v] of Object.entries(stage.env ?? {})) {
+    if (!ENV_NAME.test(k)) {
+      problem = problem ?? `"${k}" is not a valid environment variable name.`
+      continue
+    }
+    env.push([k, String(v ?? '')])
+  }
+
+  const seconds = Number(stage.timeout)
+  const timeoutMs = Number.isFinite(seconds) && seconds > 0
+    ? Math.min(Math.max(seconds, MIN_TIMEOUT_S), MAX_TIMEOUT_S) * 1000
+    : STAGE_TIMEOUT_MS
+
+  return {
+    command,
+    workingDir,
+    env,
+    timeoutMs,
+    continueOnError: stage.continueOnError === true,
+    problem,
+  }
+}
+
+/** The shell line for a stage, inside the container or in the deploy path. */
+export function buildStageCommand(
+  s: ResolvedStage,
+  target: { containerName: string | null; deployPath: string | null }
+): string {
+  if (target.containerName) {
+    // `docker exec -w` needs an absolute path; resolve relative ones against
+    // the container's WORKDIR via `cd` instead, so `npm test` still works.
+    const envFlags = s.env.map(([k, v]) => `-e ${shellQuote(`${k}=${v}`)}`).join(' ')
+    const inner = s.workingDir ? `cd ${shellQuote(s.workingDir)} && ${s.command}` : s.command
+    return `docker exec ${envFlags} ${shellQuote(target.containerName)} sh -c ${shellQuote(inner)} 2>&1`
+  }
+  const exports = s.env.map(([k, v]) => `export ${k}=${shellQuote(v)};`).join(' ')
+  const dir = s.workingDir
+    ? `${shellQuote(target.deployPath!)}/${shellQuote(s.workingDir)}`
+    : shellQuote(target.deployPath!)
+  return `cd ${dir} && ( ${exports} ${s.command} ) 2>&1`
 }
 
 export interface PipelineStageResult {
@@ -86,28 +169,30 @@ export async function executePipelineRun(
     await withConnection(creds, async (client) => {
       for (let i = 0; i < ordered.length; i++) {
         const stage = ordered[i]
-        const command = stage.config?.command?.trim()
+        const resolved = resolveStage(stage)
         const t0 = Date.now()
 
-        if (!command) {
+        if (!resolved.command || resolved.problem) {
           results[i] = {
             name: stage.name,
             type: stage.type,
             status: 'failed',
             duration: 0,
-            output: 'No command configured for this stage.',
+            output: resolved.problem || 'No command configured for this stage.',
           }
+          if (resolved.continueOnError) continue
           overall = 'failed'
           break
         }
 
         // Prefer running inside the project's container (its runtime + build
         // tools live there); fall back to the deploy path on the host.
-        const wrapped = project.containerName
-          ? `docker exec ${shellQuote(project.containerName)} sh -c ${shellQuote(command)} 2>&1`
-          : `cd ${shellQuote(project.deployPath!)} && ( ${command} ) 2>&1`
+        const wrapped = buildStageCommand(resolved, {
+          containerName: project.containerName,
+          deployPath: project.deployPath,
+        })
 
-        const r = await exec(client, wrapped, { timeoutMs: STAGE_TIMEOUT_MS })
+        const r = await exec(client, wrapped, { timeoutMs: resolved.timeoutMs })
         const duration = Math.round((Date.now() - t0) / 1000)
         const out = (r.stdout || r.stderr || '').slice(-MAX_STAGE_OUTPUT)
 
@@ -125,8 +210,13 @@ export async function executePipelineRun(
             type: stage.type,
             status: 'failed',
             duration,
-            output: out || `Command exited with code ${r.exitCode}`,
+            output:
+              (out || `Command exited with code ${r.exitCode}`) +
+              (resolved.continueOnError ? '\n(continuing: this stage may fail)' : ''),
           }
+          // "Continue on error" records the failure but lets later stages
+          // run, and does not fail the run on its own account.
+          if (resolved.continueOnError) continue
           overall = 'failed'
           break // fail-fast: remaining stages stay 'skipped'
         }
@@ -286,25 +376,36 @@ export async function runPreDeployChecks(
 
     for (let i = 0; i < ordered.length; i++) {
       const stage = ordered[i]
-      const command = stage.config?.command?.trim()
+      const resolved = resolveStage(stage)
       const t0 = Date.now()
-      if (!command) {
-        results[i] = { name: stage.name, type: stage.type, status: 'failed', duration: 0, output: 'No command configured for this stage.' }
+      if (!resolved.command || resolved.problem) {
+        const why = resolved.problem || 'No command configured for this stage.'
+        results[i] = { name: stage.name, type: stage.type, status: 'failed', duration: 0, output: why }
+        if (resolved.continueOnError) continue
         overall = 'failed'
-        out.failures.push(`${pipeline.name} → ${stage.name}: no command configured`)
+        out.failures.push(`${pipeline.name} → ${stage.name}: ${why}`)
         break
       }
 
+      // Same env / working-directory handling as a manual run, but against a
+      // throwaway container of the image about to be deployed.
+      const envFlags = resolved.env.map(([k, v]) => `-e ${shellQuote(`${k}=${v}`)}`).join(' ')
+      const inner = resolved.workingDir
+        ? `cd ${shellQuote(resolved.workingDir)} && ${resolved.command}`
+        : resolved.command
       const wrapped =
-        `cd ${shellQuote(deployPath)} && docker compose run --rm --no-deps ` +
-        `--entrypoint sh app -c ${shellQuote(command)} 2>&1`
-      const r = await exec(client, wrapped, { timeoutMs: STAGE_TIMEOUT_MS })
+        `cd ${shellQuote(deployPath)} && docker compose run --rm --no-deps ${envFlags} ` +
+        `--entrypoint sh app -c ${shellQuote(inner)} 2>&1`
+      const r = await exec(client, wrapped, { timeoutMs: resolved.timeoutMs })
       const duration = Math.round((Date.now() - t0) / 1000)
       const output = (r.stdout || r.stderr || '').slice(-MAX_STAGE_OUTPUT)
 
       if (r.exitCode === 0) {
         results[i] = { name: stage.name, type: stage.type, status: 'success', duration, output: output || '(no output)' }
         log(`  ✓ ${stage.name} (${duration}s)`)
+      } else if (resolved.continueOnError) {
+        results[i] = { name: stage.name, type: stage.type, status: 'failed', duration, output: (output || `Command exited with code ${r.exitCode}`) + '\n(continuing: this stage may fail)' }
+        log(`  ! ${stage.name} failed but may fail (${duration}s)`)
       } else {
         results[i] = { name: stage.name, type: stage.type, status: 'failed', duration, output: output || `Command exited with code ${r.exitCode}` }
         overall = 'failed'

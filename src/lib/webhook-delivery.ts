@@ -34,7 +34,9 @@ interface DeliverWebhookResult {
 export async function deliverWebhook(
   webhookId: string,
   event: string,
-  payload: unknown
+  payload: unknown,
+  /** A test send (the Test button) ignores the active flag and event filter. */
+  opts: { test?: boolean } = {}
 ): Promise<DeliverWebhookResult> {
   // 1. Fetch the webhook
   const webhook = await db.webhook.findUnique({
@@ -58,7 +60,7 @@ export async function deliverWebhook(
   }
 
   // 2. Skip if not active
-  if (!webhook.active) {
+  if (!webhook.active && !opts.test) {
     return {
       id: '',
       webhookId,
@@ -76,7 +78,7 @@ export async function deliverWebhook(
 
   // 3. Skip if event not in webhook's events list
   const webhookEvents: string[] = JSON.parse(webhook.events)
-  if (!webhookEvents.includes(event) && !webhookEvents.includes('*')) {
+  if (!opts.test && !webhookEvents.includes(event) && !webhookEvents.includes('*')) {
     return {
       id: '',
       webhookId,
