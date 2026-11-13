@@ -28,15 +28,30 @@ async function applySqlitePragmas(client: PrismaClient): Promise<void> {
   // block, silently skipped the other two — so busy_timeout stayed at 0 while
   // the log said only "could not apply SQLite pragmas". Each one is now
   // independent, so a failure costs one setting rather than the rest.
+  //
+  // Switching to WAL needs an exclusive lock, and it runs while the app's
+  // first queries are already in flight on other pooled connections (where
+  // this connection's busy_timeout does not apply), so it failed at once with
+  // 'database is locked' — and WAL was never enabled. WAL is stored in the
+  // database file, so it only has to succeed once: retry it briefly.
   for (const pragma of [
-    'journal_mode = WAL',
     'busy_timeout = 5000',
+    'journal_mode = WAL',
     'synchronous = NORMAL',
   ]) {
-    try {
-      await client.$queryRawUnsafe(`PRAGMA ${pragma}`)
-    } catch (err) {
-      console.error(`[db] could not apply PRAGMA ${pragma}:`, err)
+    const attempts = pragma.startsWith('journal_mode') ? 10 : 1
+    for (let i = 1; i <= attempts; i++) {
+      try {
+        await client.$queryRawUnsafe(`PRAGMA ${pragma}`)
+        break
+      } catch (err) {
+        const locked = /database is locked/i.test(String(err))
+        if (locked && i < attempts) {
+          await new Promise((r) => setTimeout(r, 100 * i))
+          continue
+        }
+        console.error(`[db] could not apply PRAGMA ${pragma}:`, err)
+      }
     }
   }
 }
