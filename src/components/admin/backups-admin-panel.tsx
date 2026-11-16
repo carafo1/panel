@@ -446,9 +446,8 @@ export function BackupsAdminPanel() {
   const download = async (name: string) => {
     setActing(name)
     try {
-      const token = localStorage.getItem('apsamo_token')
       const res = await fetch(`/api/admin/backups/archive/${encodeURIComponent(name)}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        credentials: 'same-origin',
       })
       if (!res.ok) {
         const e = await res.json().catch(() => ({ error: 'Download failed' }))

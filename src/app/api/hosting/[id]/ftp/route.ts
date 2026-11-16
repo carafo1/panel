@@ -3,7 +3,7 @@ import { authenticateRequest } from '@/lib/auth'
 import { requireProjectAccess } from '@/lib/project-access'
 import { enforceLimit } from '@/lib/plan-limits'
 import { logAudit } from '@/lib/audit'
-import { listFtpAccounts, createFtpAccount } from '@/lib/vps'
+import { listFtpAccounts, createFtpAccount, FtpError } from '@/lib/vps'
 
 /**
  * Project FTP Accounts Endpoint (collection)
@@ -94,8 +94,10 @@ export async function POST(
     // Return the row WITH plaintext password ONCE so the UI can show it.
     return NextResponse.json({ account }, { status: 201 })
   } catch (error) {
-    const msg = 'Internal server error'
+    if (error instanceof FtpError) {
+      return NextResponse.json({ error: error.message }, { status: error.status })
+    }
     console.error('Create FTP account error:', error)
-    return NextResponse.json({ error: msg }, { status: 500 })
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

@@ -1,46 +1,37 @@
 import { NextResponse } from 'next/server'
-import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
+import { verifyTokenFresh, extractTokenFromHeader, sessionIdOf, revokeSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
+import { clearSession } from '@/lib/session'
 
 /**
  * POST /api/auth/logout
  *
- * Stateless JWT logout. The client simply discards its token, but we use
- * this endpoint to record an audit-log entry so security teams can see
- * when a user explicitly signed out (vs. just let their token expire).
+ * Ends this device's session on the server (the token stops working
+ * everywhere, not just in this browser), deletes the session cookie, and
+ * records an audit entry. The proxy turns the session cookie into the
+ * Authorization header, so the caller is identified as on every other route.
  */
 export async function POST(request: Request) {
   try {
-    const authHeader = request.headers.get('Authorization')
-    const token = extractTokenFromHeader(authHeader)
+    const token = extractTokenFromHeader(request.headers.get('Authorization'))
+    const decoded = token ? await verifyTokenFresh(token) : null
 
-    let userId: string | undefined
-    if (token) {
-      const decoded = await verifyTokenFresh(token)
-      if (decoded) {
-        userId = decoded.userId
-      }
-    }
-
-    // Always log the logout attempt - even if the token is invalid/expired
-    // (the client-side store clears regardless). The userId may be undefined
-    // for already-expired tokens.
-    if (userId) {
+    if (decoded) {
+      const sid = sessionIdOf(token)
+      if (sid) await revokeSession(sid, decoded.userId, 'logout')
       await logAudit({
-        userId,
+        userId: decoded.userId,
         action: 'user.logout',
         resource: 'user',
-        resourceId: userId,
+        resourceId: decoded.userId,
         req: request,
       })
     }
 
-    return NextResponse.json({ message: 'Logged out successfully' })
+    return clearSession(NextResponse.json({ message: 'Logged out successfully' }))
   } catch (error) {
     console.error('Logout error:', error)
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    )
+    // Still end the browser session even if the server-side step failed.
+    return clearSession(NextResponse.json({ error: 'Internal server error' }, { status: 500 }))
   }
 }

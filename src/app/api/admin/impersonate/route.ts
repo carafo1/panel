@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { verifyTokenFresh, extractTokenFromHeader, generateImpersonationToken } from '@/lib/auth'
+import { verifyTokenFresh, extractTokenFromHeader, issueSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { db } from '@/lib/db'
 
@@ -80,12 +80,13 @@ export async function POST(request: Request) {
       )
     }
 
-    const impersonationToken = generateImpersonationToken({
-      userId: target.id,
-      email: target.email,
-      role: target.role,
-      impersonatedBy: decoded.userId,
-    })
+    // A real session (1 hour): it shows in the customer's session list as
+    // support access, and the customer — or a password change — can end it.
+    const impersonationToken = await issueSession(
+      { userId: target.id, email: target.email, role: target.role },
+      request,
+      { impersonatedBy: decoded.userId, ttlSeconds: 3600 }
+    )
 
     await logAudit({
       userId: decoded.userId,

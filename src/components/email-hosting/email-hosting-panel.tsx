@@ -276,9 +276,9 @@ interface AddonOrder {
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
+/** The httpOnly session cookie authenticates same-origin requests. */
 function authHeaders(): HeadersInit {
-  const t = typeof window !== 'undefined' ? localStorage.getItem('apsamo_token') : ''
-  return { Authorization: `Bearer ${t || ''}`, 'Content-Type': 'application/json' }
+  return { 'Content-Type': 'application/json' }
 }
 
 /** Carries the API's structured error body so callers can branch on `code`. */

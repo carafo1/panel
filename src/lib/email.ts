@@ -10,6 +10,7 @@
  */
 import nodemailer from 'nodemailer'
 import { FROM_NAME, FROM_EMAIL } from '@/lib/brand-config'
+import { isProduction } from '@/lib/demo-mode'
 
 interface SendEmailOptions {
   to: string
@@ -155,8 +156,18 @@ export async function sendEmail(
   // 2) SMTP (nodemailer) — kept for hosts that allow outbound SMTP.
   const t = getTransporter()
   if (!t) {
-    // Demo mode - log to console
-     
+    // SECURITY: never print message bodies in production. They carry password
+    // reset links, verification links and invitations — anything in the log
+    // could take over an account. And don't report a message as sent when it
+    // wasn't: callers (and customers) would believe it arrived.
+    if (isProduction()) {
+      console.error(
+        `[email] No email provider configured — "${opts.subject}" to ${opts.to} was NOT sent. ` +
+          'Set EMAIL_PROVIDER + EMAIL_API_KEY, or SMTP_HOST/PORT/USER/PASS.'
+      )
+      return { success: false }
+    }
+    // Development only: show the message so links can be followed locally.
     console.log(
       `\n========== [DEMO EMAIL] ==========\n` +
         `To: ${opts.to}\n` +

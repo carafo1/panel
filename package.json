@@ -1,5 +1,5 @@
 {
-  "name": "nextjs_tailwind_shadcn_ts",
+  "name": "apsamo-panel",
   "version": "0.2.0",
   "private": true,
   "bin": {
@@ -19,6 +19,7 @@
     "test:all": "bun test tests/",
     "test:security": "bash deploy/scripts/comprehensive-security-scan.sh",
     "db:push": "prisma db push",
+    "db:pg-schema": "bun run scripts/postgres-schema.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:reset": "prisma migrate reset"

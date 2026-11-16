@@ -63,7 +63,11 @@ import {
   CreditCard,
   Mail,
   History,
+  Monitor,
+  Smartphone,
+  LogOut,
 } from 'lucide-react'
+import { formatDistanceToNow } from 'date-fns'
 import AuditLogPanel from '@/components/settings/audit-log-panel'
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -112,7 +116,7 @@ function ProfileTab() {
       })
       // Update the auth store with new user data
       if (user) {
-        setAuth(data.user, localStorage.getItem('apsamo_token') || '')
+        setAuth(data.user)
       }
       toast.success('Profile updated successfully')
     } catch (err) {
@@ -700,6 +704,8 @@ function SecurityTab() {
   const [showCurrent, setShowCurrent] = useState(false)
   const [showNew, setShowNew] = useState(false)
   const [saving, setSaving] = useState(false)
+  // Bumped after a password change, which signs out every other device.
+  const [sessionsRefreshKey, setSessionsRefreshKey] = useState(0)
 
   const strength = getPasswordStrength(newPassword)
   const passwordsMatch = newPassword === confirmPassword
@@ -720,7 +726,8 @@ function SecurityTab() {
         method: 'PATCH',
         body: JSON.stringify({ currentPassword, newPassword }),
       })
-      toast.success('Password updated successfully')
+      toast.success('Password updated', { description: 'You have been signed out on all other devices.' })
+      setSessionsRefreshKey((k) => k + 1)
       setCurrentPassword('')
       setNewPassword('')
       setConfirmPassword('')
@@ -850,7 +857,209 @@ function SecurityTab() {
 
       {/* Two-Factor Authentication */}
       <TwoFactorSection />
+
+      {/* Signed-in devices */}
+      <ActiveSessionsCard refreshKey={sessionsRefreshKey} />
     </div>
+  )
+}
+
+// ── Active sessions ────────────────────────────────────────────────────────
+interface SessionRow {
+  id: string
+  createdAt: string
+  lastSeenAt: string
+  expiresAt: string
+  ipAddress: string | null
+  userAgent: string | null
+  supportAccess: boolean
+  current: boolean
+}
+
+/** "Chrome on Windows" from a user-agent string; good enough to recognise a device. */
+function describeDevice(ua: string | null): { label: string; mobile: boolean } {
+  if (!ua) return { label: 'Unknown device', mobile: false }
+  const browser = /Edg\//.test(ua)
+    ? 'Edge'
+    : /OPR\//.test(ua)
+      ? 'Opera'
+      : /Firefox\//.test(ua)
+        ? 'Firefox'
+        : /Chrome\//.test(ua)
+          ? 'Chrome'
+          : /Safari\//.test(ua)
+            ? 'Safari'
+            : /curl|bun|node|python|go-http/i.test(ua)
+              ? 'Script / API client'
+              : 'Browser'
+  const os = /Windows/.test(ua)
+    ? 'Windows'
+    : /iPhone|iPad/.test(ua)
+      ? 'iOS'
+      : /Android/.test(ua)
+        ? 'Android'
+        : /Mac OS X/.test(ua)
+          ? 'macOS'
+          : /Linux/.test(ua)
+            ? 'Linux'
+            : ''
+  return { label: os ? `${browser} on ${os}` : browser, mobile: /Mobi|iPhone|Android/.test(ua) }
+}
+
+function ActiveSessionsCard({ refreshKey }: { refreshKey: number }) {
+  const { logout } = useAuthStore()
+  const [sessions, setSessions] = useState<SessionRow[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [revokingAll, setRevokingAll] = useState(false)
+
+  const load = useCallback(async () => {
+    try {
+      const data = await apiFetch<{ sessions: SessionRow[] }>('/auth/sessions')
+      setSessions(data.sessions)
+      setError(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not load sessions')
+    }
+  }, [])
+
+  useEffect(() => {
+    void load()
+  }, [load, refreshKey])
+
+  const endSession = async (s: SessionRow) => {
+    setBusyId(s.id)
+    try {
+      await apiFetch(`/auth/sessions/${s.id}`, { method: 'DELETE' })
+      if (s.current) {
+        toast.success('Signed out')
+        await logout()
+        return
+      }
+      toast.success('Signed out on that device')
+      await load()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not sign out that device')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  const endOthers = async () => {
+    setRevokingAll(true)
+    try {
+      await apiFetch('/auth/sessions', { method: 'DELETE' })
+      toast.success('Signed out on all other devices')
+      await load()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not sign out other devices')
+    } finally {
+      setRevokingAll(false)
+    }
+  }
+
+  const others = sessions?.filter((s) => !s.current).length ?? 0
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <Monitor className="size-5 text-indigo-500" />
+              Active Sessions
+            </CardTitle>
+            <CardDescription className="mt-1.5">
+              Devices signed in to your account. Signing out a device ends its access immediately.
+            </CardDescription>
+          </div>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="outline" size="sm" disabled={revokingAll || others === 0} className="shrink-0">
+                {revokingAll ? <Loader2 className="size-4 animate-spin mr-2" /> : <LogOut className="size-4 mr-2" />}
+                Sign out all other devices
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Sign out all other devices?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Every other browser, phone or script signed in to your account will be signed out
+                  right away and will need your password to get back in. This device stays signed in.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={endOthers}>Sign out others</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
+      </CardHeader>
+      <CardContent aria-live="polite">
+        {error ? (
+          <Alert variant="destructive">
+            <AlertTriangle className="size-4" />
+            <AlertDescription className="flex items-center justify-between gap-3">
+              {error}
+              <Button variant="outline" size="sm" onClick={() => void load()}>
+                Retry
+              </Button>
+            </AlertDescription>
+          </Alert>
+        ) : sessions === null ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
+            <Loader2 className="size-4 animate-spin" /> Loading sessions…
+          </div>
+        ) : sessions.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-2">
+            No other sessions. Sessions started before this list existed are not shown, but
+            &ldquo;Sign out all other devices&rdquo; still ends them.
+          </p>
+        ) : (
+          <ul className="divide-y rounded-md border">
+            {sessions.map((s) => {
+              const device = describeDevice(s.userAgent)
+              const Icon = device.mobile ? Smartphone : Monitor
+              return (
+                <li key={s.id} className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-start gap-3 min-w-0">
+                    <Icon className="size-5 mt-0.5 shrink-0 text-muted-foreground" aria-hidden />
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2 text-sm font-medium">
+                        {device.label}
+                        {s.current && (
+                          <Badge variant="secondary" className="bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300">
+                            This device
+                          </Badge>
+                        )}
+                        {s.supportAccess && <Badge variant="outline">Support access</Badge>}
+                      </div>
+                      <p className="text-xs text-muted-foreground truncate">
+                        {s.ipAddress || 'Unknown IP'} · Signed in{' '}
+                        {formatDistanceToNow(new Date(s.createdAt), { addSuffix: true })} · Last active{' '}
+                        {formatDistanceToNow(new Date(s.lastSeenAt), { addSuffix: true })}
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    variant={s.current ? 'outline' : 'ghost'}
+                    size="sm"
+                    onClick={() => void endSession(s)}
+                    disabled={busyId === s.id}
+                    aria-label={s.current ? 'Sign out this device' : `Sign out ${device.label}`}
+                    className="self-start sm:self-auto"
+                  >
+                    {busyId === s.id ? <Loader2 className="size-4 animate-spin mr-2" /> : <LogOut className="size-4 mr-2" />}
+                    Sign out
+                  </Button>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
   )
 }
 

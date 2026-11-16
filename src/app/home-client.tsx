@@ -412,6 +412,27 @@ export default function HomeClient({
     setShowAuthModal(true)
   }
 
+  // Arriving from a password-reset email (?reset_token=…): open the reset form
+  // with the token filled in. The token is removed from the address bar at
+  // once so it doesn't linger in history or get shared with the URL.
+  const [linkResetToken, setLinkResetToken] = useState<string | null>(null)
+  // Read by the panel-host effect below, which would otherwise switch the
+  // dialog straight back to "Sign in".
+  const openedFromResetLink = useRef(false)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    const token = params.get('reset_token')
+    if (!token) return
+    openedFromResetLink.current = true
+    params.delete('reset_token')
+    const qs = params.toString()
+    history.replaceState(null, '', window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash)
+    setLinkResetToken(token)
+    setAuthMode('reset-password')
+    setShowAuthModal(true)
+  }, [setAuthMode])
+
   // Arriving on the panel host with #login / #register (redirected from the
   // brand site) auto-opens the auth modal, then cleans the hash.
   useEffect(() => {
@@ -436,7 +457,7 @@ export default function HomeClient({
     }
     if (panelHost && window.location.hostname.toLowerCase() === panelHost) {
       setIsPanelHostView(true)
-      setAuthMode('login')
+      if (!openedFromResetLink.current) setAuthMode('login')
     }
   }, [setAuthMode])
 
@@ -533,6 +554,7 @@ export default function HomeClient({
       {(showAuthModal || isPanelHostView) && (
         <AuthModal
           mode={authMode}
+          initialResetToken={linkResetToken ?? undefined}
           onModeChange={(mode) => {
             setAuthMode(mode)
           }}

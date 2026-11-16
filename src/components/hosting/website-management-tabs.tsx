@@ -137,12 +137,9 @@ import {
 
 // ─── Shared helpers ──────────────────────────────────────────────────
 
+/** The httpOnly session cookie authenticates same-origin requests. */
 function getAuthHeaders(): Record<string, string> {
-  const token = localStorage.getItem('apsamo_token')
-  return {
-    Authorization: `Bearer ${token}`,
-    'Content-Type': 'application/json',
-  }
+  return { 'Content-Type': 'application/json' }
 }
 
 function timeAgo(dateStr: string): string {
@@ -1914,10 +1911,8 @@ export function FilesTab({ projectId }: { projectId: string }) {
       const formData = new FormData()
       formData.append('file', file)
       formData.append('path', targetPath)
-      const token = localStorage.getItem('apsamo_token')
       const xhr = new XMLHttpRequest()
-      xhr.open('POST', `/api/hosting/${projectId}/files`)
-      xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+      xhr.open('POST', `/api/hosting/${projectId}/files`) // session cookie authenticates it
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable) {
           setUploadProgress(Math.round((e.loaded / e.total) * 100))
@@ -2041,10 +2036,9 @@ export function FilesTab({ projectId }: { projectId: string }) {
       formData.append('file', file)
       formData.append('path', currentPath)
       formData.append('action', 'import')
-      const token = localStorage.getItem('apsamo_token')
       const res = await fetch(`/api/hosting/${projectId}/files`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: 'same-origin',
         body: formData,
       })
       const data = await res.json().catch(() => null)
@@ -2879,10 +2873,9 @@ export function TerminalTab({ projectId }: { projectId: string }) {
     return () => {
       // Best-effort cleanup on unmount
       if (sessionId) {
-        const token = localStorage.getItem('apsamo_token')
         fetch(`/api/hosting/${projectId}/terminal?sessionId=${sessionId}`, {
           method: 'DELETE',
-          headers: { Authorization: `Bearer ${token}` },
+          credentials: 'same-origin',
         }).catch(() => {})
       }
     }

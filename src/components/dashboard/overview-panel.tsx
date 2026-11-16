@@ -102,10 +102,9 @@ export default function OverviewPanel() {
 
   useEffect(() => {
     async function loadData() {
-      const token = localStorage.getItem('apsamo_token')
-      if (!token) return
       try {
-        const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
+        // The httpOnly session cookie authenticates these requests.
+        const headers = { 'Content-Type': 'application/json' }
         const [projRes, domRes, depRes, logRes, subRes, usageRes, monRes] = await Promise.all([
           fetch('/api/hosting', { headers }).catch(() => null),
           fetch('/api/domains', { headers }).catch(() => null),

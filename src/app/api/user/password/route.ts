@@ -1,6 +1,14 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { verifyTokenFresh, extractTokenFromHeader, hashPassword, verifyPassword } from '@/lib/auth'
+import {
+  verifyTokenFresh,
+  extractTokenFromHeader,
+  hashPassword,
+  verifyPassword,
+  revokeAllSessions,
+  issueSession,
+} from '@/lib/auth'
+import { attachSession } from '@/lib/session'
 
 export async function PATCH(request: Request) {
   try {
@@ -73,7 +81,20 @@ export async function PATCH(request: Request) {
       data: { password: hashedPassword },
     })
 
-    return NextResponse.json({ message: 'Password updated successfully' })
+    // A password change is often a response to suspected compromise: end
+    // every other login (any device, any copied token) and keep only this one,
+    // on a fresh session.
+    await revokeAllSessions(decoded.userId, 'password_change')
+    const fresh = await issueSession(
+      { userId: decoded.userId, email: decoded.email, role: decoded.role },
+      request
+    )
+
+    return attachSession(
+      NextResponse.json({ message: 'Password updated. You have been signed out on all other devices.' }),
+      fresh,
+      request
+    )
   } catch (error) {
     console.error('Change password error:', error)
     return NextResponse.json(

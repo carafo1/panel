@@ -246,13 +246,9 @@ function getMethodIcon(iconName: string): React.ComponentType<{ className?: stri
   return ICON_REGISTRY[iconName] || FileCode
 }
 
-/** Auth headers — same pattern as the hosting panel. */
+/** The httpOnly session cookie authenticates same-origin requests. */
 function getAuthHeaders(): Record<string, string> {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('apsamo_token') : null
-  return {
-    Authorization: `Bearer ${token || ''}`,
-    'Content-Type': 'application/json',
-  }
+  return { 'Content-Type': 'application/json' }
 }
 
 function slugify(text: string): string {
@@ -984,10 +980,7 @@ export default function CreateWebsiteWizard({
       const xhr = new XMLHttpRequest()
       const result = await new Promise<{ uploadId: string; filename: string; sizeBytes: number }>(
         (resolve, reject) => {
-          xhr.open('POST', '/api/hosting/upload')
-          const token =
-            typeof window !== 'undefined' ? localStorage.getItem('apsamo_token') : null
-          if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+          xhr.open('POST', '/api/hosting/upload') // session cookie authenticates it
           xhr.upload.onprogress = (e) => {
             if (e.lengthComputable) {
               setUploadProgress((e.loaded / e.total) * 100)

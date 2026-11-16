@@ -50,6 +50,7 @@ import {
   LayoutGrid,
   Ban,
   ShieldAlert,
+  LogOut,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/store/auth-store'
@@ -116,12 +117,12 @@ interface Job {
 
 // ── API helper ─────────────────────────────────────────────────────────
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
-  const token = localStorage.getItem('apsamo_token')
+  // Authenticated by the httpOnly session cookie (see src/lib/session.ts).
   const res = await fetch(`/api${path}`, {
     ...options,
+    credentials: 'same-origin',
     headers: {
       'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options?.headers,
     },
   })
@@ -327,6 +328,21 @@ export function AdminPanel() {
    * sign-in, so a suspension/closure asks for a reason first — the customer
    * is emailed and deserves to know why.
    */
+  // Ends every login of that user (e.g. a compromised account). The account
+  // stays active; they can sign in again with their password.
+  const handleSignOutEverywhere = async (userId: string, email: string) => {
+    if (!window.confirm(`Sign ${email} out on every device?\n\nThey will need their password to sign in again.`)) return
+    setStatusLoading(userId)
+    try {
+      const res = await apiFetch<{ message: string }>(`/admin/users/${userId}/sessions`, { method: 'POST' })
+      toast.success(res.message)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not sign the user out')
+    } finally {
+      setStatusLoading(null)
+    }
+  }
+
   const handleChangeStatus = async (userId: string, newStatus: string) => {
     if (userId === currentUserId) {
       toast.error('You cannot change your own account status')
@@ -631,6 +647,13 @@ export function AdminPanel() {
                                       )}
                                     </DropdownMenuItem>
                                   ))}
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem
+                                    onClick={() => handleSignOutEverywhere(u.id, u.email)}
+                                  >
+                                    <LogOut className="size-3.5" />
+                                    Sign out all devices
+                                  </DropdownMenuItem>
                                 </DropdownMenuContent>
                               </DropdownMenu>
                             ) : (

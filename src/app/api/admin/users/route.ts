@@ -4,6 +4,7 @@ import {
   verifyTokenFresh,
   extractTokenFromHeader,
   invalidateUserAuthCache,
+  revokeAllSessions,
 } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { notifyAccountStatusChanged } from '@/lib/billing-notifications'
@@ -204,6 +205,12 @@ export async function PATCH(request: Request) {
     // This is what makes a suspension take effect on the next request rather
     // than whenever the token happens to expire.
     invalidateUserAuthCache(target.id)
+
+    // Suspension already blocks every request, but if the account is later
+    // reactivated its old logins must not come back to life with it.
+    if (status !== 'active') {
+      await revokeAllSessions(target.id, 'admin')
+    }
 
     // Cascade to the customer's actual services.
     //

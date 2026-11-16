@@ -12,26 +12,63 @@ export interface User {
 
 /** Result returned by `login`. Either a fully-authed user or a 2FA challenge. */
 export type LoginResult =
-  | { requiresTwoFactor: false; user: User; token: string }
+  | { requiresTwoFactor: false; user: User }
   | { requiresTwoFactor: true; tempToken: string }
 
+/**
+ * SESSIONS: the login token lives in an httpOnly cookie set by the server
+ * (src/lib/session.ts). Page scripts never see it, so an XSS bug cannot steal
+ * it. Requests simply go to /api on the same origin and the browser attaches
+ * the cookie. Nothing here stores or sends a token.
+ */
 interface AuthState {
   user: User | null
-  token: string | null
   isLoading: boolean
   isAuthenticated: boolean
   login: (email: string, password: string) => Promise<LoginResult>
   completeTwoFactorLogin: (tempToken: string, token: string) => Promise<void>
-  loginWithBackupCode: (email: string, backupCode: string) => Promise<void>
+  loginWithBackupCode: (tempToken: string, backupCode: string) => Promise<void>
   register: (name: string, email: string, password: string) => Promise<{ message: string }>
   logout: () => Promise<void>
   loadUser: () => Promise<void>
-  setAuth: (user: User, token: string) => void
+  setAuth: (user: User) => void
   verifyEmail: (token: string) => Promise<void>
   markEmailVerified: () => void
 }
 
 const API_BASE = '/api'
+
+/** Where tokens were kept before sessions moved into a cookie. */
+const LEGACY_TOKEN_KEYS = ['apsamo_token', 'deployhub_token']
+
+/**
+ * One-time upgrade: a browser that signed in before the change still has its
+ * token in localStorage. Trade it for the session cookie, then delete it.
+ */
+async function upgradeLegacySession(): Promise<void> {
+  if (typeof window === 'undefined') return
+  let legacy: string | null = null
+  try {
+    for (const key of LEGACY_TOKEN_KEYS) legacy = legacy || localStorage.getItem(key)
+    for (const key of LEGACY_TOKEN_KEYS) localStorage.removeItem(key)
+  } catch {
+    return // storage unavailable
+  }
+  if (!legacy) return
+  await fetch(`${API_BASE}/auth/session`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { Authorization: `Bearer ${legacy}` },
+  }).catch(() => {})
+}
+
+function forgetLegacyTokens(): void {
+  try {
+    for (const key of LEGACY_TOKEN_KEYS) localStorage.removeItem(key)
+  } catch {
+    /* storage unavailable */
+  }
+}
 
 /**
  * Authenticated fetch against the API.
@@ -47,12 +84,11 @@ export async function apiFetch<T = any>(
   path: string,
   options?: RequestInit
 ): Promise<T> {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('apsamo_token') : null
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
+    credentials: 'same-origin',
     headers: {
       'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options?.headers,
     },
   })
@@ -65,13 +101,11 @@ export async function apiFetch<T = any>(
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
-  token: null,
   isLoading: true,
   isAuthenticated: false,
 
-  setAuth: (user, token) => {
-    localStorage.setItem('apsamo_token', token)
-    set({ user, token, isAuthenticated: true, isLoading: false })
+  setAuth: (user) => {
+    set({ user, isAuthenticated: true, isLoading: false })
   },
 
   login: async (email, password) => {
@@ -79,7 +113,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       requiresTwoFactor?: boolean
       tempToken?: string
       user: User
-      token: string
     }>('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
@@ -91,24 +124,27 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (data.requiresTwoFactor) {
       return { requiresTwoFactor: true, tempToken: data.tempToken! }
     }
-    get().setAuth(data.user, data.token)
-    return { requiresTwoFactor: false, user: data.user, token: data.token }
+    // The session cookie came back with this response.
+    get().setAuth(data.user)
+    return { requiresTwoFactor: false, user: data.user }
   },
 
   completeTwoFactorLogin: async (tempToken, token) => {
-    const data = await apiFetch<{ user: User; token: string }>('/auth/2fa/login-verify', {
+    const data = await apiFetch<{ user: User }>('/auth/2fa/login-verify', {
       method: 'POST',
       body: JSON.stringify({ tempToken, token }),
     })
-    get().setAuth(data.user, data.token)
+    get().setAuth(data.user)
   },
 
-  loginWithBackupCode: async (email, backupCode) => {
-    const data = await apiFetch<{ user: User; token: string }>('/auth/2fa/verify-backup', {
+  // A backup code replaces the 6-digit code, not the password: it needs the
+  // tempToken from the password step, exactly like completeTwoFactorLogin.
+  loginWithBackupCode: async (tempToken, backupCode) => {
+    const data = await apiFetch<{ user: User }>('/auth/2fa/verify-backup', {
       method: 'POST',
-      body: JSON.stringify({ email, backupCode }),
+      body: JSON.stringify({ tempToken, backupCode }),
     })
-    get().setAuth(data.user, data.token)
+    get().setAuth(data.user)
   },
 
   register: async (name, email, password) => {
@@ -130,22 +166,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     } catch {
       // ignore - logout must succeed client-side even if API call fails
     }
-    localStorage.removeItem('apsamo_token')
-    set({ user: null, token: null, isAuthenticated: false, isLoading: false })
+    // The server cleared the cookie; also drop any pre-cookie token.
+    forgetLegacyTokens()
+    set({ user: null, isAuthenticated: false, isLoading: false })
   },
 
   loadUser: async () => {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('apsamo_token') : null
-    if (!token) {
-      set({ isLoading: false })
-      return
-    }
+    await upgradeLegacySession()
     try {
       const data = await apiFetch<{ user: User }>('/auth/me')
-      set({ user: data.user, token, isAuthenticated: true, isLoading: false })
+      set({ user: data.user, isAuthenticated: true, isLoading: false })
     } catch {
-      localStorage.removeItem('apsamo_token')
-      set({ user: null, token: null, isAuthenticated: false, isLoading: false })
+      set({ user: null, isAuthenticated: false, isLoading: false })
     }
   },
 

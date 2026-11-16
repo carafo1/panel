@@ -12,9 +12,10 @@ import { requireProjectAccess } from '@/lib/project-access'
  * duration, whether or not anything was built. It now only reports what the
  * deployer has written.
  *
- * Auth: Authorization header, or `?token=` — the browser's EventSource cannot
- * set headers, and the panel's SSE fallback sends the token that way, so it
- * was always rejected with 401.
+ * Auth: Authorization header. The browser's EventSource cannot set headers,
+ * but it sends the httpOnly session cookie, which the proxy turns into that
+ * header. (A `?token=` query parameter used to be accepted; a login token in
+ * a URL ends up in proxy and server access logs, so it no longer is.)
  */
 const TERMINAL = new Set(['live', 'failed', 'rolled_back', 'cancelled'])
 const POLL_MS = 2000
@@ -31,9 +32,7 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const token =
-    extractTokenFromHeader(request.headers.get('Authorization')) ||
-    new URL(request.url).searchParams.get('token')
+  const token = extractTokenFromHeader(request.headers.get('Authorization'))
   if (!token) return json(401, { error: 'Authorization token required' })
 
   const decoded = await verifyTokenFresh(token)

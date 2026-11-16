@@ -17,7 +17,8 @@
  *    cookies) → silently ignore; the app continues with empty storage.
  */
 const KEY_MIGRATIONS: Array<{ from: string; to: string; storage: 'local' | 'session' }> = [
-  { from: 'deployhub_token', to: 'apsamo_token', storage: 'local' },
+  // (Login tokens are no longer kept in storage at all — see
+  // upgradeLegacySession in src/store/auth-store.ts.)
   { from: 'deployhub_onboarding_complete', to: 'apsamo_onboarding_complete', storage: 'local' },
   { from: 'deployhub_notification_prefs', to: 'apsamo_notification_prefs', storage: 'local' },
   { from: 'deployhub_pending_checkout', to: 'apsamo_pending_checkout', storage: 'session' },

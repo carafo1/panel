@@ -1,5 +1,7 @@
 import { NextResponse, NextRequest } from 'next/server'
 import { db } from '@/lib/db'
+import { readSessionCookie, hasUsableBearer, cookieAuthAllowed } from '@/lib/session'
+import { buildCsp, generateNonce } from '@/lib/csp'
 
 /**
  * #8 API Rate Limiting Proxy + Project Redirect/IP-Block Enforcement
@@ -476,11 +478,34 @@ export async function proxy(request: NextRequest) {
     console.error('[proxy] Layer 1 enforcement error:', err)
   }
 
-  // ── Layer 2: Rate Limiting + CORS (existing logic, /api/* only) ────────
-  // Only apply rate limiting + CORS logic to /api/* routes.
-  // All non-API routes pass through untouched.
+  // ── Pages: Content-Security-Policy with a per-request nonce ────────────
+  // Next.js reads the nonce from the request's CSP header and stamps it on
+  // its own scripts; the same policy goes out on the response. See lib/csp.ts.
   if (!pathname.startsWith('/api/')) {
-    return NextResponse.next()
+    const nonce = generateNonce()
+    const csp = buildCsp(nonce, request.headers.get('host'))
+    const pageHeaders = new Headers(request.headers)
+    pageHeaders.set('x-nonce', nonce)
+    pageHeaders.set('Content-Security-Policy', csp)
+    const page = NextResponse.next({ request: { headers: pageHeaders } })
+    page.headers.set('Content-Security-Policy', csp)
+    return page
+  }
+
+  // ── Session cookie → Authorization header ──────────────────────────────
+  // Browser sessions live in an httpOnly cookie (lib/session.ts); every route
+  // reads `Authorization: Bearer`. An explicit bearer token or API key always
+  // wins. The cookie is used only for requests from the panel's own pages
+  // (or a plain link navigation), so another site — including a customer site
+  // on a subdomain — cannot act with a visitor's session.
+  const apiHeaders = new Headers(request.headers)
+  if (!hasUsableBearer(request.headers.get('authorization')) && !request.headers.get('x-api-key')) {
+    // Drop placeholders like "Bearer null" so they cannot shadow the cookie.
+    apiHeaders.delete('authorization')
+    const session = readSessionCookie(request.headers.get('cookie'))
+    if (session && cookieAuthAllowed(request)) {
+      apiHeaders.set('authorization', `Bearer ${session}`)
+    }
   }
 
   // CORS preflight: respond with 204 No Content (no rate limiting needed)
@@ -515,7 +540,7 @@ export async function proxy(request: NextRequest) {
 
   // Pass through to the route handler.
   // Routes do their own JWT / API-key auth — middleware does not verify tokens.
-  const response = NextResponse.next()
+  const response = NextResponse.next({ request: { headers: apiHeaders } })
   response.headers.set(
     'X-RateLimit-Limit',
     String(getRouteLimit(pathname).limit)

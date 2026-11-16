@@ -39,11 +39,12 @@
   "exclude": [
     "node_modules",
     // Not part of the shipped app. "scripts" holds one-off migrations that
-    // reference columns since dropped from the schema; "examples" and "tests"
-    // are never built by Next. Excluding them lets the production build
-    // typecheck the real app instead of ignoring every error everywhere.
+    // reference columns since dropped from the schema; "tests" are never built
+    // by Next; "_archive" holds local-only dev notes and old probes (ignored by
+    // git). Excluding them lets the production build typecheck the real app
+    // instead of ignoring every error everywhere.
     "scripts",
-    "examples",
-    "tests"
+    "tests",
+    "_archive"
   ]
 }

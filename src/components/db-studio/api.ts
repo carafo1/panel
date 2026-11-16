@@ -1,9 +1,9 @@
 /**
  * Database Studio — client API helper
  * ===================================
- * Thin typed wrapper over the Studio endpoints. Adds the tenant's bearer token
- * (same `apsamo_token` localStorage key the rest of the panel uses) and
- * normalises error responses into thrown Errors the UI can display.
+ * Thin typed wrapper over the Studio endpoints. Requests are authenticated by
+ * the panel's httpOnly session cookie (src/lib/session.ts), and error
+ * responses are normalised into thrown Errors the UI can display.
  */
 'use client'
 
@@ -38,16 +38,11 @@ export interface TableStructure {
   foreignKeys: ForeignKeyInfo[]
 }
 
-function token(): string {
-  if (typeof window === 'undefined') return ''
-  return localStorage.getItem('apsamo_token') || ''
-}
-
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...init,
+    credentials: 'same-origin',
     headers: {
-      Authorization: `Bearer ${token()}`,
       ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
       ...(init?.headers || {}),
     },
@@ -164,7 +159,7 @@ export async function exportDatabase(
   mode: 'full' | 'structure' | 'data'
 ): Promise<void> {
   const res = await fetch(`${studioBase(projectId, dbId)}/export?mode=${mode}`, {
-    headers: { Authorization: `Bearer ${token()}` },
+    credentials: 'same-origin',
     cache: 'no-store',
   })
   if (!res.ok) {
@@ -198,7 +193,7 @@ export async function importDatabase(
   form.append('file', file)
   const res = await fetch(`${studioBase(projectId, dbId)}/import`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token()}` },
+    credentials: 'same-origin',
     body: form,
   })
   const data = await res.json().catch(() => ({}))

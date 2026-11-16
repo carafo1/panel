@@ -86,10 +86,9 @@ interface Counts {
   byStatus: Record<string, number>
 }
 
+/** The httpOnly session cookie authenticates same-origin requests. */
 function authHeaders(): HeadersInit {
-  const token =
-    typeof window !== 'undefined' ? localStorage.getItem('apsamo_token') : null
-  return token ? { Authorization: `Bearer ${token}` } : {}
+  return {}
 }
 
 function relativeTime(iso: string): string {

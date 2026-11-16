@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { authenticateRequest } from '@/lib/auth'
+import { authenticateRequest, extractTokenFromHeader, verifyRealtimeTokenFresh } from '@/lib/auth'
 import { getProjectAccess, type ProjectPermission } from '@/lib/project-access'
 
 /**
@@ -23,7 +23,11 @@ import { getProjectAccess, type ProjectPermission } from '@/lib/project-access'
 const ROOM = /^(user|project|deployment|migration):([A-Za-z0-9_-]{1,64})$/
 
 export async function POST(request: Request) {
-  const auth = await authenticateRequest(request)
+  // Browsers send the realtime token from /api/auth/realtime-token (their
+  // session is an httpOnly cookie they cannot read). A session token or API
+  // key is still accepted for non-browser clients.
+  const bearer = extractTokenFromHeader(request.headers.get('Authorization'))
+  const auth = (bearer && (await verifyRealtimeTokenFresh(bearer))) || (await authenticateRequest(request))
   if (!auth) {
     return NextResponse.json({ ok: false, error: 'Invalid or expired token' }, { status: 401 })
   }

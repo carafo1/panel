@@ -5,7 +5,11 @@
  * Manages per-project FTP/SFTP accounts. Each account is stored in the
  * FtpAccount Prisma table (with AES-256-GCM encrypted password) and, when a
  * real VPS is configured, is created as a system user inside the project's
- * container via `docker exec ... adduser + chpasswd`.
+ * container via `docker exec`. The user-management commands differ between
+ * base images (Debian/Ubuntu ship `useradd`/`userdel`; Alpine/BusyBox ship
+ * `adduser -D`/`deluser`), so the scripts below detect which exist. A failure
+ * inside the container is reported to the caller — the panel never shows an
+ * account as created (or deleted) when the server did not actually do it.
  *
  * Operations:
  *   - listFtpAccounts(projectId)            — list (password masked)
@@ -98,6 +102,87 @@ function shellQuoteLocal(s: string): string {
   return "'" + s.replace(/'/g, "'\\''") + "'"
 }
 
+/** An FTP failure whose message is safe to show the customer. */
+export class FtpError extends Error {
+  constructor(
+    message: string,
+    readonly status: 400 | 404 | 409 | 502 = 400
+  ) {
+    super(message)
+    this.name = 'FtpError'
+  }
+}
+
+// ─── Container scripts (portable across Debian/Ubuntu/RHEL and Alpine) ──
+
+/**
+ * Create the system user if it does not exist, then set its password.
+ * Exit codes: 0 ok, 3 no user-management tool, 4 no chpasswd, other = tool error.
+ */
+export function buildFtpCreateUserScript(username: string, password: string): string {
+  const u = shellQuoteLocal(username)
+  return [
+    'set -e',
+    `if ! id ${u} >/dev/null 2>&1; then`,
+    '  if command -v useradd >/dev/null 2>&1; then',
+    `    useradd -M -s /bin/false ${u}`, // Debian / Ubuntu / RHEL (shadow-utils)
+    '  elif command -v adduser >/dev/null 2>&1; then',
+    `    adduser -D -H -s /bin/false ${u}`, // Alpine / BusyBox
+    '  else',
+    "    echo 'neither useradd nor adduser is available in the container' >&2; exit 3",
+    '  fi',
+    'fi',
+    buildFtpSetPasswordScript(username, password),
+  ].join('\n')
+}
+
+/** Set an existing system user's password. */
+export function buildFtpSetPasswordScript(username: string, password: string): string {
+  return [
+    "command -v chpasswd >/dev/null 2>&1 || { echo 'chpasswd is not available in the container' >&2; exit 4; }",
+    `printf '%s\\n' ${shellQuoteLocal(`${username}:${password}`)} | chpasswd`,
+  ].join('\n')
+}
+
+/** Remove the system user; succeeds if it is already gone. */
+export function buildFtpDeleteUserScript(username: string): string {
+  const u = shellQuoteLocal(username)
+  return [
+    `id ${u} >/dev/null 2>&1 || exit 0`,
+    `if command -v userdel >/dev/null 2>&1; then userdel ${u}`,
+    `elif command -v deluser >/dev/null 2>&1; then deluser ${u}`,
+    "else echo 'neither userdel nor deluser is available in the container' >&2; exit 3; fi",
+  ].join('\n')
+}
+
+/**
+ * Run a script inside the project's container. Throws FtpError on any
+ * failure, with the password scrubbed from whatever the container printed.
+ */
+async function runInContainer(
+  serverId: string,
+  containerName: string,
+  script: string,
+  what: string,
+  secret?: string
+): Promise<void> {
+  const cmd = `docker exec ${shellQuoteLocal(containerName)} sh -c ${shellQuoteLocal(script)}`
+  let result: { exitCode: number | null; stderr: string; stdout: string }
+  try {
+    const creds = await getServerCredentials(serverId)
+    result = await withConnection(creds, (client) => exec(client, cmd, { timeoutMs: 15000 }))
+  } catch (err) {
+    console.error(`[vps-ftp] ${what}: could not reach the server:`, (err as Error).message)
+    throw new FtpError(`Could not ${what}: the server is unreachable. Please try again.`, 502)
+  }
+  if (result.exitCode === 0) return
+
+  let detail = (result.stderr || result.stdout || '').trim().split('\n').pop() || `exit code ${result.exitCode}`
+  if (secret) detail = detail.split(secret).join('***')
+  console.error(`[vps-ftp] ${what} failed in ${containerName}: ${detail}`)
+  throw new FtpError(`Could not ${what} on the server: ${detail.slice(0, 200)}`, 502)
+}
+
 function toRow(
   r: {
     id: string
@@ -169,15 +254,15 @@ export async function createFtpAccount(
   opts: CreateFtpAccountInput
 ): Promise<FtpAccountRow> {
   const usernameInput = (opts.username || '').trim()
-  if (!usernameInput) throw new Error('Username is required')
+  if (!usernameInput) throw new FtpError('Username is required')
   if (!/^[a-zA-Z][a-zA-Z0-9_\-]{2,31}$/.test(usernameInput)) {
-    throw new Error(
+    throw new FtpError(
       'Username must start with a letter, be 3-32 chars, and only contain letters, digits, underscore or hyphen'
     )
   }
   const password = (opts.password || '').trim()
-  if (!password) throw new Error('Password is required')
-  if (password.length < 6) throw new Error('Password must be at least 6 characters')
+  if (!password) throw new FtpError('Password is required')
+  if (password.length < 6) throw new FtpError('Password must be at least 6 characters')
   const directory = (opts.directory || '/').trim() || '/'
   const readOnly = !!opts.readOnly
   const parsedQuota = Number(opts.quotaMB)
@@ -192,7 +277,7 @@ export async function createFtpAccount(
     where: { id: projectId },
     include: { server: true },
   })
-  if (!project) throw new Error('Project not found')
+  if (!project) throw new FtpError('Project not found', 404)
 
   const fullUsername = `${usernameInput}_${slug8(project.slug || project.name)}`
 
@@ -201,10 +286,30 @@ export async function createFtpAccount(
     where: { projectId_username: { projectId, username: fullUsername } },
   })
   if (existing) {
-    throw new Error(`An FTP account "${fullUsername}" already exists`)
+    throw new FtpError(`An FTP account "${fullUsername}" already exists`, 409)
   }
 
-  // Create the DB row first (with encrypted password).
+  // Create the system user FIRST: if the container refuses, no DB row is
+  // written and the customer is told, instead of seeing an account that
+  // cannot log in.
+  if (
+    project.serverId &&
+    project.containerName &&
+    !isServerInDemoMode(project.server)
+  ) {
+    await runInContainer(
+      project.serverId,
+      project.containerName,
+      buildFtpCreateUserScript(fullUsername, password),
+      'create the FTP user',
+      password
+    )
+  } else {
+    console.log(
+      `[demo] ftp create — would create system user ${fullUsername} in ${project.containerName || 'container'}`
+    )
+  }
+
   const row = await db.ftpAccount.create({
     data: {
       projectId,
@@ -216,31 +321,6 @@ export async function createFtpAccount(
       enabled: true,
     },
   })
-
-  // Best-effort: create system user inside the container.
-  if (
-    project.serverId &&
-    project.containerName &&
-    !isServerInDemoMode(project.server)
-  ) {
-    try {
-      const creds = await getServerCredentials(project.serverId)
-      await withConnection(creds, async (client) => {
-        // Create a non-login system user then set their password via chpasswd.
-        // -D: no password (we'll set it next), -H: no home dir, -s /bin/false: no shell.
-        const adduserCmd = `docker exec ${shellQuoteLocal(project.containerName!)} sh -c ${shellQuoteLocal(
-          `adduser -D -H -s /bin/false ${shellQuoteLocal(fullUsername)} 2>/dev/null; echo ${shellQuoteLocal(`${fullUsername}:${password}`)} | chpasswd 2>/dev/null; true`
-        )}`
-        await exec(client, adduserCmd, { timeoutMs: 15000 })
-      })
-    } catch (err) {
-      console.error('[vps-ftp] failed to create system user:', err)
-    }
-  } else {
-    console.log(
-      `[demo] ftp create — would adduser + chpasswd for ${fullUsername} in ${project.containerName || 'container'}`
-    )
-  }
 
   return toRow(row, true) // reveal the password ONCE on creation
 }
@@ -255,14 +335,14 @@ export async function updateFtpAccount(
   const existing = await db.ftpAccount.findFirst({
     where: { id: accountId, projectId },
   })
-  if (!existing) throw new Error('FTP account not found')
+  if (!existing) throw new FtpError('FTP account not found', 404)
 
   const data: Record<string, unknown> = {}
   let newPassword: string | null = null
   if (patch.password !== undefined) {
     const pw = patch.password.trim()
-    if (!pw) throw new Error('Password cannot be empty')
-    if (pw.length < 6) throw new Error('Password must be at least 6 characters')
+    if (!pw) throw new FtpError('Password cannot be empty')
+    if (pw.length < 6) throw new FtpError('Password must be at least 6 characters')
     data.password = encrypt(pw)
     newPassword = pw
   }
@@ -283,12 +363,8 @@ export async function updateFtpAccount(
     data.enabled = !!patch.enabled
   }
 
-  const updated = await db.ftpAccount.update({
-    where: { id: accountId },
-    data,
-  })
-
-  // Best-effort: update system user password if changed.
+  // Change the password on the server FIRST, so the stored password never
+  // disagrees with the one that actually works.
   if (newPassword) {
     const project = await db.project.findUnique({
       where: { id: projectId },
@@ -299,23 +375,22 @@ export async function updateFtpAccount(
       project.containerName &&
       !isServerInDemoMode(project.server)
     ) {
-      try {
-        const creds = await getServerCredentials(project.serverId)
-        await withConnection(creds, async (client) => {
-          const cmd = `docker exec ${shellQuoteLocal(project.containerName!)} sh -c ${shellQuoteLocal(
-            `echo ${shellQuoteLocal(`${existing.username}:${newPassword}`)} | chpasswd 2>/dev/null; true`
-          )}`
-          await exec(client, cmd, { timeoutMs: 15000 })
-        })
-      } catch (err) {
-        console.error('[vps-ftp] failed to update system user password:', err)
-      }
-    } else {
-      console.log(
-        `[demo] ftp update — would chpasswd for ${existing.username}`
+      await runInContainer(
+        project.serverId,
+        project.containerName,
+        buildFtpSetPasswordScript(existing.username, newPassword),
+        'change the FTP password',
+        newPassword
       )
+    } else {
+      console.log(`[demo] ftp update — would set the password for ${existing.username}`)
     }
   }
+
+  const updated = await db.ftpAccount.update({
+    where: { id: accountId },
+    data,
+  })
 
   return toRow(updated, !!newPassword)
 }
@@ -341,19 +416,23 @@ export async function deleteFtpAccount(
     project.containerName &&
     !isServerInDemoMode(project.server)
   ) {
+    // A user left behind in the container could still log in over FTP, so a
+    // failure here keeps the row (and tells the customer) rather than hiding
+    // a live account. The one safe exception: the container no longer exists,
+    // so nothing can log in to it.
     try {
-      const creds = await getServerCredentials(project.serverId)
-      await withConnection(creds, async (client) => {
-        const cmd = `docker exec ${shellQuoteLocal(project.containerName!)} sh -c ${shellQuoteLocal(
-          `deluser ${shellQuoteLocal(existing.username)} 2>/dev/null; true`
-        )}`
-        await exec(client, cmd, { timeoutMs: 15000 })
-      })
+      await runInContainer(
+        project.serverId,
+        project.containerName,
+        buildFtpDeleteUserScript(existing.username),
+        'remove the FTP user'
+      )
     } catch (err) {
-      console.error('[vps-ftp] failed to delete system user:', err)
+      if (!(err instanceof FtpError && /No such container/i.test(err.message))) throw err
+      console.warn(`[vps-ftp] container ${project.containerName} is gone; deleting the account record only`)
     }
   } else {
-    console.log(`[demo] ftp delete — would deluser ${existing.username}`)
+    console.log(`[demo] ftp delete — would remove system user ${existing.username}`)
   }
 
   await db.ftpAccount.delete({ where: { id: accountId } })
