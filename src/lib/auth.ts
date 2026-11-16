@@ -8,9 +8,8 @@ import { requireSecret } from '@/lib/security'
 const JWT_SECRET = requireSecret('JWT_SECRET')
 const TOKEN_EXPIRY = '7d'
 const TWO_FACTOR_TEMP_TOKEN_EXPIRY = '5m'
-// Deliberately short: an impersonation session should not outlive the support
-// interaction that justified it.
-const IMPERSONATION_TOKEN_EXPIRY = '1h'
+// Impersonation (support access) sessions are issued by issueSession with a
+// 1-hour lifetime — see app/api/admin/impersonate.
 
 export async function hashPassword(password: string): Promise<string> {
   const salt = await bcryptjs.genSalt(12)
@@ -26,23 +25,16 @@ export function generateToken(payload: { userId: string; email: string; role: st
 }
 
 /**
- * Short-lived token that lets a super admin act as a customer for support.
+ * Verify a SESSION token (login or impersonation).
  *
- * SECURITY: carries an `impersonatedBy` claim so every action taken while
- * impersonating is attributable to the real admin, and expires in 1 hour
- * rather than the normal 7 days.
+ * SECURITY: other short-lived tokens are signed with the same secret — the
+ * "password OK, 2FA pending" token, the GitHub OAuth `state`, the realtime
+ * token. Each carries a `kind` claim. Session tokens never do, and always
+ * carry email + role. Without this check those tokens were accepted as a full
+ * login: the 2FA-pending token let anyone with just the password skip the
+ * second factor, and the OAuth state (visible in the GitHub URL) was a
+ * 10-minute session.
  */
-export function generateImpersonationToken(payload: {
-  userId: string
-  email: string
-  role: string
-  impersonatedBy: string
-}): string {
-  return jwt.sign(payload, JWT_SECRET, {
-    expiresIn: IMPERSONATION_TOKEN_EXPIRY,
-  })
-}
-
 export function verifyToken(token: string): {
   userId: string
   email: string
@@ -51,12 +43,26 @@ export function verifyToken(token: string): {
 } | null {
   try {
     const decoded = jwt.verify(token, JWT_SECRET) as {
-      userId: string
-      email: string
-      role: string
+      userId?: unknown
+      email?: unknown
+      role?: unknown
+      kind?: unknown
       impersonatedBy?: string
     }
-    return decoded
+    if (decoded.kind !== undefined) return null
+    if (
+      typeof decoded.userId !== 'string' ||
+      typeof decoded.email !== 'string' ||
+      typeof decoded.role !== 'string'
+    ) {
+      return null
+    }
+    return {
+      userId: decoded.userId,
+      email: decoded.email,
+      role: decoded.role,
+      ...(decoded.impersonatedBy ? { impersonatedBy: decoded.impersonatedBy } : {}),
+    }
   } catch {
     return null
   }
@@ -83,6 +89,8 @@ interface CachedIdentity {
   role: string
   status: string
   email: string
+  /** ms epoch; tokens issued (iat) before this are rejected. 0 = never. */
+  sessionsRevokedAt: number
   expiresAt: number
 }
 
@@ -108,7 +116,7 @@ async function loadIdentity(userId: string): Promise<CachedIdentity | null> {
     const { db } = require('@/lib/db') as typeof import('@/lib/db')
     const user = await db.user.findUnique({
       where: { id: userId },
-      select: { id: true, email: true, role: true, status: true },
+      select: { id: true, email: true, role: true, status: true, sessionsRevokedAt: true },
     })
     if (!user) {
       // Deleted user: forget any cached identity so a stale entry can't
@@ -120,6 +128,7 @@ async function loadIdentity(userId: string): Promise<CachedIdentity | null> {
       role: user.role,
       status: (user as { status?: string }).status || 'active',
       email: user.email,
+      sessionsRevokedAt: user.sessionsRevokedAt ? user.sessionsRevokedAt.getTime() : 0,
       expiresAt: Date.now() + AUTH_CACHE_TTL_MS,
     }
     identityCache.set(userId, fresh)
@@ -153,18 +162,200 @@ export async function verifyTokenFresh(
 ): Promise<FreshAuth | null> {
   const decoded = verifyToken(token)
   if (!decoded) return null
+  const { iat, sid } = readTimingClaims(token)
+  return checkSession(decoded.userId, iat, sid, decoded.impersonatedBy)
+}
 
-  const identity = await loadIdentity(decoded.userId)
-  if (!identity) return null
-  if (identity.status !== 'active') return null
+/* ────────────────────────────────────────────────────────────────────
+ * Sessions — signing out actually ends a token
+ * ────────────────────────────────────────────────────────────────────
+ *
+ * SECURITY: a JWT is valid until it expires (7 days) no matter what the
+ * server thinks. Signing out used to delete only the browser's copy, so a
+ * token copied anywhere kept working for a week, and changing a password left
+ * an attacker's existing login in place. Now:
+ *   - each login creates a Session row; the token carries its id (`sid`) and
+ *     is accepted only while that row is live — logout revokes it
+ *   - `User.sessionsRevokedAt` rejects EVERY token issued before it (also old
+ *     tokens without a sid), for "sign out everywhere" and password changes
+ * Lookups are cached for AUTH_CACHE_TTL_MS like identities; revoking clears
+ * the cache, so a revocation takes effect immediately.
+ */
+const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60
+/** Don't write lastSeenAt more than once per this interval per session. */
+const LAST_SEEN_WRITE_MS = 5 * 60 * 1000
+
+interface CachedSession {
+  userId: string
+  live: boolean
+  expiresAtMs: number
+  cachedUntil: number
+}
+const sessionCache = new Map<string, CachedSession>()
+const lastSeenWritten = new Map<string, number>()
+
+/** iat (seconds) and sid of an ALREADY VERIFIED token. */
+function readTimingClaims(token: string): { iat: number; sid?: string } {
+  const payload = jwt.decode(token) as { iat?: number; sid?: unknown } | null
+  return {
+    iat: typeof payload?.iat === 'number' ? payload.iat : 0,
+    sid: typeof payload?.sid === 'string' ? payload.sid : undefined,
+  }
+}
+
+async function loadSessionRow(sid: string): Promise<CachedSession | null> {
+  const cached = sessionCache.get(sid)
+  if (cached && cached.cachedUntil > Date.now()) return cached
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { db } = require('@/lib/db') as typeof import('@/lib/db')
+    const row = await db.session.findUnique({
+      where: { id: sid },
+      select: { userId: true, revokedAt: true, expiresAt: true },
+    })
+    if (!row) {
+      sessionCache.delete(sid)
+      return null
+    }
+    const entry: CachedSession = {
+      userId: row.userId,
+      live: !row.revokedAt,
+      expiresAtMs: row.expiresAt.getTime(),
+      cachedUntil: Date.now() + AUTH_CACHE_TTL_MS,
+    }
+    sessionCache.set(sid, entry)
+    return entry
+  } catch (error) {
+    console.error('[auth] loadSessionRow failed:', error)
+    return null // fail closed
+  }
+}
+
+function touchSession(sid: string): void {
+  const last = lastSeenWritten.get(sid) || 0
+  if (Date.now() - last < LAST_SEEN_WRITE_MS) return
+  lastSeenWritten.set(sid, Date.now())
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { db } = require('@/lib/db') as typeof import('@/lib/db')
+  db.session.update({ where: { id: sid }, data: { lastSeenAt: new Date() } }).catch(() => {})
+}
+
+/** The shared freshness + revocation check behind every token type. */
+async function checkSession(
+  userId: string,
+  iat: number,
+  sid: string | undefined,
+  impersonatedBy?: string
+): Promise<FreshAuth | null> {
+  const identity = await loadIdentity(userId)
+  if (!identity || identity.status !== 'active') return null
+  if (identity.sessionsRevokedAt && iat * 1000 < identity.sessionsRevokedAt) return null
+
+  if (sid) {
+    const session = await loadSessionRow(sid)
+    if (!session || !session.live || session.userId !== userId) return null
+    if (session.expiresAtMs <= Date.now()) return null
+    touchSession(sid)
+  }
 
   return {
-    userId: decoded.userId,
+    userId,
     email: identity.email,
     role: identity.role,
     status: identity.status,
-    impersonatedBy: decoded.impersonatedBy,
+    ...(impersonatedBy ? { impersonatedBy } : {}),
   }
+}
+
+function clientIp(req?: Request): string | null {
+  if (!req) return null
+  const fwd = req.headers.get('x-forwarded-for')
+  if (fwd) return fwd.split(',')[0].trim().slice(0, 64) || null
+  return req.headers.get('x-real-ip')?.trim().slice(0, 64) || null
+}
+
+/**
+ * Start a session for a successful login and return its token. Use this —
+ * not generateToken — wherever a person signs in, so the login can be listed
+ * in Settings and revoked.
+ */
+export async function issueSession(
+  user: { userId: string; email: string; role: string },
+  req?: Request,
+  opts: { impersonatedBy?: string; ttlSeconds?: number } = {}
+): Promise<string> {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { db } = require('@/lib/db') as typeof import('@/lib/db')
+  const ttl = opts.ttlSeconds ?? SESSION_TTL_SECONDS
+  const session = await db.session.create({
+    data: {
+      userId: user.userId,
+      expiresAt: new Date(Date.now() + ttl * 1000),
+      ipAddress: clientIp(req),
+      userAgent: req?.headers.get('user-agent')?.slice(0, 300) || null,
+      impersonatedBy: opts.impersonatedBy || null,
+    },
+    select: { id: true },
+  })
+  // Housekeeping: forget this user's sessions that ended over 30 days ago.
+  const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+  db.session
+    .deleteMany({
+      where: { userId: user.userId, OR: [{ expiresAt: { lt: monthAgo } }, { revokedAt: { lt: monthAgo } }] },
+    })
+    .catch(() => {})
+
+  return jwt.sign(
+    {
+      userId: user.userId,
+      email: user.email,
+      role: user.role,
+      sid: session.id,
+      ...(opts.impersonatedBy ? { impersonatedBy: opts.impersonatedBy } : {}),
+    },
+    JWT_SECRET,
+    { expiresIn: ttl }
+  )
+}
+
+/** The session id inside a valid token, if it has one. */
+export function sessionIdOf(token: string | null): string | undefined {
+  if (!token || !verifyToken(token)) return undefined
+  return readTimingClaims(token).sid
+}
+
+/** End one session (one device). */
+export async function revokeSession(sid: string, userId: string, reason: string): Promise<boolean> {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { db } = require('@/lib/db') as typeof import('@/lib/db')
+  const { count } = await db.session.updateMany({
+    where: { id: sid, userId, revokedAt: null },
+    data: { revokedAt: new Date(), revokedReason: reason },
+  })
+  sessionCache.delete(sid)
+  return count > 0
+}
+
+/**
+ * End EVERY session of a user, including logins from before per-device
+ * sessions existed. To keep the caller signed in, issue them a new session
+ * afterwards (see issueSession).
+ */
+export async function revokeAllSessions(userId: string, reason: string): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { db } = require('@/lib/db') as typeof import('@/lib/db')
+  // Whole seconds: token iat is in seconds, so a session issued right after
+  // this call (same second) must not fall before the cutoff.
+  const cutoff = new Date(Math.floor(Date.now() / 1000) * 1000)
+  await db.$transaction([
+    db.user.update({ where: { id: userId }, data: { sessionsRevokedAt: cutoff } }),
+    db.session.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: new Date(), revokedReason: reason },
+    }),
+  ])
+  identityCache.delete(userId)
+  for (const [sid, s] of sessionCache) if (s.userId === userId) sessionCache.delete(sid)
 }
 
 /**
@@ -297,16 +488,19 @@ export async function verifyApiKey(
  */
 export async function authenticateRequest(
   request: Request
-): Promise<{ userId: string; email: string; role: string } | null> {
-  const authHeader = request.headers.get('Authorization')
-  const xApiKey = request.headers.get('x-api-key')
-  const token = extractTokenFromHeader(authHeader) || xApiKey
-  if (!token) return null
-  // Fast path: valid JWT
-  const decoded = verifyToken(token)
-  if (decoded) return decoded
-  // Slow path: API key lookup
-  return verifyApiKey(token)
+): Promise<{ userId: string; email: string; role: string; impersonatedBy?: string } | null> {
+  // SECURITY: this used to trust the token on its own (signature + expiry),
+  // so a signed-out session, a password-changed account or a suspended user
+  // still worked on every route using it. It now applies the same session,
+  // revocation and account-status checks as authenticateRequestFresh.
+  const auth = await authenticateRequestFresh(request)
+  if (!auth) return null
+  return {
+    userId: auth.userId,
+    email: auth.email,
+    role: auth.role,
+    ...(auth.impersonatedBy ? { impersonatedBy: auth.impersonatedBy } : {}),
+  }
 }
 
 /**
@@ -334,15 +528,44 @@ export function verifyTwoFactorTempToken(token: string): { userId: string } | nu
   }
 }
 
+/* ────────────────────────────────────────────────────────────────────
+ * Realtime token — lets the browser's Socket.IO connection prove who it is
+ * ────────────────────────────────────────────────────────────────────
+ * The session lives in an httpOnly cookie the page cannot read, but the
+ * realtime service needs something to forward to /api/realtime/authorize.
+ * This token is fetched fresh on each connect, kept only in memory, and is
+ * accepted ONLY by that endpoint (verifyToken rejects it everywhere else).
+ */
+const REALTIME_TOKEN_EXPIRY = '12h'
+
+/** `sid` ties the realtime token to the login session, so signing out ends it too. */
+export function generateRealtimeToken(userId: string, sid?: string): string {
+  return jwt.sign({ userId, kind: 'realtime', ...(sid ? { sid } : {}) }, JWT_SECRET, {
+    expiresIn: REALTIME_TOKEN_EXPIRY,
+  })
+}
+
+/** Resolve a realtime token to the user's CURRENT role and status. */
+export async function verifyRealtimeTokenFresh(token: string): Promise<FreshAuth | null> {
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET) as { userId?: unknown; kind?: unknown; iat?: number; sid?: unknown }
+    if (decoded.kind !== 'realtime' || typeof decoded.userId !== 'string') return null
+    return checkSession(
+      decoded.userId,
+      typeof decoded.iat === 'number' ? decoded.iat : 0,
+      typeof decoded.sid === 'string' ? decoded.sid : undefined
+    )
+  } catch {
+    return null
+  }
+}
+
 /**
  * Resolve the authenticated user from an Authorization: Bearer header.
  * Returns null when not authenticated or user no longer exists.
  */
 export async function getUserFromRequest(request: Request) {
-  const authHeader = request.headers.get('Authorization')
-  const token = extractTokenFromHeader(authHeader)
+  const token = extractTokenFromHeader(request.headers.get('Authorization'))
   if (!token) return null
-  const decoded = verifyToken(token)
-  if (!decoded) return null
-  return decoded
+  return verifyTokenFresh(token)
 }

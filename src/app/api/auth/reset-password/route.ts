@@ -1,66 +1,63 @@
 import { NextResponse } from 'next/server'
 import { withRateLimit } from '@/lib/rate-limit'
 import { db } from '@/lib/db'
-import bcrypt from 'bcryptjs'
+import { hashPassword, revokeAllSessions } from '@/lib/auth'
+import { consumePasswordResetToken } from '@/lib/password-reset'
+import { logAudit } from '@/lib/audit'
 
+/**
+ * POST /api/auth/reset-password   { token, newPassword }
+ *
+ * Sets a new password with a link from /api/auth/forgot-password. The token
+ * must be unexpired (1 hour) and unused; it is used up even if the request
+ * then fails, so a link only ever works once. Every existing login of the
+ * account is ended — whoever knew the old password may still be signed in.
+ */
 async function postHandler(request: Request) {
   try {
     const body = await request.json().catch(() => null)
     if (!body || typeof body !== 'object') {
-      return NextResponse.json(
-        { error: 'A JSON body is required' },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: 'A JSON body is required' }, { status: 400 })
     }
-    const { token, newPassword } = body
+    const { token, newPassword } = body as { token?: unknown; newPassword?: unknown }
 
-    if (!token || !newPassword) {
-      return NextResponse.json(
-        { error: 'Token and new password are required' },
-        { status: 400 }
-      )
+    if (typeof token !== 'string' || !token || typeof newPassword !== 'string' || !newPassword) {
+      return NextResponse.json({ error: 'Token and new password are required' }, { status: 400 })
     }
-
+    // Validate BEFORE using up the token, so a too-short password doesn't
+    // burn a working link.
     if (newPassword.length < 8) {
+      return NextResponse.json({ error: 'New password must be at least 8 characters' }, { status: 400 })
+    }
+
+    const userId = await consumePasswordResetToken(token)
+    if (!userId) {
       return NextResponse.json(
-        { error: 'New password must be at least 8 characters' },
+        { error: 'This reset link is invalid, expired or already used. Request a new one.' },
         { status: 400 }
       )
     }
 
-    // Find user with matching token (using emailVerificationToken field for demo)
-    const user = await db.user.findFirst({
-      where: { emailVerificationToken: token },
-    })
-
-    if (!user) {
-      return NextResponse.json(
-        { error: 'Invalid or expired reset token' },
-        { status: 400 }
-      )
-    }
-
-    // Hash the new password
-    const hashedPassword = await bcrypt.hash(newPassword, 12)
-
-    // Update user password and clear the token
     await db.user.update({
-      where: { id: user.id },
-      data: {
-        password: hashedPassword,
-        emailVerificationToken: null,
-      },
+      where: { id: userId },
+      // Following the emailed link proves the address works.
+      data: { password: await hashPassword(newPassword), emailVerified: true },
     })
 
-    return NextResponse.json({
-      message: 'Password reset successfully',
+    await revokeAllSessions(userId, 'password_reset')
+
+    await logAudit({
+      userId,
+      action: 'user.password_reset',
+      resource: 'user',
+      resourceId: userId,
+      req: request,
     })
+
+    return NextResponse.json({ message: 'Password reset successfully' })
   } catch (error) {
     console.error('Reset password error:', error)
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
 

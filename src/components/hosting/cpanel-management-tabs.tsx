@@ -108,12 +108,9 @@ import {
 
 // ─── Shared helpers (same as website-management-tabs.tsx) ──────────────
 
+/** The httpOnly session cookie authenticates same-origin requests. */
 function getAuthHeaders(): Record<string, string> {
-  const token = localStorage.getItem('apsamo_token')
-  return {
-    Authorization: `Bearer ${token}`,
-    'Content-Type': 'application/json',
-  }
+  return { 'Content-Type': 'application/json' }
 }
 
 function timeAgo(dateStr: string | null): string {

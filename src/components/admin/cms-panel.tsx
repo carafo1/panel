@@ -76,12 +76,12 @@ interface SiteContentMap {
 
 // ── API helper ─────────────────────────────────────────────────────────
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
-  const token = localStorage.getItem('apsamo_token')
+  // Authenticated by the httpOnly session cookie (see src/lib/session.ts).
   const res = await fetch(`/api${path}`, {
     ...options,
+    credentials: 'same-origin',
     headers: {
       'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options?.headers,
     },
   })

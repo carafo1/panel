@@ -20,17 +20,15 @@ export function getSocket(): Socket {
   if (!socket) {
     const socketUrl = getSocketUrl()
     socket = io(socketUrl, {
-      // The realtime service refuses connections without the user's token and
-      // checks every room join with the panel. A function, so a reconnect
-      // after logging in again sends the current token, not a stale one.
+      // The realtime service refuses connections without a token and checks
+      // every room join with the panel. The login session is an httpOnly
+      // cookie this code cannot read, so each (re)connect asks the panel for a
+      // realtime-only token (accepted nowhere else) and keeps it in memory.
       auth: (cb) => {
-        let token: string | null = null
-        try {
-          token = localStorage.getItem('apsamo_token')
-        } catch {
-          /* storage unavailable */
-        }
-        cb({ token })
+        fetch('/api/auth/realtime-token', { credentials: 'same-origin', cache: 'no-store' })
+          .then((res) => (res.ok ? res.json() : null))
+          .then((data: { token?: string } | null) => cb({ token: data?.token ?? null }))
+          .catch(() => cb({ token: null }))
       },
       transports: ['websocket', 'polling'],
       forceNew: false,

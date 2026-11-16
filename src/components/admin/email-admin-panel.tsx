@@ -87,9 +87,9 @@ interface PlanOption {
   emailMailboxes: number | null
 }
 
+/** The httpOnly session cookie authenticates same-origin requests. */
 function authHeaders(): HeadersInit {
-  const t = typeof window !== 'undefined' ? localStorage.getItem('apsamo_token') : ''
-  return { Authorization: `Bearer ${t || ''}`, 'Content-Type': 'application/json' }
+  return { 'Content-Type': 'application/json' }
 }
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {

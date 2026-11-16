@@ -113,7 +113,7 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
   const [deployUrl, setDeployUrl] = useState('')
   const [searchingDomain, setSearchingDomain] = useState(false)
   const [loadingPlans, setLoadingPlans] = useState(false)
-  const { user, token } = useAuthStore()
+  const { user, isAuthenticated } = useAuthStore()
 
   // Fetch plans on mount
   useEffect(() => {
@@ -175,14 +175,15 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
 
   // Deploy
   const handleDeploy = useCallback(async () => {
-    if (!selectedPlan || !token) return
+    if (!selectedPlan || !isAuthenticated) return
     setDeploying(true)
     try {
       const slug = projectName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
       const type = selectedDomain && !useFreeSubdomain ? 'both' : 'hosting'
       const res = await fetch('/api/billing/checkout', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           planId: selectedPlan,
           type,
@@ -204,7 +205,7 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
       toast.error('Deployment failed. Please try again.')
     }
     setDeploying(false)
-  }, [selectedPlan, token, projectName, framework, selectedDomain, useFreeSubdomain])
+  }, [selectedPlan, isAuthenticated, projectName, framework, selectedDomain, useFreeSubdomain])
 
   // Progress
   const progress = (step / 5) * 100

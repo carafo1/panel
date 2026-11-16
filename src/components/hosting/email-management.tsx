@@ -113,9 +113,9 @@ interface LogEntry {
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
+/** The httpOnly session cookie authenticates same-origin requests. */
 function authHeaders(): HeadersInit {
-  const t = typeof window !== 'undefined' ? localStorage.getItem('apsamo_token') : ''
-  return { Authorization: `Bearer ${t || ''}`, 'Content-Type': 'application/json' }
+  return { 'Content-Type': 'application/json' }
 }
 
 function formatBytes(n: number | null | undefined): string {

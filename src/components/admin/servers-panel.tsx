@@ -219,15 +219,9 @@ interface ServerStats {
 }
 
 // ─── API helper ─────────────────────────────────────────────────────────
+/** The httpOnly session cookie authenticates same-origin requests. */
 function authHeaders(): Record<string, string> {
-  const token =
-    typeof window !== 'undefined'
-      ? localStorage.getItem('apsamo_token')
-      : null
-  return {
-    'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  }
+  return { 'Content-Type': 'application/json' }
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────

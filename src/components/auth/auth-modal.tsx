@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Loader2, X, KeyRound, Mail, CheckCircle2, Shield, ArrowLeft } from 'lucide-react'
 import { LogoMark } from '@/components/ui/logo'
 import { toast } from 'sonner'
@@ -19,9 +19,11 @@ interface AuthModalProps {
   mode: AuthMode
   onModeChange: (mode: AuthMode) => void
   onClose: () => void
+  /** Token from a password-reset email link; pre-fills (and hides) the token field. */
+  initialResetToken?: string
 }
 
-export function AuthModal({ mode, onModeChange, onClose }: AuthModalProps) {
+export function AuthModal({ mode, onModeChange, onClose, initialResetToken }: AuthModalProps) {
   const { login, register, completeTwoFactorLogin, loginWithBackupCode } = useAuthStore()
   const [isLoading, setIsLoading] = useState(false)
 
@@ -49,7 +51,12 @@ export function AuthModal({ mode, onModeChange, onClose }: AuthModalProps) {
   const [forgotToken, setForgotToken] = useState('')
   const [forgotSuccess, setForgotSuccess] = useState(false)
 
-  const [resetToken, setResetToken] = useState('')
+  const [resetToken, setResetToken] = useState(initialResetToken ?? '')
+  const tokenFromLink = !!initialResetToken && resetToken === initialResetToken
+  // The modal can already be open (panel host) when the link's token arrives.
+  useEffect(() => {
+    if (initialResetToken) setResetToken(initialResetToken)
+  }, [initialResetToken])
   const [resetPassword, setResetPassword] = useState('')
   const [resetConfirmPassword, setResetConfirmPassword] = useState('')
 
@@ -108,7 +115,9 @@ export function AuthModal({ mode, onModeChange, onClose }: AuthModalProps) {
     }
     setIsLoading(true)
     try {
-      await loginWithBackupCode(twoFactorEmail, backupCode.trim())
+      // The tempToken proves the password step; the backup code replaces
+      // only the 6-digit code.
+      await loginWithBackupCode(twoFactorTempToken, backupCode.trim())
       toast.success('Welcome back!')
       onClose()
     } catch (err) {
@@ -249,7 +258,9 @@ export function AuthModal({ mode, onModeChange, onClose }: AuthModalProps) {
                   ? 'Enter your email to receive a reset link'
                   : mode === 'two-factor'
                     ? 'Enter the 6-digit code from your authenticator app'
-                    : 'Enter your token and set a new password'}
+                    : tokenFromLink
+                      ? 'Set a new password for your account'
+                      : 'Enter your token and set a new password'}
           </p>
         </div>
 
@@ -659,17 +670,23 @@ export function AuthModal({ mode, onModeChange, onClose }: AuthModalProps) {
                   <KeyRound className="size-6 text-indigo-600" />
                 </div>
               </div>
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="reset-token">Reset Token</Label>
-                <Input
-                  id="reset-token"
-                  type="text"
-                  placeholder="Paste your reset token here"
-                  value={resetToken}
-                  onChange={(e) => setResetToken(e.target.value)}
-                  disabled={isLoading}
-                />
-              </div>
+              {tokenFromLink ? (
+                <p className="text-center text-sm text-muted-foreground">
+                  Choose a new password. This link works once and expires an hour after it was sent.
+                </p>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="reset-token">Reset Token</Label>
+                  <Input
+                    id="reset-token"
+                    type="text"
+                    placeholder="Paste the token from your reset email"
+                    value={resetToken}
+                    onChange={(e) => setResetToken(e.target.value)}
+                    disabled={isLoading}
+                  />
+                </div>
+              )}
               <div className="flex flex-col gap-2">
                 <Label htmlFor="reset-password">New Password</Label>
                 <Input

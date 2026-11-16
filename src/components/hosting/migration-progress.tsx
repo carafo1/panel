@@ -193,12 +193,9 @@ function formatDuration(ms: number | null): string {
   return `${m}m ${s}s`
 }
 
+/** The httpOnly session cookie authenticates same-origin requests. */
 function authHeaders(): HeadersInit {
-  const token =
-    typeof window !== 'undefined' ? localStorage.getItem('apsamo_token') : null
-  return token
-    ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
-    : { 'Content-Type': 'application/json' }
+  return { 'Content-Type': 'application/json' }
 }
 
 // ─── Stage row ───────────────────────────────────────────────────────────

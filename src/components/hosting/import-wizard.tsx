@@ -232,15 +232,9 @@ function formatBytes(bytes: number): string {
   return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`
 }
 
-function authToken(): string | null {
-  return typeof window !== 'undefined' ? localStorage.getItem('apsamo_token') : null
-}
-
+/** The httpOnly session cookie authenticates same-origin requests. */
 function jsonHeaders(): HeadersInit {
-  const token = authToken()
-  return token
-    ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
-    : { 'Content-Type': 'application/json' }
+  return { 'Content-Type': 'application/json' }
 }
 
 /** Single request, streamed, with real upload progress from XHR. */
@@ -251,9 +245,7 @@ function uploadSingleShot(
 ): Promise<UploadState> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
-    xhr.open('POST', '/api/hosting/upload')
-    const token = authToken()
-    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+    xhr.open('POST', '/api/hosting/upload') // session cookie authenticates it
     // The filename travels in a header so the server can stream the body
     // straight to disk instead of buffering a multipart parse.
     xhr.setRequestHeader('X-Upload-Filename', encodeURIComponent(file.name))
@@ -316,9 +308,7 @@ async function uploadChunked(
           `/api/hosting/upload?action=chunk&uploadId=${uploadId}&index=${i}`,
           {
             method: 'POST',
-            headers: authToken()
-              ? { Authorization: `Bearer ${authToken()}` }
-              : undefined,
+            credentials: 'same-origin',
             body: slice,
             signal,
           }
@@ -559,17 +549,13 @@ export default function ImportWizard({
   // ── Load the server's source list + the customer's domains ────────
   useEffect(() => {
     if (!open) return
-    const token = authToken()
-    if (!token) return
-    void fetch('/api/migrations?limit=1', {
-      headers: { Authorization: `Bearer ${token}` },
-    })
+    void fetch('/api/migrations?limit=1', { credentials: 'same-origin' })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (d?.sources?.length) setSources(d.sources as SourceDefinition[])
       })
       .catch(() => {})
-    void fetch('/api/domains', { headers: { Authorization: `Bearer ${token}` } })
+    void fetch('/api/domains', { credentials: 'same-origin' })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         const list = (d?.domains ?? []) as Array<{ name: string; status?: string }>

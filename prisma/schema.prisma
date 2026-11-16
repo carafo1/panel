@@ -22,13 +22,27 @@ model User {
   statusChangedAt         DateTime?
   emailVerified           Boolean  @default(false)
   emailVerificationToken  String?
+  // Password reset: only a SHA-256 of the emailed token is stored (a copy of
+  // the database must not be enough to reset anyone's password), it expires,
+  // and it is cleared when used. Kept apart from emailVerificationToken so a
+  // signup-verification link can never reset a password.
+  // Indexed, not @unique: adding a unique constraint makes `prisma db push`
+  // (which `apsamo update` runs) stop for confirmation on existing installs.
+  // Tokens are 256 random bits, so collisions are not a practical concern.
+  passwordResetTokenHash  String?
+  passwordResetExpiresAt  DateTime?
   avatar                  String?
   twoFactorSecret         String?
   twoFactorEnabled        Boolean  @default(false)
   twoFactorBackupCodes    String? // JSON string of hashed backup codes
+  // "Sign out everywhere": any login token issued before this instant is
+  // rejected, including tokens from before per-device sessions existed.
+  // Set on password change/reset and by the user or an admin on demand.
+  sessionsRevokedAt       DateTime?
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
+  sessions      Session[]
   subscriptions Subscription[]
   payments      Payment[]
   projects      Project[]
@@ -62,6 +76,8 @@ model User {
   templateReviews     TemplateReview[]
   emailServices      EmailService[]
   backupDestinations BackupDestination[]
+
+  @@index([passwordResetTokenHash])
 }
 
 model Plan {
@@ -651,6 +667,29 @@ model EnvironmentVariable {
   project  Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@unique([projectId, key])
+}
+
+/// One signed-in device. The login JWT carries this row's id (`sid`), and the
+/// token is only accepted while the row exists, is unrevoked and unexpired —
+/// so signing out, or revoking a device from Settings, ends that token for
+/// real instead of only deleting the browser's copy.
+model Session {
+  id             String    @id @default(cuid())
+  userId         String
+  createdAt      DateTime  @default(now())
+  expiresAt      DateTime
+  lastSeenAt     DateTime  @default(now())
+  revokedAt      DateTime?
+  /// Why it ended: logout | user | password_change | password_reset | admin | sign_out_everywhere
+  revokedReason  String?
+  ipAddress      String?
+  userAgent      String?
+  /// Set when a super admin is acting as this user (support impersonation).
+  impersonatedBy String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
 }
 
 model ApiKey {

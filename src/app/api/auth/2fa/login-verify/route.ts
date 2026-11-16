@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server'
 import { withRateLimit } from '@/lib/rate-limit'
 import { db } from '@/lib/db'
-import { generateToken, verifyTwoFactorTempToken } from '@/lib/auth'
+import { issueSession, verifyTwoFactorTempToken } from '@/lib/auth'
 import { verifyToken as verifyTotpToken } from '@/lib/totp'
 import { logAudit } from '@/lib/audit'
+import { attachSession } from '@/lib/session'
 
 /**
  * POST /api/auth/2fa/login-verify
@@ -97,11 +98,10 @@ async function postHandler(request: Request) {
       )
     }
 
-    const token = generateToken({
-      userId: user.id,
-      email: user.email,
-      role: user.role,
-    })
+    const token = await issueSession(
+      { userId: user.id, email: user.email, role: user.role },
+      request
+    )
 
     // Audit successful 2FA login
     await logAudit({
@@ -113,18 +113,22 @@ async function postHandler(request: Request) {
       metadata: { email: user.email, role: user.role, twoFactor: true },
     })
 
-    return NextResponse.json({
+    return attachSession(
+      NextResponse.json({
+        token,
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          avatar: user.avatar,
+          emailVerified: user.emailVerified,
+          createdAt: user.createdAt,
+        },
+      }),
       token,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        avatar: user.avatar,
-        emailVerified: user.emailVerified,
-        createdAt: user.createdAt,
-      },
-    })
+      request
+    )
   } catch (error) {
     console.error('2FA login verify error:', error)
     return NextResponse.json(

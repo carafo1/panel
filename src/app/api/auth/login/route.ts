@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { verifyPassword, generateToken, generateTwoFactorTempToken } from '@/lib/auth'
+import { verifyPassword, issueSession, generateTwoFactorTempToken } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { withRateLimit } from '@/lib/rate-limit'
+import { attachSession } from '@/lib/session'
 
 // Brute-force protection: 10 login attempts per IP per minute.
 export const POST = withRateLimit(loginHandler, { limit: 10, windowMs: 60_000 })
@@ -102,12 +103,11 @@ async function loginHandler(request: Request) {
       })
     }
 
-    // Generate JWT
-    const token = generateToken({
-      userId: user.id,
-      email: user.email,
-      role: user.role,
-    })
+    // A revocable session (listed in Settings → Security, ended by sign-out).
+    const token = await issueSession(
+      { userId: user.id, email: user.email, role: user.role },
+      request
+    )
 
     // Audit successful login
     await logAudit({
@@ -119,18 +119,24 @@ async function loginHandler(request: Request) {
       metadata: { email: user.email, role: user.role, twoFactor: false },
     })
 
-    return NextResponse.json({
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        avatar: user.avatar,
-        emailVerified: user.emailVerified,
-        createdAt: user.createdAt,
-      },
+    // Browsers get an httpOnly session cookie; `token` stays in the body for
+    // scripts and API clients that send it as a bearer header themselves.
+    return attachSession(
+      NextResponse.json({
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          avatar: user.avatar,
+          emailVerified: user.emailVerified,
+          createdAt: user.createdAt,
+        },
+        token,
+      }),
       token,
-    })
+      request
+    )
   } catch (error) {
     console.error('Login error:', error)
     return NextResponse.json(

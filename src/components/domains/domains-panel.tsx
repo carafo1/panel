@@ -335,6 +335,14 @@ interface DnsRecord {
   proxied?: boolean
 }
 
+/** GET /api/domains/[id]/email-dns */
+interface EmailDnsPreview {
+  domain: string
+  mailServer: string
+  records: DnsRecord[]
+  dkim: { available: true; name: string } | { available: false; reason: string; message: string }
+}
+
 interface TldPrice {
   tld: string
   // SECURITY: wholesale + markup are admin-only — optional for non-admin responses
@@ -1751,7 +1759,39 @@ function DnsSection({ domain, onUpdated }: { domain: Domain; onUpdated: () => vo
   const [records, setRecords] = useState<DnsRecord[]>([])
   const [saving, setSaving] = useState(false)
   const [showEmailGen, setShowEmailGen] = useState(false)
-  const [mxTarget, setMxTarget] = useState('mail.apsamo.com')
+  // Empty = use the server's configured mail host (MAIL_SERVER_HOSTNAME).
+  const [mxTarget, setMxTarget] = useState('')
+  const [emailDns, setEmailDns] = useState<EmailDnsPreview | null>(null)
+  const [emailDnsLoading, setEmailDnsLoading] = useState(false)
+  const [emailDnsError, setEmailDnsError] = useState<string | null>(null)
+
+  // Load the real records whenever the dialog is open and the MX host changes
+  // (debounced). DKIM comes from Mailcow, so only the server can produce it.
+  useEffect(() => {
+    if (!showEmailGen) return
+    let cancelled = false
+    setEmailDnsLoading(true)
+    const timer = setTimeout(async () => {
+      try {
+        const qs = mxTarget.trim() ? `?mx=${encodeURIComponent(mxTarget.trim())}` : ''
+        const data = await apiFetch<EmailDnsPreview>(`/domains/${domain.id}/email-dns${qs}`)
+        if (cancelled) return
+        setEmailDns(data)
+        setEmailDnsError(null)
+        if (!mxTarget.trim()) setMxTarget(data.mailServer)
+      } catch (err) {
+        if (cancelled) return
+        setEmailDns(null)
+        setEmailDnsError((err as Error).message)
+      } finally {
+        if (!cancelled) setEmailDnsLoading(false)
+      }
+    }, 400)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [showEmailGen, mxTarget, domain.id])
 
   useEffect(() => {
     setRecords(domain.dnsRecords || [])
@@ -1770,15 +1810,29 @@ function DnsSection({ domain, onUpdated }: { domain: Domain; onUpdated: () => vo
   const removeRecord = (i: number) => setRecords(records.filter((_, idx) => idx !== i))
 
   const generateEmailDns = () => {
-    const emailRecords: DnsRecord[] = [
-      { type: 'MX', name: '@', value: mxTarget, ttl: 3600, priority: 10 },
-      { type: 'TXT', name: '@', value: `v=spf1 mx a:${mxTarget} ~all`, ttl: 3600 },
-      { type: 'TXT', name: '_dmarc', value: `v=DMARC1; p=quarantine; rua=mailto:postmaster@${domain.name}`, ttl: 3600 },
-      { type: 'TXT', name: 'mail._domainkey', value: 'v=DKIM1; k=rsa; p=PLACEHOLDER_REPLACE_WITH_DKIM_KEY', ttl: 3600 },
-    ]
-    setRecords([...records.filter((r) => !(r.type === 'MX' || r.name === '_dmarc' || r.name === 'mail._domainkey' || (r.type === 'TXT' && r.name === '@' && r.value?.startsWith('v=spf1')))), ...emailRecords])
+    if (!emailDns) return
+    const withDkim = emailDns.dkim.available
+    const isDkim = (r: DnsRecord) => /(^|\.)_domainkey$/.test(r.name)
+    setRecords([
+      ...records.filter(
+        (r) =>
+          !(
+            r.type === 'MX' ||
+            r.name === '_dmarc' ||
+            (r.type === 'TXT' && r.name === '@' && r.value?.startsWith('v=spf1')) ||
+            // Replace DKIM only with a real key; always drop a placeholder
+            // that an older version of this screen may have saved.
+            (isDkim(r) && (withDkim || r.value?.includes('PLACEHOLDER')))
+          )
+      ),
+      ...emailDns.records,
+    ])
     setShowEmailGen(false)
-    toast.success('Email DNS records added', { description: 'SPF, DKIM, DMARC & MX generated' })
+    if (emailDns.dkim.available) {
+      toast.success('Email DNS records added', { description: 'MX, SPF, DMARC and DKIM. Save to publish them.' })
+    } else {
+      toast.warning('MX, SPF and DMARC added — DKIM skipped', { description: emailDns.dkim.message })
+    }
   }
 
   const save = async () => {
@@ -1877,24 +1931,62 @@ function DnsSection({ domain, onUpdated }: { domain: Domain; onUpdated: () => vo
                 <Mail className="h-5 w-5 text-indigo-500" /> Generate Email DNS Records
               </DialogTitle>
               <DialogDescription>
-                Automatically adds SPF, DKIM, DMARC &amp; MX records for email delivery.
+                Adds MX, SPF and DMARC records, plus DKIM when this domain has a key on the mail server.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-3 py-2">
               <div className="space-y-2">
-                <Label>Mail Server (MX target)</Label>
-                <Input value={mxTarget} onChange={(e) => setMxTarget(e.target.value)} className="font-mono" />
+                <Label htmlFor="email-dns-mx">Mail Server (MX target)</Label>
+                <Input
+                  id="email-dns-mx"
+                  value={mxTarget}
+                  onChange={(e) => setMxTarget(e.target.value)}
+                  placeholder="mail.example.com"
+                  className="font-mono"
+                />
               </div>
-              <div className="rounded-md bg-muted/50 p-3 text-xs space-y-1">
-                <div><strong>MX</strong> → {mxTarget} (priority 10)</div>
-                <div><strong>SPF</strong> → v=spf1 mx a:{mxTarget} ~all</div>
-                <div><strong>DMARC</strong> → v=DMARC1; p=quarantine; ...</div>
-                <div><strong>DKIM</strong> → mail._domainkey (placeholder — replace with real key)</div>
+              <div className="rounded-md bg-muted/50 p-3 text-xs space-y-1 min-h-[5.5rem]" aria-live="polite">
+                {emailDnsLoading && !emailDns ? (
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading records…
+                  </div>
+                ) : emailDnsError ? (
+                  <div className="flex items-start gap-2 text-destructive">
+                    <XCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" /> {emailDnsError}
+                  </div>
+                ) : emailDns ? (
+                  <>
+                    {emailDns.records.map((r) => (
+                      <div key={`${r.type}-${r.name}`} className="break-all">
+                        <strong>{r.type}</strong> {r.name} → <span className="font-mono">{r.value}</span>
+                        {r.priority ? ` (priority ${r.priority})` : ''}
+                      </div>
+                    ))}
+                  </>
+                ) : null}
               </div>
+              {emailDns && !emailDnsError && (
+                emailDns.dkim.available ? (
+                  <div className="flex items-start gap-2 text-xs text-muted-foreground">
+                    <ShieldCheck className="h-3.5 w-3.5 mt-0.5 shrink-0 text-indigo-500" />
+                    DKIM uses this domain&apos;s real key from the mail server.
+                  </div>
+                ) : (
+                  <div className="flex items-start gap-2 rounded-md border border-amber-300/60 bg-amber-50 dark:bg-amber-950/30 p-2.5 text-xs text-amber-800 dark:text-amber-300">
+                    <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                    <span>
+                      <strong>No DKIM record will be added.</strong> {emailDns.dkim.message}
+                    </span>
+                  </div>
+                )
+              )}
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setShowEmailGen(false)}>Cancel</Button>
-              <Button onClick={generateEmailDns}>Generate Records</Button>
+              <Button onClick={generateEmailDns} disabled={!emailDns || !!emailDnsError || emailDnsLoading}>
+                {emailDnsLoading && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                Add Records
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

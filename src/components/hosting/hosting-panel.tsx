@@ -312,12 +312,9 @@ interface Plan {
 }
 
 // Helpers
+/** The httpOnly session cookie authenticates same-origin requests. */
 function getAuthHeaders(): Record<string, string> {
-  const token = localStorage.getItem('apsamo_token')
-  return {
-    'Authorization': `Bearer ${token}`,
-    'Content-Type': 'application/json',
-  }
+  return { 'Content-Type': 'application/json' }
 }
 
 function statusColor(status: string) {

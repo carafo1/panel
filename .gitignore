@@ -40,6 +40,14 @@ db/*.db
 db/*.db-journal
 db/*.sqlite
 db/*.sqlite-journal
+# the dev database lives under prisma/db (DATABASE_URL=file:./db/custom.db is
+# relative to prisma/schema.prisma), including SQLite's WAL side files
+prisma/db/*.db
+prisma/db/*.db-journal
+prisma/db/*.db-shm
+prisma/db/*.db-wal
+*.sqlite-wal
+*.sqlite-shm
 
 # vercel
 .vercel
@@ -80,3 +88,14 @@ server.log
 # Verification screenshots
 project-detail-verify.png
 *.verify.png
+# Ad-hoc screenshots and pasted images (app images live in /public)
+/*.png
+/screenshots/
+/upload/
+
+# Development notes, old sandbox scripts and throwaway probes kept locally only
+/_archive/
+/worklog.md
+
+# process id files
+*.pid

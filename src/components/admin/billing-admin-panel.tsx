@@ -876,14 +876,8 @@ export function BillingAdminPanel() {
                           variant="ghost"
                           title="Open the PDF (print or save from there)"
                           onClick={() => {
-                            const t =
-                              typeof window !== 'undefined'
-                                ? localStorage.getItem('apsamo_token')
-                                : null
-                            window.open(
-                              `/api/invoices/${inv.id}/pdf?token=${encodeURIComponent(t || '')}`,
-                              '_blank'
-                            )
+                            // The session cookie authenticates the download.
+                            window.open(`/api/invoices/${inv.id}/pdf`, '_blank', 'noopener')
                           }}
                         >
                           PDF

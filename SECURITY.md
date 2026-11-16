@@ -25,8 +25,33 @@ If you discover a security vulnerability in Apsamo Panel, please report it respo
 
 ### Authentication & authorization
 - JWT-based auth (7-day expiry, signed with `JWT_SECRET`)
+- Browser sessions live in an **httpOnly cookie** (`__Host-apsamo_session` in
+  production: Secure, host-only, SameSite=Lax), never in localStorage — page
+  scripts cannot read it. `src/proxy.ts` turns it into the `Authorization`
+  header for API routes (`src/lib/session.ts`).
+- The cookie is honoured only for requests from the panel's own pages (Fetch
+  Metadata, Origin fallback) or plain link navigations, so another site —
+  including a customer site on a subdomain — cannot act with a visitor's
+  session (CSRF). A login posted from another site gets no cookie.
+- Only real session tokens count as a login: the 2FA-pending token, OAuth
+  `state` and realtime tokens carry a `kind` claim and are rejected elsewhere.
+- No login tokens in URLs (they leak into access logs).
+- Signing out really ends a login: every sign-in is a `Session` row the token
+  points to, checked on every request. Users see their devices in
+  Settings → Security and can sign out one or all others; changing or
+  resetting the password, suspending the account, or an admin's
+  "Sign out all devices" ends every earlier login (`User.sessionsRevokedAt`
+  also covers tokens issued before sessions were tracked). Support access
+  (impersonation) is a visible, revocable 1-hour session.
+- Password-reset links are single-use, expire after 1 hour, are stored only
+  as a SHA-256 hash in their own fields (`passwordResetTokenHash`), and are
+  never logged; email-verification tokens cannot reset a password. A reset
+  ends every existing login (`src/lib/password-reset.ts`).
+- In production, an email that cannot be sent (no provider configured) is
+  reported as failed and its contents are never written to the log.
 - bcrypt password hashing (cost factor 12)
-- Optional 2FA via TOTP (`otplib`)
+- Optional 2FA via TOTP (`otplib`); a backup code replaces the 6-digit code
+  only — the password step is still required
 - API key support (`dh_` prefix, SHA-256 hashed at rest)
 - Role-based access: `user` < `admin` < `super_admin`
 - Ownership checks on every `[id]` route
@@ -38,6 +63,9 @@ If you discover a security vulnerability in Apsamo Panel, please report it respo
 - `ENCRYPTION_KEY` is mandatory in production (panel refuses to boot without it)
 
 ### HTTP security
+- Content-Security-Policy with a per-request nonce on every page
+  (`src/lib/csp.ts`): only the panel's own scripts run, no inline handlers,
+  no plugins, no framing by other sites
 - HSTS (2 years, includeSubDomains, preload)
 - X-Content-Type-Options: nosniff
 - X-Frame-Options: SAMEORIGIN

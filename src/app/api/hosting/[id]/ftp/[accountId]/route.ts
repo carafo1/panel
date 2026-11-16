@@ -3,7 +3,7 @@ import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
 import { requireProjectAccess } from '@/lib/project-access'
 import { logAudit } from '@/lib/audit'
-import { getFtpAccount, updateFtpAccount, deleteFtpAccount } from '@/lib/vps'
+import { getFtpAccount, updateFtpAccount, deleteFtpAccount, FtpError } from '@/lib/vps'
 
 /**
  * Project FTP Account Endpoint (single)
@@ -79,9 +79,11 @@ export async function PATCH(
 
     return NextResponse.json({ account })
   } catch (error) {
-    const msg = 'Internal server error'
+    if (error instanceof FtpError) {
+      return NextResponse.json({ error: error.message }, { status: error.status })
+    }
     console.error('Update FTP account error:', error)
-    return NextResponse.json({ error: msg }, { status: 500 })
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
 
@@ -117,6 +119,9 @@ export async function DELETE(
 
     return NextResponse.json({ message: 'FTP account deleted' })
   } catch (error) {
+    if (error instanceof FtpError) {
+      return NextResponse.json({ error: error.message }, { status: error.status })
+    }
     console.error('Delete FTP account error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }

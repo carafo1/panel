@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server'
 import { authenticateRequest } from '@/lib/auth'
 import { requireProjectAccess } from '@/lib/project-access'
 import { generateEmailDnsRecords, type MailcowDkimInput } from '@/lib/email-dns'
-import { getDomain, isMailcowConfigured } from '@/lib/mailcow'
+import { isMailcowConfigured } from '@/lib/mailcow'
+import { lookupMailcowDkim } from '@/lib/email-dkim'
 
 /**
  * Project Email DNS Records Endpoint
@@ -37,23 +38,8 @@ function normaliseDomain(value: string): string {
 async function fetchMailcowDkim(
   domain: string
 ): Promise<MailcowDkimInput | null> {
-  if (!isMailcowConfigured()) return null
-  try {
-    const result = await getDomain(domain)
-    if (!result.success || !result.domain) return null
-    const dkim = result.domain.dkim
-    if (!dkim || !dkim.public) return null
-    return {
-      selector: dkim.selector || 'mail',
-      publicKey: dkim.public,
-    }
-  } catch (err) {
-    console.error(
-      '[email/dns-records] Mailcow DKIM fetch failed:',
-      err instanceof Error ? err.message : String(err)
-    )
-    return null
-  }
+  const lookup = await lookupMailcowDkim(domain)
+  return lookup.ok ? lookup.dkim : null
 }
 
 export async function GET(

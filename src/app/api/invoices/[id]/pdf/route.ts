@@ -8,20 +8,17 @@ import { FROM_NAME, BRAND_DOMAIN, BILLING_EMAIL } from '@/lib/brand-config'
  * GET /api/invoices/:id/pdf
  *
  * Downloadable PDF for an invoice. A customer may fetch their OWN invoice;
- * admins may fetch any. The token can come from the Authorization header or a
- * `?token=` query param, because a browser navigating to a download URL can't
- * set headers.
+ * admins may fetch any. A browser opening the download link sends the httpOnly
+ * session cookie, which the proxy turns into the Authorization header; API
+ * clients send the header themselves. (A `?token=` query parameter used to be
+ * accepted; a login token in a URL leaks into access logs and browser history.)
  */
 export async function GET(
   request: Request,
   context: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { searchParams } = new URL(request.url)
-    const headerToken = extractTokenFromHeader(
-      request.headers.get('Authorization')
-    )
-    const token = headerToken || searchParams.get('token')
+    const token = extractTokenFromHeader(request.headers.get('Authorization'))
     const decoded = token ? await verifyTokenFresh(token) : null
     if (!decoded) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -109,7 +106,7 @@ export async function GET(
     // `inline` lets the browser preview (and therefore print) it; add
     // ?download=1 to force a save dialog instead.
     const disposition =
-      searchParams.get('download') === '1' ? 'attachment' : 'inline'
+      new URL(request.url).searchParams.get('download') === '1' ? 'attachment' : 'inline'
 
     return new NextResponse(new Uint8Array(pdf), {
       status: 200,

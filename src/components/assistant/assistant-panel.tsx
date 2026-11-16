@@ -19,7 +19,6 @@ import {
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { useAuthStore } from '@/store/auth-store'
 
 // ── Types ───────────────────────────────────────────────────────────────
 interface ChatMessage {
@@ -82,7 +81,6 @@ function renderMarkdown(text: string) {
 
 // ── Component ───────────────────────────────────────────────────────────
 export default function AssistantPanel() {
-  const { token } = useAuthStore()
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -120,10 +118,8 @@ export default function AssistantPanel() {
       try {
         const response = await fetch('/api/assistant/chat', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             message: messageText.trim(),
             sessionId: sessionId || undefined,
@@ -157,7 +153,7 @@ export default function AssistantPanel() {
         inputRef.current?.focus()
       }
     },
-    [isLoading, sessionId, token]
+    [isLoading, sessionId]
   )
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -170,7 +166,7 @@ export default function AssistantPanel() {
       try {
         await fetch(`/api/assistant/chat?sessionId=${sessionId}`, {
           method: 'DELETE',
-          headers: { Authorization: `Bearer ${token}` },
+          credentials: 'same-origin',
         })
       } catch {
         // Silently fail - it's just cleanup
