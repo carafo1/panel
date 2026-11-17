@@ -50,8 +50,12 @@ import {
   LayoutGrid,
   Ban,
   ShieldAlert,
-  LogOut,
 } from 'lucide-react'
+import { CustomerActionsMenu } from '@/components/admin/customer-actions'
+import { AdminSearch } from '@/components/admin/admin-search'
+import { BroadcastPanel } from '@/components/admin/broadcast-panel'
+import { TemplatesAdminPanel } from '@/components/admin/templates-admin-panel'
+import { UsageAdminPanel } from '@/components/admin/usage-admin-panel'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/store/auth-store'
 import { PaymentMethodsPanel } from '@/components/admin/payment-methods-panel'
@@ -246,6 +250,7 @@ export function AdminPanel() {
   const [jobs, setJobs] = useState<Job[]>([])
   const [loading, setLoading] = useState(true)
   const [userSearch, setUserSearch] = useState('')
+  const [adminTab, setAdminTab] = useState('content')
   const [jobFilter, setJobFilter] = useState('all')
   const [retryLoading, setRetryLoading] = useState<string | null>(null)
   const [roleLoading, setRoleLoading] = useState<string | null>(null)
@@ -470,9 +475,17 @@ export function AdminPanel() {
         })}
       </div>
 
+      {/* ── Global search: find a customer from any identifier ─────── */}
+      <AdminSearch
+        onOpenCustomer={(email) => {
+          setUserSearch(email)
+          setAdminTab('users')
+        }}
+      />
+
       {/* ── Tabbed sections ────────────────────────────────────────── */}
-      <Tabs defaultValue="content" className="space-y-4">
-        <TabsList className="flex flex-wrap">
+      <Tabs value={adminTab} onValueChange={setAdminTab} className="space-y-4">
+        <TabsList className="flex flex-wrap h-auto">
           <TabsTrigger value="infrastructure">
             <Server className="size-4 mr-1.5" />
             Infrastructure
@@ -482,6 +495,9 @@ export function AdminPanel() {
             Content
           </TabsTrigger>
           <TabsTrigger value="users">Users</TabsTrigger>
+          <TabsTrigger value="usage">Usage</TabsTrigger>
+          <TabsTrigger value="announcements">Announcements</TabsTrigger>
+          <TabsTrigger value="templates">Templates</TabsTrigger>
           <TabsTrigger value="jobs">Job Queue</TabsTrigger>
           <TabsTrigger value="servers">Servers</TabsTrigger>
           <TabsTrigger value="backups">Backups</TabsTrigger>
@@ -551,13 +567,13 @@ export function AdminPanel() {
                       <TableHead>Plan</TableHead>
                       <TableHead>Projects</TableHead>
                       <TableHead>Joined</TableHead>
-                      {isSuperAdmin && <TableHead className="text-right">Actions</TableHead>}
+                      <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {filteredUsers.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={isSuperAdmin ? 8 : 7} className="text-center py-8 text-muted-foreground">
+                        <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                           No users found
                         </TableCell>
                       </TableRow>
@@ -647,13 +663,6 @@ export function AdminPanel() {
                                       )}
                                     </DropdownMenuItem>
                                   ))}
-                                  <DropdownMenuSeparator />
-                                  <DropdownMenuItem
-                                    onClick={() => handleSignOutEverywhere(u.id, u.email)}
-                                  >
-                                    <LogOut className="size-3.5" />
-                                    Sign out all devices
-                                  </DropdownMenuItem>
                                 </DropdownMenuContent>
                               </DropdownMenu>
                             ) : (
@@ -675,19 +684,14 @@ export function AdminPanel() {
                           <TableCell className="text-xs text-muted-foreground">
                             {new Date(u.createdAt).toLocaleDateString()}
                           </TableCell>
-                          {isSuperAdmin && (
-                            <TableCell className="text-right">
-                              {u.id === currentUserId ? (
-                                <span className="text-xs text-muted-foreground italic">
-                                  You
-                                </span>
-                              ) : (
-                                <span className="text-xs text-muted-foreground">
-                                  Use role menu
-                                </span>
-                              )}
-                            </TableCell>
-                          )}
+                          <TableCell className="text-right">
+                            <CustomerActionsMenu
+                              customer={{ id: u.id, name: u.name, email: u.email, role: u.role }}
+                              isSelf={u.id === currentUserId}
+                              isSuperAdmin={isSuperAdmin}
+                              onSignOutEverywhere={handleSignOutEverywhere}
+                            />
+                          </TableCell>
                         </TableRow>
                       ))
                     )}
@@ -696,6 +700,18 @@ export function AdminPanel() {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="usage">
+          <UsageAdminPanel />
+        </TabsContent>
+
+        <TabsContent value="announcements">
+          <BroadcastPanel />
+        </TabsContent>
+
+        <TabsContent value="templates">
+          <TemplatesAdminPanel />
         </TabsContent>
 
         {/* ── Jobs Tab ───────────────────────────────────────────────── */}

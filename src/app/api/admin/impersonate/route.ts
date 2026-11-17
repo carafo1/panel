@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { verifyTokenFresh, extractTokenFromHeader, issueSession } from '@/lib/auth'
+import { attachSession, attachSupportReturn, requestSource } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
 import { db } from '@/lib/db'
 
@@ -46,7 +47,7 @@ export async function POST(request: Request) {
       )
     }
 
-    const body = (await request.json().catch(() => ({}))) as { userId?: string }
+    const body = (await request.json().catch(() => ({}))) as { userId?: string; switchSession?: boolean }
     if (!body.userId) {
       return NextResponse.json({ error: 'userId is required' }, { status: 400 })
     }
@@ -101,14 +102,29 @@ export async function POST(request: Request) {
       },
     }).catch(() => {})
 
-    return NextResponse.json({
+    const payload = {
       success: true,
-      token: impersonationToken,
       expiresInSeconds: 3600,
       user: { id: target.id, email: target.email, name: target.name, role: target.role },
       warning:
         'This session expires in 1 hour and every action is logged against your admin account.',
-    })
+    }
+
+    // From the admin panel itself: switch THIS browser into the support
+    // session and keep the admin's own login aside for "Return to admin".
+    // The token never reaches page scripts.
+    if (body.switchSession === true) {
+      if (requestSource(request) !== 'same-origin') {
+        return NextResponse.json({ error: 'Not allowed' }, { status: 403 })
+      }
+      const res = NextResponse.json(payload)
+      attachSession(res, impersonationToken, request)
+      attachSupportReturn(res, token!)
+      return res
+    }
+
+    // API clients get the token to use as a bearer header.
+    return NextResponse.json({ ...payload, token: impersonationToken })
   } catch (error) {
     console.error('[admin/impersonate] failed:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

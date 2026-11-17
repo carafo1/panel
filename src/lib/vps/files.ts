@@ -46,6 +46,18 @@ import {
 import { ensureDir } from './local-exec'
 import { getServerCredentials } from './provisioner'
 
+/**
+ * A path the customer asked for that we refuse (absolute, `..`, escapes the
+ * site). It is the caller's mistake, so routes answer 400 with this message
+ * rather than a 500 "internal error".
+ */
+export class PathError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'PathError'
+  }
+}
+
 // ─── Per-project storage root (LOCAL mode) ──────────────────────────────
 
 /**
@@ -78,19 +90,19 @@ function PROJECT_ROOT(projectId: string): string {
  */
 export function pathTraversalSafe(root: string, requested: string): string {
   if (!requested || typeof requested !== 'string') {
-    throw new Error('Path is required')
+    throw new PathError('Path is required')
   }
   if (path.isAbsolute(requested)) {
-    throw new Error('Absolute paths are not allowed')
+    throw new PathError('Absolute paths are not allowed')
   }
   const segments = requested.split('/')
   if (segments.some((s) => s === '..')) {
-    throw new Error('Parent-directory (..) segments are not allowed')
+    throw new PathError('Parent-directory (..) segments are not allowed')
   }
   const base = root.replace(/\/$/, '')
   const resolved = path.posix.normalize(`${base}/${requested}`)
   if (resolved !== base && !resolved.startsWith(base + '/')) {
-    throw new Error('Resolved path escapes the project directory')
+    throw new PathError('Resolved path escapes the project directory')
   }
   return resolved
 }
@@ -122,23 +134,23 @@ export interface FileEntry {
  */
 export function safePath(deployPath: string, requested: string): string {
   if (!requested || typeof requested !== 'string') {
-    throw new Error('Path is required')
+    throw new PathError('Path is required')
   }
   if (path.isAbsolute(requested)) {
-    throw new Error('Absolute paths are not allowed')
+    throw new PathError('Absolute paths are not allowed')
   }
   // Reject any ".." segment literally — even before normalization, so users
   // can't sneak a `..` past us via encoded characters etc.
   const segments = requested.split('/')
   if (segments.some((s) => s === '..')) {
-    throw new Error('Parent-directory (..) segments are not allowed')
+    throw new PathError('Parent-directory (..) segments are not allowed')
   }
 
   // Resolve to an absolute path on the VPS and assert it stays inside.
   const base = deployPath.replace(/\/$/, '')
   const resolved = path.posix.normalize(`${base}/${requested}`)
   if (resolved !== base && !resolved.startsWith(base + '/')) {
-    throw new Error('Resolved path escapes the project directory')
+    throw new PathError('Resolved path escapes the project directory')
   }
   return resolved
 }
@@ -193,8 +205,10 @@ async function resolveProjectPath(
   }
   // No server configured → demo mode (synthetic listing).
   const isDemo = project.server ? isServerInDemoMode(project.server) : true
+  // Reject a bad path first, whatever state the site is in.
+  safePath('/__validate__', relative || '.')
   if (!project.deployPath) {
-    throw new Error('Project has no deployPath (not deployed yet)')
+    throw new PathError('This website has not been deployed yet — its files appear after the first deployment.')
   }
   return {
     abs: safePath(project.deployPath, relative || '.'),

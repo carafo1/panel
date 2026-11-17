@@ -98,6 +98,7 @@ import {
   Loader2,
   Clock,
   Container,
+  HeartPulse,
 } from 'lucide-react'
 
 // ─── Types ──────────────────────────────────────────────────────────────
@@ -468,6 +469,34 @@ export function ServersPanel() {
     fetchServers()
   }
 
+  // Docker + Caddy check over SSH; the server row's health is updated too.
+  const [healthChecking, setHealthChecking] = useState<string | null>(null)
+  const runHealthCheck = async (server: Server) => {
+    setHealthChecking(server.id)
+    try {
+      const res = await fetch(`/api/admin/servers/${server.id}/health`, { headers: authHeaders() })
+      const data = (await res.json().catch(() => ({}))) as { status?: string; details?: unknown; error?: string }
+      if (!res.ok) throw new Error(data.error || 'Health check failed')
+      const detail =
+        typeof data.details === 'string'
+          ? data.details
+          : data.details && typeof data.details === 'object'
+            ? Object.entries(data.details as Record<string, unknown>)
+                .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`)
+                .join(' · ')
+            : undefined
+      const text = `${server.name}: ${data.status}`
+      if (data.status === 'healthy') toast.success(text, { description: detail })
+      else if (data.status === 'degraded') toast.warning(text, { description: detail })
+      else toast.error(text, { description: detail })
+      await fetchServers()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Health check failed')
+    } finally {
+      setHealthChecking(null)
+    }
+  }
+
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -546,6 +575,8 @@ export function ServersPanel() {
               key={server.id}
               server={server}
               onTest={() => setTestDialog(server)}
+              onHealth={() => runHealthCheck(server)}
+              healthBusy={healthChecking === server.id}
               onProvision={() => setProvisionDialog(server)}
               onStats={() => setStatsDialog(server)}
               onCaddy={() => setCaddyDialog(server)}
@@ -602,6 +633,8 @@ export function ServersPanel() {
 function ServerCard({
   server,
   onTest,
+  onHealth,
+  healthBusy,
   onProvision,
   onStats,
   onCaddy,
@@ -610,6 +643,8 @@ function ServerCard({
 }: {
   server: Server
   onTest: () => void
+  onHealth: () => void
+  healthBusy: boolean
   onProvision: () => void
   onStats: () => void
   onCaddy: () => void
@@ -732,6 +767,13 @@ function ServerCard({
             label="Test SSH"
             onClick={onTest}
             variant="outline"
+          />
+          <TooltipButton
+            icon={healthBusy ? Loader2 : HeartPulse}
+            label={healthBusy ? 'Checking…' : 'Health check'}
+            onClick={onHealth}
+            variant="outline"
+            disabled={healthBusy}
           />
           <TooltipButton
             icon={Play}

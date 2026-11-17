@@ -431,12 +431,14 @@ export default function DomainsPanel() {
   const { user } = useAuthStore()
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin'
 
-  // Fetch the current global markup once on mount so the badge can show it.
+  // The markup badge is admin-only, and so is the endpoint: customers would
+  // only get a 403 on every visit, so don't ask on their behalf.
   useEffect(() => {
+    if (!isAdmin) return
     apiFetch('/pricing/markup')
       .then((data) => setGlobalMarkup(typeof data.data?.markup === 'number' ? data.data.markup : null))
       .catch(() => setGlobalMarkup(null))
-  }, [])
+  }, [isAdmin])
 
   if (selectedDomainId) {
     return (

@@ -42,6 +42,7 @@ import { NotificationCenter } from '@/components/notifications/notification-cent
 import { ThemeToggle } from '@/components/ui/theme-toggle'
 import OnboardingWizard from '@/components/onboarding/onboarding-wizard'
 import { EmailVerificationBanner } from '@/components/auth/email-verification-banner'
+import { SupportSessionBanner } from '@/components/auth/support-session-banner'
 import { ErrorBoundary } from '@/components/error-boundary'
 import PipelinesPanel from '@/components/pipelines/pipelines-panel'
 import WebhooksPanel from '@/components/webhooks/webhooks-panel'
@@ -254,8 +255,10 @@ function Dashboard() {
         </div>
       </aside>
 
-      {/* Main content */}
-      <main className="flex-1 flex flex-col min-h-0">
+      {/* Main content. min-w-0: a flex item otherwise grows to its widest
+          content (e.g. a site's 17-tab strip) and pushes the whole page
+          wider than the screen; with it, wide strips scroll inside instead. */}
+      <main className="flex-1 flex flex-col min-h-0 min-w-0">
         {/* Top bar */}
         <header className="sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b px-4 py-3 flex items-center gap-3 shrink-0">
           <Button
@@ -302,6 +305,9 @@ function Dashboard() {
             <NotificationCenter />
           </div>
         </header>
+
+        {/* Support access ("log in as customer") — always visible while active */}
+        <SupportSessionBanner />
 
         {/* Scrollable content area */}
         <div className="flex-1 overflow-y-auto pb-16 lg:pb-0">

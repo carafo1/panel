@@ -8,6 +8,8 @@ export interface User {
   emailVerified: boolean
   avatar?: string
   twoFactorEnabled?: boolean
+  /** Set while a super admin is using support access as this user. */
+  supportSession?: { adminEmail: string | null } | null
 }
 
 /** Result returned by `login`. Either a fully-authed user or a 2FA challenge. */
