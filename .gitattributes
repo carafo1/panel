@@ -1,0 +1,10 @@
+# Files that run on the Linux server must keep Linux line endings (LF).
+# With Windows line endings bash fails on the first line
+# (e.g. "set: pipefail\r: invalid option"), and systemd/cloud-init/Caddy
+# configs can misread values. This holds no matter how git is configured on
+# the machine that commits them.
+*.sh            text eol=lf
+deploy/**       text eol=lf
+deploy/bin/*    text eol=lf
+mini-services/**/*.sh text eol=lf
+Caddyfile       text eol=lf
