@@ -12,7 +12,7 @@
     "build": "next build && cp -r .next/static .next/standalone/.next/ && cp -r public .next/standalone/ && mkdir -p .next/standalone/node_modules/@prisma && cp -r node_modules/.prisma .next/standalone/node_modules/ && cp -r node_modules/@prisma/client .next/standalone/node_modules/@prisma/",
     "start": "NODE_ENV=production bun .next/standalone/server.js 2>&1 | tee server.log",
     "lint": "eslint .",
-    "test": "bun test tests/unit/",
+    "test": "bun test --preload ./tests/unit/preload.ts tests/unit/",
     "test:scenarios": "bun test --preload ./tests/scenarios/preload.ts tests/scenarios/",
     "typecheck": "tsc --noEmit -p .",
     "test:integration": "bun test tests/integration/",
