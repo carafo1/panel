@@ -582,7 +582,7 @@ function StageConfigDialogInner({
             Configure the command, environment, and behavior for this stage.
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-4 py-2 max-h-[60vh] overflow-y-auto pr-1">
+        <div className="space-y-4 py-2 max-h-[60vh] overflow-y-auto pe-1">
           {/* Name */}
           <div className="space-y-2">
             <Label>Stage Name</Label>
@@ -743,7 +743,7 @@ function SortableStageCard({
         className={`relative w-56 rounded-xl border-2 p-4 transition-all hover:shadow-md group ${def.border} ${def.bg}`}
       >
         {/* Drag handle + order badge */}
-        <div className="absolute -top-2 -left-2 flex items-center gap-0.5">
+        <div className="absolute -top-2 -start-2 flex items-center gap-0.5">
           <div className="size-5 rounded-full bg-background border-2 flex items-center justify-center text-[10px] font-bold text-muted-foreground" style={{ borderColor: 'var(--border)' }}>
             {index + 1}
           </div>
@@ -909,7 +909,7 @@ function VisualStageEditor({
         <Label className="text-sm font-medium">Pipeline Stages</Label>
         {!readOnly && (
           <Button variant="outline" size="sm" onClick={() => setPickerOpen(true)} className="h-7 text-xs">
-            <Plus className="size-3 mr-1" />
+            <Plus className="size-3 me-1" />
             Add Stage
           </Button>
         )}
@@ -924,7 +924,7 @@ function VisualStageEditor({
           </p>
           {!readOnly && (
             <Button variant="outline" size="sm" onClick={() => setPickerOpen(true)}>
-              <Plus className="size-3.5 mr-1" />
+              <Plus className="size-3.5 me-1" />
               Add First Stage
             </Button>
           )}
@@ -956,7 +956,7 @@ function VisualStageEditor({
                       <div className="flex items-center h-36 px-1">
                         <div className="flex items-center">
                           <div className="w-6 h-0.5 bg-border" />
-                          <ArrowRight className="size-4 text-muted-foreground -ml-0.5" />
+                          <ArrowRight className="size-4 text-muted-foreground -ms-0.5" />
                         </div>
                       </div>
                     )}
@@ -965,7 +965,7 @@ function VisualStageEditor({
 
                 {/* Add stage button at the end */}
                 {!readOnly && stages.length > 0 && (
-                  <div className="flex items-center h-36 pl-2">
+                  <div className="flex items-center h-36 ps-2">
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <Button
@@ -1122,10 +1122,10 @@ function HorizontalRunProgress({
               <button
                 type="button"
                 onClick={() => onSelectStage(isSelected ? null : index)}
-                className={`relative w-48 rounded-xl border-2 p-3 transition-all hover:shadow-md text-left ${st.border} ${st.bg} ${st.glow} ${isSelected ? 'ring-2 ring-indigo-500/50 shadow-lg' : ''}`}
+                className={`relative w-48 rounded-xl border-2 p-3 transition-all hover:shadow-md text-start ${st.border} ${st.bg} ${st.glow} ${isSelected ? 'ring-2 ring-indigo-500/50 shadow-lg' : ''}`}
               >
                 {/* Status indicator */}
-                <div className="absolute -top-1.5 -left-1.5">
+                <div className="absolute -top-1.5 -start-1.5">
                   {statusIcon}
                 </div>
 
@@ -1167,7 +1167,7 @@ function HorizontalRunProgress({
                       stage.status === 'running' ? 'bg-indigo-300 dark:bg-indigo-700' :
                       'bg-border'
                     }`} />
-                    <ArrowRight className={`size-3 -ml-0.5 ${
+                    <ArrowRight className={`size-3 -ms-0.5 ${
                       stage.status === 'success' ? 'text-indigo-400' :
                       stage.status === 'running' ? 'text-indigo-400' :
                       'text-muted-foreground'
@@ -1302,7 +1302,7 @@ function PipelineFlowchart({ stages }: { stages: PipelineStage[] }) {
             <Play className="size-4 text-indigo-600 dark:text-indigo-400" />
           </div>
           <div className="w-8 h-0.5 bg-indigo-300 dark:bg-indigo-700" />
-          <ArrowRight className="size-4 text-indigo-400 -ml-0.5" />
+          <ArrowRight className="size-4 text-indigo-400 -ms-0.5" />
         </div>
 
         {stages.map((stage, index) => {
@@ -1327,7 +1327,7 @@ function PipelineFlowchart({ stages }: { stages: PipelineStage[] }) {
               {index < stages.length - 1 && (
                 <div className="flex items-center px-0.5">
                   <div className="w-6 h-0.5 bg-border" />
-                  <ArrowRight className="size-3.5 text-muted-foreground -ml-0.5" />
+                  <ArrowRight className="size-3.5 text-muted-foreground -ms-0.5" />
                 </div>
               )}
             </div>
@@ -1337,7 +1337,7 @@ function PipelineFlowchart({ stages }: { stages: PipelineStage[] }) {
         {/* End node */}
         <div className="flex items-center">
           <div className="w-6 h-0.5 bg-border" />
-          <ArrowRight className="size-3.5 text-muted-foreground -ml-0.5" />
+          <ArrowRight className="size-3.5 text-muted-foreground -ms-0.5" />
           <div className="w-10 h-10 rounded-full bg-gray-100 dark:bg-gray-900/40 border-2 border-gray-400 dark:border-gray-600 flex items-center justify-center">
             <CheckCircle2 className="size-4 text-gray-600 dark:text-gray-400" />
           </div>
@@ -1677,7 +1677,7 @@ export default function PipelinesPanel() {
             onClick={() => setCreateDialogOpen(true)}
             className="bg-indigo-600 hover:bg-indigo-700"
           >
-            <Plus className="size-4 mr-1.5" />
+            <Plus className="size-4 me-1.5" />
             New Pipeline
           </Button>
         </div>
@@ -1695,7 +1695,7 @@ export default function PipelinesPanel() {
                 onClick={() => setCreateDialogOpen(true)}
                 className="bg-indigo-600 hover:bg-indigo-700"
               >
-                <Plus className="size-4 mr-1.5" />
+                <Plus className="size-4 me-1.5" />
                 Create Pipeline
               </Button>
             </CardContent>
@@ -1749,7 +1749,7 @@ export default function PipelinesPanel() {
                     <div className="flex items-center gap-2 shrink-0">
                       {/* Last run status */}
                       {pipeline.lastRun ? (
-                        <div className="text-right hidden sm:block">
+                        <div className="text-end hidden sm:block">
                           <RunStatusBadge status={pipeline.lastRun.status} />
                           <p className="text-[10px] text-muted-foreground mt-0.5">
                             {formatDuration(pipeline.lastRun.duration)} ago
@@ -1778,7 +1778,7 @@ export default function PipelinesPanel() {
                               openPipeline(pipeline)
                             }}
                           >
-                            <Eye className="size-3.5 mr-2" />
+                            <Eye className="size-3.5 me-2" />
                             View Details
                           </DropdownMenuItem>
                           {pipeline.status === 'active' && (
@@ -1788,7 +1788,7 @@ export default function PipelinesPanel() {
                                 handleTriggerRun(pipeline)
                               }}
                             >
-                              <Play className="size-3.5 mr-2" />
+                              <Play className="size-3.5 me-2" />
                               Trigger Run
                             </DropdownMenuItem>
                           )}
@@ -1799,7 +1799,7 @@ export default function PipelinesPanel() {
                                 handleStatusChange(pipeline, 'active')
                               }}
                             >
-                              <Play className="size-3.5 mr-2" />
+                              <Play className="size-3.5 me-2" />
                               Activate
                             </DropdownMenuItem>
                           )}
@@ -1810,7 +1810,7 @@ export default function PipelinesPanel() {
                                 handleStatusChange(pipeline, 'paused')
                               }}
                             >
-                              <Pause className="size-3.5 mr-2" />
+                              <Pause className="size-3.5 me-2" />
                               Pause
                             </DropdownMenuItem>
                           )}
@@ -1821,7 +1821,7 @@ export default function PipelinesPanel() {
                                 handleStatusChange(pipeline, 'active')
                               }}
                             >
-                              <Play className="size-3.5 mr-2" />
+                              <Play className="size-3.5 me-2" />
                               Resume
                             </DropdownMenuItem>
                           )}
@@ -1831,7 +1831,7 @@ export default function PipelinesPanel() {
                               handleDuplicatePipeline(pipeline)
                             }}
                           >
-                            <Copy className="size-3.5 mr-2" />
+                            <Copy className="size-3.5 me-2" />
                             Duplicate
                           </DropdownMenuItem>
                           <DropdownMenuItem
@@ -1842,7 +1842,7 @@ export default function PipelinesPanel() {
                               setDeleteDialogOpen(true)
                             }}
                           >
-                            <Trash2 className="size-3.5 mr-2" />
+                            <Trash2 className="size-3.5 me-2" />
                             Delete
                           </DropdownMenuItem>
                         </DropdownMenuContent>
@@ -1936,7 +1936,7 @@ export default function PipelinesPanel() {
                 onClick={() => handleStatusChange(selectedPipeline, 'active')}
                 className="bg-indigo-600 hover:bg-indigo-700 h-8"
               >
-                <Play className="size-3.5 mr-1" />
+                <Play className="size-3.5 me-1" />
                 Activate
               </Button>
             )}
@@ -1949,9 +1949,9 @@ export default function PipelinesPanel() {
                   className="bg-indigo-600 hover:bg-indigo-700 h-8"
                 >
                   {triggeringRun ? (
-                    <Loader2 className="size-3.5 mr-1 animate-spin" />
+                    <Loader2 className="size-3.5 me-1 animate-spin" />
                   ) : (
-                    <Play className="size-3.5 mr-1" />
+                    <Play className="size-3.5 me-1" />
                   )}
                   Run Now
                 </Button>
@@ -1961,7 +1961,7 @@ export default function PipelinesPanel() {
                   onClick={() => handleStatusChange(selectedPipeline, 'paused')}
                   className="h-8"
                 >
-                  <Pause className="size-3.5 mr-1" />
+                  <Pause className="size-3.5 me-1" />
                   Pause
                 </Button>
               </>
@@ -1972,7 +1972,7 @@ export default function PipelinesPanel() {
                 onClick={() => handleStatusChange(selectedPipeline, 'active')}
                 className="bg-indigo-600 hover:bg-indigo-700 h-8"
               >
-                <Play className="size-3.5 mr-1" />
+                <Play className="size-3.5 me-1" />
                 Resume
               </Button>
             )}
@@ -1984,7 +1984,7 @@ export default function PipelinesPanel() {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuItem onClick={() => handleDuplicatePipeline(selectedPipeline)}>
-                  <Copy className="size-3.5 mr-2" />
+                  <Copy className="size-3.5 me-2" />
                   Duplicate
                 </DropdownMenuItem>
                 <DropdownMenuItem
@@ -1994,7 +1994,7 @@ export default function PipelinesPanel() {
                     setDeleteDialogOpen(true)
                   }}
                 >
-                  <Trash2 className="size-3.5 mr-2" />
+                  <Trash2 className="size-3.5 me-2" />
                   Delete
                 </DropdownMenuItem>
               </DropdownMenuContent>
@@ -2079,15 +2079,15 @@ export default function PipelinesPanel() {
         <Tabs defaultValue="visual" className="space-y-4">
           <TabsList>
             <TabsTrigger value="visual">
-              <Eye className="size-3.5 mr-1" />
+              <Eye className="size-3.5 me-1" />
               Visual
             </TabsTrigger>
             <TabsTrigger value="editor">
-              <Settings className="size-3.5 mr-1" />
+              <Settings className="size-3.5 me-1" />
               Editor
             </TabsTrigger>
             <TabsTrigger value="runs">
-              <Clock className="size-3.5 mr-1" />
+              <Clock className="size-3.5 me-1" />
               Runs
             </TabsTrigger>
           </TabsList>
@@ -2226,7 +2226,7 @@ export default function PipelinesPanel() {
                     className="h-7 text-xs"
                   >
                     {savingStages ? (
-                      <Loader2 className="size-3 mr-1 animate-spin" />
+                      <Loader2 className="size-3 me-1 animate-spin" />
                     ) : null}
                     Save Changes
                   </Button>
@@ -2375,9 +2375,9 @@ export default function PipelinesPanel() {
                 className="bg-indigo-600 hover:bg-indigo-700 h-8"
               >
                 {triggeringRun ? (
-                  <Loader2 className="size-3.5 mr-1 animate-spin" />
+                  <Loader2 className="size-3.5 me-1 animate-spin" />
                 ) : (
-                  <RotateCcw className="size-3.5 mr-1" />
+                  <RotateCcw className="size-3.5 me-1" />
                 )}
                 Re-run
               </Button>
@@ -2610,12 +2610,12 @@ export default function PipelinesPanel() {
             >
               {creating ? (
                 <>
-                  <Loader2 className="size-3.5 mr-1 animate-spin" />
+                  <Loader2 className="size-3.5 me-1 animate-spin" />
                   Creating...
                 </>
               ) : (
                 <>
-                  <Plus className="size-3.5 mr-1" />
+                  <Plus className="size-3.5 me-1" />
                   Create Pipeline
                 </>
               )}
@@ -2643,12 +2643,12 @@ export default function PipelinesPanel() {
             >
               {deleting ? (
                 <>
-                  <Loader2 className="size-3.5 mr-1 animate-spin" />
+                  <Loader2 className="size-3.5 me-1 animate-spin" />
                   Deleting...
                 </>
               ) : (
                 <>
-                  <Trash2 className="size-3.5 mr-1" />
+                  <Trash2 className="size-3.5 me-1" />
                   Delete
                 </>
               )}

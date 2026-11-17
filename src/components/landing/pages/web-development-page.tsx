@@ -224,7 +224,7 @@ export function WebDevelopmentPage({ onGetStarted }: WebDevelopmentPageProps) {
               return (
                 <StaggerCard key={cat.title} index={i}>
                   <Card className="group relative overflow-hidden border hover:border-indigo-500/40 hover:shadow-glow-indigo transition-all duration-500 h-full bg-card/80 backdrop-blur-sm">
-                    <div className="absolute -top-16 -right-16 size-40 rounded-full bg-indigo-500/10 blur-3xl group-hover:bg-indigo-500/20 transition-all duration-500" />
+                    <div className="absolute -top-16 -end-16 size-40 rounded-full bg-indigo-500/10 blur-3xl group-hover:bg-indigo-500/20 transition-all duration-500" />
                     <CardContent className="p-6 sm:p-8 relative">
                       <div className="flex items-center gap-4 mb-4">
                         <div className="flex size-12 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-700 text-white shadow-glow-indigo group-hover:scale-110 transition-transform duration-500">
@@ -288,7 +288,7 @@ export function WebDevelopmentPage({ onGetStarted }: WebDevelopmentPageProps) {
                       <span className="size-3 rounded-full bg-amber-400/80" />
                       <span className="size-3 rounded-full bg-green-400/80" />
                     </div>
-                    <div className="ml-2 flex items-center gap-1.5 text-xs text-zinc-400">
+                    <div className="ms-2 flex items-center gap-1.5 text-xs text-zinc-400">
                       <Terminal className="size-3.5" />
                       route.ts
                     </div>
@@ -296,7 +296,7 @@ export function WebDevelopmentPage({ onGetStarted }: WebDevelopmentPageProps) {
                   <CardContent className="p-5 font-mono text-[13px] leading-relaxed">
                     {CODE_LINES.map((line) => (
                       <div key={line.n} className="flex gap-4">
-                        <span className="select-none text-zinc-600 w-6 text-right">{line.n}</span>
+                        <span className="select-none text-zinc-600 w-6 text-end">{line.n}</span>
                         <span className={line.c || 'text-zinc-300'}>{line.t || '\u00A0'}</span>
                       </div>
                     ))}
@@ -319,7 +319,7 @@ export function WebDevelopmentPage({ onGetStarted }: WebDevelopmentPageProps) {
           </ScrollReveal>
           <div className="relative">
             {/* vertical line */}
-            <div className="absolute left-6 sm:left-8 top-2 bottom-2 w-px bg-gradient-to-b from-indigo-400 via-indigo-500/40 to-transparent" aria-hidden />
+            <div className="absolute start-6 sm:start-8 top-2 bottom-2 w-px bg-gradient-to-b from-indigo-400 via-indigo-500/40 to-transparent" aria-hidden />
             <div className="space-y-8">
               {PROCESS.map((p, i) => {
                 const Icon = p.icon
@@ -362,7 +362,7 @@ export function WebDevelopmentPage({ onGetStarted }: WebDevelopmentPageProps) {
               return (
                 <StaggerCard key={cap.title} index={i}>
                   <Card className="group relative overflow-hidden border hover:border-indigo-500/40 hover:shadow-glow-indigo transition-all duration-500 h-full bg-card/80 backdrop-blur-sm">
-                    <div className="absolute -top-12 -right-12 size-32 rounded-full bg-indigo-500/10 blur-3xl group-hover:bg-indigo-500/20 transition-all duration-500" />
+                    <div className="absolute -top-12 -end-12 size-32 rounded-full bg-indigo-500/10 blur-3xl group-hover:bg-indigo-500/20 transition-all duration-500" />
                     <CardContent className="p-6 relative">
                       <div className="mb-4 flex size-12 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-700 text-white shadow-glow-indigo group-hover:scale-110 group-hover:-rotate-6 transition-all duration-500">
                         <Icon className="size-5" />
@@ -435,7 +435,7 @@ export function WebDevelopmentPage({ onGetStarted }: WebDevelopmentPageProps) {
           <Accordion type="single" collapsible className="w-full">
             {faqs.map((faq, i) => (
               <AccordionItem key={i} value={`item-${i}`}>
-                <AccordionTrigger className="text-left">{faq.q}</AccordionTrigger>
+                <AccordionTrigger className="text-start">{faq.q}</AccordionTrigger>
                 <AccordionContent className="text-muted-foreground">{faq.a}</AccordionContent>
               </AccordionItem>
             ))}
@@ -453,9 +453,9 @@ export function WebDevelopmentPage({ onGetStarted }: WebDevelopmentPageProps) {
             <p className="text-zinc-300 text-lg mb-8 max-w-xl mx-auto">Tell us about your idea. We&apos;ll reply within 24 hours with a plan, a timeline, and a fixed quote.</p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
               <Button size="lg" className="btn-shimmer bg-indigo-500 hover:bg-indigo-600 text-white px-10 h-12 border-0 shadow-glow-indigo hover:scale-105 transition-all" onClick={onGetStarted}>
-                <Sparkles className="size-4 mr-2" />
+                <Sparkles className="size-4 me-2" />
                 {getContent('svc.web-development.cta.button')}
-                <ArrowRight className="size-4 ml-2" />
+                <ArrowRight className="size-4 ms-2" />
               </Button>
               <button onClick={() => setPublicPage({ page: 'services' })} className="inline-flex items-center justify-center gap-2 h-12 px-8 rounded-md glass text-white hover:bg-white/10 transition-all">
                 <Cloud className="size-4 text-indigo-300" />

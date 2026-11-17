@@ -111,7 +111,7 @@ function DeployStatusBadge({ status }: { status: string }) {
   const isAnimating = status === 'building' || status === 'deploying'
   return (
     <Badge variant="outline" className={`${cfg.className} ${isAnimating ? 'animate-pulse' : ''}`}>
-      {isAnimating && <Loader2 className="size-3 animate-spin mr-1" />}
+      {isAnimating && <Loader2 className="size-3 animate-spin me-1" />}
       {cfg.label}
     </Badge>
   )
@@ -482,7 +482,7 @@ export function DeploymentsPanel() {
           }}
           className="mb-2"
         >
-          <ArrowLeft className="size-4 mr-1" />
+          <ArrowLeft className="size-4 me-1" />
           Back to deployments
         </Button>
 
@@ -496,7 +496,7 @@ export function DeploymentsPanel() {
                   {detail.project.name}
                   {/* Live status indicator */}
                   {isAnimating && (
-                    <span className="flex items-center gap-1 text-sm text-indigo-600 ml-1">
+                    <span className="flex items-center gap-1 text-sm text-indigo-600 ms-1">
                       <span className="relative flex size-2">
                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
                         <span className="relative inline-flex size-2 rounded-full bg-indigo-500" />
@@ -505,7 +505,7 @@ export function DeploymentsPanel() {
                     </span>
                   )}
                   {isLive && (
-                    <span className="flex items-center gap-1 text-sm text-indigo-600 ml-1">
+                    <span className="flex items-center gap-1 text-sm text-indigo-600 ms-1">
                       <span className="relative flex size-2">
                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
                         <span className="relative inline-flex size-2 rounded-full bg-indigo-500" />
@@ -533,7 +533,7 @@ export function DeploymentsPanel() {
                 {isLive && detail.deployUrl && (
                   <Button variant="outline" size="sm" asChild>
                     <a href={detail.deployUrl} target="_blank" rel="noopener noreferrer">
-                      <Globe className="size-4 mr-1" />
+                      <Globe className="size-4 me-1" />
                       Visit Site
                     </a>
                   </Button>
@@ -546,9 +546,9 @@ export function DeploymentsPanel() {
                     onClick={() => handleRollback(detail.id)}
                   >
                     {rollbackLoading ? (
-                      <Loader2 className="size-4 animate-spin mr-1" />
+                      <Loader2 className="size-4 animate-spin me-1" />
                     ) : (
-                      <RotateCcw className="size-4 mr-1" />
+                      <RotateCcw className="size-4 me-1" />
                     )}
                     Rollback
                   </Button>
@@ -570,9 +570,9 @@ export function DeploymentsPanel() {
                     onClick={() => handleDelete(detail.id)}
                   >
                     {deleteLoading ? (
-                      <Loader2 className="size-4 animate-spin mr-1" />
+                      <Loader2 className="size-4 animate-spin me-1" />
                     ) : (
-                      <Trash2 className="size-4 mr-1" />
+                      <Trash2 className="size-4 me-1" />
                     )}
                     Delete
                   </Button>
@@ -646,7 +646,7 @@ export function DeploymentsPanel() {
               <Terminal className="size-4 text-indigo-600" />
               Build Logs
               {isAnimating && (
-                <span className="flex items-center gap-1 text-sm text-indigo-600 ml-2">
+                <span className="flex items-center gap-1 text-sm text-indigo-600 ms-2">
                   <span className="relative flex size-2">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
                     <span className="relative inline-flex size-2 rounded-full bg-indigo-500" />
@@ -656,7 +656,7 @@ export function DeploymentsPanel() {
               )}
               {/* WebSocket connection indicator */}
               {isAnimating && (
-                <span className={`flex items-center gap-1 text-xs ml-auto px-2 py-0.5 rounded-full ${isLiveConnected ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400' : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400'}`}>
+                <span className={`flex items-center gap-1 text-xs ms-auto px-2 py-0.5 rounded-full ${isLiveConnected ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400' : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400'}`}>
                   {isLiveConnected ? (
                     <>
                       <Wifi className="size-3" />
@@ -679,9 +679,9 @@ export function DeploymentsPanel() {
                 <div className="size-3 rounded-full bg-red-500/80" />
                 <div className="size-3 rounded-full bg-yellow-500/80" />
                 <div className="size-3 rounded-full bg-green-500/80" />
-                <span className="ml-2 text-xs text-zinc-500 font-mono">build log — {detail.project.name}</span>
+                <span className="ms-2 text-xs text-zinc-500 font-mono">build log — {detail.project.name}</span>
                 {useLiveLogs && (
-                  <span className="ml-auto text-xs text-indigo-400 font-mono flex items-center gap-1">
+                  <span className="ms-auto text-xs text-indigo-400 font-mono flex items-center gap-1">
                     <span className="relative flex size-1.5">
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
                       <span className="relative inline-flex size-1.5 rounded-full bg-indigo-500" />
@@ -709,7 +709,7 @@ export function DeploymentsPanel() {
             <span>Created: {new Date(detail.createdAt).toLocaleString()}</span>
             <span>Updated: {new Date(detail.updatedAt).toLocaleString()}</span>
             {useLiveLogs && (
-              <span className="ml-auto text-indigo-600 dark:text-indigo-400 flex items-center gap-1">
+              <span className="ms-auto text-indigo-600 dark:text-indigo-400 flex items-center gap-1">
                 <Wifi className="size-3" />
                 Real-time
               </span>
@@ -725,7 +725,7 @@ export function DeploymentsPanel() {
     return (
       <div className="space-y-4">
         <Button variant="ghost" size="sm" className="mb-2" disabled>
-          <ArrowLeft className="size-4 mr-1" />
+          <ArrowLeft className="size-4 me-1" />
           Back to deployments
         </Button>
         <Skeleton className="h-24 w-full rounded-xl" />
@@ -741,19 +741,19 @@ export function DeploymentsPanel() {
         <h2 className="text-xl font-semibold">Recent Deployments</h2>
         <div className="flex items-center gap-2">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+            <Search className="absolute start-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
             <Input
               type="search"
               placeholder="Search by project, branch, commit..."
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
-              className="pl-9 pr-8 h-9 w-48 sm:w-64"
+              className="ps-9 pe-8 h-9 w-48 sm:w-64"
             />
             {searchInput && (
               <button
                 type="button"
                 onClick={() => setSearchInput('')}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                className="absolute end-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                 aria-label="Clear search"
               >
                 <X className="size-3.5" />
@@ -761,7 +761,7 @@ export function DeploymentsPanel() {
             )}
           </div>
           <Button variant="outline" size="sm" onClick={fetchDeployments}>
-            <RotateCcw className="size-4 mr-1" />
+            <RotateCcw className="size-4 me-1" />
             Refresh
           </Button>
         </div>
@@ -785,7 +785,7 @@ export function DeploymentsPanel() {
               <TabsTrigger value="all" className="gap-1">
                 <Filter className="size-3.5" />
                 All
-                <Badge variant="secondary" className="ml-1 h-5 min-w-5 text-[10px] px-1.5">
+                <Badge variant="secondary" className="ms-1 h-5 min-w-5 text-[10px] px-1.5">
                   {counts.all}
                 </Badge>
               </TabsTrigger>
@@ -793,7 +793,7 @@ export function DeploymentsPanel() {
                 <CheckCircle2 className="size-3.5 text-indigo-500" />
                 Live
                 {counts.live > 0 && (
-                  <Badge variant="secondary" className="ml-1 h-5 min-w-5 text-[10px] px-1.5 bg-indigo-100 text-indigo-700">
+                  <Badge variant="secondary" className="ms-1 h-5 min-w-5 text-[10px] px-1.5 bg-indigo-100 text-indigo-700">
                     {counts.live}
                   </Badge>
                 )}
@@ -802,7 +802,7 @@ export function DeploymentsPanel() {
                 <Loader2 className="size-3.5 text-indigo-500" />
                 Building
                 {counts.building > 0 && (
-                  <Badge variant="secondary" className="ml-1 h-5 min-w-5 text-[10px] px-1.5 bg-indigo-100 text-indigo-700">
+                  <Badge variant="secondary" className="ms-1 h-5 min-w-5 text-[10px] px-1.5 bg-indigo-100 text-indigo-700">
                     {counts.building}
                   </Badge>
                 )}
@@ -811,7 +811,7 @@ export function DeploymentsPanel() {
                 <XCircle className="size-3.5 text-red-500" />
                 Failed
                 {counts.failed > 0 && (
-                  <Badge variant="secondary" className="ml-1 h-5 min-w-5 text-[10px] px-1.5 bg-red-100 text-red-700">
+                  <Badge variant="secondary" className="ms-1 h-5 min-w-5 text-[10px] px-1.5 bg-red-100 text-red-700">
                     {counts.failed}
                   </Badge>
                 )}
@@ -834,7 +834,7 @@ export function DeploymentsPanel() {
                         onClick={() => setSearchInput('')}
                         className="mt-3"
                       >
-                        <X className="size-3.5 mr-1" />
+                        <X className="size-3.5 me-1" />
                         Clear search
                       </Button>
                     )}
@@ -854,7 +854,7 @@ export function DeploymentsPanel() {
                             <TableHead>Triggered By</TableHead>
                             <TableHead>Duration</TableHead>
                             <TableHead>Time</TableHead>
-                            <TableHead className="text-right">Actions</TableHead>
+                            <TableHead className="text-end">Actions</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -891,7 +891,7 @@ export function DeploymentsPanel() {
                               <TableCell className="text-muted-foreground text-xs">
                                 {timeAgo(d.createdAt)}
                               </TableCell>
-                              <TableCell className="text-right">
+                              <TableCell className="text-end">
                                 {/* Shown on every row, disabled where it cannot
                                     apply. "You cannot delete this, and here is
                                     why" is more useful than no button at all. */}

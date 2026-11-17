@@ -4,7 +4,8 @@ import { hashPassword } from '@/lib/auth'
 import { sendWelcomeEmail } from '@/lib/email'
 import { logAudit } from '@/lib/audit'
 import { withRateLimit } from '@/lib/rate-limit'
-import crypto from 'crypto'
+import { newVerificationToken, verificationUrl as buildVerificationUrl } from '@/lib/email-verification'
+import { attachReferral } from '@/lib/referrals'
 
 // Anti-spam: 5 registrations per IP per minute.
 export const POST = withRateLimit(registerHandler, { limit: 5, windowMs: 60_000 })
@@ -59,8 +60,8 @@ async function registerHandler(request: Request) {
     // Hash password
     const hashedPassword = await hashPassword(password)
 
-    // Generate email verification token
-    const verificationToken = crypto.randomBytes(32).toString('hex')
+    // Verification link: stored only as a hash, expires in 48h (lib/email-verification).
+    const verification = newVerificationToken()
 
     // Create user
     const user = await db.user.create({
@@ -70,16 +71,15 @@ async function registerHandler(request: Request) {
         password: hashedPassword,
         role: 'user',
         emailVerified: false,
-        emailVerificationToken: verificationToken,
+        ...verification.data,
       },
     })
 
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
-    const verificationUrl = `${appUrl}?verify_token=${verificationToken}`
+    // Signed up with someone's referral link? (Never blocks registration.)
+    await attachReferral(user.id, body.referralCode)
 
-    // Demo log kept for local development visibility (also logged by email service in demo mode)
-    console.log(`[email] Welcome email + verification for ${user.email}`)
-    console.log(`[email] Verification link: ${verificationUrl}`)
+    // Never log the link: it is a credential for this account.
+    const verificationUrl = buildVerificationUrl(verification.token)
 
     // Send the real welcome + verification email.
     // In demo mode (no SMTP env vars) this simply logs to console.

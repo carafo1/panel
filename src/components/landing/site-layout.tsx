@@ -5,6 +5,7 @@ import { Menu, X, ChevronDown, ArrowRight } from 'lucide-react'
 import { Logo } from '@/components/ui/logo'
 import { Button } from '@/components/ui/button'
 import { ThemeToggle } from '@/components/ui/theme-toggle'
+import { LanguageSwitcher } from '@/components/ui/language-switcher'
 import { ScrollProgress } from './ui-helpers'
 import { cn } from '@/lib/utils'
 import { useAppStore, type PublicPageState } from '@/store/app-store'
@@ -177,6 +178,7 @@ export function SiteLayout({ children, onGetStarted }: SiteLayoutProps) {
             </nav>
 
             <div className="hidden md:flex items-center gap-2">
+              <LanguageSwitcher />
               <ThemeToggle />
               <Button variant="ghost" size="sm" onClick={onGetStarted} className="text-muted-foreground hover:text-foreground">
                 {getContent('nav.signin')}
@@ -192,6 +194,7 @@ export function SiteLayout({ children, onGetStarted }: SiteLayoutProps) {
 
             {/* Mobile: theme toggle + menu */}
             <div className="md:hidden flex items-center gap-1">
+              <LanguageSwitcher compact />
               <ThemeToggle />
               <button
                 className="inline-flex items-center justify-center size-10 rounded-md text-foreground hover:bg-accent"
@@ -228,7 +231,7 @@ export function SiteLayout({ children, onGetStarted }: SiteLayoutProps) {
                         <ChevronDown className={cn('size-4 transition-transform duration-200', servicesOpen && 'rotate-180')} />
                       </button>
                       {servicesOpen && (
-                        <div className="ml-2 mt-1 mb-2 border-l border-border/60 pl-3 flex flex-col gap-0.5">
+                        <div className="ms-2 mt-1 mb-2 border-s border-border/60 ps-3 flex flex-col gap-0.5">
                           <a
                             href="#/services"
                             onClick={() => { setPublicPage({ page: 'services' }); setMobileOpen(false) }}

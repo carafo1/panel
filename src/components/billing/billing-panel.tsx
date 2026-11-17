@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { ReferralCard } from '@/components/billing/referral-card'
 import {
   Card,
   CardHeader,
@@ -564,7 +565,7 @@ function CheckoutDialog({
                                       <dt className="text-muted-foreground shrink-0">
                                         {label}
                                       </dt>
-                                      <dd className="font-mono text-right break-all">
+                                      <dd className="font-mono text-end break-all">
                                         {value}
                                       </dd>
                                     </div>
@@ -755,13 +756,13 @@ function CheckoutDialog({
               <div className="space-y-2">
                 <Label htmlFor="domain-name">Domain Name</Label>
                 <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                  <Search className="absolute start-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
                   <Input
                     id="domain-name"
                     placeholder="example.com"
                     value={domainName}
                     onChange={(e) => setDomainName(e.target.value)}
-                    className="pl-9"
+                    className="ps-9"
                   />
                 </div>
                 <p className="text-xs text-muted-foreground">
@@ -1270,7 +1271,7 @@ export function BillingPanel() {
                 className="bg-indigo-600 hover:bg-indigo-700 text-white"
               >
                 Choose a Plan
-                <ArrowRight className="size-4 ml-1" />
+                <ArrowRight className="size-4 ms-1" />
               </Button>
             </div>
           )}
@@ -1437,6 +1438,8 @@ export function BillingPanel() {
           )}
         </CardContent>
       </Card>
+
+      <ReferralCard />
 
       {/* ── Checkout Dialog ───────────────────────────────────────── */}
       {selectedPlan && (

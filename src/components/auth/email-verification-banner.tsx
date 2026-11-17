@@ -55,12 +55,12 @@ export function EmailVerificationBanner({ email, onVerified }: EmailVerification
           >
             {sending ? (
               <>
-                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                <Loader2 className="h-3 w-3 me-1 animate-spin" />
                 Sending...
               </>
             ) : sent ? (
               <>
-                <CheckCircle2 className="h-3 w-3 mr-1" />
+                <CheckCircle2 className="h-3 w-3 me-1" />
                 Email Sent!
               </>
             ) : (
@@ -72,7 +72,7 @@ export function EmailVerificationBanner({ email, onVerified }: EmailVerification
       <Button
         variant="ghost"
         size="icon"
-        className="absolute top-2 right-2 h-6 w-6 text-amber-400 hover:text-amber-200 hover:bg-amber-500/20"
+        className="absolute top-2 end-2 h-6 w-6 text-amber-400 hover:text-amber-200 hover:bg-amber-500/20"
         onClick={() => setDismissed(true)}
       >
         <X className="h-3 w-3" />

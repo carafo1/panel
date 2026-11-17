@@ -47,7 +47,7 @@ export function ServicesPage() {
                     className="group block h-full"
                   >
                     <Card className="group relative overflow-hidden border hover:border-indigo-500/50 hover:shadow-glow-indigo transition-all duration-500 h-full bg-card/80 backdrop-blur-sm">
-                      <div className={`absolute -top-20 -right-20 size-56 rounded-full bg-gradient-to-br ${service.accent} opacity-10 blur-3xl group-hover:opacity-25 transition-opacity duration-700`} />
+                      <div className={`absolute -top-20 -end-20 size-56 rounded-full bg-gradient-to-br ${service.accent} opacity-10 blur-3xl group-hover:opacity-25 transition-opacity duration-700`} />
                       <CardContent className="p-8 relative">
                         <div className="flex items-start gap-4 mb-5">
                           <div className={`relative flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br ${service.accent} text-white shadow-glow-indigo group-hover:scale-110 group-hover:rotate-3 transition-all duration-500 shrink-0`}>
@@ -125,7 +125,7 @@ export function ServicesPage() {
                 <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight mb-4"><span className="text-gradient-brand">{getContent('services.why.title')}</span></h2>
                 <p className="text-lg text-muted-foreground mb-6">{getContent('services.why.desc')}</p>
                 <Button onClick={() => setPublicPage({ page: 'pricing' })} className="bg-indigo-500 hover:bg-indigo-600 text-white border-0 shadow-glow-indigo">
-                  {getContent('services.why.button')} <ArrowRight className="size-4 ml-1" />
+                  {getContent('services.why.button')} <ArrowRight className="size-4 ms-1" />
                 </Button>
               </div>
               <div className="space-y-3">
@@ -155,7 +155,7 @@ export function ServicesPage() {
             <a href="#/contact" onClick={() => setPublicPage({ page: 'contact' })} className="inline-flex items-center gap-2 h-12 px-8 rounded-md glass text-white hover:bg-white/10 transition-all">
               <Sparkles className="size-4 text-indigo-300" />
               {getContent('services.cta.button')}
-              <ArrowRight className="size-4 ml-1" />
+              <ArrowRight className="size-4 ms-1" />
             </a>
           </ScrollReveal>
         </div>

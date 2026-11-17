@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { verifyPassword, issueSession, generateTwoFactorTempToken } from '@/lib/auth'
+import { verifyPassword, issueSession, generateTwoFactorTempToken, effectiveRole } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { withRateLimit } from '@/lib/rate-limit'
 import { attachSession } from '@/lib/session'
@@ -105,7 +105,7 @@ async function loginHandler(request: Request) {
 
     // A revocable session (listed in Settings → Security, ended by sign-out).
     const token = await issueSession(
-      { userId: user.id, email: user.email, role: user.role },
+      { userId: user.id, email: user.email, role: effectiveRole(user.role, false) },
       request
     )
 
@@ -127,7 +127,9 @@ async function loginHandler(request: Request) {
           id: user.id,
           name: user.name,
           email: user.email,
-          role: user.role,
+          // Admins without 2FA act as regular users until they enable it.
+          role: effectiveRole(user.role, false),
+          adminTwoFactorRequired: effectiveRole(user.role, false) !== user.role,
           avatar: user.avatar,
           emailVerified: user.emailVerified,
           createdAt: user.createdAt,

@@ -15,7 +15,13 @@
 #   - SQLite backend: one file, no extra service to run or back up separately.
 set -uo pipefail
 
-PUB_IP="${PUB_IP:-159.195.15.99}"
+# The server's public IPv4 (Netcup and most VPS hosts have no NAT, so the
+# source address of the default route is the public one). Override with PUB_IP=.
+PUB_IP="${PUB_IP:-$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<NF;i++) if ($i=="src") print $(i+1)}')}"
+if [[ -z "$PUB_IP" ]]; then
+  echo "[pdns-setup] ERROR: could not detect the public IP; run again with PUB_IP=your.server.ip" >&2
+  exit 1
+fi
 PDNS_DIR=/var/lib/powerdns
 DB="$PDNS_DIR/pdns.sqlite3"
 

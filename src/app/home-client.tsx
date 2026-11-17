@@ -36,13 +36,14 @@ import {
   Sparkles,
   Activity,
   Mail,
+  LifeBuoy,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { NotificationCenter } from '@/components/notifications/notification-center'
 import { ThemeToggle } from '@/components/ui/theme-toggle'
 import OnboardingWizard from '@/components/onboarding/onboarding-wizard'
 import { EmailVerificationBanner } from '@/components/auth/email-verification-banner'
-import { SupportSessionBanner } from '@/components/auth/support-session-banner'
+import { SupportSessionBanner, AdminTwoFactorBanner } from '@/components/auth/support-session-banner'
 import { ErrorBoundary } from '@/components/error-boundary'
 import PipelinesPanel from '@/components/pipelines/pipelines-panel'
 import WebhooksPanel from '@/components/webhooks/webhooks-panel'
@@ -50,10 +51,15 @@ import GithubPanel from '@/components/github/github-panel'
 import AssistantPanel from '@/components/assistant/assistant-panel'
 import UptimePanel from '@/components/monitoring/uptime-panel'
 import ProvisioningPanel from '@/components/provisioning/provisioning-panel'
+import SupportPanel from '@/components/support/support-panel'
+import { IncidentBanner } from '@/components/status/incident-banner'
 import { CommandPalette } from '@/components/command-palette'
 import { Search, Zap } from 'lucide-react'
 import { LogoMark } from '@/components/ui/logo'
 import { migrateStorageKeys } from '@/lib/migrate-storage'
+import { captureReferralCode } from '@/lib/referral-capture'
+import { useTranslations } from 'next-intl'
+import { LanguageSwitcher } from '@/components/ui/language-switcher'
 
 // ── Sidebar nav items ──────────────────────────────────────────────────
 const NAV_ITEMS: { id: DashboardTab; label: string; icon: React.ElementType; adminOnly?: boolean }[] = [
@@ -71,6 +77,7 @@ const NAV_ITEMS: { id: DashboardTab; label: string; icon: React.ElementType; adm
   { id: 'teams', label: 'Teams', icon: Users },
   { id: 'analytics', label: 'Analytics', icon: BarChart3 },
   { id: 'monitoring', label: 'Monitoring', icon: Activity },
+  { id: 'support', label: 'Support', icon: LifeBuoy },
   { id: 'settings', label: 'Settings', icon: Settings },
   { id: 'assistant', label: 'AI Assistant', icon: Sparkles },
 ]
@@ -79,6 +86,9 @@ const NAV_ITEMS: { id: DashboardTab; label: string; icon: React.ElementType; adm
 function Dashboard() {
   const { dashboardTab, setDashboardTab, sidebarOpen, setSidebarOpen } = useAppStore()
   const { user, logout, verifyEmail, markEmailVerified } = useAuthStore()
+  const t = useTranslations('shell')
+  const tNav = useTranslations('nav')
+  const MOBILE_LABEL: Partial<Record<DashboardTab, string>> = { overview: 'mobileHome', deployments: 'mobileDeploy', assistant: 'mobileAi' }
 
   // Handle email verification from URL
   const [verifying, setVerifying] = useState(false)
@@ -162,6 +172,8 @@ function Dashboard() {
               return <UptimePanel />
             case 'assistant':
               return <AssistantPanel />
+            case 'support':
+              return <SupportPanel />
             default:
               return <OverviewPanel />
           }
@@ -192,8 +204,8 @@ function Dashboard() {
 
       {/* Sidebar */}
       <aside
-        className={`fixed lg:static inset-y-0 left-0 z-40 w-64 bg-card border-r flex flex-col transition-transform duration-300 ease-out lg:translate-x-0 ${
-          sidebarOpen ? 'translate-x-0 sidebar-slide-in' : '-translate-x-full'
+        className={`fixed lg:static inset-y-0 start-0 z-40 w-64 bg-card border-e flex flex-col transition-transform duration-300 ease-out lg:translate-x-0 lg:rtl:translate-x-0 ${
+          sidebarOpen ? 'translate-x-0 sidebar-slide-in' : '-translate-x-full rtl:translate-x-full'
         }`}
       >
         {/* Logo */}
@@ -203,7 +215,7 @@ function Dashboard() {
           <Button
             variant="ghost"
             size="icon"
-            className="ml-auto lg:hidden"
+            className="ms-auto lg:hidden"
             onClick={() => setSidebarOpen(false)}
           >
             <X className="size-5" />
@@ -229,8 +241,8 @@ function Dashboard() {
                 }`}
               >
                 <Icon className="size-4" />
-                {item.label}
-                {isActive && <div className="ml-auto size-1.5 rounded-full bg-indigo-500" />}
+                {tNav(item.id)}
+                {isActive && <div className="ms-auto size-1.5 rounded-full bg-indigo-500" />}
               </button>
             )
           })}
@@ -245,10 +257,10 @@ function Dashboard() {
               </span>
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium truncate">{user?.name || 'User'}</p>
+              <p className="text-sm font-medium truncate">{user?.name || t('user')}</p>
               <p className="text-xs text-muted-foreground truncate">{user?.email || ''}</p>
             </div>
-            <Button variant="ghost" size="icon" onClick={() => { logout(); toast.success('Signed out') }} title="Sign out">
+            <Button variant="ghost" size="icon" onClick={() => { logout(); toast.success(t('signedOut')) }} title={t('signOut')} aria-label={t('signOut')}>
               <LogOut className="size-4" />
             </Button>
           </div>
@@ -270,7 +282,7 @@ function Dashboard() {
             <Menu className="size-5" />
           </Button>
           <div className="flex items-center gap-2">
-            <h2 className="font-semibold capitalize">{dashboardTab === 'overview' ? 'Dashboard' : dashboardTab}</h2>
+            <h2 className="font-semibold">{dashboardTab === 'overview' ? t('dashboard') : tNav(dashboardTab)}</h2>
             {dashboardTab === 'hosting' && <Badge variant="outline" className="text-[10px] hidden sm:inline-flex">Projects</Badge>}
             {dashboardTab === 'domains' && <Badge variant="outline" className="text-[10px] hidden sm:inline-flex">DNS</Badge>}
             {dashboardTab === 'deployments' && <Badge variant="outline" className="text-[10px] hidden sm:inline-flex">CI/CD</Badge>}
@@ -278,15 +290,15 @@ function Dashboard() {
             {dashboardTab === 'monitoring' && <Badge variant="outline" className="text-[10px] hidden sm:inline-flex">Uptime</Badge>}
             {dashboardTab === 'provisioning' && <Badge variant="outline" className="text-[10px] hidden sm:inline-flex bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/30">Auto</Badge>}
           </div>
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ms-auto flex items-center gap-2">
             <button
               type="button"
               onClick={() => window.dispatchEvent(new CustomEvent('deployhub:open-command-palette'))}
               className="hidden sm:flex items-center gap-2 h-9 w-56 lg:w-64 rounded-md border border-input bg-transparent px-3 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              title="Open command palette"
+              title={t('openCommandPalette')}
             >
               <Search className="size-4 shrink-0" />
-              <span className="flex-1 text-left">Search or jump to...</span>
+              <span className="flex-1 text-start">{t('searchPlaceholder')}</span>
               <kbd className="pointer-events-none select-none rounded border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
                 ⌘K
               </kbd>
@@ -296,11 +308,12 @@ function Dashboard() {
               size="icon"
               className="sm:hidden"
               onClick={() => window.dispatchEvent(new CustomEvent('deployhub:open-command-palette'))}
-              title="Search (Cmd+K)"
-              aria-label="Search"
+              title={t('search')}
+              aria-label={t('search')}
             >
               <Search className="size-4" />
             </Button>
+            <LanguageSwitcher compact />
             <ThemeToggle />
             <NotificationCenter />
           </div>
@@ -308,6 +321,9 @@ function Dashboard() {
 
         {/* Support access ("log in as customer") — always visible while active */}
         <SupportSessionBanner />
+        {/* Admin without 2FA: admin powers paused until it's turned on */}
+        <AdminTwoFactorBanner onOpenSettings={() => setDashboardTab('settings')} />
+        <IncidentBanner />
 
         {/* Scrollable content area */}
         <div className="flex-1 overflow-y-auto pb-16 lg:pb-0">
@@ -333,12 +349,14 @@ function Dashboard() {
 
           {/* Footer */}
           <footer className="border-t px-4 py-4 text-center text-xs text-muted-foreground mt-auto">
-            © {new Date().getFullYear()} Apsamo Panel. All rights reserved.
+            {t('rights', { year: new Date().getFullYear() })} ·{' '}
+            <a href="/status" target="_blank" rel="noreferrer" className="hover:text-foreground">{t('systemStatus')}</a> ·{' '}
+            <a href="/help" target="_blank" rel="noreferrer" className="hover:text-foreground">{t('helpCenter')}</a>
           </footer>
         </div>
 
         {/* Mobile Bottom Navigation */}
-        <nav className="fixed bottom-0 left-0 right-0 z-30 bg-card/95 backdrop-blur-sm border-t lg:hidden safe-area-inset-bottom transition-all duration-300">
+        <nav className="fixed bottom-0 start-0 end-0 z-30 bg-card/95 backdrop-blur-sm border-t lg:hidden safe-area-inset-bottom transition-all duration-300">
           <div className="flex items-center justify-around px-1 py-1">
             {MOBILE_NAV_ITEMS.map((item) => {
               const Icon = item.icon
@@ -356,7 +374,7 @@ function Dashboard() {
                   <div className={`transition-transform duration-200 ${isActive ? 'scale-110' : ''}`}>
                     <Icon className="size-5" />
                   </div>
-                  <span className="text-[10px] font-medium">{item.label}</span>
+                  <span className="text-[10px] font-medium">{tNav(MOBILE_LABEL[item.id] ?? item.id)}</span>
                 </button>
               )
             })}
@@ -466,6 +484,11 @@ export default function HomeClient({
       if (!openedFromResetLink.current) setAuthMode('login')
     }
   }, [setAuthMode])
+
+  // Remember a referral link's code until the visitor signs up.
+  useEffect(() => {
+    captureReferralCode()
+  }, [])
 
   // ── Handle URL params (Stripe Checkout redirect, billing tab) ──────
   useEffect(() => {

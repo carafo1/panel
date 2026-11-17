@@ -107,7 +107,7 @@ function SidebarNavContent({
             <Icon className={`size-4 shrink-0 ${isActive ? 'text-indigo-500' : ''}`} />
             <span className="truncate">{item.label}</span>
             {isActive && (
-              <div className="ml-auto size-1.5 rounded-full bg-indigo-500" />
+              <div className="ms-auto size-1.5 rounded-full bg-indigo-500" />
             )}
           </button>
         )
@@ -201,7 +201,7 @@ export function DashboardLayout({ children, activeTab, onTabChange }: DashboardL
     <div className="flex h-screen w-full overflow-hidden bg-background">
       {/* Desktop Sidebar */}
       <aside
-        className={`hidden md:flex flex-col border-r bg-card transition-[width] duration-300 ease-in-out ${
+        className={`hidden md:flex flex-col border-e bg-card transition-[width] duration-300 ease-in-out ${
           sidebarOpen ? 'w-64' : 'w-0 overflow-hidden'
         }`}
       >
@@ -264,13 +264,13 @@ export function DashboardLayout({ children, activeTab, onTabChange }: DashboardL
           {/* Mobile title */}
           <span className="text-sm font-medium sm:hidden">{currentLabel}</span>
 
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ms-auto flex items-center gap-2">
             {/* Notification bell */}
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button variant="ghost" size="icon" className="relative">
                   <Bell className="size-4" />
-                  <Badge className="absolute -top-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full bg-indigo-500 p-0 text-[10px] text-white">
+                  <Badge className="absolute -top-0.5 -end-0.5 flex size-4 items-center justify-center rounded-full bg-indigo-500 p-0 text-[10px] text-white">
                     3
                   </Badge>
                   <span className="sr-only">Notifications</span>

@@ -179,7 +179,7 @@ export function ServiceDetailPage({ slug, onGetStarted }: ServiceDetailPageProps
             <Accordion type="single" collapsible className="w-full">
               {service.faqs.map((faq, i) => (
                 <AccordionItem key={i} value={`item-${i}`}>
-                  <AccordionTrigger className="text-left">{faq.q}</AccordionTrigger>
+                  <AccordionTrigger className="text-start">{faq.q}</AccordionTrigger>
                   <AccordionContent className="text-muted-foreground">{faq.a}</AccordionContent>
                 </AccordionItem>
               ))}
@@ -195,9 +195,9 @@ export function ServiceDetailPage({ slug, onGetStarted }: ServiceDetailPageProps
           <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight mb-4">Ready to get started with {service.name}?</h2>
           <p className="text-zinc-300 mb-8">Join thousands of developers building on Apsamo Technology.</p>
           <Button size="lg" className="btn-shimmer bg-indigo-500 hover:bg-indigo-600 text-white px-10 h-12 border-0 shadow-glow-indigo hover:scale-105 transition-all" onClick={onGetStarted}>
-            <Sparkles className="size-4 mr-2" />
+            <Sparkles className="size-4 me-2" />
             Get Started Free
-            <ArrowRight className="size-4 ml-2" />
+            <ArrowRight className="size-4 ms-2" />
           </Button>
         </div>
       </section>

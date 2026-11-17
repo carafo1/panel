@@ -308,7 +308,7 @@ function ServerStatusBadge({ status }: { status: string }) {
   return (
     <Badge variant="outline" className={cfg.className}>
       {cfg.dot && (
-        <span className={`size-1.5 rounded-full bg-current mr-1.5 ${cfg.dot}`} />
+        <span className={`size-1.5 rounded-full bg-current me-1.5 ${cfg.dot}`} />
       )}
       {status.charAt(0).toUpperCase() + status.slice(1)}
     </Badge>
@@ -370,13 +370,13 @@ function ResourceBar({
         <span className="font-medium tabular-nums">
           {value}
           {sublabel && (
-            <span className="text-muted-foreground ml-1">{sublabel}</span>
+            <span className="text-muted-foreground ms-1">{sublabel}</span>
           )}
         </span>
       </div>
       <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-muted">
         <div
-          className={`absolute left-0 top-0 h-full rounded-full ${color} transition-all`}
+          className={`absolute start-0 top-0 h-full rounded-full ${color} transition-all`}
           style={{ width: `${Math.min(100, Math.max(0, percent))}%` }}
         />
       </div>
@@ -519,7 +519,7 @@ export function ServersPanel() {
             disabled={refreshing}
           >
             <RefreshCw
-              className={`size-4 mr-1.5 ${refreshing ? 'animate-spin' : ''}`}
+              className={`size-4 me-1.5 ${refreshing ? 'animate-spin' : ''}`}
             />
             Refresh
           </Button>
@@ -531,7 +531,7 @@ export function ServersPanel() {
             }}
             className="bg-indigo-600 hover:bg-indigo-700 text-white"
           >
-            <Plus className="size-4 mr-1.5" />
+            <Plus className="size-4 me-1.5" />
             Add Server
           </Button>
         </div>
@@ -563,7 +563,7 @@ export function ServersPanel() {
               }}
               className="mt-4 bg-indigo-600 hover:bg-indigo-700 text-white"
             >
-              <Plus className="size-4 mr-1.5" />
+              <Plus className="size-4 me-1.5" />
               Add Your First Server
             </Button>
           </CardContent>
@@ -843,7 +843,7 @@ function TooltipButton({
                 : ''
             }`}
           >
-            <Icon className="size-3.5 mr-1" />
+            <Icon className="size-3.5 me-1" />
             <span className="hidden sm:inline">{label}</span>
           </Button>
         </TooltipTrigger>
@@ -1168,12 +1168,12 @@ function EditServerDialog({
                     }
                     value={sshPassword}
                     onChange={(e) => setSshPassword(e.target.value)}
-                    className="font-mono text-sm pr-10"
+                    className="font-mono text-sm pe-10"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword((v) => !v)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    className="absolute end-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                     aria-label={showPassword ? 'Hide password' : 'Show password'}
                   >
                     {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
@@ -1192,12 +1192,12 @@ function EditServerDialog({
                     }
                     value={sshPrivateKey}
                     onChange={(e) => setSshPrivateKey(e.target.value)}
-                    className="font-mono text-xs min-h-[120px] max-h-[200px] pr-10"
+                    className="font-mono text-xs min-h-[120px] max-h-[200px] pe-10"
                   />
                   <button
                     type="button"
                     onClick={() => setShowKey((v) => !v)}
-                    className="absolute right-2 top-2 text-muted-foreground hover:text-foreground"
+                    className="absolute end-2 top-2 text-muted-foreground hover:text-foreground"
                     aria-label={showKey ? 'Hide key' : 'Show key'}
                   >
                     {showKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
@@ -1234,12 +1234,12 @@ function EditServerDialog({
           >
             {saving ? (
               <>
-                <Loader2 className="size-4 mr-2 animate-spin" />
+                <Loader2 className="size-4 me-2 animate-spin" />
                 {isEdit ? 'Saving...' : 'Creating...'}
               </>
             ) : (
               <>
-                <CheckCircle2 className="size-4 mr-2" />
+                <CheckCircle2 className="size-4 me-2" />
                 {isEdit ? 'Save Changes' : 'Create Server'}
               </>
             )}
@@ -1421,7 +1421,7 @@ function TestSshDialog({
                 disabled={loading}
                 className="w-full"
               >
-                <RefreshCw className="size-4 mr-2" />
+                <RefreshCw className="size-4 me-2" />
                 Retry Test
               </Button>
             </div>
@@ -1560,7 +1560,7 @@ function ProvisionDialog({
           {loading && (
             <div className="space-y-3">
               <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                <div className="absolute inset-y-0 left-0 w-1/3 bg-indigo-500 rounded-full animate-[indeterminate_1.5s_ease-in-out_infinite]" />
+                <div className="absolute inset-y-0 start-0 w-1/3 bg-indigo-500 rounded-full animate-[indeterminate_1.5s_ease-in-out_infinite]" />
               </div>
               <style>{`
                 @keyframes indeterminate {
@@ -1617,7 +1617,7 @@ function ProvisionDialog({
                 <div key={step.name} className="relative">
                   {!isLast && (
                     <div
-                      className={`absolute left-[18px] top-9 w-0.5 h-[calc(100%-12px)] ${connectorClass}`}
+                      className={`absolute start-[18px] top-9 w-0.5 h-[calc(100%-12px)] ${connectorClass}`}
                     />
                   )}
                   <div className="relative flex items-start gap-3 p-2 rounded-lg">
@@ -1764,7 +1764,7 @@ function ProvisionDialog({
               onClick={runProvision}
               className="bg-indigo-600 hover:bg-indigo-700 text-white"
             >
-              <RotateCcw className="size-4 mr-2" />
+              <RotateCcw className="size-4 me-2" />
               Retry Provisioning
             </Button>
           )}
@@ -1854,7 +1854,7 @@ function StatsDialog({
                 Updated {new Date(stats.timestamp).toLocaleTimeString()}
               </span>
             )}
-            <label className="ml-auto flex items-center gap-1.5 text-xs cursor-pointer">
+            <label className="ms-auto flex items-center gap-1.5 text-xs cursor-pointer">
               <Switch
                 checked={autoRefresh}
                 onCheckedChange={setAutoRefresh}
@@ -1976,9 +1976,9 @@ function StatsDialog({
                       <table className="w-full text-xs">
                         <thead className="bg-muted/50 sticky top-0">
                           <tr>
-                            <th className="text-left p-2 font-medium">Name</th>
-                            <th className="text-left p-2 font-medium">Status</th>
-                            <th className="text-left p-2 font-medium">Ports</th>
+                            <th className="text-start p-2 font-medium">Name</th>
+                            <th className="text-start p-2 font-medium">Status</th>
+                            <th className="text-start p-2 font-medium">Ports</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -2030,7 +2030,7 @@ function StatsDialog({
 
         <DialogFooter>
           <Button variant="outline" size="sm" onClick={fetchStats} disabled={loading}>
-            <RefreshCw className={`size-4 mr-1.5 ${loading ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`size-4 me-1.5 ${loading ? 'animate-spin' : ''}`} />
             Refresh Now
           </Button>
           <Button variant="outline" onClick={onClose}>
@@ -2176,7 +2176,7 @@ function CaddyfileDialog({
                   <span className="size-2.5 rounded-full bg-red-500/80" />
                   <span className="size-2.5 rounded-full bg-amber-500/80" />
                   <span className="size-2.5 rounded-full bg-indigo-500/80" />
-                  <span className="ml-2 text-[10px] text-zinc-500 font-mono">
+                  <span className="ms-2 text-[10px] text-zinc-500 font-mono">
                     Caddyfile
                   </span>
                 </div>
@@ -2188,12 +2188,12 @@ function CaddyfileDialog({
                 >
                   {copied ? (
                     <>
-                      <CheckCircle2 className="size-3 mr-1 text-indigo-500" />
+                      <CheckCircle2 className="size-3 me-1 text-indigo-500" />
                       Copied
                     </>
                   ) : (
                     <>
-                      <Copy className="size-3 mr-1" />
+                      <Copy className="size-3 me-1" />
                       Copy
                     </>
                   )}
@@ -2212,7 +2212,7 @@ function CaddyfileDialog({
             onClick={fetchCaddyfile}
             disabled={loading}
           >
-            <RefreshCw className={`size-4 mr-1.5 ${loading ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`size-4 me-1.5 ${loading ? 'animate-spin' : ''}`} />
             Reload Content
           </Button>
           <Button
@@ -2222,12 +2222,12 @@ function CaddyfileDialog({
           >
             {reloading ? (
               <>
-                <Loader2 className="size-4 mr-2 animate-spin" />
+                <Loader2 className="size-4 me-2 animate-spin" />
                 Reloading Caddy...
               </>
             ) : (
               <>
-                <RotateCcw className="size-4 mr-2" />
+                <RotateCcw className="size-4 me-2" />
                 Reload Caddy
               </>
             )}
@@ -2317,14 +2317,14 @@ function DeleteServerDialog({
           >
             {deleting ? (
               <>
-                <Loader2 className="size-4 mr-2 animate-spin" />
+                <Loader2 className="size-4 me-2 animate-spin" />
                 Deleting...
               </>
             ) : hasProjects ? (
               'Cannot Delete (projects attached)'
             ) : (
               <>
-                <Trash2 className="size-4 mr-2" />
+                <Trash2 className="size-4 me-2" />
                 Delete Permanently
               </>
             )}

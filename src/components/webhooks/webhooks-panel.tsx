@@ -494,9 +494,9 @@ export default function WebhooksPanel() {
               disabled={testingWebhookId === selectedWebhook.id}
             >
               {testingWebhookId === selectedWebhook.id ? (
-                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                <Loader2 className="me-1.5 h-3.5 w-3.5 animate-spin" />
               ) : (
-                <Send className="mr-1.5 h-3.5 w-3.5" />
+                <Send className="me-1.5 h-3.5 w-3.5" />
               )}
               Test
             </Button>
@@ -507,7 +507,7 @@ export default function WebhooksPanel() {
               disabled={togglingId === selectedWebhook.id}
             >
               {togglingId === selectedWebhook.id ? (
-                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                <Loader2 className="me-1.5 h-3.5 w-3.5 animate-spin" />
               ) : null}
               {selectedWebhook.active ? 'Disable' : 'Enable'}
             </Button>
@@ -517,7 +517,7 @@ export default function WebhooksPanel() {
               className="text-destructive hover:bg-destructive/10"
               onClick={() => setDeleteTarget(selectedWebhook)}
             >
-              <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+              <Trash2 className="me-1.5 h-3.5 w-3.5" />
               Delete
             </Button>
           </div>
@@ -536,12 +536,12 @@ export default function WebhooksPanel() {
                 <div className="flex items-center gap-2">
                   {selectedWebhook.active ? (
                     <Badge className="bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300">
-                      <CheckCircle2 className="mr-1 h-3 w-3" />
+                      <CheckCircle2 className="me-1 h-3 w-3" />
                       Active
                     </Badge>
                   ) : (
                     <Badge variant="secondary">
-                      <XCircle className="mr-1 h-3 w-3" />
+                      <XCircle className="me-1 h-3 w-3" />
                       Inactive
                     </Badge>
                   )}
@@ -586,7 +586,7 @@ export default function WebhooksPanel() {
               <div className="flex flex-wrap gap-2">
                 {selectedWebhook.events.map((evt) => (
                   <Badge key={evt} variant="secondary" className={getEventBadgeColor(evt)}>
-                    <Zap className="mr-1 h-3 w-3" />
+                    <Zap className="me-1 h-3 w-3" />
                     {getEventLabel(evt)}
                   </Badge>
                 ))}
@@ -598,7 +598,7 @@ export default function WebhooksPanel() {
             {/* Secret */}
             <div className="space-y-2">
               <p className="text-sm font-medium text-muted-foreground">
-                <Key className="mr-1 inline h-3.5 w-3.5" />
+                <Key className="me-1 inline h-3.5 w-3.5" />
                 Signing Secret
               </p>
               <div className="flex items-center gap-2">
@@ -651,7 +651,7 @@ export default function WebhooksPanel() {
                 disabled={deliveriesLoading}
               >
                 {deliveriesLoading ? (
-                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  <Loader2 className="me-1.5 h-3.5 w-3.5 animate-spin" />
                 ) : null}
                 Refresh
               </Button>
@@ -681,7 +681,7 @@ export default function WebhooksPanel() {
                       <TableHead>Event</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Duration</TableHead>
-                      <TableHead className="text-right">Time</TableHead>
+                      <TableHead className="text-end">Time</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -707,7 +707,7 @@ export default function WebhooksPanel() {
                         <TableCell className="text-sm text-muted-foreground">
                           {d.duration != null ? `${d.duration}ms` : '—'}
                         </TableCell>
-                        <TableCell className="text-right text-sm text-muted-foreground">
+                        <TableCell className="text-end text-sm text-muted-foreground">
                           {formatRelativeTime(d.createdAt)}
                         </TableCell>
                       </TableRow>
@@ -737,9 +737,9 @@ export default function WebhooksPanel() {
                 className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               >
                 {deleting ? (
-                  <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                  <Loader2 className="me-1.5 h-4 w-4 animate-spin" />
                 ) : (
-                  <Trash2 className="mr-1.5 h-4 w-4" />
+                  <Trash2 className="me-1.5 h-4 w-4" />
                 )}
                 Delete
               </AlertDialogAction>
@@ -765,7 +765,7 @@ export default function WebhooksPanel() {
           onClick={() => setCreateOpen(true)}
           className="bg-indigo-600 hover:bg-indigo-700 shrink-0"
         >
-          <Plus className="mr-1.5 h-4 w-4" />
+          <Plus className="me-1.5 h-4 w-4" />
           New Webhook
         </Button>
       </div>
@@ -786,7 +786,7 @@ export default function WebhooksPanel() {
               onClick={() => setCreateOpen(true)}
               className="mt-4 bg-indigo-600 hover:bg-indigo-700"
             >
-              <Plus className="mr-1.5 h-4 w-4" />
+              <Plus className="me-1.5 h-4 w-4" />
               Create Your First Webhook
             </Button>
           </CardContent>
@@ -881,9 +881,9 @@ export default function WebhooksPanel() {
                       disabled={testingWebhookId === wh.id || !wh.active}
                     >
                       {testingWebhookId === wh.id ? (
-                        <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                        <Loader2 className="me-1.5 h-3.5 w-3.5 animate-spin" />
                       ) : (
-                        <Send className="mr-1.5 h-3.5 w-3.5" />
+                        <Send className="me-1.5 h-3.5 w-3.5" />
                       )}
                       Test
                     </Button>
@@ -1012,9 +1012,9 @@ export default function WebhooksPanel() {
               className="bg-indigo-600 hover:bg-indigo-700"
             >
               {creating ? (
-                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                <Loader2 className="me-1.5 h-4 w-4 animate-spin" />
               ) : (
-                <Plus className="mr-1.5 h-4 w-4" />
+                <Plus className="me-1.5 h-4 w-4" />
               )}
               Create Webhook
             </Button>
@@ -1040,9 +1040,9 @@ export default function WebhooksPanel() {
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               {deleting ? (
-                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                <Loader2 className="me-1.5 h-4 w-4 animate-spin" />
               ) : (
-                <Trash2 className="mr-1.5 h-4 w-4" />
+                <Trash2 className="me-1.5 h-4 w-4" />
               )}
               Delete
             </AlertDialogAction>

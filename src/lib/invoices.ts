@@ -278,6 +278,12 @@ export async function markInvoicePaid(
     method: opts.gateway,
   }).catch(() => {})
 
+  // A first real payment is what rewards whoever referred this customer.
+  if (opts.gateway !== 'credit' && settled > 0) {
+    const { qualifyReferral } = await import('@/lib/referrals')
+    await qualifyReferral(invoice.userId, settled).catch((err) => console.error('[referrals] qualify failed:', err))
+  }
+
   // A paid renewal invoice is what brings a past-due or suspended
   // subscription back. Imported lazily: enforcement pulls in the server and
   // mail layers, which must not load whenever an invoice is touched.

@@ -121,7 +121,7 @@ function MigrationRow({
     <button
       type="button"
       onClick={onOpen}
-      className="group flex w-full items-center gap-4 rounded-lg border p-4 text-left transition-colors hover:border-indigo-300 hover:bg-muted/40"
+      className="group flex w-full items-center gap-4 rounded-lg border p-4 text-start transition-colors hover:border-indigo-300 hover:bg-muted/40"
     >
       <span
         className={cn(
@@ -297,7 +297,7 @@ export default function ImportDashboard({
             onClick={() => setWizardOpen(true)}
             className="bg-indigo-600 hover:bg-indigo-700 text-white"
           >
-            <HardDriveDownload className="size-4 mr-2" />
+            <HardDriveDownload className="size-4 me-2" />
             Import a website
           </Button>
         </div>
@@ -380,7 +380,7 @@ export default function ImportDashboard({
                   onClick={() => setWizardOpen(true)}
                   className="bg-indigo-600 hover:bg-indigo-700 text-white"
                 >
-                  <HardDriveDownload className="size-4 mr-2" />
+                  <HardDriveDownload className="size-4 me-2" />
                   Import a website
                 </Button>
                 {onChooseFreshInstall && (

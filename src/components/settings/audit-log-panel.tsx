@@ -373,7 +373,7 @@ export default function AuditLogPanel() {
             </div>
             <p className="text-sm font-medium text-red-700">{error}</p>
             <Button variant="outline" size="sm" onClick={() => fetchLogs(page)}>
-              <RefreshCw className="size-3.5 mr-1.5" />
+              <RefreshCw className="size-3.5 me-1.5" />
               Try again
             </Button>
           </div>

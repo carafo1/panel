@@ -3,7 +3,7 @@ import { withRateLimit } from '@/lib/rate-limit'
 import { db } from '@/lib/db'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { sendWelcomeEmail } from '@/lib/email'
-import crypto from 'crypto'
+import { newVerificationToken, verificationUrl as buildVerificationUrl } from '@/lib/email-verification'
 
 async function postHandler(request: Request) {
   try {
@@ -43,20 +43,10 @@ async function postHandler(request: Request) {
       )
     }
 
-    // Generate new verification token
-    const verificationToken = crypto.randomBytes(32).toString('hex')
-
-    await db.user.update({
-      where: { id: user.id },
-      data: { emailVerificationToken: verificationToken },
-    })
-
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
-    const verificationUrl = `${appUrl}?verify_token=${verificationToken}`
-
-    // Demo log kept for local development visibility (also logged by email service in demo mode)
-    console.log(`[email] Verification email for ${user.email}`)
-    console.log(`[email] Verification link: ${verificationUrl}`)
+    // A fresh link replaces the old one; stored only as a hash, expires in 48h.
+    const verification = newVerificationToken()
+    await db.user.update({ where: { id: user.id }, data: verification.data })
+    const verificationUrl = buildVerificationUrl(verification.token)
 
     // Resend the real welcome + verification email.
     // In demo mode (no SMTP env vars) this simply logs to console.

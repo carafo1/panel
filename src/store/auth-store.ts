@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { readReferralCode } from '@/lib/referral-capture'
 
 export interface User {
   id: string
@@ -10,6 +11,8 @@ export interface User {
   twoFactorEnabled?: boolean
   /** Set while a super admin is using support access as this user. */
   supportSession?: { adminEmail: string | null } | null
+  /** An admin whose powers are paused until they turn on 2FA. */
+  adminTwoFactorRequired?: boolean
 }
 
 /** Result returned by `login`. Either a fully-authed user or a 2FA challenge. */
@@ -152,7 +155,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   register: async (name, email, password) => {
     const data = await apiFetch<{ message: string }>('/auth/register', {
       method: 'POST',
-      body: JSON.stringify({ name, email, password }),
+      body: JSON.stringify({ name, email, password, referralCode: readReferralCode() }),
     })
     // Registration now requires email verification before login.
     // The API returns `{ message: "..." }` only - no session token -

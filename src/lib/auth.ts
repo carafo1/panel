@@ -101,6 +101,26 @@ const identityCache = new Map<string, CachedIdentity>()
  * Called whenever a role or account status changes — without it a demotion
  * would take up to AUTH_CACHE_TTL_MS to bite instead of being immediate.
  */
+/**
+ * SECURITY: admin accounts must use two-factor authentication. An admin or
+ * super admin without 2FA is treated as a regular user — every admin check
+ * reads the role through here, so admin powers stay paused everywhere until
+ * they turn 2FA on (Settings → Security). On by default in production;
+ * REQUIRE_ADMIN_2FA=true|false overrides (development defaults to off).
+ */
+export function adminTwoFactorRequired(): boolean {
+  const v = (process.env.REQUIRE_ADMIN_2FA || '').trim().toLowerCase()
+  if (v === 'true' || v === '1') return true
+  if (v === 'false' || v === '0') return false
+  return process.env.NODE_ENV === 'production'
+}
+
+/** The role a user actually gets, after the admin-2FA rule. */
+export function effectiveRole(role: string, twoFactorEnabled: boolean): string {
+  const isAdminRole = role === 'admin' || role === 'super_admin'
+  return isAdminRole && !twoFactorEnabled && adminTwoFactorRequired() ? 'user' : role
+}
+
 export function invalidateUserAuthCache(userId?: string): void {
   if (userId) identityCache.delete(userId)
   else identityCache.clear()
@@ -116,7 +136,7 @@ async function loadIdentity(userId: string): Promise<CachedIdentity | null> {
     const { db } = require('@/lib/db') as typeof import('@/lib/db')
     const user = await db.user.findUnique({
       where: { id: userId },
-      select: { id: true, email: true, role: true, status: true, sessionsRevokedAt: true },
+      select: { id: true, email: true, role: true, status: true, sessionsRevokedAt: true, twoFactorEnabled: true },
     })
     if (!user) {
       // Deleted user: forget any cached identity so a stale entry can't
@@ -125,7 +145,7 @@ async function loadIdentity(userId: string): Promise<CachedIdentity | null> {
       return null
     }
     const fresh: CachedIdentity = {
-      role: user.role,
+      role: effectiveRole(user.role, user.twoFactorEnabled),
       status: (user as { status?: string }).status || 'active',
       email: user.email,
       sessionsRevokedAt: user.sessionsRevokedAt ? user.sessionsRevokedAt.getTime() : 0,

@@ -433,7 +433,7 @@ export default function OverviewPanel() {
             <button
               key={card.title}
               onClick={() => setDashboardTab(card.tab)}
-              className={`relative bg-card border rounded-xl p-5 flex items-center gap-4 hover:shadow-md transition-all text-left group overflow-hidden stat-card-hover ${
+              className={`relative bg-card border rounded-xl p-5 flex items-center gap-4 hover:shadow-md transition-all text-start group overflow-hidden stat-card-hover ${
                 mounted ? 'animate-stagger-in' : 'opacity-0'
               }`}
               style={{ animationDelay: `${idx * 0.1 + 0.1}s` }}
@@ -654,7 +654,7 @@ export default function OverviewPanel() {
         ) : (
           <div className="relative">
             {/* Vertical timeline line */}
-            <div className="absolute left-5 top-3 bottom-3 w-px bg-border" />
+            <div className="absolute start-5 top-3 bottom-3 w-px bg-border" />
             <div className="space-y-0">
               {activityTimeline.map((item, idx) => {
                 const ti = timelineIcon(item.type)
@@ -692,7 +692,7 @@ export default function OverviewPanel() {
               <button
                 key={action.label}
                 onClick={() => setDashboardTab(action.tab)}
-                className="group bg-card border rounded-xl p-4 flex items-center gap-3 hover:border-indigo-300 hover:shadow-md transition-all text-left relative overflow-hidden"
+                className="group bg-card border rounded-xl p-4 flex items-center gap-3 hover:border-indigo-300 hover:shadow-md transition-all text-start relative overflow-hidden"
               >
                 {/* Gradient hover overlay */}
                 <div className={`absolute inset-0 bg-gradient-to-br ${action.gradient} opacity-0 group-hover:opacity-[0.06] transition-opacity duration-300`} />
@@ -703,7 +703,7 @@ export default function OverviewPanel() {
                   <p className="text-sm font-medium">{action.label}</p>
                   <p className="text-xs text-muted-foreground">{action.desc}</p>
                 </div>
-                <ChevronRight className="size-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity ml-auto relative z-10" />
+                <ChevronRight className="size-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity ms-auto relative z-10" />
               </button>
             )
           })}

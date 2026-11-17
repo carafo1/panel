@@ -141,9 +141,9 @@ export function ContactPage() {
                       className="btn-shimmer w-full bg-indigo-500 hover:bg-indigo-600 text-white border-0 h-12 shadow-glow-indigo"
                     >
                       {loading ? (
-                        <><Loader2 className="size-4 mr-2 animate-spin" /> Sending...</>
+                        <><Loader2 className="size-4 me-2 animate-spin" /> Sending...</>
                       ) : (
-                        <><Send className="size-4 mr-2" /> {getContent('contact.form.button')}</>
+                        <><Send className="size-4 me-2" /> {getContent('contact.form.button')}</>
                       )}
                     </Button>
                   </form>

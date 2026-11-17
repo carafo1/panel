@@ -141,7 +141,7 @@ export function BroadcastPanel() {
         <div className="space-y-1.5">
           <Label htmlFor="bc-message">Message</Label>
           <Textarea id="bc-message" rows={5} maxLength={4000} placeholder="What is happening, who is affected, and what they need to do." value={message} onChange={(e) => setMessage(e.target.value)} />
-          <p className="text-right text-xs text-muted-foreground">{message.length}/4000</p>
+          <p className="text-end text-xs text-muted-foreground">{message.length}/4000</p>
         </div>
         <div className="flex items-start justify-between gap-4 rounded-md border p-3">
           <div>
@@ -155,7 +155,7 @@ export function BroadcastPanel() {
         </div>
         <div className="flex justify-end">
           <Button onClick={doPreview} disabled={!valid || !!busy}>
-            {busy === 'preview' ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Users className="mr-2 size-4" />}
+            {busy === 'preview' ? <Loader2 className="me-2 size-4 animate-spin" /> : <Users className="me-2 size-4" />}
             Preview recipients
           </Button>
         </div>
@@ -191,7 +191,7 @@ export function BroadcastPanel() {
               }}
               disabled={busy === 'send'}
             >
-              {busy === 'send' ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Send className="mr-2 size-4" />}
+              {busy === 'send' ? <Loader2 className="me-2 size-4 animate-spin" /> : <Send className="me-2 size-4" />}
               Send now
             </AlertDialogAction>
           </AlertDialogFooter>

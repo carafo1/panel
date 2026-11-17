@@ -279,11 +279,11 @@ export function CmsPanel() {
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={fetchAll} disabled={loading}>
-            <RefreshCw className="size-4 mr-1" /> Refresh
+            <RefreshCw className="size-4 me-1" /> Refresh
           </Button>
           {view === 'services' && (
             <Button size="sm" onClick={openCreate} className="bg-indigo-500 hover:bg-indigo-600 text-white border-0">
-              <Plus className="size-4 mr-1" /> New Service
+              <Plus className="size-4 me-1" /> New Service
             </Button>
           )}
         </div>
@@ -312,7 +312,7 @@ export function CmsPanel() {
                     <TableHead className="hidden md:table-cell">Slug</TableHead>
                     <TableHead className="hidden lg:table-cell">Plans</TableHead>
                     <TableHead className="text-center">Visible</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
+                    <TableHead className="text-end">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -354,7 +354,7 @@ export function CmsPanel() {
                             )}
                           </button>
                         </TableCell>
-                        <TableCell className="text-right">
+                        <TableCell className="text-end">
                           <div className="flex justify-end gap-1">
                             <Button variant="ghost" size="sm" onClick={() => openEdit(svc)}>
                               <Pencil className="size-3.5" />
@@ -414,7 +414,7 @@ export function CmsPanel() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={saving}>Cancel</Button>
             <Button variant="destructive" onClick={handleDelete} disabled={saving}>
-              {saving ? <Loader2 className="size-4 mr-1 animate-spin" /> : <Trash2 className="size-4 mr-1" />}
+              {saving ? <Loader2 className="size-4 me-1 animate-spin" /> : <Trash2 className="size-4 me-1" />}
               Delete
             </Button>
           </DialogFooter>
@@ -503,7 +503,7 @@ function PagesEditor({ content, setContent, onSave, saving }: PagesEditorProps) 
           <span>Edit the text shown across every public page. Fields are pre-filled with defaults.</span>
         </div>
         <Button size="sm" onClick={onSave} disabled={saving} className="bg-indigo-500 hover:bg-indigo-600 text-white border-0">
-          {saving ? <Loader2 className="size-4 mr-1 animate-spin" /> : <SaveIcon className="size-4 mr-1" />}
+          {saving ? <Loader2 className="size-4 me-1 animate-spin" /> : <SaveIcon className="size-4 me-1" />}
           Save Changes
         </Button>
       </div>
@@ -520,7 +520,7 @@ function PagesEditor({ content, setContent, onSave, saving }: PagesEditorProps) 
             <button
               type="button"
               onClick={() => setOpenGroup(isOpen ? '' : group.group)}
-              className="w-full text-left flex items-center justify-between gap-3 px-4 py-3.5 hover:bg-accent/50 transition-colors"
+              className="w-full text-start flex items-center justify-between gap-3 px-4 py-3.5 hover:bg-accent/50 transition-colors"
             >
               <div className="flex items-center gap-3 min-w-0">
                 <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-indigo-500/10">
@@ -578,7 +578,7 @@ function PagesEditor({ content, setContent, onSave, saving }: PagesEditorProps) 
         <button
           type="button"
           onClick={() => setCustomOpen((v) => !v)}
-          className="w-full text-left flex items-center justify-between gap-3 px-4 py-3.5 hover:bg-accent/50 transition-colors"
+          className="w-full text-start flex items-center justify-between gap-3 px-4 py-3.5 hover:bg-accent/50 transition-colors"
         >
           <div className="flex items-center gap-3">
             <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-amber-500/10">
@@ -627,7 +627,7 @@ function PagesEditor({ content, setContent, onSave, saving }: PagesEditorProps) 
                 className="text-sm max-w-xs"
               />
               <Button variant="outline" size="sm" onClick={addCustomKey}>
-                <Plus className="size-4 mr-1" /> Add Key
+                <Plus className="size-4 me-1" /> Add Key
               </Button>
             </div>
           </CardContent>
@@ -837,7 +837,7 @@ function ServiceEditorDialog({ open, onOpenChange, service, onChange, onSave, sa
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>Cancel</Button>
           <Button onClick={onSave} disabled={saving} className="bg-indigo-500 hover:bg-indigo-600 text-white border-0">
-            {saving ? <Loader2 className="size-4 mr-1 animate-spin" /> : <Save className="size-4 mr-1" />}
+            {saving ? <Loader2 className="size-4 me-1 animate-spin" /> : <Save className="size-4 me-1" />}
             {isEdit ? 'Save Changes' : 'Create Service'}
           </Button>
         </DialogFooter>
@@ -856,7 +856,7 @@ function SubSection({ title, count, onAdd, children }: { title: string; count: n
           <Badge variant="secondary" className="text-xs">{count}</Badge>
         </div>
         <Button variant="outline" size="sm" onClick={onAdd} type="button">
-          <Plus className="size-3.5 mr-1" /> Add
+          <Plus className="size-3.5 me-1" /> Add
         </Button>
       </div>
       <div className="space-y-2">{children}</div>
@@ -868,10 +868,10 @@ function SubSection({ title, count, onAdd, children }: { title: string; count: n
 function NestedCard({ onRemove, children }: { onRemove: () => void; children: React.ReactNode }) {
   return (
     <div className="rounded-lg border bg-muted/30 p-3 relative">
-      <button onClick={onRemove} className="absolute top-2 right-2 text-red-400 hover:text-red-600 z-10" aria-label="Remove">
+      <button onClick={onRemove} className="absolute top-2 end-2 text-red-400 hover:text-red-600 z-10" aria-label="Remove">
         <X className="size-4" />
       </button>
-      <div className="pr-6">{children}</div>
+      <div className="pe-6">{children}</div>
     </div>
   )
 }

@@ -32,7 +32,10 @@ model User {
   statusReason            String?
   statusChangedAt         DateTime?
   emailVerified           Boolean  @default(false)
+  /// SHA-256 of the emailed verification token (never the token itself).
   emailVerificationToken  String?
+  /// Verification links stop working after this (48 hours after sending).
+  emailVerificationExpiresAt DateTime?
   // Password reset: only a SHA-256 of the emailed token is stored (a copy of
   // the database must not be enough to reset anyone's password), it expires,
   // and it is cleared when used. Kept apart from emailVerificationToken so a
@@ -54,6 +57,13 @@ model User {
   updatedAt    DateTime      @updatedAt
 
   sessions      Session[]
+  supportTickets        SupportTicket[] @relation("TicketCustomer")
+  assignedTickets       SupportTicket[] @relation("TicketAssignee")
+  supportMessages       SupportMessage[]
+  sshKeys               SshKey[]
+  referralCode          ReferralCode?
+  referralsMade         Referral[]      @relation("ReferralsMade")
+  referredBy            Referral?       @relation("ReferredBy")
   subscriptions Subscription[]
   payments      Payment[]
   projects      Project[]
@@ -395,6 +405,15 @@ model Project {
   // (kept for audit + future re-deploys). Schema is open-ended on purpose.
   installSettings    String?  // JSON string
 
+  // Staging (lib/staging.ts). A staging site is its own Project row pointing
+  // at the live site; it is hidden from project lists and plan site counts.
+  environment        String   @default("production") // production | staging
+  parentProjectId    String?  // staging → its live site
+  stagingStatus      String?  // creating | ready | syncing | pushing | failed (on the staging row)
+  stagingMessage     String?
+  stagingSyncedAt    DateTime?
+  stagingPushedAt    DateTime?
+
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -419,6 +438,10 @@ model Project {
   ftpAccounts        FtpAccount[]
   redirects          Redirect[]
   ipBlocks           IpBlock[]
+  sftpAccess         SftpAccess?
+  cdnZones           CdnZone[]
+
+  @@index([parentProjectId])
 
   // ── pgvector embedding (PostgreSQL only) ── Populated by src/lib/embeddings.ts when the project is created or updated.
   embedding Unsupported("vector(1536)")?
@@ -684,6 +707,198 @@ model EnvironmentVariable {
   project  Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@unique([projectId, key])
+}
+
+/// A customer's request for help. Messages form a live conversation with the
+/// support team (pushed to both sides over the realtime service).
+model SupportTicket {
+  id            String    @id @default(cuid())
+  /// Human-friendly reference shown to customers, e.g. T-48213.
+  reference     String    @unique
+  userId        String
+  subject       String
+  /// open | waiting_customer | resolved | closed
+  status        String    @default("open")
+  /// low | normal | high | urgent
+  priority      String    @default("normal")
+  /// billing | technical | domain | email | account | other
+  category      String    @default("other")
+  projectId     String?
+  assignedToId  String?
+  lastMessageAt DateTime  @default(now())
+  /// Who wrote last: "customer" | "staff" — drives "waiting for you" badges.
+  lastReplyBy   String    @default("customer")
+  closedAt      DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  user       User             @relation("TicketCustomer", fields: [userId], references: [id], onDelete: Cascade)
+  assignedTo User?            @relation("TicketAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  messages   SupportMessage[]
+
+  @@index([userId, status])
+  @@index([status, lastMessageAt])
+}
+
+model SupportMessage {
+  id        String   @id @default(cuid())
+  ticketId  String
+  authorId  String
+  /// Written by support staff (admin) rather than the customer.
+  fromStaff Boolean  @default(false)
+  /// Staff-only note — never shown to the customer.
+  internal  Boolean  @default(false)
+  body      String
+  createdAt DateTime @default(now())
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  author User          @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId, createdAt])
+}
+
+/// A public status-page incident or scheduled maintenance, posted by staff.
+model Incident {
+  id          String    @id @default(cuid())
+  title       String
+  /// minor | major | critical | maintenance
+  impact      String    @default("minor")
+  /// investigating | identified | monitoring | resolved (maintenance: scheduled | in_progress | completed)
+  status      String    @default("investigating")
+  /// JSON array of affected component keys (lib/status.ts COMPONENTS)
+  components  String    @default("[]")
+  /// When it started (or, for maintenance, when it is scheduled to start).
+  startedAt   DateTime  @default(now())
+  resolvedAt  DateTime?
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  updates IncidentUpdate[]
+
+  @@index([resolvedAt, startedAt])
+}
+
+model IncidentUpdate {
+  id         String   @id @default(cuid())
+  incidentId String
+  status     String
+  message    String
+  createdAt  DateTime @default(now())
+
+  incident Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+
+  @@index([incidentId, createdAt])
+}
+
+/// A public SSH key on a customer's account (public half only).
+model SshKey {
+  id          String    @id @default(cuid())
+  userId      String
+  name        String
+  /// "type base64" — options and comment stripped
+  publicKey   String
+  fingerprint String
+  createdAt   DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, fingerprint])
+}
+
+/// SFTP (SSH file transfer) access to one website, chrooted to its files.
+model SftpAccess {
+  id          String   @id @default(cuid())
+  projectId   String   @unique
+  /// System user on the server, e.g. "sftp_myshop_3f2a"
+  username    String   @unique
+  /// JSON array of SshKey ids whose public keys may log in
+  keyIds      String   @default("[]")
+  /// active | failed
+  status      String   @default("active")
+  lastError   String?
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+/// A customer domain proxied through Cloudflare (CDN, WAF, DDoS protection).
+model CdnZone {
+  id          String   @id @default(cuid())
+  projectId   String
+  /// The Cloudflare zone (registrable domain), e.g. example.com
+  domain      String   @unique
+  provider    String   @default("cloudflare")
+  zoneId      String
+  /// pending (waiting for nameservers) | active | error
+  status      String   @default("pending")
+  /// JSON array of the nameservers the customer must set at their registrar
+  nameservers String   @default("[]")
+  /// essentially_off | low | medium | high | under_attack
+  securityLevel String @default("medium")
+  developmentMode Boolean @default(false)
+  lastError   String?
+  activatedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+/// A customer's personal referral code (one per user, created on first view).
+model ReferralCode {
+  userId    String   @id
+  code      String   @unique
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/// Someone who signed up with a referral code. Rewarded (as account credit)
+/// once their first real payment clears — see lib/referrals.ts.
+model Referral {
+  id             String    @id @default(cuid())
+  referrerId     String
+  referredUserId String    @unique
+  /// signed_up | rewarded | not_rewarded
+  status         String    @default("signed_up")
+  referrerReward Float?
+  refereeReward  Float?
+  /// Why a referral was not rewarded (cap reached, programme off, …)
+  note           String?
+  rewardedAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  referrer User @relation("ReferralsMade", fields: [referrerId], references: [id], onDelete: Cascade)
+  referred User @relation("ReferredBy", fields: [referredUserId], references: [id], onDelete: Cascade)
+
+  @@index([referrerId, status])
+}
+
+/// A public help-center article (Markdown body, rendered without raw HTML).
+model HelpArticle {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  title       String
+  summary     String   @default("")
+  /// Markdown
+  body        String
+  /// getting-started | hosting | domains | email | billing | account
+  category    String   @default("getting-started")
+  published   Boolean  @default(true)
+  order       Int      @default(0)
+  views       Int      @default(0)
+  helpfulYes  Int      @default(0)
+  helpfulNo   Int      @default(0)
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([published, category, order])
 }
 
 /// One signed-in device. The login JWT carries this row's id (`sid`), and the

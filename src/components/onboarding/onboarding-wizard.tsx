@@ -262,7 +262,7 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                   <div className="size-20 rounded-2xl bg-gradient-to-br from-indigo-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-500/30">
                     <Rocket className="size-10 text-white" />
                   </div>
-                  <div className="absolute -top-2 -right-2 size-6 rounded-full bg-indigo-400 flex items-center justify-center animate-float">
+                  <div className="absolute -top-2 -end-2 size-6 rounded-full bg-indigo-400 flex items-center justify-center animate-float">
                     <Sparkles className="size-3 text-white" />
                   </div>
                 </div>
@@ -278,7 +278,7 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                   onClick={() => setStep(2)}
                 >
                   Get Started
-                  <ArrowRight className="size-4 ml-2" />
+                  <ArrowRight className="size-4 ms-2" />
                 </Button>
                 <button
                   className="mt-4 text-sm text-muted-foreground hover:text-foreground transition-colors"
@@ -316,7 +316,7 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                         <button
                           key={fw.id}
                           onClick={() => setFramework(fw.id)}
-                          className={`flex items-start gap-3 p-4 rounded-xl border-2 text-left transition-all duration-200 hover:shadow-md ${
+                          className={`flex items-start gap-3 p-4 rounded-xl border-2 text-start transition-all duration-200 hover:shadow-md ${
                             isSelected
                               ? 'border-indigo-500 bg-indigo-500/5 shadow-md shadow-indigo-500/10'
                               : 'border-border hover:border-indigo-500/30'
@@ -344,14 +344,14 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                   </button>
                   <div className="flex gap-3">
                     <Button variant="outline" onClick={() => setStep(1)}>
-                      <ArrowLeft className="size-4 mr-1" /> Back
+                      <ArrowLeft className="size-4 me-1" /> Back
                     </Button>
                     <Button
                       className="bg-indigo-500 hover:bg-indigo-600 text-white"
                       onClick={() => setStep(3)}
                       disabled={!projectName.trim()}
                     >
-                      Continue <ArrowRight className="size-4 ml-1" />
+                      Continue <ArrowRight className="size-4 ms-1" />
                     </Button>
                   </div>
                 </div>
@@ -369,12 +369,12 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                 <div className="mb-6">
                   <div className="flex gap-2">
                     <div className="relative flex-1">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                      <Search className="absolute start-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
                       <Input
                         value={domainSearch}
                         onChange={(e) => setDomainSearch(e.target.value)}
                         placeholder="e.g. myapp.com"
-                        className="h-11 pl-10"
+                        className="h-11 ps-10"
                         onKeyDown={(e) => e.key === 'Enter' && handleDomainSearch()}
                       />
                     </div>
@@ -440,13 +440,13 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                   <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-indigo-500/10">
                     <Globe className="size-5 text-indigo-500" />
                   </div>
-                  <div className="text-left">
+                  <div className="text-start">
                     <p className="font-semibold text-sm">Use a free subdomain</p>
                     <p className="text-xs text-muted-foreground">
                       <span className="text-indigo-600 font-mono">{slug}.apsamo.com</span> — Free with any plan
                     </p>
                   </div>
-                  <Badge variant="secondary" className="ml-auto bg-indigo-500/10 text-indigo-600 text-[10px]">FREE</Badge>
+                  <Badge variant="secondary" className="ms-auto bg-indigo-500/10 text-indigo-600 text-[10px]">FREE</Badge>
                 </button>
 
                 <div className="mt-auto flex items-center justify-between">
@@ -458,14 +458,14 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                   </button>
                   <div className="flex gap-3">
                     <Button variant="outline" onClick={() => setStep(2)}>
-                      <ArrowLeft className="size-4 mr-1" /> Back
+                      <ArrowLeft className="size-4 me-1" /> Back
                     </Button>
                     <Button
                       className="bg-indigo-500 hover:bg-indigo-600 text-white"
                       onClick={() => setStep(4)}
                       disabled={!selectedDomain && !useFreeSubdomain}
                     >
-                      Continue <ArrowRight className="size-4 ml-1" />
+                      Continue <ArrowRight className="size-4 ms-1" />
                     </Button>
                   </div>
                 </div>
@@ -492,7 +492,7 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                         <button
                           key={plan.id}
                           onClick={() => setSelectedPlan(plan.id)}
-                          className={`relative flex flex-col p-4 rounded-xl border-2 text-left transition-all duration-200 hover:shadow-md ${
+                          className={`relative flex flex-col p-4 rounded-xl border-2 text-start transition-all duration-200 hover:shadow-md ${
                             isSelected
                               ? 'border-indigo-500 bg-indigo-500/5 shadow-md shadow-indigo-500/10'
                               : 'border-border hover:border-indigo-500/30'
@@ -534,14 +534,14 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                   </button>
                   <div className="flex gap-3">
                     <Button variant="outline" onClick={() => setStep(3)}>
-                      <ArrowLeft className="size-4 mr-1" /> Back
+                      <ArrowLeft className="size-4 me-1" /> Back
                     </Button>
                     <Button
                       className="bg-indigo-500 hover:bg-indigo-600 text-white"
                       onClick={() => setStep(5)}
                       disabled={!selectedPlan}
                     >
-                      Continue <ArrowRight className="size-4 ml-1" />
+                      Continue <ArrowRight className="size-4 ms-1" />
                     </Button>
                   </div>
                 </div>
@@ -590,7 +590,7 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                   </button>
                   <div className="flex gap-3">
                     <Button variant="outline" onClick={() => setStep(4)}>
-                      <ArrowLeft className="size-4 mr-1" /> Back
+                      <ArrowLeft className="size-4 me-1" /> Back
                     </Button>
                     <Button
                       className="bg-indigo-500 hover:bg-indigo-600 text-white px-8"
@@ -599,12 +599,12 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                     >
                       {deploying ? (
                         <>
-                          <Loader2 className="size-4 animate-spin mr-2" />
+                          <Loader2 className="size-4 animate-spin me-2" />
                           Deploying...
                         </>
                       ) : (
                         <>
-                          <Rocket className="size-4 mr-2" />
+                          <Rocket className="size-4 me-2" />
                           Deploy Now
                         </>
                       )}
@@ -642,7 +642,7 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                   onClick={onComplete}
                 >
                   Go to Dashboard
-                  <ArrowRight className="size-4 ml-2" />
+                  <ArrowRight className="size-4 ms-2" />
                 </Button>
               </div>
             )}

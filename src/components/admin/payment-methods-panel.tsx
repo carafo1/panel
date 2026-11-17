@@ -698,7 +698,7 @@ export function PaymentMethodsPanel() {
             className="mt-4"
             onClick={fetchMethods}
           >
-            <RefreshCw className="size-4 mr-1" />
+            <RefreshCw className="size-4 me-1" />
             Refresh
           </Button>
         </CardContent>
@@ -743,7 +743,7 @@ export function PaymentMethodsPanel() {
                 <RefreshCw
                   className={`size-4 ${loading ? 'animate-spin' : ''}`}
                 />
-                <span className="ml-1 hidden sm:inline">Refresh</span>
+                <span className="ms-1 hidden sm:inline">Refresh</span>
               </Button>
             </div>
           </div>
@@ -828,7 +828,7 @@ export function PaymentMethodsPanel() {
                     size="sm"
                     onClick={() => handleOpenConfig(m)}
                   >
-                    <Settings className="size-4 mr-1" />
+                    <Settings className="size-4 me-1" />
                     Configure
                   </Button>
                 </div>

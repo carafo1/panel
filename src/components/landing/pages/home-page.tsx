@@ -100,7 +100,7 @@ export function HomePage({ onGetStarted }: HomePageProps) {
         <div className="relative z-10 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pt-10 sm:pt-12 lg:pt-14 pb-20 sm:pb-24 lg:pb-28">
           <div className="grid lg:grid-cols-2 gap-12 lg:gap-6 items-center">
             {/* Copy — first on mobile, left on desktop */}
-            <div className="order-1 lg:order-1 text-center lg:text-left">
+            <div className="order-1 lg:order-1 text-center lg:text-start">
               <div className="animate-fade-in-up">
                 <span className="inline-flex items-center gap-2 mb-6 rounded-full glass px-4 py-1.5 text-sm text-indigo-200">
                   <Sparkles className="size-3.5 text-indigo-300" />
@@ -119,7 +119,7 @@ export function HomePage({ onGetStarted }: HomePageProps) {
               <div className="flex flex-col sm:flex-row items-center justify-center lg:justify-start gap-4 animate-fade-in-up" style={{ animationDelay: '0.45s' }}>
                 <Button size="lg" className="btn-shimmer relative bg-indigo-500 hover:bg-indigo-600 text-white px-8 h-12 text-base shadow-glow-indigo hover:shadow-glow-indigo-lg transition-all duration-300 hover:scale-105 border-0" onClick={onGetStarted}>
                   {getContent('home.hero.ctaPrimary')}
-                  <ArrowRight className="size-4 ml-1" />
+                  <ArrowRight className="size-4 ms-1" />
                 </Button>
                 <button onClick={() => setPublicPage({ page: 'services' })} className="group inline-flex items-center justify-center gap-2 h-12 px-8 text-base rounded-md glass text-white hover:bg-white/10 transition-all duration-300">
                   <Play className="size-4 text-indigo-300" />
@@ -200,7 +200,7 @@ export function HomePage({ onGetStarted }: HomePageProps) {
                   <div ref={serviceRefs[i].ref} onMouseMove={serviceRefs[i].onMouseMove} className="spotlight h-full">
                     <a href={`#/services/${service.slug}`} onClick={() => setPublicPage({ page: 'service-detail', slug: service.slug })} className="group block h-full">
                       <Card className="group relative overflow-hidden border hover:border-indigo-500/50 hover:shadow-glow-indigo transition-all duration-500 h-full cursor-pointer bg-card/80 backdrop-blur-sm">
-                        <div className={`absolute -top-20 -right-20 size-48 rounded-full bg-gradient-to-br ${service.accent} opacity-10 blur-3xl group-hover:opacity-25 transition-opacity duration-700`} />
+                        <div className={`absolute -top-20 -end-20 size-48 rounded-full bg-gradient-to-br ${service.accent} opacity-10 blur-3xl group-hover:opacity-25 transition-opacity duration-700`} />
                         <CardContent className="p-6 sm:p-8 relative">
                           <div className={`relative flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br ${service.accent} text-white shadow-glow-indigo group-hover:scale-110 group-hover:rotate-3 transition-all duration-500 shrink-0 mb-5`}>
                             <Icon className="size-7" />
@@ -237,7 +237,7 @@ export function HomePage({ onGetStarted }: HomePageProps) {
               return (
                 <StaggerCard key={feature.title} index={i} className={i === 0 ? 'md:col-span-2 md:row-span-1' : ''}>
                   <Card className="group relative overflow-hidden border hover:border-indigo-500/40 hover:shadow-glow-indigo transition-all duration-500 h-full bg-card/80 backdrop-blur-sm">
-                    <div className="absolute -top-12 -right-12 size-32 rounded-full bg-indigo-500/10 blur-3xl group-hover:bg-indigo-500/20 transition-all duration-500" />
+                    <div className="absolute -top-12 -end-12 size-32 rounded-full bg-indigo-500/10 blur-3xl group-hover:bg-indigo-500/20 transition-all duration-500" />
                     <CardContent className="p-6 relative">
                       <div className="mb-3 flex size-12 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-700 text-white shadow-glow-indigo group-hover:scale-110 group-hover:-rotate-6 transition-all duration-500">
                         <Icon className="size-5" />
@@ -346,7 +346,7 @@ export function HomePage({ onGetStarted }: HomePageProps) {
               <h2 className="text-3xl sm:text-5xl font-extrabold tracking-tight mb-4"><span className="text-gradient-brand">{getContent('home.cta.title')}</span></h2>
               <p className="text-zinc-300 text-lg mb-8 max-w-lg mx-auto">{getContent('home.cta.subtitle')}</p>
               <Button size="lg" className="btn-shimmer relative bg-indigo-500 hover:bg-indigo-600 text-white px-10 h-12 text-base shadow-glow-indigo hover:shadow-glow-indigo-lg hover:scale-105 transition-all duration-300 border-0" onClick={onGetStarted}>
-                <Rocket className="size-4 mr-2" />
+                <Rocket className="size-4 me-2" />
                 {getContent('home.cta.button')}
               </Button>
             </div>

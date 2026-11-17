@@ -56,6 +56,11 @@ import { AdminSearch } from '@/components/admin/admin-search'
 import { BroadcastPanel } from '@/components/admin/broadcast-panel'
 import { TemplatesAdminPanel } from '@/components/admin/templates-admin-panel'
 import { UsageAdminPanel } from '@/components/admin/usage-admin-panel'
+import SupportPanel from '@/components/support/support-panel'
+import { IncidentsAdminPanel } from '@/components/admin/incidents-admin-panel'
+import { HelpAdminPanel } from '@/components/admin/help-admin-panel'
+import { CloudflareAdminCard } from '@/components/admin/cloudflare-admin-card'
+import { ReferralsAdminCard } from '@/components/admin/referrals-admin-card'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/store/auth-store'
 import { PaymentMethodsPanel } from '@/components/admin/payment-methods-panel'
@@ -183,7 +188,7 @@ function RoleBadge({ role }: { role: string }) {
   const Icon = cfg.icon
   return (
     <Badge variant="outline" className={cfg.className}>
-      {Icon && <Icon className="size-3 mr-1" />}
+      {Icon && <Icon className="size-3 me-1" />}
       {roleLabel(role)}
     </Badge>
   )
@@ -220,7 +225,7 @@ function StatusBadge({ status }: { status?: string }) {
   const Icon = cfg.icon
   return (
     <Badge variant="outline" className={cfg.className}>
-      <Icon className="size-3 mr-1" />
+      <Icon className="size-3 me-1" />
       {cfg.label}
     </Badge>
   )
@@ -237,7 +242,7 @@ function JobStatusBadge({ status }: { status: string }) {
   const Icon = cfg.icon
   return (
     <Badge variant="outline" className={cfg.className}>
-      <Icon className={`size-3 mr-1 ${status === 'processing' ? 'animate-spin' : ''}`} />
+      <Icon className={`size-3 me-1 ${status === 'processing' ? 'animate-spin' : ''}`} />
       {status.charAt(0).toUpperCase() + status.slice(1)}
     </Badge>
   )
@@ -250,7 +255,9 @@ export function AdminPanel() {
   const [jobs, setJobs] = useState<Job[]>([])
   const [loading, setLoading] = useState(true)
   const [userSearch, setUserSearch] = useState('')
-  const [adminTab, setAdminTab] = useState('content')
+  const [adminTab, setAdminTab] = useState(() =>
+    typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('ticket') ? 'support' : 'content'
+  )
   const [jobFilter, setJobFilter] = useState('all')
   const [retryLoading, setRetryLoading] = useState<string | null>(null)
   const [roleLoading, setRoleLoading] = useState<string | null>(null)
@@ -487,13 +494,16 @@ export function AdminPanel() {
       <Tabs value={adminTab} onValueChange={setAdminTab} className="space-y-4">
         <TabsList className="flex flex-wrap h-auto">
           <TabsTrigger value="infrastructure">
-            <Server className="size-4 mr-1.5" />
+            <Server className="size-4 me-1.5" />
             Infrastructure
           </TabsTrigger>
           <TabsTrigger value="content">
-            <LayoutGrid className="size-4 mr-1.5" />
+            <LayoutGrid className="size-4 me-1.5" />
             Content
           </TabsTrigger>
+          <TabsTrigger value="support">Support</TabsTrigger>
+          <TabsTrigger value="status">Status</TabsTrigger>
+          <TabsTrigger value="help">Help</TabsTrigger>
           <TabsTrigger value="users">Users</TabsTrigger>
           <TabsTrigger value="usage">Usage</TabsTrigger>
           <TabsTrigger value="announcements">Announcements</TabsTrigger>
@@ -506,18 +516,18 @@ export function AdminPanel() {
           <TabsTrigger value="promotions">Discounts</TabsTrigger>
           <TabsTrigger value="reports">Reports</TabsTrigger>
           <TabsTrigger value="billing">
-            <CreditCard className="size-4 mr-1.5" />
+            <CreditCard className="size-4 me-1.5" />
             Billing
           </TabsTrigger>
           {isSuperAdmin && (
             <TabsTrigger value="payment-methods">
-              <CreditCard className="size-4 mr-1.5" />
+              <CreditCard className="size-4 me-1.5" />
               Payment Methods
             </TabsTrigger>
           )}
           {isSuperAdmin && (
             <TabsTrigger value="gateways">
-              <CreditCard className="size-4 mr-1.5" />
+              <CreditCard className="size-4 me-1.5" />
               Gateways
             </TabsTrigger>
           )}
@@ -545,10 +555,10 @@ export function AdminPanel() {
                   </CardDescription>
                 </div>
                 <div className="relative w-full sm:w-64">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                  <Search className="absolute start-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
                   <Input
                     placeholder="Search users..."
-                    className="pl-9"
+                    className="ps-9"
                     value={userSearch}
                     onChange={(e) => setUserSearch(e.target.value)}
                   />
@@ -567,7 +577,7 @@ export function AdminPanel() {
                       <TableHead>Plan</TableHead>
                       <TableHead>Projects</TableHead>
                       <TableHead>Joined</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
+                      <TableHead className="text-end">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -597,7 +607,7 @@ export function AdminPanel() {
                                     ) : (
                                       <RoleBadge role={u.role} />
                                     )}
-                                    <ChevronDown className="size-3 ml-0.5 text-muted-foreground" />
+                                    <ChevronDown className="size-3 ms-0.5 text-muted-foreground" />
                                   </button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="start">
@@ -612,7 +622,7 @@ export function AdminPanel() {
                                       >
                                         <RoleBadge role={r} />
                                         {u.role === r && (
-                                          <CheckCircle2 className="size-3.5 ml-auto text-indigo-600" />
+                                          <CheckCircle2 className="size-3.5 ms-auto text-indigo-600" />
                                         )}
                                       </DropdownMenuItem>
                                     )
@@ -637,7 +647,7 @@ export function AdminPanel() {
                                     ) : (
                                       <StatusBadge status={u.status} />
                                     )}
-                                    <ChevronDown className="size-3 ml-0.5 text-muted-foreground" />
+                                    <ChevronDown className="size-3 ms-0.5 text-muted-foreground" />
                                   </button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="start">
@@ -659,7 +669,7 @@ export function AdminPanel() {
                                     >
                                       <StatusBadge status={s} />
                                       {(u.status || 'active') === s && (
-                                        <CheckCircle2 className="size-3.5 ml-auto text-indigo-600" />
+                                        <CheckCircle2 className="size-3.5 ms-auto text-indigo-600" />
                                       )}
                                     </DropdownMenuItem>
                                   ))}
@@ -684,7 +694,7 @@ export function AdminPanel() {
                           <TableCell className="text-xs text-muted-foreground">
                             {new Date(u.createdAt).toLocaleDateString()}
                           </TableCell>
-                          <TableCell className="text-right">
+                          <TableCell className="text-end">
                             <CustomerActionsMenu
                               customer={{ id: u.id, name: u.name, email: u.email, role: u.role }}
                               isSelf={u.id === currentUserId}
@@ -700,6 +710,18 @@ export function AdminPanel() {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="support">
+          <SupportPanel staff />
+        </TabsContent>
+
+        <TabsContent value="status">
+          <IncidentsAdminPanel />
+        </TabsContent>
+
+        <TabsContent value="help">
+          <HelpAdminPanel />
         </TabsContent>
 
         <TabsContent value="usage">
@@ -808,8 +830,10 @@ export function AdminPanel() {
 
         {/* ── Servers Tab ────────────────────────────────────────────── */}
         <TabsContent value="servers">
-          <ServersPanel />
-
+          <div className="space-y-4">
+            <ServersPanel />
+            <CloudflareAdminCard />
+          </div>
         </TabsContent>
 
         <TabsContent value="backups">
@@ -830,7 +854,10 @@ export function AdminPanel() {
         </TabsContent>
 
         <TabsContent value="promotions">
-          <PromotionsAdminPanel />
+          <div className="space-y-4">
+            <PromotionsAdminPanel />
+            <ReferralsAdminCard />
+          </div>
         </TabsContent>
 
         <TabsContent value="reports">

@@ -95,6 +95,8 @@ export async function GET(
         status: project.status,
         subdomain: project.subdomain,
         customDomain: project.customDomain,
+        environment: project.environment,
+        parentProjectId: project.parentProjectId,
         repoUrl: project.repoUrl,
         autoDeploy: project.autoDeploy,
         sslEnabled: project.sslEnabled,

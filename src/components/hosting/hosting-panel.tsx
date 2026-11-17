@@ -54,6 +54,9 @@ import {
   Folder,
   Mail,
   Archive,
+  FlaskConical,
+  KeyRound,
+  Cloud,
   Activity,
   HardDriveUpload,
   ArrowRightLeft,
@@ -135,6 +138,9 @@ import {
 } from '@/components/hosting/website-management-tabs'
 import { WordPressTab } from '@/components/hosting/wordpress-tab'
 import { AppToolsTab } from '@/components/hosting/app-tools-tab'
+import { StagingTab } from '@/components/hosting/staging-tab'
+import { SftpTab } from '@/components/hosting/sftp-tab'
+import { CdnTab } from '@/components/hosting/cdn-tab'
 import {
   CronTab,
   FtpTab,
@@ -158,10 +164,13 @@ const PROJECT_SUBTABS: { id: string; label: string; icon: React.ElementType }[] 
   { id: 'files', label: 'Files', icon: Folder },
   { id: 'terminal', label: 'Terminal', icon: Terminal },
   { id: 'cron', label: 'Cron Jobs', icon: Clock },
+  { id: 'sftp', label: 'SSH / SFTP', icon: KeyRound },
   { id: 'ftp', label: 'FTP', icon: HardDriveUpload },
   { id: 'backups', label: 'Backups', icon: Archive },
+  { id: 'staging', label: 'Staging', icon: FlaskConical },
   { id: 'import', label: 'Import', icon: HardDriveDownload },
   { id: 'domains', label: 'Domains', icon: Globe },
+  { id: 'cdn', label: 'CDN & protection', icon: Cloud },
   { id: 'redirects', label: 'Redirects', icon: ArrowRightLeft },
   { id: 'security', label: 'IP Blocker', icon: Ban },
   { id: 'resources', label: 'Resources', icon: Activity },
@@ -217,6 +226,8 @@ interface Project {
 
 interface ProjectDetail extends Project {
   repoUrl?: string
+  environment?: string
+  parentProjectId?: string | null
   /** What the viewer may do; absent from older API responses (treat as owner). */
   access?: {
     role: string
@@ -523,7 +534,7 @@ function ProjectCard({
 
       {/* Selection checkbox (top-right) */}
       <div
-        className="absolute top-3 right-3 z-10"
+        className="absolute top-3 end-3 z-10"
         onClick={(e) => {
           e.stopPropagation()
           if (e.shiftKey) {
@@ -551,7 +562,7 @@ function ProjectCard({
       </div>
 
       <CardHeader className="pb-2 relative">
-        <div className="flex items-start justify-between pr-8">
+        <div className="flex items-start justify-between pe-8">
           <div className="flex items-center gap-2">
             {frameworkIcon(project.framework)}
             <CardTitle className="text-base">{project.name}</CardTitle>
@@ -571,13 +582,13 @@ function ProjectCard({
           </Badge>
           {project.team && (
             <Badge variant="outline" className="text-xs" title={project.ownedByMe === false ? `Shared with you through ${project.team.name}` : `Shared with ${project.team.name}`}>
-              <Users className="size-3 mr-1" />
+              <Users className="size-3 me-1" />
               {project.team.name}
             </Badge>
           )}
           {project.sslEnabled && (
             <Badge variant="outline" className="bg-indigo-50 text-indigo-600 dark:bg-indigo-900/20 dark:text-indigo-400 text-xs">
-              <Shield className="size-3 mr-1" />
+              <Shield className="size-3 me-1" />
               SSL
             </Badge>
           )}
@@ -708,14 +719,14 @@ function CreateProjectDialog({
                     key={plan.id}
                     type="button"
                     onClick={() => setPlanId(plan.id)}
-                    className={`relative flex items-center gap-3 rounded-lg border p-3 text-left transition-all hover:border-indigo-300 dark:hover:border-indigo-700 ${
+                    className={`relative flex items-center gap-3 rounded-lg border p-3 text-start transition-all hover:border-indigo-300 dark:hover:border-indigo-700 ${
                       planId === plan.id
                         ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20 ring-1 ring-indigo-500'
                         : 'border-border'
                     }`}
                   >
                     {plan.popular && (
-                      <Badge className="absolute -top-2 right-3 bg-indigo-600 text-white text-[10px] px-1.5 py-0">
+                      <Badge className="absolute -top-2 end-3 bg-indigo-600 text-white text-[10px] px-1.5 py-0">
                         Popular
                       </Badge>
                     )}
@@ -725,7 +736,7 @@ function CreateProjectDialog({
                         {plan.cpu} &middot; {plan.ram} &middot; {plan.storage}
                       </div>
                     </div>
-                    <div className="text-right">
+                    <div className="text-end">
                       <div className="font-semibold text-indigo-600 dark:text-indigo-400">
                         ${plan.price}
                       </div>
@@ -749,12 +760,12 @@ function CreateProjectDialog({
           >
             {loading ? (
               <>
-                <RefreshCw className="size-4 mr-2 animate-spin" />
+                <RefreshCw className="size-4 me-2 animate-spin" />
                 Creating...
               </>
             ) : (
               <>
-                <Rocket className="size-4 mr-2" />
+                <Rocket className="size-4 me-2" />
                 Create Project
               </>
             )}
@@ -804,7 +815,7 @@ function BuildLogsDialog({
             <Terminal className="size-5 text-indigo-600" />
             Build Logs
             {isAnimating && (
-              <span className="flex items-center gap-1 text-sm text-indigo-600 ml-2">
+              <span className="flex items-center gap-1 text-sm text-indigo-600 ms-2">
                 <span className="relative flex size-2">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
                   <span className="relative inline-flex size-2 rounded-full bg-indigo-500" />
@@ -832,7 +843,7 @@ function BuildLogsDialog({
             <div className="size-3 rounded-full bg-red-500/80" />
             <div className="size-3 rounded-full bg-yellow-500/80" />
             <div className="size-3 rounded-full bg-green-500/80" />
-            <span className="ml-2 text-xs text-zinc-500 font-mono">build log</span>
+            <span className="ms-2 text-xs text-zinc-500 font-mono">build log</span>
           </div>
 
           {/* Terminal content */}
@@ -945,12 +956,12 @@ function ContainerLogsDialog({
             >
               {copied ? (
                 <>
-                  <CheckCircle2 className="size-3.5 mr-1 text-indigo-500" />
+                  <CheckCircle2 className="size-3.5 me-1 text-indigo-500" />
                   Copied
                 </>
               ) : (
                 <>
-                  <FileText className="size-3.5 mr-1" />
+                  <FileText className="size-3.5 me-1" />
                   Copy
                 </>
               )}
@@ -962,7 +973,7 @@ function ContainerLogsDialog({
               onClick={onRefresh}
               disabled={loading}
             >
-              <RefreshCw className={`size-3.5 mr-1 ${loading ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`size-3.5 me-1 ${loading ? 'animate-spin' : ''}`} />
               Refresh
             </Button>
           </div>
@@ -974,7 +985,7 @@ function ContainerLogsDialog({
             <span className="size-2 rounded-full bg-red-500/80" />
             <span className="size-2 rounded-full bg-amber-500/80" />
             <span className="size-2 rounded-full bg-indigo-500/80" />
-            <span className="ml-2 text-[10px] text-zinc-500 font-mono">
+            <span className="ms-2 text-[10px] text-zinc-500 font-mono">
               docker logs --tail {tail} {containerName}
             </span>
           </div>
@@ -991,7 +1002,7 @@ function ContainerLogsDialog({
               <pre className="whitespace-pre-wrap break-all">
                 {logs.split('\n').map((line, i) => (
                   <div key={i} className="leading-relaxed">
-                    <span className="text-zinc-600 select-none mr-3">
+                    <span className="text-zinc-600 select-none me-3">
                       {String(i + 1).padStart(3, '0')}
                     </span>
                     <span
@@ -1033,10 +1044,13 @@ function ProjectDetailView({
   projectId,
   onBack,
   onRefresh,
+  onOpenProject,
 }: {
   projectId: string
   onBack: () => void
   onRefresh: () => void
+  /** Switch the detail view to another project (live ↔ staging). */
+  onOpenProject?: (id: string) => void
 }) {
   const [project, setProject] = useState<ProjectDetail | null>(null)
   const [loading, setLoading] = useState(true)
@@ -1690,10 +1704,22 @@ function ProjectDetailView({
       {/* Header */}
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="sm" onClick={onBack}>
-          <ArrowLeft className="size-4 mr-1" />
+          <ArrowLeft className="size-4 me-1" />
           Back
         </Button>
       </div>
+
+      {project.environment === 'staging' && (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100" role="note">
+          <FlaskConical className="size-4 shrink-0" />
+          <span className="flex-1">This is a <strong>staging</strong> copy. Changes here don’t affect your live site until you push them from the live site’s Staging section.</span>
+          {project.parentProjectId && onOpenProject && (
+            <Button size="sm" variant="outline" onClick={() => onOpenProject(project.parentProjectId!)}>
+              Open live site
+            </Button>
+          )}
+        </div>
+      )}
 
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
@@ -1716,7 +1742,7 @@ function ProjectDetailView({
               className="hover:text-indigo-600 transition-colors font-mono"
             >
               {project.subdomain}
-              <ExternalLink className="size-3 inline ml-1" />
+              <ExternalLink className="size-3 inline ms-1" />
             </a>
           </div>
           {project.customDomain && (
@@ -1739,14 +1765,14 @@ function ProjectDetailView({
             className="bg-indigo-600 hover:bg-indigo-700 text-white"
           >
             {deploying ? (
-              <RefreshCw className="size-4 mr-2 animate-spin" />
+              <RefreshCw className="size-4 me-2 animate-spin" />
             ) : (
-              <Rocket className="size-4 mr-2" />
+              <Rocket className="size-4 me-2" />
             )}
             {project.lastDeployment ? 'Redeploy' : 'Deploy'}
           </Button>
           <Button variant="outline" onClick={handleStop} disabled={project.status !== 'running'}>
-            <StopCircle className="size-4 mr-2" />
+            <StopCircle className="size-4 me-2" />
             Stop
           </Button>
           <DropdownMenu>
@@ -1758,7 +1784,7 @@ function ProjectDetailView({
             <DropdownMenuContent align="end">
               {project.access?.isOwner !== false ? (
                 <DropdownMenuItem className="text-red-600 focus:text-red-600" onClick={() => setDeleteDialogOpen(true)}>
-                  <Trash2 className="size-4 mr-2" />
+                  <Trash2 className="size-4 me-2" />
                   Delete Project
                 </DropdownMenuItem>
               ) : (
@@ -1779,7 +1805,7 @@ function ProjectDetailView({
           Deployments without scrolling through the whole page. */}
       <div className="sticky top-0 z-20 -mx-1 px-1 py-2 bg-background/95 backdrop-blur border-b">
         <div className="flex items-center gap-1 overflow-x-auto pb-1 [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/20">
-          {subtabsFor(project).map((tab) => {
+          {subtabsFor(project).filter((t) => t.id !== 'staging' || project.environment !== 'staging').map((tab) => {
             const Icon = tab.icon
             const isActive = activeSection === tab.id
             return (
@@ -1911,7 +1937,7 @@ function ProjectDetailView({
                     <TableHead>Branch</TableHead>
                     <TableHead>Duration</TableHead>
                     <TableHead>Time</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
+                    <TableHead className="text-end">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1940,14 +1966,14 @@ function ProjectDetailView({
                       <TableCell className="text-xs text-muted-foreground">
                         {timeAgo(dep.createdAt)}
                       </TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="text-end">
                         <Button
                           variant="ghost"
                           size="sm"
                           className="h-7 text-xs hover:text-indigo-600"
                           onClick={() => handleViewLogs(dep)}
                         >
-                          <Terminal className="size-3 mr-1" />
+                          <Terminal className="size-3 me-1" />
                           View Logs
                         </Button>
                       </TableCell>
@@ -2034,12 +2060,12 @@ function ProjectDetailView({
             >
               {savingSettings ? (
                 <>
-                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  <Loader2 className="size-4 me-2 animate-spin" />
                   Saving...
                 </>
               ) : (
                 <>
-                  <Save className="size-4 mr-2" />
+                  <Save className="size-4 me-2" />
                   Save Changes
                 </>
               )}
@@ -2068,7 +2094,7 @@ function ProjectDetailView({
               onClick={() => fetchContainerInfo()}
               disabled={containerLoading}
             >
-              <RefreshCw className={`size-3.5 mr-1 ${containerLoading ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`size-3.5 me-1 ${containerLoading ? 'animate-spin' : ''}`} />
               Refresh
             </Button>
           </div>
@@ -2094,9 +2120,9 @@ function ProjectDetailView({
                 className="mt-4 bg-indigo-600 hover:bg-indigo-700 text-white h-8 text-xs"
               >
                 {deploying ? (
-                  <Loader2 className="size-3.5 mr-1 animate-spin" />
+                  <Loader2 className="size-3.5 me-1 animate-spin" />
                 ) : (
-                  <Rocket className="size-3.5 mr-1" />
+                  <Rocket className="size-3.5 me-1" />
                 )}
                 Deploy now
               </Button>
@@ -2141,7 +2167,7 @@ function ProjectDetailView({
                         <span className="text-xs text-muted-foreground w-20">State</span>
                         <Badge variant="outline" className={stateColor}>
                           {isRunning && (
-                            <span className="size-1.5 rounded-full bg-indigo-500 mr-1.5 animate-pulse" />
+                            <span className="size-1.5 rounded-full bg-indigo-500 me-1.5 animate-pulse" />
                           )}
                           {c.state}
                         </Badge>
@@ -2178,9 +2204,9 @@ function ProjectDetailView({
                       disabled={containerActionLoading}
                     >
                       {containerActionLoading ? (
-                        <Loader2 className="size-3.5 mr-1 animate-spin" />
+                        <Loader2 className="size-3.5 me-1 animate-spin" />
                       ) : (
-                        <RotateCcw className="size-3.5 mr-1" />
+                        <RotateCcw className="size-3.5 me-1" />
                       )}
                       Restart
                     </Button>
@@ -2191,7 +2217,7 @@ function ProjectDetailView({
                       onClick={handleContainerStop}
                       disabled={containerActionLoading || !isRunning}
                     >
-                      <Square className="size-3.5 mr-1" />
+                      <Square className="size-3.5 me-1" />
                       Stop
                     </Button>
                     <Button
@@ -2200,7 +2226,7 @@ function ProjectDetailView({
                       className="h-8 text-xs"
                       onClick={handleOpenContainerLogs}
                     >
-                      <Terminal className="size-3.5 mr-1" />
+                      <Terminal className="size-3.5 me-1" />
                       View Logs
                     </Button>
                   </div>
@@ -2231,7 +2257,7 @@ function ProjectDetailView({
               onClick={() => fetchSslInfo()}
               disabled={sslLoading}
             >
-              <RefreshCw className={`size-3.5 mr-1 ${sslLoading ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`size-3.5 me-1 ${sslLoading ? 'animate-spin' : ''}`} />
               Refresh
             </Button>
           </div>
@@ -2288,7 +2314,7 @@ function ProjectDetailView({
                   <div className="flex items-center gap-3 flex-wrap">
                     <Badge variant="outline" className={sCfg.className}>
                       {sCfg.pulse && (
-                        <span className="size-1.5 rounded-full bg-current mr-1.5 animate-pulse" />
+                        <span className="size-1.5 rounded-full bg-current me-1.5 animate-pulse" />
                       )}
                       SSL: {status}
                     </Badge>
@@ -2313,9 +2339,9 @@ function ProjectDetailView({
                         className="mt-3 bg-indigo-600 hover:bg-indigo-700 text-white h-8 text-xs"
                       >
                         {sslActionLoading ? (
-                          <Loader2 className="size-3.5 mr-1 animate-spin" />
+                          <Loader2 className="size-3.5 me-1 animate-spin" />
                         ) : (
-                          <Lock className="size-3.5 mr-1" />
+                          <Lock className="size-3.5 me-1" />
                         )}
                         Enable SSL
                       </Button>
@@ -2354,7 +2380,7 @@ function ProjectDetailView({
                           <span className={`text-xs ${expiryColor}`}>
                             {cert.expiresAt ? formatDate(cert.expiresAt) : '—'}
                             {days != null && (
-                              <span className="ml-1 opacity-80">
+                              <span className="ms-1 opacity-80">
                                 ({days < 0 ? `expired ${-days}d ago` : `${days}d left`})
                               </span>
                             )}
@@ -2402,9 +2428,9 @@ function ProjectDetailView({
                           disabled={sslActionLoading}
                         >
                           {sslActionLoading ? (
-                            <Loader2 className="size-3.5 mr-1 animate-spin" />
+                            <Loader2 className="size-3.5 me-1 animate-spin" />
                           ) : (
-                            <RefreshCw className="size-3.5 mr-1" />
+                            <RefreshCw className="size-3.5 me-1" />
                           )}
                           Renew Certificate
                         </Button>
@@ -2430,8 +2456,8 @@ function ProjectDetailView({
               <CardTitle className="text-lg flex items-center gap-2">
                 <Key className="size-5 text-indigo-600" />
                 Environment Variables
-                <Badge variant="outline" className="ml-1 bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-900/20 dark:text-indigo-400 dark:border-indigo-900/50 text-[10px] h-5">
-                  <Lock className="size-3 mr-1" />
+                <Badge variant="outline" className="ms-1 bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-900/20 dark:text-indigo-400 dark:border-indigo-900/50 text-[10px] h-5">
+                  <Lock className="size-3 me-1" />
                   AES-256
                 </Badge>
               </CardTitle>
@@ -2448,12 +2474,12 @@ function ProjectDetailView({
               >
                 {envReveal ? (
                   <>
-                    <EyeOff className="size-3.5 mr-1" />
+                    <EyeOff className="size-3.5 me-1" />
                     Hide
                   </>
                 ) : (
                   <>
-                    <Eye className="size-3.5 mr-1" />
+                    <Eye className="size-3.5 me-1" />
                     Reveal
                   </>
                 )}
@@ -2464,7 +2490,7 @@ function ProjectDetailView({
                 onClick={() => setEnvImportOpen(true)}
                 className="h-8 text-xs"
               >
-                <Upload className="size-3.5 mr-1" />
+                <Upload className="size-3.5 me-1" />
                 Import .env
               </Button>
               <Button
@@ -2472,7 +2498,7 @@ function ProjectDetailView({
                 onClick={() => handleOpenEnvDialog('create')}
                 className="bg-indigo-600 hover:bg-indigo-700 text-white h-8 text-xs"
               >
-                <Plus className="size-3.5 mr-1" />
+                <Plus className="size-3.5 me-1" />
                 Add Variable
               </Button>
             </div>
@@ -2513,12 +2539,12 @@ function ProjectDetailView({
               >
                 {envApplying ? (
                   <>
-                    <Loader2 className="size-3.5 mr-1 animate-spin" />
+                    <Loader2 className="size-3.5 me-1 animate-spin" />
                     Applying…
                   </>
                 ) : (
                   <>
-                    <RefreshCw className="size-3.5 mr-1" />
+                    <RefreshCw className="size-3.5 me-1" />
                     Apply now
                   </>
                 )}
@@ -2541,7 +2567,7 @@ function ProjectDetailView({
                 onClick={() => handleOpenEnvDialog('create')}
                 className="mt-4 bg-indigo-600 hover:bg-indigo-700 text-white h-8 text-xs"
               >
-                <Plus className="size-3.5 mr-1" />
+                <Plus className="size-3.5 me-1" />
                 Add Your First Variable
               </Button>
             </div>
@@ -2553,7 +2579,7 @@ function ProjectDetailView({
                     <TableHead>Key</TableHead>
                     <TableHead>Value</TableHead>
                     <TableHead>Type</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
+                    <TableHead className="text-end">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -2573,7 +2599,7 @@ function ProjectDetailView({
                       <TableCell>
                         {ev.encrypted ? (
                           <Badge variant="outline" className="bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400 text-xs">
-                            <Lock className="size-3 mr-1" />
+                            <Lock className="size-3 me-1" />
                             Encrypted
                           </Badge>
                         ) : (
@@ -2582,7 +2608,7 @@ function ProjectDetailView({
                           </Badge>
                         )}
                       </TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="text-end">
                         <div className="flex items-center justify-end gap-1">
                           <Button
                             variant="ghost"
@@ -2590,7 +2616,7 @@ function ProjectDetailView({
                             className="h-7 text-xs hover:text-indigo-600"
                             onClick={() => handleOpenEnvDialog('edit', ev)}
                           >
-                            <Edit className="size-3 mr-1" />
+                            <Edit className="size-3 me-1" />
                             Edit
                           </Button>
                           <Button
@@ -2599,7 +2625,7 @@ function ProjectDetailView({
                             className="h-7 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/20"
                             onClick={() => setEnvDeleteId(ev.id)}
                           >
-                            <Trash2 className="size-3 mr-1" />
+                            <Trash2 className="size-3 me-1" />
                             Delete
                           </Button>
                         </div>
@@ -2644,7 +2670,7 @@ function ProjectDetailView({
                 onClick={() => setConnectDialogOpen(true)}
                 className="mt-4 bg-indigo-600 hover:bg-indigo-700 text-white h-8 text-xs"
               >
-                <Github className="size-3.5 mr-1" />
+                <Github className="size-3.5 me-1" />
                 Connect GitHub
               </Button>
             </div>
@@ -2658,7 +2684,7 @@ function ProjectDetailView({
                   <p className="text-sm font-medium truncate">{githubIntegration.repoFullName}</p>
                   <div className="flex items-center gap-2 mt-0.5">
                     <Badge variant="outline" className="text-[10px] h-5">
-                      <GitBranch className="size-3 mr-1" />
+                      <GitBranch className="size-3 me-1" />
                       {githubIntegration.branch}
                     </Badge>
                     {githubIntegration.autoDeploy && (
@@ -2674,7 +2700,7 @@ function ProjectDetailView({
                   className="h-8 text-xs"
                   onClick={() => window.open(githubIntegration.repoUrl, '_blank')}
                 >
-                  <ExternalLink className="size-3.5 mr-1" />
+                  <ExternalLink className="size-3.5 me-1" />
                   Open
                 </Button>
               </div>
@@ -2703,7 +2729,7 @@ function ProjectDetailView({
                     }
                   }}
                 >
-                  <GitCommit className="size-3.5 mr-1" />
+                  <GitCommit className="size-3.5 me-1" />
                   Commit History
                 </Button>
                 <Button
@@ -2733,7 +2759,7 @@ function ProjectDetailView({
                     }
                   }}
                 >
-                  {redeploying ? <Loader2 className="size-3.5 mr-1 animate-spin" /> : <RefreshCw className="size-3.5 mr-1" />}
+                  {redeploying ? <Loader2 className="size-3.5 me-1 animate-spin" /> : <RefreshCw className="size-3.5 me-1" />}
                   Trigger Redeploy
                 </Button>
                 <Button
@@ -2742,7 +2768,7 @@ function ProjectDetailView({
                   className="h-8 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/20"
                   onClick={() => setDisconnectDialogOpen(true)}
                 >
-                  <Unplug className="size-3.5 mr-1" />
+                  <Unplug className="size-3.5 me-1" />
                   Disconnect
                 </Button>
               </div>
@@ -2844,12 +2870,12 @@ function ProjectDetailView({
             >
               {connecting ? (
                 <>
-                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  <Loader2 className="size-4 me-2 animate-spin" />
                   Connecting...
                 </>
               ) : (
                 <>
-                  <Github className="size-4 mr-2" />
+                  <Github className="size-4 me-2" />
                   Connect
                 </>
               )}
@@ -2955,12 +2981,12 @@ function ProjectDetailView({
             >
               {disconnecting ? (
                 <>
-                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  <Loader2 className="size-4 me-2 animate-spin" />
                   Disconnecting...
                 </>
               ) : (
                 <>
-                  <Unplug className="size-4 mr-2" />
+                  <Unplug className="size-4 me-2" />
                   Disconnect
                 </>
               )}
@@ -2988,6 +3014,9 @@ function ProjectDetailView({
         <section id="apptools" className="scroll-mt-32"><AppToolsTab projectId={project.id} /></section>
       )}
       <section id="backups" className="scroll-mt-32"><BackupsTab projectId={project.id} /></section>
+      {project.environment !== 'staging' && (
+        <section id="staging" className="scroll-mt-32"><StagingTab projectId={project.id} onOpenProject={onOpenProject} /></section>
+      )}
       {/* Importing into an existing website replaces its files and database,
           so it lives beside Backups rather than in the creation flow — the
           customer should be one click from taking a backup first. */}
@@ -3002,10 +3031,12 @@ function ProjectDetailView({
       <section id="terminal" className="scroll-mt-32"><TerminalTab projectId={project.id} /></section>
       <section id="resources" className="scroll-mt-32"><ResourcesTab projectId={project.id} /></section>
       <section id="domains" className="scroll-mt-32"><DomainsTab projectId={project.id} onProjectChanged={fetchProject} /></section>
+      <section id="cdn" className="scroll-mt-32"><CdnTab projectId={project.id} /></section>
 
       {/* ─── cPanel-style features (Phase 2-c upgrade) ─────────────────── */}
       {/* Cron + FTP near Files/Terminal; Redirects + Security near Domains. */}
       <section id="cron" className="scroll-mt-32"><CronTab projectId={project.id} /></section>
+      <section id="sftp" className="scroll-mt-32"><SftpTab projectId={project.id} /></section>
       <section id="ftp" className="scroll-mt-32"><FtpTab projectId={project.id} /></section>
       <section id="redirects" className="scroll-mt-32"><RedirectsTab projectId={project.id} /></section>
       <section id="security" className="scroll-mt-32"><SecurityTab projectId={project.id} /></section>
@@ -3036,7 +3067,7 @@ function ProjectDetailView({
               disabled={project.access?.isOwner === false}
               title={project.access?.isOwner === false ? 'Only the project owner can delete it' : undefined}
             >
-              <Trash2 className="size-4 mr-2" />
+              <Trash2 className="size-4 me-2" />
               Delete Project
             </Button>
           </div>
@@ -3093,12 +3124,12 @@ function ProjectDetailView({
             >
               {deleting ? (
                 <>
-                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  <Loader2 className="size-4 me-2 animate-spin" />
                   Deleting...
                 </>
               ) : (
                 <>
-                  <Trash2 className="size-4 mr-2" />
+                  <Trash2 className="size-4 me-2" />
                   Delete Project
                 </>
               )}
@@ -3178,12 +3209,12 @@ function ProjectDetailView({
             >
               {envImporting ? (
                 <>
-                  <Loader2 className="size-4 mr-1.5 animate-spin" />
+                  <Loader2 className="size-4 me-1.5 animate-spin" />
                   Importing…
                 </>
               ) : (
                 <>
-                  <Upload className="size-4 mr-1.5" />
+                  <Upload className="size-4 me-1.5" />
                   Import
                 </>
               )}
@@ -3259,12 +3290,12 @@ function ProjectDetailView({
             >
               {envSaving ? (
                 <>
-                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  <Loader2 className="size-4 me-2 animate-spin" />
                   Saving...
                 </>
               ) : (
                 <>
-                  <Save className="size-4 mr-2" />
+                  <Save className="size-4 me-2" />
                   {envDialogMode === 'create' ? 'Add Variable' : 'Save Changes'}
                 </>
               )}
@@ -3294,12 +3325,12 @@ function ProjectDetailView({
             >
               {envDeleting ? (
                 <>
-                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  <Loader2 className="size-4 me-2 animate-spin" />
                   Deleting...
                 </>
               ) : (
                 <>
-                  <Trash2 className="size-4 mr-2" />
+                  <Trash2 className="size-4 me-2" />
                   Delete Variable
                 </>
               )}
@@ -3320,7 +3351,10 @@ export default function HostingPanel() {
   const [showImport, setShowImport] = useState(false)
   // 'projects' is the website list; 'imports' is the migration dashboard.
   const [view, setView] = useState<'projects' | 'imports'>('projects')
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
+  // Notification links open a website directly (?tab=hosting&project=<id>).
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(() =>
+    typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('project')
+  )
 
   // ── Search / filter / sort state ──────────────────────────────────
   const [searchInput, setSearchInput] = useState('')
@@ -3507,9 +3541,11 @@ export default function HostingPanel() {
     return (
       <div>
         <ProjectDetailView
+          key={selectedProjectId}
           projectId={selectedProjectId}
           onBack={() => setSelectedProjectId(null)}
           onRefresh={fetchProjects}
+          onOpenProject={setSelectedProjectId}
         />
       </div>
     )
@@ -3555,14 +3591,14 @@ export default function HostingPanel() {
             onClick={() => setView('imports')}
             title="Move an existing website here from another host"
           >
-            <HardDriveDownload className="size-4 mr-2" />
+            <HardDriveDownload className="size-4 me-2" />
             Import
           </Button>
           <Button
             onClick={() => setShowCreate(true)}
             className="bg-indigo-600 hover:bg-indigo-700 text-white"
           >
-            <Plus className="size-4 mr-2" />
+            <Plus className="size-4 me-2" />
             Create Website
           </Button>
         </div>
@@ -3571,19 +3607,19 @@ export default function HostingPanel() {
       {/* Search & Filter Bar */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+          <Search className="absolute start-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
           <Input
             type="search"
             placeholder="Search by name, framework, or domain..."
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            className="pl-9 pr-4"
+            className="ps-9 pe-4"
           />
           {searchInput && (
             <button
               type="button"
               onClick={() => setSearchInput('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              className="absolute end-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
               aria-label="Clear search"
             >
               <X className="size-4" />
@@ -3611,7 +3647,7 @@ export default function HostingPanel() {
                   className={statusFilter === s ? 'bg-accent' : ''}
                 >
                   <span className="capitalize">{s}</span>
-                  {statusFilter === s && <CheckCircle2 className="size-3.5 ml-auto text-indigo-600" />}
+                  {statusFilter === s && <CheckCircle2 className="size-3.5 ms-auto text-indigo-600" />}
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>
@@ -3636,7 +3672,7 @@ export default function HostingPanel() {
                   className={frameworkFilter === f ? 'bg-accent' : ''}
                 >
                   {f === 'all' ? 'All' : frameworkLabel(f)}
-                  {frameworkFilter === f && <CheckCircle2 className="size-3.5 ml-auto text-indigo-600" />}
+                  {frameworkFilter === f && <CheckCircle2 className="size-3.5 ms-auto text-indigo-600" />}
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>
@@ -3661,21 +3697,21 @@ export default function HostingPanel() {
                 className={sortBy === 'created' ? 'bg-accent' : ''}
               >
                 Created date (newest)
-                {sortBy === 'created' && <CheckCircle2 className="size-3.5 ml-auto text-indigo-600" />}
+                {sortBy === 'created' && <CheckCircle2 className="size-3.5 ms-auto text-indigo-600" />}
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => setSortBy('name')}
                 className={sortBy === 'name' ? 'bg-accent' : ''}
               >
                 Name (A → Z)
-                {sortBy === 'name' && <CheckCircle2 className="size-3.5 ml-auto text-indigo-600" />}
+                {sortBy === 'name' && <CheckCircle2 className="size-3.5 ms-auto text-indigo-600" />}
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => setSortBy('deployed')}
                 className={sortBy === 'deployed' ? 'bg-accent' : ''}
               >
                 Last deployed
-                {sortBy === 'deployed' && <CheckCircle2 className="size-3.5 ml-auto text-indigo-600" />}
+                {sortBy === 'deployed' && <CheckCircle2 className="size-3.5 ms-auto text-indigo-600" />}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -3815,11 +3851,11 @@ export default function HostingPanel() {
                     onClick={() => setShowCreate(true)}
                     className="bg-indigo-600 hover:bg-indigo-700 text-white"
                   >
-                    <Plus className="size-4 mr-2" />
+                    <Plus className="size-4 me-2" />
                     Create Website
                   </Button>
                   <Button variant="outline" onClick={() => setShowImport(true)}>
-                    <HardDriveDownload className="size-4 mr-2" />
+                    <HardDriveDownload className="size-4 me-2" />
                     Import existing site
                   </Button>
                 </div>
@@ -3897,12 +3933,12 @@ export default function HostingPanel() {
             >
               {bulkLoading ? (
                 <>
-                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  <Loader2 className="size-4 me-2 animate-spin" />
                   Deleting {selectedCount}...
                 </>
               ) : (
                 <>
-                  <Trash2 className="size-4 mr-2" />
+                  <Trash2 className="size-4 me-2" />
                   Delete {selectedCount} project{selectedCount !== 1 ? 's' : ''}
                 </>
               )}

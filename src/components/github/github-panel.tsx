@@ -441,7 +441,7 @@ function ConnectRepositoryDialog({
                   </div>
                 </div>
                 {oauthIntegration && (
-                  <div className="text-xs text-muted-foreground flex items-center gap-1.5 pl-12">
+                  <div className="text-xs text-muted-foreground flex items-center gap-1.5 ps-12">
                     <CheckCircle2 className="size-3 text-indigo-600" />
                     Signed in as
                     <span className="font-mono font-medium text-indigo-700 dark:text-indigo-400">
@@ -449,7 +449,7 @@ function ConnectRepositoryDialog({
                     </span>
                   </div>
                 )}
-                <div className="pl-12">
+                <div className="ps-12">
                   <Button
                     onClick={handleStartOauth}
                     disabled={oauthStarting || connecting}
@@ -458,12 +458,12 @@ function ConnectRepositoryDialog({
                   >
                     {oauthStarting ? (
                       <>
-                        <Loader2 className="size-4 mr-2 animate-spin" />
+                        <Loader2 className="size-4 me-2 animate-spin" />
                         Redirecting...
                       </>
                     ) : (
                       <>
-                        <Github className="size-4 mr-2" />
+                        <Github className="size-4 me-2" />
                         {oauthIntegration ? 'Re-authorize GitHub' : 'Connect with GitHub'}
                       </>
                     )}
@@ -571,12 +571,12 @@ function ConnectRepositoryDialog({
           >
             {connecting ? (
               <>
-                <Loader2 className="size-4 mr-2 animate-spin" />
+                <Loader2 className="size-4 me-2 animate-spin" />
                 Connecting...
               </>
             ) : (
               <>
-                <Link2 className="size-4 mr-2" />
+                <Link2 className="size-4 me-2" />
                 Connect Manually
               </>
             )}
@@ -702,7 +702,7 @@ function IntegrationDetailView({
           <p className="text-sm text-muted-foreground">GitHub Integration Details</p>
         </div>
         <Button variant="outline" size="sm" onClick={handleRefreshData} disabled={refreshing}>
-          <RefreshCw className={`size-4 mr-1.5 ${refreshing ? 'animate-spin' : ''}`} />
+          <RefreshCw className={`size-4 me-1.5 ${refreshing ? 'animate-spin' : ''}`} />
           Refresh
         </Button>
       </div>
@@ -723,7 +723,7 @@ function IntegrationDetailView({
               </div>
             </div>
             <Badge variant="outline" className="bg-indigo-50 text-indigo-600 dark:bg-indigo-900/20 dark:text-indigo-400 shrink-0">
-              <CheckCircle2 className="size-3 mr-1" />
+              <CheckCircle2 className="size-3 me-1" />
               Connected
             </Badge>
             {integration.oauthConnected && (
@@ -844,7 +844,7 @@ function IntegrationDetailView({
                   target="_blank"
                   rel="noopener noreferrer"
                 >
-                  <ExternalLink className="size-3 mr-1" />
+                  <ExternalLink className="size-3 me-1" />
                   Open in GitHub
                 </a>
               </Button>
@@ -854,7 +854,7 @@ function IntegrationDetailView({
                 className="text-xs text-red-600 hover:text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30 border-red-200 dark:border-red-900/50"
                 onClick={() => setDisconnectDialogOpen(true)}
               >
-                <Unplug className="size-3 mr-1" />
+                <Unplug className="size-3 me-1" />
                 Disconnect
               </Button>
             </div>
@@ -993,7 +993,7 @@ function IntegrationDetailView({
                         <TableHead>Repository</TableHead>
                         <TableHead className="hidden sm:table-cell">Language</TableHead>
                         <TableHead className="hidden md:table-cell">Stars</TableHead>
-                        <TableHead className="text-right">Updated</TableHead>
+                        <TableHead className="text-end">Updated</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -1007,13 +1007,13 @@ function IntegrationDetailView({
                                   {repo.fullName}
                                   {repo.private && (
                                     <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
-                                      <Lock className="size-2.5 mr-0.5" />
+                                      <Lock className="size-2.5 me-0.5" />
                                       Private
                                     </Badge>
                                   )}
                                   {repo.connected && (
                                     <Badge variant="outline" className="text-[10px] bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400">
-                                      <CheckCircle2 className="size-2.5 mr-0.5" />
+                                      <CheckCircle2 className="size-2.5 me-0.5" />
                                       Linked
                                     </Badge>
                                   )}
@@ -1045,7 +1045,7 @@ function IntegrationDetailView({
                               <span className="text-xs text-muted-foreground">—</span>
                             )}
                           </TableCell>
-                          <TableCell className="text-right text-xs text-muted-foreground">
+                          <TableCell className="text-end text-xs text-muted-foreground">
                             {repo.updatedAt ? timeAgo(repo.updatedAt) : '—'}
                           </TableCell>
                         </TableRow>
@@ -1082,12 +1082,12 @@ function IntegrationDetailView({
             >
               {disconnecting ? (
                 <>
-                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  <Loader2 className="size-4 me-2 animate-spin" />
                   Disconnecting...
                 </>
               ) : (
                 <>
-                  <Unplug className="size-4 mr-2" />
+                  <Unplug className="size-4 me-2" />
                   Disconnect
                 </>
               )}
@@ -1325,17 +1325,17 @@ function GithubAccountCard({
           >
             {connecting ? (
               <>
-                <Loader2 className="size-4 mr-2 animate-spin" />
+                <Loader2 className="size-4 me-2 animate-spin" />
                 Redirecting...
               </>
             ) : connected ? (
               <>
-                <RefreshCw className="size-4 mr-2" />
+                <RefreshCw className="size-4 me-2" />
                 Re-authorize
               </>
             ) : (
               <>
-                <Github className="size-4 mr-2" />
+                <Github className="size-4 me-2" />
                 Connect with GitHub
               </>
             )}
@@ -1510,7 +1510,7 @@ export default function GithubPanel() {
           onClick={() => setShowConnect(true)}
           className="bg-indigo-600 hover:bg-indigo-700 text-white shrink-0"
         >
-          <Plus className="size-4 mr-2" />
+          <Plus className="size-4 me-2" />
           Connect Repo
         </Button>
       </div>
@@ -1638,12 +1638,12 @@ export default function GithubPanel() {
                       </Badge>
                       {isConnected ? (
                         <Badge variant="outline" className="bg-indigo-50 text-indigo-600 dark:bg-indigo-900/20 dark:text-indigo-400 text-[10px]">
-                          <CheckCircle2 className="size-2.5 mr-0.5" />
+                          <CheckCircle2 className="size-2.5 me-0.5" />
                           Connected
                         </Badge>
                       ) : (
                         <Badge variant="outline" className="bg-gray-50 text-gray-500 dark:bg-gray-800/30 dark:text-gray-400 text-[10px]">
-                          <XCircle className="size-2.5 mr-0.5" />
+                          <XCircle className="size-2.5 me-0.5" />
                           Disconnected
                         </Badge>
                       )}
@@ -1706,7 +1706,7 @@ export default function GithubPanel() {
                             setShowConnect(true)
                           }}
                         >
-                          <Plus className="size-3 mr-1" />
+                          <Plus className="size-3 me-1" />
                           Connect Repository
                         </Button>
                       </div>

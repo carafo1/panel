@@ -230,9 +230,9 @@ export default function EmailAdminPanel() {
                   .join(', ')}
           </p>
         </div>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ms-auto flex items-center gap-2">
           <div className="relative">
-            <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Search className="absolute start-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               value={q}
               onChange={(e) => {
@@ -240,7 +240,7 @@ export default function EmailAdminPanel() {
                 setQ(e.target.value)
               }}
               placeholder="domain or customer"
-              className="pl-8 w-56"
+              className="ps-8 w-56"
             />
           </div>
           <Select
@@ -530,7 +530,7 @@ export default function EmailAdminPanel() {
                 )
               }}
             >
-              {busy && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+              {busy && <Loader2 className="h-4 w-4 animate-spin me-1" />}
               Save
             </Button>
           </DialogFooter>
@@ -580,7 +580,7 @@ export default function EmailAdminPanel() {
                 )
               }
             >
-              {busy && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+              {busy && <Loader2 className="h-4 w-4 animate-spin me-1" />}
               Delete permanently
             </Button>
           </DialogFooter>

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { authenticateRequest, extractTokenFromHeader, verifyRealtimeTokenFresh } from '@/lib/auth'
 import { getProjectAccess, type ProjectPermission } from '@/lib/project-access'
+import { canViewTicket } from '@/lib/support'
 
 /**
  * POST /api/realtime/authorize   { room }   (Authorization: Bearer <user token>)
@@ -20,7 +21,9 @@ import { getProjectAccess, type ProjectPermission } from '@/lib/project-access'
  * Response: 200 { ok: true, userId } | 401 | 403 { ok: false, error }.
  * Unknown room shapes are refused.
  */
-const ROOM = /^(user|project|deployment|migration):([A-Za-z0-9_-]{1,64})$/
+//   ticket:<id>       the ticket's customer, or staff
+//   ticketstaff:<id>  staff only (internal notes)
+const ROOM = /^(user|project|deployment|migration|ticket|ticketstaff):([A-Za-z0-9_-]{1,64})$/
 
 export async function POST(request: Request) {
   // Browsers send the realtime token from /api/auth/realtime-token (their
@@ -43,6 +46,11 @@ export async function POST(request: Request) {
 
   if (kind === 'user') {
     return id === auth.userId ? NextResponse.json({ ok: true, userId: auth.userId }) : deny()
+  }
+
+  if (kind === 'ticket' || kind === 'ticketstaff') {
+    const ok = await canViewTicket(id, { userId: auth.userId, role: auth.role }, kind === 'ticketstaff')
+    return ok ? NextResponse.json({ ok: true, userId: auth.userId }) : deny()
   }
 
   let projectId: string | null = null

@@ -399,7 +399,7 @@ function DropZone({
         <div className="mb-2 flex items-center gap-2">
           <Loader2 className="size-4 animate-spin text-indigo-600 dark:text-indigo-400" />
           <span className="text-sm font-medium">Uploading…</span>
-          <span className="ml-auto text-sm tabular-nums text-muted-foreground">
+          <span className="ms-auto text-sm tabular-nums text-muted-foreground">
             {Math.round(progress)}%
           </span>
         </div>
@@ -795,7 +795,7 @@ export default function ImportWizard({
                     onClose()
                     setTimeout(reset, 250)
                   }}
-                  className="group flex flex-col items-start rounded-xl border-2 border-muted p-5 text-left transition-colors hover:border-indigo-400 hover:bg-muted/40"
+                  className="group flex flex-col items-start rounded-xl border-2 border-muted p-5 text-start transition-colors hover:border-indigo-400 hover:bg-muted/40"
                 >
                   <span className="mb-3 flex size-10 items-center justify-center rounded-lg bg-indigo-100 text-indigo-600 dark:bg-indigo-950 dark:text-indigo-400">
                     <Sparkles className="size-5" />
@@ -814,7 +814,7 @@ export default function ImportWizard({
                 <button
                   type="button"
                   onClick={() => setStep('source')}
-                  className="group flex flex-col items-start rounded-xl border-2 border-indigo-500 bg-indigo-50/50 p-5 text-left dark:bg-indigo-950/30"
+                  className="group flex flex-col items-start rounded-xl border-2 border-indigo-500 bg-indigo-50/50 p-5 text-start dark:bg-indigo-950/30"
                 >
                   <span className="mb-3 flex size-10 items-center justify-center rounded-lg bg-indigo-600 text-white">
                     <HardDriveDownload className="size-5" />
@@ -854,7 +854,7 @@ export default function ImportWizard({
                           setSqlUpload(null)
                         }}
                         className={cn(
-                          'flex items-start gap-3 rounded-lg border-2 p-4 text-left transition-colors',
+                          'flex items-start gap-3 rounded-lg border-2 p-4 text-start transition-colors',
                           selected
                             ? 'border-indigo-500 bg-indigo-50/60 dark:bg-indigo-950/30'
                             : 'border-muted hover:border-indigo-300 hover:bg-muted/40'
@@ -914,9 +914,9 @@ export default function ImportWizard({
                           mode === m && 'bg-indigo-600 hover:bg-indigo-700 text-white'
                         )}
                       >
-                        {m === 'upload' && <Upload className="size-4 mr-1.5" />}
-                        {m === 'url' && <Link2 className="size-4 mr-1.5" />}
-                        {m === 'git' && <GitBranch className="size-4 mr-1.5" />}
+                        {m === 'upload' && <Upload className="size-4 me-1.5" />}
+                        {m === 'url' && <Link2 className="size-4 me-1.5" />}
+                        {m === 'git' && <GitBranch className="size-4 me-1.5" />}
                         {m === 'upload'
                           ? 'Upload a file'
                           : m === 'url'
@@ -1267,7 +1267,7 @@ export default function ImportWizard({
               }}
               disabled={submitting}
             >
-              <ArrowLeft className="size-4 mr-1.5" />
+              <ArrowLeft className="size-4 me-1.5" />
               Back
             </Button>
 
@@ -1278,7 +1278,7 @@ export default function ImportWizard({
                 className="bg-indigo-600 hover:bg-indigo-700 text-white"
               >
                 Continue
-                <ArrowRight className="size-4 ml-1.5" />
+                <ArrowRight className="size-4 ms-1.5" />
               </Button>
             )}
             {step === 'payload' && (
@@ -1288,7 +1288,7 @@ export default function ImportWizard({
                 className="bg-indigo-600 hover:bg-indigo-700 text-white"
               >
                 Continue
-                <ArrowRight className="size-4 ml-1.5" />
+                <ArrowRight className="size-4 ms-1.5" />
               </Button>
             )}
             {step === 'destination' && (
@@ -1298,7 +1298,7 @@ export default function ImportWizard({
                 className="bg-indigo-600 hover:bg-indigo-700 text-white"
               >
                 Review
-                <ArrowRight className="size-4 ml-1.5" />
+                <ArrowRight className="size-4 ms-1.5" />
               </Button>
             )}
             {step === 'review' && (
@@ -1308,9 +1308,9 @@ export default function ImportWizard({
                 className="bg-indigo-600 hover:bg-indigo-700 text-white"
               >
                 {submitting ? (
-                  <Loader2 className="size-4 mr-1.5 animate-spin" />
+                  <Loader2 className="size-4 me-1.5 animate-spin" />
                 ) : (
-                  <Rocket className="size-4 mr-1.5" />
+                  <Rocket className="size-4 me-1.5" />
                 )}
                 Start import
               </Button>
@@ -1334,7 +1334,7 @@ function ReviewRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-start justify-between gap-4 px-4 py-3">
       <span className="text-sm text-muted-foreground shrink-0">{label}</span>
-      <span className="text-sm font-medium text-right break-all">{value || '—'}</span>
+      <span className="text-sm font-medium text-end break-all">{value || '—'}</span>
     </div>
   )
 }

@@ -460,7 +460,7 @@ function MethodCard({
     <button
       type="button"
       onClick={onClick}
-      className={`group relative flex w-full flex-col gap-1.5 rounded-lg border p-3 text-left transition-all hover:border-primary/50 hover:shadow-sm ${
+      className={`group relative flex w-full flex-col gap-1.5 rounded-lg border p-3 text-start transition-all hover:border-primary/50 hover:shadow-sm ${
         selected ? 'border-primary ring-1 ring-primary bg-primary/5' : 'border-border'
       }`}
     >
@@ -545,7 +545,7 @@ function MethodFieldInput({
         <button
           type="button"
           onClick={() => setShow((s) => !s)}
-          className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+          className="absolute end-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
           aria-label={show ? 'Hide value' : 'Show value'}
         >
           {show ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
@@ -601,7 +601,7 @@ function EnvVarsEditor({
         </div>
       ))}
       <Button type="button" size="sm" variant="outline" onClick={add} className="h-7 text-xs">
-        <Plus className="mr-1 size-3.5" />
+        <Plus className="me-1 size-3.5" />
         Add variable
       </Button>
     </div>
@@ -651,7 +651,7 @@ function UploadDropzone({
             onClick={onClear}
             className="h-8 text-muted-foreground hover:text-destructive"
           >
-            <X className="mr-1 size-4" />
+            <X className="me-1 size-4" />
             Remove
           </Button>
         </div>
@@ -711,7 +711,7 @@ function UploadDropzone({
       {uploading && (
         <div className="space-y-1">
           <Progress value={progress} className="h-1.5" />
-          <p className="text-right text-xs text-muted-foreground">{Math.round(progress)}%</p>
+          <p className="text-end text-xs text-muted-foreground">{Math.round(progress)}%</p>
         </div>
       )}
       {error && (
@@ -1664,7 +1664,7 @@ export default function CreateWebsiteWizard({
                             disabled={!selectedMethod.supportsGit}
                             className="text-xs"
                           >
-                            <GitBranch className="mr-1 size-3.5" />
+                            <GitBranch className="me-1 size-3.5" />
                             Git
                           </TabsTrigger>
                           <TabsTrigger
@@ -1672,7 +1672,7 @@ export default function CreateWebsiteWizard({
                             disabled={!selectedMethod.supportsZip}
                             className="text-xs"
                           >
-                            <Package className="mr-1 size-3.5" />
+                            <Package className="me-1 size-3.5" />
                             Upload ZIP
                           </TabsTrigger>
                           <TabsTrigger
@@ -1680,7 +1680,7 @@ export default function CreateWebsiteWizard({
                             disabled={!selectedMethod.supportsManual}
                             className="text-xs"
                           >
-                            <FileCode className="mr-1 size-3.5" />
+                            <FileCode className="me-1 size-3.5" />
                             Start Fresh
                           </TabsTrigger>
                         </TabsList>
@@ -1779,7 +1779,7 @@ export default function CreateWebsiteWizard({
                     <button
                       type="button"
                       onClick={() => setShowEnv((s) => !s)}
-                      className="flex w-full items-center justify-between rounded-md px-1 py-1 text-left"
+                      className="flex w-full items-center justify-between rounded-md px-1 py-1 text-start"
                     >
                       <span className="flex items-center gap-2 text-sm font-medium">
                         <Key className="size-4 text-muted-foreground" />
@@ -1858,7 +1858,7 @@ export default function CreateWebsiteWizard({
                       key={opt.id}
                       type="button"
                       onClick={() => setDeployMode(opt.id)}
-                      className={`text-left rounded-lg border p-3 transition-colors ${
+                      className={`text-start rounded-lg border p-3 transition-colors ${
                         deployMode === opt.id
                           ? 'border-primary bg-primary/5'
                           : 'hover:border-primary/40'
@@ -1874,7 +1874,7 @@ export default function CreateWebsiteWizard({
                         />
                         <span className="font-medium text-sm">{opt.title}</span>
                       </div>
-                      <p className="text-xs text-muted-foreground mt-1 ml-[22px]">
+                      <p className="text-xs text-muted-foreground mt-1 ms-[22px]">
                         {opt.body}
                       </p>
                     </button>
@@ -1943,7 +1943,7 @@ export default function CreateWebsiteWizard({
                 </div>
               </div>
               <Button variant="outline" onClick={() => setStep(3)}>
-                <ArrowLeft className="mr-2 size-4" />
+                <ArrowLeft className="me-2 size-4" />
                 Back to method
               </Button>
             </div>
@@ -2099,7 +2099,7 @@ function MethodCategoryNav({
             key={c}
             type="button"
             onClick={() => onPickCategory(c)}
-            className={`flex shrink-0 items-center justify-between gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors ${
+            className={`flex shrink-0 items-center justify-between gap-2 rounded-md px-3 py-2 text-start text-sm transition-colors ${
               active
                 ? 'bg-primary/10 text-primary'
                 : 'text-muted-foreground hover:bg-accent hover:text-foreground'
@@ -2556,7 +2556,7 @@ function ProgressView({
             <li key={s.id || `${s.name}-${i}`} className="relative flex items-start gap-3 pb-3">
               {i < stages.length - 1 && (
                 <span
-                  className={`absolute left-[10px] top-6 h-[calc(100%-12px)] w-0.5 ${
+                  className={`absolute start-[10px] top-6 h-[calc(100%-12px)] w-0.5 ${
                     s.status === 'completed' ? 'bg-primary/30' : 'bg-border'
                   }`}
                 />

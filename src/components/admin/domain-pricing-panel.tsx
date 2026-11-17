@@ -165,7 +165,7 @@ export function DomainPricingPanel() {
               </CardDescription>
             </div>
             <Button variant="outline" size="sm" onClick={load}>
-              <RefreshCw className="size-3.5 mr-1" />
+              <RefreshCw className="size-3.5 me-1" />
               Refresh
             </Button>
           </div>
@@ -176,10 +176,10 @@ export function DomainPricingPanel() {
             <div className="grid gap-2">
               <Label htmlFor="dp-reg">Registration markup</Label>
               <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">$</span>
+                <span className="absolute start-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">$</span>
                 <Input
                   id="dp-reg"
-                  className="pl-6"
+                  className="ps-6"
                   inputMode="decimal"
                   placeholder="e.g. 5.00"
                   value={reg}
@@ -192,10 +192,10 @@ export function DomainPricingPanel() {
             <div className="grid gap-2">
               <Label htmlFor="dp-ren">Renewal markup</Label>
               <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">$</span>
+                <span className="absolute start-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">$</span>
                 <Input
                   id="dp-ren"
-                  className="pl-6"
+                  className="ps-6"
                   inputMode="decimal"
                   placeholder="e.g. 8.00"
                   value={ren}
@@ -208,10 +208,10 @@ export function DomainPricingPanel() {
             <div className="grid gap-2">
               <Label htmlFor="dp-xfer">Transfer markup</Label>
               <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">$</span>
+                <span className="absolute start-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">$</span>
                 <Input
                   id="dp-xfer"
-                  className="pl-6"
+                  className="ps-6"
                   inputMode="decimal"
                   placeholder="e.g. 3.00"
                   value={xfer}
@@ -236,7 +236,7 @@ export function DomainPricingPanel() {
                   All actions
                 </Label>
                 <div className="relative">
-                  <Input id="dp-disc" className="pr-8" inputMode="decimal" placeholder="0"
+                  <Input id="dp-disc" className="pe-8" inputMode="decimal" placeholder="0"
                     value={disc}
                     onChange={(e) => {
                       // Writes through to all three rather than being inherited
@@ -246,7 +246,7 @@ export function DomainPricingPanel() {
                       setDRen(e.target.value)
                       setDXfer(e.target.value)
                     }} />
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">%</span>
+                  <span className="absolute end-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">%</span>
                 </div>
                 <p className="text-xs text-muted-foreground">Sets all three.</p>
               </div>
@@ -254,9 +254,9 @@ export function DomainPricingPanel() {
               <div className="grid gap-2">
                 <Label htmlFor="dp-dreg">Registration</Label>
                 <div className="relative">
-                  <Input id="dp-dreg" className="pr-8" inputMode="decimal" placeholder="0"
+                  <Input id="dp-dreg" className="pe-8" inputMode="decimal" placeholder="0"
                     value={dReg} onChange={(e) => setDReg(e.target.value)} />
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">%</span>
+                  <span className="absolute end-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">%</span>
                 </div>
                 <p className="text-xs text-muted-foreground">First year only.</p>
               </div>
@@ -264,9 +264,9 @@ export function DomainPricingPanel() {
               <div className="grid gap-2">
                 <Label htmlFor="dp-dren">Renewal</Label>
                 <div className="relative">
-                  <Input id="dp-dren" className="pr-8" inputMode="decimal" placeholder="0"
+                  <Input id="dp-dren" className="pe-8" inputMode="decimal" placeholder="0"
                     value={dRen} onChange={(e) => setDRen(e.target.value)} />
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">%</span>
+                  <span className="absolute end-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">%</span>
                 </div>
                 <p className="text-xs text-muted-foreground">Every year after.</p>
               </div>
@@ -274,9 +274,9 @@ export function DomainPricingPanel() {
               <div className="grid gap-2">
                 <Label htmlFor="dp-dxfer">Transfer</Label>
                 <div className="relative">
-                  <Input id="dp-dxfer" className="pr-8" inputMode="decimal" placeholder="0"
+                  <Input id="dp-dxfer" className="pe-8" inputMode="decimal" placeholder="0"
                     value={dXfer} onChange={(e) => setDXfer(e.target.value)} />
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">%</span>
+                  <span className="absolute end-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">%</span>
                 </div>
                 <p className="text-xs text-muted-foreground">Moved in from elsewhere.</p>
               </div>
@@ -298,7 +298,7 @@ export function DomainPricingPanel() {
 
         <CardFooter className="flex items-center gap-2">
           <Button onClick={save} disabled={saving || !dirty}>
-            {saving ? <Loader2 className="size-4 mr-2 animate-spin" /> : null}
+            {saving ? <Loader2 className="size-4 me-2 animate-spin" /> : null}
             Save
           </Button>
           {dirty && <span className="text-xs text-muted-foreground">unsaved changes</span>}
@@ -322,7 +322,7 @@ export function DomainPricingPanel() {
                   <TableHead>Register</TableHead>
                   <TableHead>Renew</TableHead>
                   <TableHead>Transfer</TableHead>
-                  <TableHead className="text-right">Margin / yr</TableHead>
+                  <TableHead className="text-end">Margin / yr</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -344,7 +344,7 @@ export function DomainPricingPanel() {
                       <TableCell className={x < e.wholesale ? 'text-destructive font-medium' : ''}>
                         {usd(x)}
                       </TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="text-end">
                         <Badge
                           variant="outline"
                           className={

@@ -493,19 +493,19 @@ function NewProvisioningDialog({
           <div className="space-y-2">
             <Label htmlFor="prov-domain">Domain Name</Label>
             <div className="relative">
-              <Globe className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+              <Globe className="absolute start-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
               <Input
                 id="prov-domain"
                 placeholder="example.com"
                 value={domain}
                 onChange={(e) => setDomain(e.target.value.trim().toLowerCase())}
-                className="pl-9 pr-10"
+                className="ps-9 pe-10"
                 autoComplete="off"
                 autoCapitalize="off"
                 spellCheck={false}
               />
               {domainChecking && (
-                <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 size-4 animate-spin text-muted-foreground" />
+                <Loader2 className="absolute end-3 top-1/2 -translate-y-1/2 size-4 animate-spin text-muted-foreground" />
               )}
             </div>
             {domainCheck && !domainChecking && (
@@ -571,7 +571,7 @@ function NewProvisioningDialog({
                       key={s.id}
                       type="button"
                       onClick={() => setStack(s.id)}
-                      className={`flex items-start gap-3 p-3 rounded-lg border text-left transition-all ${
+                      className={`flex items-start gap-3 p-3 rounded-lg border text-start transition-all ${
                         active
                           ? 'border-indigo-500 bg-indigo-500/5 ring-1 ring-indigo-500/30'
                           : 'border-border hover:border-indigo-500/40 hover:bg-muted/50'
@@ -772,13 +772,13 @@ function PipelineStepRow({
     <div className="relative">
       {!isLast && (
         <div
-          className={`absolute left-[18px] top-9 w-0.5 h-[calc(100%-12px)] ${connectorClass}`}
+          className={`absolute start-[18px] top-9 w-0.5 h-[calc(100%-12px)] ${connectorClass}`}
         />
       )}
       <button
         type="button"
         onClick={onToggle}
-        className="relative flex items-start gap-3 w-full text-left p-2 rounded-lg hover:bg-muted/40 transition-colors"
+        className="relative flex items-start gap-3 w-full text-start p-2 rounded-lg hover:bg-muted/40 transition-colors"
       >
         <div
           className={`size-9 rounded-full flex items-center justify-center shrink-0 ${iconWrapClass}`}
@@ -801,7 +801,7 @@ function PipelineStepRow({
               </span>
             )}
             {(status === 'success' || status === 'failed' || status === 'rolled_back') && (
-              <div className="ml-auto">
+              <div className="ms-auto">
                 {expanded ? (
                   <ChevronDown className="size-4 text-muted-foreground" />
                 ) : (
@@ -966,7 +966,7 @@ function DetailRow({
     <div className="flex items-start justify-between gap-3 py-1">
       <span className="text-xs text-muted-foreground shrink-0">{label}</span>
       <span
-        className={`text-xs font-medium text-right break-all ${mono ? 'font-mono' : ''}`}
+        className={`text-xs font-medium text-end break-all ${mono ? 'font-mono' : ''}`}
       >
         {value || '—'}
       </span>
@@ -1015,9 +1015,9 @@ function DnsResultCard({ result }: { result: ProvisioningResult }) {
           <table className="w-full text-xs">
             <thead className="bg-muted/50 text-muted-foreground">
               <tr>
-                <th className="text-left px-2 py-1.5 font-medium">Type</th>
-                <th className="text-left px-2 py-1.5 font-medium">Name</th>
-                <th className="text-left px-2 py-1.5 font-medium">Value</th>
+                <th className="text-start px-2 py-1.5 font-medium">Type</th>
+                <th className="text-start px-2 py-1.5 font-medium">Name</th>
+                <th className="text-start px-2 py-1.5 font-medium">Value</th>
               </tr>
             </thead>
             <tbody>
@@ -1659,7 +1659,7 @@ function JobDetailView({
           <AlertTriangle className="size-4" />
           <AlertTitle>Step errors</AlertTitle>
           <AlertDescription>
-            <ul className="list-disc ml-4 space-y-0.5 text-xs">
+            <ul className="list-disc ms-4 space-y-0.5 text-xs">
               {result.errors.map((e, i) => (
                 <li key={i}>
                   <span className="font-medium capitalize">{e.step}:</span>{' '}
@@ -1846,11 +1846,11 @@ function JobsList({
           <table className="w-full text-sm">
             <thead className="bg-muted/50 text-xs text-muted-foreground">
               <tr>
-                <th className="text-left font-medium px-4 py-2.5">Domain</th>
-                <th className="text-left font-medium px-4 py-2.5">Stack</th>
-                <th className="text-left font-medium px-4 py-2.5">Status</th>
-                <th className="text-left font-medium px-4 py-2.5">Created</th>
-                <th className="text-right font-medium px-4 py-2.5">Actions</th>
+                <th className="text-start font-medium px-4 py-2.5">Domain</th>
+                <th className="text-start font-medium px-4 py-2.5">Stack</th>
+                <th className="text-start font-medium px-4 py-2.5">Status</th>
+                <th className="text-start font-medium px-4 py-2.5">Created</th>
+                <th className="text-end font-medium px-4 py-2.5">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -1882,7 +1882,7 @@ function JobsList({
                     <td className="px-4 py-3 text-xs text-muted-foreground">
                       {timeAgo(job.createdAt)}
                     </td>
-                    <td className="px-4 py-3 text-right">
+                    <td className="px-4 py-3 text-end">
                       <Button
                         variant="ghost"
                         size="sm"
@@ -1910,7 +1910,7 @@ function JobsList({
               <button
                 key={job.id}
                 onClick={() => onSelect(job)}
-                className="w-full text-left p-3 hover:bg-muted/30 transition-colors flex items-center gap-3"
+                className="w-full text-start p-3 hover:bg-muted/30 transition-colors flex items-center gap-3"
               >
                 <div className="size-9 rounded-md bg-indigo-600/10 flex items-center justify-center shrink-0">
                   <Icon className="size-4 text-indigo-600 dark:text-indigo-400" />

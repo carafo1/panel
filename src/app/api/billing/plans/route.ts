@@ -10,6 +10,7 @@
  */
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { cdnAdvertisable } from '@/lib/cdn'
 
 /** Null/0 on a limit column means "unlimited" — say so rather than printing 0. */
 function limit(value: number | null | undefined): number | null {
@@ -48,6 +49,9 @@ export async function GET(request: Request) {
     // established by `bun run scripts/seed-plans.ts`, not by someone loading a
     // page.
     const plans = await db.plan.findMany({ where, orderBy: { priority: 'asc' } })
+    // CDN, WAF and DDoS come from Cloudflare. Until it is connected, no plan
+    // advertises them — a pricing line nothing delivers is a false promise.
+    const protection = await cdnAdvertisable()
 
     return NextResponse.json({
       plans: plans.map((p) => ({
@@ -98,7 +102,7 @@ export async function GET(request: Request) {
         stagingEnvironment: p.stagingEnvironment,
         dockerSupport: p.dockerSupport,
         gitDeployment: p.gitDeployment,
-        cdnIntegration: p.cdnIntegration,
+        cdnIntegration: protection && p.cdnIntegration,
         ssl: p.ssl,
 
         // Service tiers
@@ -106,8 +110,8 @@ export async function GET(request: Request) {
         uptimeSla: p.uptimeSla,
         supportLevel: p.supportLevel,
         malwareScanner: p.malwareScanner,
-        wafLevel: p.wafLevel,
-        ddosLevel: p.ddosLevel,
+        wafLevel: protection && p.cdnIntegration ? p.wafLevel : null,
+        ddosLevel: protection && p.cdnIntegration ? p.ddosLevel : null,
         freeMigrations: p.freeMigrations,
 
         highlights: parseJsonArray(p.highlights),

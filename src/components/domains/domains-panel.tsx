@@ -474,12 +474,12 @@ export default function DomainsPanel() {
               "markup loading…" placeholder leaked into their view). */}
           {isAdmin && globalMarkup !== null && (
             <Badge variant="outline" className="w-fit" title="Editable in the Pricing tab">
-              <Sparkles className="h-3 w-3 mr-1 text-amber-500" />
+              <Sparkles className="h-3 w-3 me-1 text-amber-500" />
               {`$${globalMarkup.toFixed(2)} markup applied`}
             </Badge>
           )}
           <Button variant="outline" size="sm" onClick={() => setTransferOpen(true)}>
-            <Send className="h-4 w-4 mr-1.5" />
+            <Send className="h-4 w-4 me-1.5" />
             Transfer Domain
           </Button>
         </div>
@@ -687,9 +687,9 @@ function SearchTab({ onRegistered }: { onRegistered: () => void }) {
                       <TableRow>
                         <TableHead>Domain</TableHead>
                         <TableHead>Status</TableHead>
-                        <TableHead className="text-right">Register</TableHead>
-                        <TableHead className="text-right">Renew</TableHead>
-                        <TableHead className="text-right">Transfer</TableHead>
+                        <TableHead className="text-end">Register</TableHead>
+                        <TableHead className="text-end">Renew</TableHead>
+                        <TableHead className="text-end">Transfer</TableHead>
                         <TableHead></TableHead>
                       </TableRow>
                     </TableHeader>
@@ -707,13 +707,13 @@ function SearchTab({ onRegistered }: { onRegistered: () => void }) {
                               <Badge variant="secondary">Taken</Badge>
                             )}
                           </TableCell>
-                          <TableCell className="text-right font-mono">
+                          <TableCell className="text-end font-mono">
                             {r.registrationPrice ? `$${r.registrationPrice}` : '—'}
                           </TableCell>
-                          <TableCell className="text-right font-mono">
+                          <TableCell className="text-end font-mono">
                             {r.renewalPrice ? `$${r.renewalPrice}` : '—'}
                           </TableCell>
-                          <TableCell className="text-right font-mono">
+                          <TableCell className="text-end font-mono">
                             {r.transferPrice ? `$${r.transferPrice}` : '—'}
                           </TableCell>
                           <TableCell>
@@ -723,7 +723,7 @@ function SearchTab({ onRegistered }: { onRegistered: () => void }) {
                                 variant="outline"
                                 onClick={() => setRegisterDialog({ domain: r.domain, price: r.registrationPrice! })}
                               >
-                                <ShoppingBag className="h-3 w-3 mr-1" /> Buy
+                                <ShoppingBag className="h-3 w-3 me-1" /> Buy
                               </Button>
                             )}
                           </TableCell>
@@ -783,7 +783,7 @@ function SearchResultCard({
               <h3 className="text-xl font-bold">{result.domain}</h3>
               {result.premium && (
                 <Badge className="bg-amber-500/15 text-amber-600 border-amber-500/30">
-                  <Sparkles className="h-3 w-3 mr-1" /> Premium
+                  <Sparkles className="h-3 w-3 me-1" /> Premium
                 </Badge>
               )}
             </div>
@@ -803,7 +803,7 @@ function SearchResultCard({
             )}
           </div>
           {result.available && result.registrationPrice && (
-            <div className="text-right">
+            <div className="text-end">
               <div className="text-2xl font-bold text-indigo-600 dark:text-indigo-400">
                 ${result.registrationPrice}
               </div>
@@ -837,9 +837,9 @@ function SearchResultCard({
               className="flex-1"
             >
               {registering === result.domain ? (
-                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                <Loader2 className="h-4 w-4 animate-spin me-2" />
               ) : (
-                <ShoppingBag className="h-4 w-4 mr-2" />
+                <ShoppingBag className="h-4 w-4 me-2" />
               )}
               Register Now
             </Button>
@@ -1028,7 +1028,7 @@ function RegisterDialog({
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={loading}>Cancel</Button>
           <Button onClick={submit} disabled={loading || methods.length === 0}>
-            {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Zap className="h-4 w-4 mr-2" />}
+            {loading ? <Loader2 className="h-4 w-4 animate-spin me-2" /> : <Zap className="h-4 w-4 me-2" />}
             Continue to payment (${total})
           </Button>
         </DialogFooter>
@@ -1186,7 +1186,7 @@ function TransferDomainDialog({
               <AlertTriangle className="h-3.5 w-3.5" />
               Before transferring
             </div>
-            <ul className="list-disc list-inside space-y-0.5 ml-1">
+            <ul className="list-disc list-inside space-y-0.5 ms-1">
               <li>Unlock the domain at your current registrar</li>
               <li>Disable WHOIS privacy if enabled</li>
               <li>Ensure the domain has 7+ days until expiry</li>
@@ -1203,9 +1203,9 @@ function TransferDomainDialog({
             disabled={transferring || !domain.trim() || !authCode.trim() || methods.length === 0}
           >
             {transferring ? (
-              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              <Loader2 className="h-4 w-4 animate-spin me-2" />
             ) : (
-              <Send className="h-4 w-4 mr-2" />
+              <Send className="h-4 w-4 me-2" />
             )}
             Continue to payment
           </Button>
@@ -1284,7 +1284,7 @@ function DomainsListTab({ onSelect }: { onSelect: (id: string) => void }) {
                     <ModeBadge mode={d.mode} />
                     {d.premium && (
                       <Badge className="bg-amber-500/15 text-amber-600 border-amber-500/30" variant="outline">
-                        <Sparkles className="h-3 w-3 mr-1" />Premium
+                        <Sparkles className="h-3 w-3 me-1" />Premium
                       </Badge>
                     )}
                   </div>
@@ -1508,7 +1508,7 @@ function DomainDetail({
     <div className="space-y-6">
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="sm" onClick={onBack}>
-          <ArrowLeft className="h-4 w-4 mr-1" /> Back
+          <ArrowLeft className="h-4 w-4 me-1" /> Back
         </Button>
       </div>
 
@@ -1530,7 +1530,7 @@ function DomainDetail({
                 )}
                 {domain.premium && (
                   <Badge className="bg-amber-500/15 text-amber-600 border-amber-500/30" variant="outline">
-                    <Sparkles className="h-3 w-3 mr-1" />Premium
+                    <Sparkles className="h-3 w-3 me-1" />Premium
                   </Badge>
                 )}
               </div>
@@ -1744,11 +1744,11 @@ function NameserversSection({ domain, onUpdated }: { domain: Domain; onUpdated: 
         <div className="flex gap-2">
           {nameservers.length < 13 && (
             <Button variant="outline" size="sm" onClick={add}>
-              <Plus className="h-4 w-4 mr-1" /> Add Nameserver
+              <Plus className="h-4 w-4 me-1" /> Add Nameserver
             </Button>
           )}
-          <Button onClick={save} disabled={saving} className="ml-auto">
-            {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+          <Button onClick={save} disabled={saving} className="ms-auto">
+            {saving ? <Loader2 className="h-4 w-4 animate-spin me-2" /> : <RefreshCw className="h-4 w-4 me-2" />}
             Save Nameservers
           </Button>
         </div>
@@ -1866,7 +1866,7 @@ function DnsSection({ domain, onUpdated }: { domain: Domain; onUpdated: () => vo
             <CardDescription>A, AAAA, CNAME, MX, TXT, SRV, CAA, NS</CardDescription>
           </div>
           <Button variant="outline" size="sm" onClick={() => setShowEmailGen(true)}>
-            <Mail className="h-4 w-4 mr-1" /> Email DNS
+            <Mail className="h-4 w-4 me-1" /> Email DNS
           </Button>
         </div>
       </CardHeader>
@@ -1918,10 +1918,10 @@ function DnsSection({ domain, onUpdated }: { domain: Domain; onUpdated: () => vo
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={addRecord}>
-            <Plus className="h-4 w-4 mr-1" /> Add Record
+            <Plus className="h-4 w-4 me-1" /> Add Record
           </Button>
-          <Button onClick={save} disabled={saving} className="ml-auto">
-            {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+          <Button onClick={save} disabled={saving} className="ms-auto">
+            {saving ? <Loader2 className="h-4 w-4 animate-spin me-2" /> : <RefreshCw className="h-4 w-4 me-2" />}
             Save All Records
           </Button>
         </div>
@@ -1986,7 +1986,7 @@ function DnsSection({ domain, onUpdated }: { domain: Domain; onUpdated: () => vo
             <DialogFooter>
               <Button variant="outline" onClick={() => setShowEmailGen(false)}>Cancel</Button>
               <Button onClick={generateEmailDns} disabled={!emailDns || !!emailDnsError || emailDnsLoading}>
-                {emailDnsLoading && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                {emailDnsLoading && <Loader2 className="h-4 w-4 animate-spin me-2" />}
                 Add Records
               </Button>
             </DialogFooter>
@@ -2091,7 +2091,7 @@ function SecuritySection({ domain, onUpdated }: { domain: Domain; onUpdated: () 
             </div>
           ) : (
             <Button variant="outline" onClick={getAuthCode} disabled={busy === 'authCode'}>
-              {busy === 'authCode' ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <KeyRound className="h-4 w-4 mr-2" />}
+              {busy === 'authCode' ? <Loader2 className="h-4 w-4 animate-spin me-2" /> : <KeyRound className="h-4 w-4 me-2" />}
               Reveal Auth Code
             </Button>
           )}
@@ -2223,7 +2223,7 @@ function RenewTransferSection({ domain, onUpdated }: { domain: Domain; onUpdated
             disabled={renewing || methods.length === 0}
             className="w-full"
           >
-            {renewing ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+            {renewing ? <Loader2 className="h-4 w-4 animate-spin me-2" /> : <RefreshCw className="h-4 w-4 me-2" />}
             {quote
               ? `Continue to payment ($${quote.total.toFixed(2)})`
               : `Renew ${years} year${years > 1 ? 's' : ''}`}
@@ -2286,7 +2286,7 @@ function LogsSection({ logs }: { logs: DomainLog[] }) {
         <CardDescription>Last {logs.length} events</CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="space-y-2 max-h-96 overflow-y-auto pr-2">
+        <div className="space-y-2 max-h-96 overflow-y-auto pe-2">
           {logs.map((log) => (
             <div key={log.id} className="flex items-start gap-3 rounded-md border p-2.5 text-sm">
               <div className="mt-0.5">
@@ -2369,7 +2369,7 @@ function InvoicesTab() {
               <TableRow>
                 <TableHead>Invoice #</TableHead>
                 <TableHead>Domain</TableHead>
-                <TableHead className="text-right">Amount</TableHead>
+                <TableHead className="text-end">Amount</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Date</TableHead>
                 <TableHead></TableHead>
@@ -2380,7 +2380,7 @@ function InvoicesTab() {
                 <TableRow key={inv.id} className="cursor-pointer hover:bg-accent/50" onClick={() => setSelected(inv)}>
                   <TableCell className="font-mono text-sm">{inv.number}</TableCell>
                   <TableCell>{inv.domainName || '—'}</TableCell>
-                  <TableCell className="text-right font-mono">${inv.total} {inv.currency}</TableCell>
+                  <TableCell className="text-end font-mono">${inv.total} {inv.currency}</TableCell>
                   <TableCell>
                     <Badge variant="outline" className={inv.status === 'paid' ? 'bg-indigo-500/15 text-indigo-600 border-indigo-500/30' : ''}>
                       {inv.status}
@@ -2404,7 +2404,7 @@ function InvoiceDetail({ invoice, onBack }: { invoice: Invoice; onBack: () => vo
   return (
     <div className="space-y-4">
       <Button variant="ghost" size="sm" onClick={onBack}>
-        <ArrowLeft className="h-4 w-4 mr-1" /> Back to Invoices
+        <ArrowLeft className="h-4 w-4 me-1" /> Back to Invoices
       </Button>
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
@@ -2422,18 +2422,18 @@ function InvoiceDetail({ invoice, onBack }: { invoice: Invoice; onBack: () => vo
               <TableHeader>
                 <TableRow>
                   <TableHead>Description</TableHead>
-                  <TableHead className="text-right">Qty</TableHead>
-                  <TableHead className="text-right">Unit Price</TableHead>
-                  <TableHead className="text-right">Total</TableHead>
+                  <TableHead className="text-end">Qty</TableHead>
+                  <TableHead className="text-end">Unit Price</TableHead>
+                  <TableHead className="text-end">Total</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {(invoice.items || []).map((item, i) => (
                   <TableRow key={i}>
                     <TableCell>{item.description}</TableCell>
-                    <TableCell className="text-right">{item.quantity}</TableCell>
-                    <TableCell className="text-right font-mono">${item.unitPrice}</TableCell>
-                    <TableCell className="text-right font-mono">${item.total}</TableCell>
+                    <TableCell className="text-end">{item.quantity}</TableCell>
+                    <TableCell className="text-end font-mono">${item.unitPrice}</TableCell>
+                    <TableCell className="text-end font-mono">${item.total}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -2448,7 +2448,7 @@ function InvoiceDetail({ invoice, onBack }: { invoice: Invoice; onBack: () => vo
             </div>
           </div>
           <Button variant="outline" onClick={() => window.print()}>
-            <Download className="h-4 w-4 mr-2" /> Download Receipt
+            <Download className="h-4 w-4 me-2" /> Download Receipt
           </Button>
         </CardContent>
       </Card>
@@ -2525,7 +2525,7 @@ function PricingTab({ isAdmin, globalMarkup, onMarkupChanged }: PricingTabProps)
             </div>
             {isAdmin && (
               <Button variant="outline" size="sm" onClick={sync} disabled={syncing}>
-                {syncing ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <RefreshCw className="h-4 w-4 mr-1" />}
+                {syncing ? <Loader2 className="h-4 w-4 animate-spin me-1" /> : <RefreshCw className="h-4 w-4 me-1" />}
                 Sync Prices
               </Button>
             )}
@@ -2541,11 +2541,11 @@ function PricingTab({ isAdmin, globalMarkup, onMarkupChanged }: PricingTabProps)
                   <TableRow>
                     <TableHead>TLD</TableHead>
                     {/* SECURITY: hide Wholesale + Markup columns from non-admin customers — M7 */}
-                    {isAdmin && <TableHead className="text-right">Wholesale</TableHead>}
-                    {isAdmin && <TableHead className="text-right">Markup</TableHead>}
-                    <TableHead className="text-right">Register</TableHead>
-                    <TableHead className="text-right">Renew</TableHead>
-                    <TableHead className="text-right">Transfer</TableHead>
+                    {isAdmin && <TableHead className="text-end">Wholesale</TableHead>}
+                    {isAdmin && <TableHead className="text-end">Markup</TableHead>}
+                    <TableHead className="text-end">Register</TableHead>
+                    <TableHead className="text-end">Renew</TableHead>
+                    <TableHead className="text-end">Transfer</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -2553,18 +2553,18 @@ function PricingTab({ isAdmin, globalMarkup, onMarkupChanged }: PricingTabProps)
                     <TableRow key={p.tld}>
                       <TableCell className="font-mono font-medium">{p.tld}</TableCell>
                       {isAdmin && (
-                        <TableCell className="text-right font-mono text-muted-foreground">
+                        <TableCell className="text-end font-mono text-muted-foreground">
                           ${p.wholesale?.toFixed(2) ?? '—'}
                         </TableCell>
                       )}
                       {isAdmin && (
-                        <TableCell className="text-right font-mono text-amber-600">
+                        <TableCell className="text-end font-mono text-amber-600">
                           +${p.markup?.toFixed(2) ?? '—'}
                         </TableCell>
                       )}
-                      <TableCell className="text-right font-mono font-semibold text-indigo-600">${p.registration.toFixed(2)}</TableCell>
-                      <TableCell className="text-right font-mono">${p.renewal.toFixed(2)}</TableCell>
-                      <TableCell className="text-right font-mono">${p.transfer.toFixed(2)}</TableCell>
+                      <TableCell className="text-end font-mono font-semibold text-indigo-600">${p.registration.toFixed(2)}</TableCell>
+                      <TableCell className="text-end font-mono">${p.renewal.toFixed(2)}</TableCell>
+                      <TableCell className="text-end font-mono">${p.transfer.toFixed(2)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -2729,7 +2729,7 @@ function ReconcileDialog({
           </Button>
           {report.dryRun && report.findings.length > 0 && (
             <Button onClick={onApply} disabled={applying}>
-              {applying ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              {applying ? <Loader2 className="h-4 w-4 animate-spin me-2" /> : null}
               Apply changes
             </Button>
           )}
@@ -2883,9 +2883,9 @@ function AdminTab({ onSelect }: { onSelect: (id: string) => void }) {
             disabled={reconciling}
           >
             {reconciling ? (
-              <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
+              <Loader2 className="h-4 w-4 animate-spin me-1.5" />
             ) : (
-              <ShieldCheck className="h-4 w-4 mr-1.5" />
+              <ShieldCheck className="h-4 w-4 me-1.5" />
             )}
             Check ownership
           </Button>
@@ -3039,7 +3039,7 @@ function AdminTab({ onSelect }: { onSelect: (id: string) => void }) {
                   : 'Try a different status filter or sync again.'}
               </p>
               <Button variant="outline" size="sm" className="mt-3" onClick={load} disabled={loading}>
-                <RefreshCw className="h-3.5 w-3.5 mr-1" /> Sync from Dynadot
+                <RefreshCw className="h-3.5 w-3.5 me-1" /> Sync from Dynadot
               </Button>
             </div>
           ) : (
@@ -3052,9 +3052,9 @@ function AdminTab({ onSelect }: { onSelect: (id: string) => void }) {
                     <TableHead>Status</TableHead>
                     <TableHead>Hosting</TableHead>
                     <TableHead>Registrar</TableHead>
-                    <TableHead className="text-right">Expires</TableHead>
-                    <TableHead className="text-right">DNS</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
+                    <TableHead className="text-end">Expires</TableHead>
+                    <TableHead className="text-end">DNS</TableHead>
+                    <TableHead className="text-end">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -3065,7 +3065,7 @@ function AdminTab({ onSelect }: { onSelect: (id: string) => void }) {
                       <TableRow key={d.id} className={d.status === 'deleted' || d.status === 'cancelled' ? 'opacity-60' : ''}>
                         <TableCell>
                           <button
-                            className="font-medium hover:underline flex items-center gap-1.5 text-left"
+                            className="font-medium hover:underline flex items-center gap-1.5 text-start"
                             onClick={() => onSelect(d.id)}
                           >
                             <Globe className={`h-3.5 w-3.5 shrink-0 ${isTransferring ? 'text-purple-500' : 'text-indigo-500'}`} />
@@ -3084,8 +3084,8 @@ function AdminTab({ onSelect }: { onSelect: (id: string) => void }) {
                               <TooltipProvider>
                                 <Tooltip>
                                   <TooltipTrigger asChild>
-                                    <Badge className="bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 border-purple-500/30 ml-1" variant="outline">
-                                      <ArrowLeftRight className="h-3 w-3 mr-1" /> Transfer In
+                                    <Badge className="bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 border-purple-500/30 ms-1" variant="outline">
+                                      <ArrowLeftRight className="h-3 w-3 me-1" /> Transfer In
                                     </Badge>
                                   </TooltipTrigger>
                                   <TooltipContent>
@@ -3097,7 +3097,7 @@ function AdminTab({ onSelect }: { onSelect: (id: string) => void }) {
                             )}
                           </button>
                           {isTransferring ? (
-                            <div className="text-xs mt-0.5 ml-5 space-y-0.5">
+                            <div className="text-xs mt-0.5 ms-5 space-y-0.5">
                               <div className="flex items-center gap-1 text-purple-600 dark:text-purple-400">
                                 <Clock className="h-3 w-3" />
                                 <span className="font-medium">{d.transferDetail!.status}</span>
@@ -3112,7 +3112,7 @@ function AdminTab({ onSelect }: { onSelect: (id: string) => void }) {
                               </div>
                             </div>
                           ) : (
-                            <div className="text-xs text-muted-foreground mt-0.5 ml-5">
+                            <div className="text-xs text-muted-foreground mt-0.5 ms-5">
                               {d.nameservers.length > 0 ? (
                                 <span className="font-mono">{d.nameservers[0]}{d.nameservers.length > 1 ? ` +${d.nameservers.length - 1}` : ''}</span>
                               ) : (
@@ -3133,7 +3133,7 @@ function AdminTab({ onSelect }: { onSelect: (id: string) => void }) {
                                 <Tooltip>
                                   <TooltipTrigger asChild>
                                     <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 border-amber-500/30 w-fit" variant="outline">
-                                      <Mail className="h-3 w-3 mr-1" /> Email
+                                      <Mail className="h-3 w-3 me-1" /> Email
                                     </Badge>
                                   </TooltipTrigger>
                                   <TooltipContent>Email hosting active on this domain</TooltipContent>
@@ -3152,7 +3152,7 @@ function AdminTab({ onSelect }: { onSelect: (id: string) => void }) {
                                       }`}
                                       variant="outline"
                                     >
-                                      <Server className="h-3 w-3 mr-1" /> {d.project.name}
+                                      <Server className="h-3 w-3 me-1" /> {d.project.name}
                                     </Badge>
                                   </TooltipTrigger>
                                   <TooltipContent>
@@ -3174,14 +3174,14 @@ function AdminTab({ onSelect }: { onSelect: (id: string) => void }) {
                             <TooltipProvider>
                               <Tooltip>
                                 <TooltipTrigger asChild>
-                                  <Lock className="h-3 w-3 text-muted-foreground inline-block ml-1" />
+                                  <Lock className="h-3 w-3 text-muted-foreground inline-block ms-1" />
                                 </TooltipTrigger>
                                 <TooltipContent>Registrar lock enabled</TooltipContent>
                               </Tooltip>
                             </TooltipProvider>
                           )}
                         </TableCell>
-                        <TableCell className="text-right align-top">
+                        <TableCell className="text-end align-top">
                           <div className="text-sm">{exp.text}</div>
                           {exp.days !== null && (
                             <div className={`text-xs ${exp.days < 30 ? 'text-red-500' : exp.days < 60 ? 'text-amber-500' : 'text-muted-foreground'}`}>
@@ -3189,13 +3189,13 @@ function AdminTab({ onSelect }: { onSelect: (id: string) => void }) {
                             </div>
                           )}
                         </TableCell>
-                        <TableCell className="text-right align-top">
+                        <TableCell className="text-end align-top">
                           <span className="font-mono text-sm">{d.dnsRecordsCount}</span>
                           {d.logsCount > 0 && (
                             <div className="text-xs text-muted-foreground">{d.logsCount} logs</div>
                           )}
                         </TableCell>
-                        <TableCell className="text-right align-top">
+                        <TableCell className="text-end align-top">
                           <div className="flex gap-1 justify-end">
                             <TooltipProvider>
                               <Tooltip>
@@ -3385,7 +3385,7 @@ function IntegrationStatusCard() {
             </CardDescription>
           </div>
           <Button variant="outline" size="sm" onClick={load} disabled={checking}>
-            {checking ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <RefreshCw className="h-4 w-4 mr-1" />}
+            {checking ? <Loader2 className="h-4 w-4 animate-spin me-1" /> : <RefreshCw className="h-4 w-4 me-1" />}
             Re-check
           </Button>
         </div>

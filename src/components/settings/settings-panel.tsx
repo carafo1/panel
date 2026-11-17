@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { SshKeysCard } from '@/components/settings/ssh-keys-card'
 import { useAuthStore, apiFetch } from '@/store/auth-store'
 import { toast } from 'sonner'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -154,7 +155,7 @@ function ProfileTab() {
                 <Badge variant="outline" className="text-[10px] capitalize">{user?.role}</Badge>
                 {user?.emailVerified ? (
                   <Badge className="text-[10px] bg-indigo-100 text-indigo-700 hover:bg-indigo-100">
-                    <CheckCircle2 className="size-3 mr-1" /> Verified
+                    <CheckCircle2 className="size-3 me-1" /> Verified
                   </Badge>
                 ) : (
                   <Badge variant="outline" className="text-[10px] text-amber-600 border-amber-300">
@@ -203,9 +204,9 @@ function ProfileTab() {
               className="bg-indigo-600 hover:bg-indigo-700 text-white"
             >
               {saving ? (
-                <Loader2 className="size-4 animate-spin mr-2" />
+                <Loader2 className="size-4 animate-spin me-2" />
               ) : (
-                <Save className="size-4 mr-2" />
+                <Save className="size-4 me-2" />
               )}
               Save Changes
             </Button>
@@ -435,9 +436,9 @@ function TwoFactorCard({ enabled, onToggle }: TwoFactorCardProps) {
               disabled={settingUp}
             >
               {settingUp ? (
-                <Loader2 className="size-4 animate-spin mr-2" />
+                <Loader2 className="size-4 animate-spin me-2" />
               ) : (
-                <Shield className="size-4 mr-2" />
+                <Shield className="size-4 me-2" />
               )}
               Enable 2FA
             </Button>
@@ -447,7 +448,7 @@ function TwoFactorCard({ enabled, onToggle }: TwoFactorCardProps) {
               variant="outline"
               className="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
             >
-              <Shield className="size-4 mr-2" />
+              <Shield className="size-4 me-2" />
               Disable 2FA
             </Button>
           )}
@@ -576,7 +577,7 @@ function TwoFactorCard({ enabled, onToggle }: TwoFactorCardProps) {
                     className="flex-1"
                     onClick={handleDownloadBackupCodes}
                   >
-                    <Download className="size-4 mr-2" />
+                    <Download className="size-4 me-2" />
                     Download
                   </Button>
                   <Button
@@ -586,9 +587,9 @@ function TwoFactorCard({ enabled, onToggle }: TwoFactorCardProps) {
                     onClick={handleCopyAllBackupCodes}
                   >
                     {copiedAll ? (
-                      <CheckCircle2 className="size-4 mr-2 text-indigo-600" />
+                      <CheckCircle2 className="size-4 me-2 text-indigo-600" />
                     ) : (
-                      <Copy className="size-4 mr-2" />
+                      <Copy className="size-4 me-2" />
                     )}
                     Copy All
                   </Button>
@@ -608,9 +609,9 @@ function TwoFactorCard({ enabled, onToggle }: TwoFactorCardProps) {
                     className="bg-indigo-600 hover:bg-indigo-700 text-white"
                   >
                     {enabling ? (
-                      <Loader2 className="size-4 animate-spin mr-2" />
+                      <Loader2 className="size-4 animate-spin me-2" />
                     ) : (
-                      <ShieldCheck className="size-4 mr-2" />
+                      <ShieldCheck className="size-4 me-2" />
                     )}
                     Verify &amp; Enable
                   </Button>
@@ -620,7 +621,7 @@ function TwoFactorCard({ enabled, onToggle }: TwoFactorCardProps) {
                   onClick={handleCloseEnable}
                   className="bg-indigo-600 hover:bg-indigo-700 text-white"
                 >
-                  <CheckCircle2 className="size-4 mr-2" />
+                  <CheckCircle2 className="size-4 me-2" />
                   I&apos;ve saved my codes
                 </Button>
               )}
@@ -682,9 +683,9 @@ function TwoFactorCard({ enabled, onToggle }: TwoFactorCardProps) {
                 className="bg-red-600 hover:bg-red-700 text-white"
               >
                 {disabling ? (
-                  <Loader2 className="size-4 animate-spin mr-2" />
+                  <Loader2 className="size-4 animate-spin me-2" />
                 ) : (
-                  <Shield className="size-4 mr-2" />
+                  <Shield className="size-4 me-2" />
                 )}
                 Disable 2FA
               </Button>
@@ -766,7 +767,7 @@ function SecurityTab() {
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="absolute right-1 top-1/2 -translate-y-1/2 size-7"
+                className="absolute end-1 top-1/2 -translate-y-1/2 size-7"
                 onClick={() => setShowCurrent(!showCurrent)}
               >
                 {showCurrent ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
@@ -791,7 +792,7 @@ function SecurityTab() {
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="absolute right-1 top-1/2 -translate-y-1/2 size-7"
+                className="absolute end-1 top-1/2 -translate-y-1/2 size-7"
                 onClick={() => setShowNew(!showNew)}
               >
                 {showNew ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
@@ -845,9 +846,9 @@ function SecurityTab() {
               className="bg-indigo-600 hover:bg-indigo-700 text-white"
             >
               {saving ? (
-                <Loader2 className="size-4 animate-spin mr-2" />
+                <Loader2 className="size-4 animate-spin me-2" />
               ) : (
-                <Shield className="size-4 mr-2" />
+                <Shield className="size-4 me-2" />
               )}
               Update Password
             </Button>
@@ -860,7 +861,143 @@ function SecurityTab() {
 
       {/* Signed-in devices */}
       <ActiveSessionsCard refreshKey={sessionsRefreshKey} />
+      <SshKeysCard />
+
+      {/* Export and deletion */}
+      <YourDataCard />
     </div>
+  )
+}
+
+// ── Your data: export + delete account ─────────────────────────────────────
+function YourDataCard() {
+  const user = useAuthStore((s) => s.user)
+  const [open, setOpen] = useState(false)
+  const [blockers, setBlockers] = useState<string[] | null>(null)
+  const [password, setPassword] = useState('')
+  const [code, setCode] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const openDialog = async () => {
+    setOpen(true)
+    setBlockers(null)
+    try {
+      const d = await apiFetch<{ blockers: string[] }>('/user/delete-account')
+      setBlockers(d.blockers)
+    } catch (err) {
+      setBlockers([err instanceof Error ? err.message : 'Could not check your account'])
+    }
+  }
+
+  const remove = async () => {
+    setBusy(true)
+    try {
+      await apiFetch('/user/delete-account', {
+        method: 'POST',
+        body: JSON.stringify({ password, code: code || undefined, confirm }),
+      })
+      toast.success('Your account has been deleted')
+      window.location.assign('/')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not delete the account')
+      setBusy(false)
+    }
+  }
+
+  const canDelete = blockers !== null && blockers.length === 0 && password.length > 0 && confirm === 'DELETE' && (!user?.twoFactorEnabled || code.trim().length >= 6)
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Download className="size-5 text-indigo-500" />
+          Your Data
+        </CardTitle>
+        <CardDescription>Take a copy of your data, or delete your account.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex flex-col gap-3 rounded-lg border p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm font-medium">Download my data</p>
+            <p className="text-xs text-muted-foreground">
+              Your account, websites, domains, billing history and activity as a JSON file. Passwords and keys are not included.
+            </p>
+          </div>
+          <Button variant="outline" className="shrink-0" onClick={() => window.location.assign('/api/user/export')}>
+            <Download className="me-2 size-4" /> Download
+          </Button>
+        </div>
+        <div className="flex flex-col gap-3 rounded-lg border border-red-200 p-4 sm:flex-row sm:items-center sm:justify-between dark:border-red-900/50">
+          <div>
+            <p className="text-sm font-medium text-red-700 dark:text-red-400">Delete my account</p>
+            <p className="text-xs text-muted-foreground">
+              Permanently removes your websites, email hosting and personal details. This cannot be undone.
+            </p>
+          </div>
+          <Button variant="outline" className="shrink-0 border-red-300 text-red-700 hover:bg-red-50 dark:text-red-400" onClick={openDialog}>
+            <Trash2 className="me-2 size-4" /> Delete account
+          </Button>
+        </div>
+      </CardContent>
+
+      <Dialog open={open} onOpenChange={(o) => !busy && setOpen(o)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete your account?</DialogTitle>
+            <DialogDescription>
+              Your websites and their files and databases, your email hosting and your personal details will be deleted
+              permanently. Invoices are kept without your name, because financial records must be retained.
+            </DialogDescription>
+          </DialogHeader>
+          {blockers === null ? (
+            <div className="flex items-center gap-2 py-3 text-sm text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" /> Checking your account…
+            </div>
+          ) : blockers.length > 0 ? (
+            <Alert variant="destructive">
+              <AlertTriangle className="size-4" />
+              <AlertDescription>
+                <p className="mb-1 font-medium">Before you can delete the account:</p>
+                <ul className="list-disc space-y-1 ps-4">
+                  {blockers.map((b) => (
+                    <li key={b}>{b}</li>
+                  ))}
+                </ul>
+              </AlertDescription>
+            </Alert>
+          ) : (
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="del-password">Password</Label>
+                <Input id="del-password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+              </div>
+              {user?.twoFactorEnabled && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="del-code">Authenticator code</Label>
+                  <Input id="del-code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(e) => setCode(e.target.value)} />
+                </div>
+              )}
+              <div className="space-y-1.5">
+                <Label htmlFor="del-confirm">
+                  Type <span className="font-mono font-semibold">DELETE</span> to confirm
+                </Label>
+                <Input id="del-confirm" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="off" />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOpen(false)} disabled={busy}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={remove} disabled={!canDelete || busy}>
+              {busy && <Loader2 className="me-2 size-4 animate-spin" />}
+              Delete permanently
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </Card>
   )
 }
 
@@ -976,7 +1113,7 @@ function ActiveSessionsCard({ refreshKey }: { refreshKey: number }) {
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <Button variant="outline" size="sm" disabled={revokingAll || others === 0} className="shrink-0">
-                {revokingAll ? <Loader2 className="size-4 animate-spin mr-2" /> : <LogOut className="size-4 mr-2" />}
+                {revokingAll ? <Loader2 className="size-4 animate-spin me-2" /> : <LogOut className="size-4 me-2" />}
                 Sign out all other devices
               </Button>
             </AlertDialogTrigger>
@@ -1050,7 +1187,7 @@ function ActiveSessionsCard({ refreshKey }: { refreshKey: number }) {
                     aria-label={s.current ? 'Sign out this device' : `Sign out ${device.label}`}
                     className="self-start sm:self-auto"
                   >
-                    {busyId === s.id ? <Loader2 className="size-4 animate-spin mr-2" /> : <LogOut className="size-4 mr-2" />}
+                    {busyId === s.id ? <Loader2 className="size-4 animate-spin me-2" /> : <LogOut className="size-4 me-2" />}
                     Sign out
                   </Button>
                 </li>
@@ -1168,7 +1305,7 @@ function ApiKeysTab() {
             }}>
               <DialogTrigger asChild>
                 <Button className="bg-indigo-600 hover:bg-indigo-700 text-white">
-                  <Plus className="size-4 mr-2" />
+                  <Plus className="size-4 me-2" />
                   Create API Key
                 </Button>
               </DialogTrigger>
@@ -1202,7 +1339,7 @@ function ApiKeysTab() {
                     disabled={creating || !newKeyName.trim()}
                     className="bg-indigo-600 hover:bg-indigo-700 text-white"
                   >
-                    {creating ? <Loader2 className="size-4 animate-spin mr-2" /> : <KeyRound className="size-4 mr-2" />}
+                    {creating ? <Loader2 className="size-4 animate-spin me-2" /> : <KeyRound className="size-4 me-2" />}
                     Create Key
                   </Button>
                 </DialogFooter>
@@ -1262,7 +1399,7 @@ function ApiKeysTab() {
                 onClick={() => setCreateOpen(true)}
                 className="mt-4 bg-indigo-600 hover:bg-indigo-700 text-white"
               >
-                <Plus className="size-4 mr-2" />
+                <Plus className="size-4 me-2" />
                 Create Your First API Key
               </Button>
             </div>
@@ -1323,7 +1460,7 @@ function ApiKeysTab() {
                                 disabled={deleting}
                                 className="bg-red-600 hover:bg-red-700 text-white"
                               >
-                                {deleting ? <Loader2 className="size-4 animate-spin mr-2" /> : null}
+                                {deleting ? <Loader2 className="size-4 animate-spin me-2" /> : null}
                                 Delete Key
                               </AlertDialogAction>
                             </AlertDialogFooter>
@@ -1470,9 +1607,9 @@ function NotificationsTab() {
               className="bg-indigo-600 hover:bg-indigo-700 text-white"
             >
               {saving ? (
-                <Loader2 className="size-4 animate-spin mr-2" />
+                <Loader2 className="size-4 animate-spin me-2" />
               ) : (
-                <Save className="size-4 mr-2" />
+                <Save className="size-4 me-2" />
               )}
               Save Preferences
             </Button>

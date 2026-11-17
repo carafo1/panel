@@ -119,7 +119,7 @@ export function AppToolsTab({ projectId }: { projectId: string }) {
             </ul>
             {list.hasLog && (
               <Button size="sm" variant="outline" disabled={!!busy} onClick={() => run({ id: '__log', label: 'Application log' })}>
-                {busy === '__log' ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : <FileText className="mr-1.5 size-3.5" />}
+                {busy === '__log' ? <Loader2 className="me-1.5 size-3.5 animate-spin" /> : <FileText className="me-1.5 size-3.5" />}
                 Show application log
               </Button>
             )}
