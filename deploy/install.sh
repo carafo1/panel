@@ -149,7 +149,7 @@ step "Installing system packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq \
-  curl wget git unzip vim less \
+  curl wget git unzip vim less rsync \
   build-essential python3-dev \
   ufw ca-certificates gnupg lsb-release \
   sqlite3 libsqlite3-dev \
@@ -224,8 +224,13 @@ step "Setting up Apsamo Panel"
 INSTALL_DIR="/opt/apsamo"
 mkdir -p "$INSTALL_DIR"
 
-if [[ -n "$PANEL_SRC" ]]; then
+if [[ -n "$PANEL_SRC" && "$(cd "$PANEL_SRC" && pwd -P)" == "$(cd "$INSTALL_DIR" && pwd -P)" ]]; then
+  # The source is already checked out at the install location (e.g. git clone
+  # straight into /opt/apsamo); copying it onto itself is pointless.
+  log "Panel source is already in $INSTALL_DIR"
+elif [[ -n "$PANEL_SRC" ]]; then
   # Copy from local source
+  command -v rsync &>/dev/null || apt-get install -y -qq rsync
   log "Copying panel from $PANEL_SRC → $INSTALL_DIR"
   rsync -a --exclude 'node_modules' --exclude '.next' --exclude 'db' --exclude 'storage' \
         --exclude 'logs' --exclude '*.log' --exclude '.git' \
@@ -532,11 +537,12 @@ $PANEL_DOMAIN, $SERVER_HOSTNAME, www.$SERVER_HOSTNAME {
         }
     }
 
-    # Static assets caching
+    # Static assets caching. A plain header directive, NOT a handle block:
+    # handle blocks are mutually exclusive, so a handle @static without a
+    # reverse_proxy would answer every /_next/static/* request with an empty 200
+    # and the panel would never load its JS/CSS.
     @static path /_next/static/*
-    handle @static {
-        header Cache-Control "public, max-age=31536000, immutable"
-    }
+    header @static Cache-Control "public, max-age=31536000, immutable"
 
     log {
         output file /var/log/caddy/apsamo.log
