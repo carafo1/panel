@@ -16,10 +16,9 @@ Where a step says **Admin → X**, that is the Admin menu in the panel, tab X.
 ## ☐ Step 0 — Before you start (on your computer)
 
 1. **`main` must contain everything.** The server installs from `main`.
-   - Already merged: pull requests #131 (all features) and #132 (CI fix).
-   - Still to merge: the latest work on `fix/production-install-hardening`
-     (Dynadot keys in Admin, Mailcow setup fix, this checklist). Open a pull
-     request into `main`, wait for the checks to pass, and merge it.
+   ✅ Done: pull requests #131 (all features), #132 (CI fix) and #133 (Dynadot keys
+   in Admin, Mailcow setup fix, this checklist) are merged. If you change anything
+   later, merge it into `main` (with green CI checks) before installing or updating.
 2. **Leaked credentials** (they are in git history):
    - GitHub token "dd": ✅ deleted.
    - Dynadot keys: still the same keys. They only work from IPs on Dynadot's
