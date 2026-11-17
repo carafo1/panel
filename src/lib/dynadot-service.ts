@@ -215,10 +215,10 @@ export function splitPhone(raw?: string): { cc: string; num: string } {
 // ─── Service class ────────────────────────────────────────────────────────────
 
 class DynadotService {
-  private apiKey: string | null
-
-  constructor() {
-    this.apiKey = process.env.DYNADOT_API_KEY || null
+  // Read on every call, not once at startup: keys saved in Admin
+  // (lib/dynadot-settings) replace process.env while the server runs.
+  private get apiKey(): string | null {
+    return process.env.DYNADOT_API_KEY || null
   }
 
   get demoMode(): boolean {

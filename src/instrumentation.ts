@@ -12,6 +12,15 @@
  */
 export async function register() {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return
+
+  // Dynadot keys saved in Admin (encrypted in the database) override .env.
+  try {
+    const { applyDynadotSettings } = await import('./lib/dynadot-settings')
+    await applyDynadotSettings()
+  } catch (err) {
+    console.error('[instrumentation] loading Dynadot settings failed:', err)
+  }
+
   if (process.env.DISABLE_CRON_SCHEDULER === '1') return
 
   setTimeout(() => {

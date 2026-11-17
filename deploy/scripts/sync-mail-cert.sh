@@ -14,9 +14,20 @@
 # actually changed.
 set -uo pipefail
 
-DOMAIN="${MAIL_CERT_DOMAIN:-mail.apsamo.com}"
+# Mail hostname: MAIL_CERT_DOMAIN, else MAIL_SERVER_HOSTNAME from the panel's .env.
+ENV_FILE="${APSAMO_ENV:-/opt/apsamo/.env}"
+env_mail_host=""
+[[ -f "$ENV_FILE" ]] && env_mail_host=$(grep -E '^MAIL_SERVER_HOSTNAME=' "$ENV_FILE" | tail -1 | cut -d= -f2- | tr -d '"'"'"' ')
+DOMAIN="${MAIL_CERT_DOMAIN:-$env_mail_host}"
+if [[ -z "$DOMAIN" ]]; then echo "[mail-cert] ERROR: set MAIL_CERT_DOMAIN or MAIL_SERVER_HOSTNAME" >&2; exit 1; fi
+# Mailcow's folder: /opt/mailcow (our scripts) or /opt/mailcow-dockerized (Mailcow's docs).
+MC_DIR="${MAILCOW_DIR:-}"
+if [[ -z "$MC_DIR" ]]; then
+  for d in /opt/mailcow /opt/mailcow-dockerized; do [[ -f "$d/mailcow.conf" ]] && MC_DIR="$d" && break; done
+fi
+if [[ -z "$MC_DIR" ]]; then echo "[mail-cert] ERROR: Mailcow not found in /opt/mailcow or /opt/mailcow-dockerized" >&2; exit 1; fi
 CADDY_DIR="/var/lib/caddy/.local/share/caddy/certificates/acme-v02.api.letsencrypt.org-directory/${DOMAIN}"
-MC_SSL="/opt/mailcow-dockerized/data/assets/ssl"
+MC_SSL="$MC_DIR/data/assets/ssl"
 SRC_CRT="${CADDY_DIR}/${DOMAIN}.crt"
 SRC_KEY="${CADDY_DIR}/${DOMAIN}.key"
 
@@ -51,7 +62,7 @@ log "installed $(openssl x509 -in "$MC_SSL/cert.pem" -noout -issuer)"
 
 # Reload the services that terminate TLS for mail. Restart (not just reload)
 # because postfix/dovecot read the cert at startup.
-cd /opt/mailcow-dockerized || exit 1
+cd "$MC_DIR" || exit 1
 for c in postfix-mailcow dovecot-mailcow nginx-mailcow; do
   name="mailcowdockerized-${c}-1"
   if docker ps --format '{{.Names}}' | grep -qx "$name"; then

@@ -29,7 +29,7 @@
 #     3. Installs Docker Engine
 #     4. Installs Caddy v2 (auto-HTTPS via Let's Encrypt)
 #     5. Installs Bun (Next.js runtime)
-#     6. Optionally installs Mailcow (Dockerized email)
+#     6. (Mailcow is set up afterwards with `apsamo setup-email`)
 #     7. Sets up the panel at /opt/apsamo
 #     8. Generates strong secrets for .env (JWT, encryption, cron key)
 #     9. Pushes Prisma schema + seeds DB (plans, servers, templates, admin)
@@ -210,26 +210,12 @@ else
   log "Node.js already installed ($(node --version))"
 fi
 
-# ── Optional: Install Mailcow ────────────────────────────────────────────
+# ── Optional: Mailcow ────────────────────────────────────────────────────
+# Mailcow is NOT installed here. Its defaults take ports 80/443, which Caddy
+# needs for every website; deploy/scripts/setup-email.sh (apsamo setup-email)
+# installs it behind Caddy correctly once the panel is running.
 if [[ "$INSTALL_MAILCOW" == "1" ]]; then
-  step "Installing Mailcow (email hosting)"
-
-  MAILCOW_DIR="/opt/mailcow"
-  if [[ ! -d "$MAILCOW_DIR" ]]; then
-    git clone https://github.com/mailcow/mailcow-dockerized "$MAILCOW_DIR"
-    cd "$MAILCOW_DIR"
-    # Generate config with sensible defaults
-    ./generate_config.sh \
-      MAILCOW_HOSTNAME="mail.$SERVER_HOSTNAME" \
-      MAILCOW_TZ="UTC" \
-      <<EOF
-y
-EOF
-    docker compose up -d
-    log "Mailcow installed at $MAILCOW_DIR (https://mail.$SERVER_HOSTNAME)"
-  else
-    log "Mailcow already installed at $MAILCOW_DIR"
-  fi
+  warn "Mailcow will be set up after the install: run  apsamo setup-email"
 fi
 
 # ── Set up panel source ──────────────────────────────────────────────────
@@ -311,7 +297,7 @@ SMTP_FROM_NAME="Apsamo Panel"
 SMTP_FROM_EMAIL="no-reply@${SERVER_HOSTNAME}"
 
 # Mailcow — email hosting API
-MAILCOW_API_URL="$([[ "$INSTALL_MAILCOW" == "1" ]] && echo "https://mail.${SERVER_HOSTNAME}" || echo "")"
+MAILCOW_API_URL=""   # set by apsamo setup-email
 MAILCOW_API_KEY=""
 
 # Domains — Dynadot Registrar API
@@ -558,15 +544,7 @@ $PANEL_DOMAIN, $SERVER_HOSTNAME, www.$SERVER_HOSTNAME {
     }
 }
 
-# ─── Mailcow webmail (optional) ──────────────────────────────────────
-${MAILCOW_API_URL:+mail.$SERVER_HOSTNAME {
-    reverse_proxy localhost:443 {
-        transport http {
-            tls
-            tls_server_name mail.$SERVER_HOSTNAME
-        }
-    }
-}}
+# Mailcow webmail is added by apsamo setup-email (proxied to 127.0.0.1:8080).
 EOF
 
 caddy validate --config /etc/caddy/Caddyfile
@@ -685,6 +663,8 @@ echo "    A     www.$SERVER_HOSTNAME       → $SERVER_IP"
 if [[ "$INSTALL_MAILCOW" == "1" ]]; then
   echo "    A     mail.$SERVER_HOSTNAME       → $SERVER_IP"
   echo "    MX    $SERVER_HOSTNAME           → mail.$SERVER_HOSTNAME (priority 10)"
+  echo ""
+  echo "  ${BOLD}Next:${NC} apsamo setup-email   (installs Mailcow behind Caddy)"
 fi
 echo "    A     ns1.$SERVER_HOSTNAME       → $SERVER_IP"
 echo "    A     ns2.$SERVER_HOSTNAME       → $SERVER_IP"
