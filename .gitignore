@@ -46,6 +46,9 @@ prisma/db/*.db
 prisma/db/*.db-journal
 prisma/db/*.db-shm
 prisma/db/*.db-wal
+# throwaway database the CI build step points at (see .github/workflows/ci.yml)
+ci-build.db*
+prisma/ci-build.db*
 *.sqlite-wal
 *.sqlite-shm
 

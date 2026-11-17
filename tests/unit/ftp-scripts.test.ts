@@ -20,26 +20,32 @@ const SH = Bun.which('sh')
 let dir: string
 let log: string
 
-/** Install stub commands. Each appends "<name> <args>" to the log. */
-function stub(name: string, body = '') {
-  const file = join(dir, name)
-  writeFileSync(file, `#!/bin/sh\necho "${name} $*" >> "${log}"\n${body}\n`)
-  chmodSync(file, 0o755)
-}
-
 /** POSIX form of a path (Git Bash on Windows wants /c/Users/..., not C:\Users\...). */
 const posix = (p: string) =>
   process.platform === 'win32' ? p.replace(/^([A-Za-z]):\\/, (_, d: string) => `/${d.toLowerCase()}/`).replace(/\\/g, '/') : p
 
 /**
- * Run a script with the stub dir FIRST on PATH. It is prepended inside the
- * script because some shells (Git Bash) put their own /usr/bin ahead of the
- * inherited PATH, which would let the real `id` shadow the stub.
+ * Install stub commands. Each appends "<name> <args>" to the log. Stubs use
+ * only shell built-ins, because the scripts run with the stub dir as the
+ * ONLY entry on PATH (see run()).
+ */
+function stub(name: string, body = '') {
+  const file = join(dir, name)
+  writeFileSync(file, `#!/bin/sh\necho "${name} $*" >> "${posix(log)}"\n${body}\n`)
+  chmodSync(file, 0o755)
+}
+
+/**
+ * Run a script with ONLY the stub dir on PATH. A real Linux machine (CI) has
+ * useradd/userdel/chpasswd in /usr/sbin; if those stay reachable they shadow
+ * a missing stub and the "no such tool" branches can never be tested. (On
+ * Windows, Git Bash also puts its own /usr/bin first, so PATH is set inside
+ * the script rather than in the spawn environment.)
  */
 function run(script: string, stdinLog = false) {
   // chpasswd records what it read on stdin so we can check the password line.
-  if (stdinLog) stub('chpasswd', `cat >> "${log}"`)
-  const r = Bun.spawnSync([SH!, '-c', `PATH="${posix(dir)}:$PATH"; export PATH\n${script}`], {
+  if (stdinLog) stub('chpasswd', `while IFS= read -r line || [ -n "$line" ]; do echo "$line" >> "${posix(log)}"; done`)
+  const r = Bun.spawnSync([SH!, '-c', `PATH="${posix(dir)}"; export PATH\n${script}`], {
     env: { ...process.env, HOME: dir },
   })
   return { code: r.exitCode, stderr: r.stderr.toString(), log: existsSync(log) ? readFileSync(log, 'utf8') : '' }

@@ -11,11 +11,10 @@ import { describe, it, expect } from 'bun:test'
 // The default 5s per-test budget is too small for that; raise the budget
 // rather than weakening the cost factor to make tests pass.
 const HASH_TIMEOUT = 30_000
+// Test secrets come from tests/unit/preload.ts, which runs before this file's
+// imports. (Setting them here was too late — imports are hoisted, so auth.ts
+// had already refused to load in CI, where there is no .env.)
 import { hashPassword, verifyPassword, generateToken, verifyToken, extractTokenFromHeader } from '../../src/lib/auth'
-
-// Set test secrets before importing
-process.env.JWT_SECRET = 'test-secret-not-for-production-use-32chars-min'
-process.env.ENCRYPTION_KEY = '0000000000000000000000000000000000000000000000000000000000000000'
 
 describe('auth.ts', () => {
   // ── Password hashing ─────────────────────────────────────────────────
