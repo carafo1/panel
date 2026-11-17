@@ -239,7 +239,7 @@ function CouponDialog({
             Cancel
           </Button>
           <Button onClick={save} disabled={busy}>
-            {busy && <Loader2 className="size-4 animate-spin mr-1.5" />}
+            {busy && <Loader2 className="size-4 animate-spin me-1.5" />}
             Create
           </Button>
         </DialogFooter>
@@ -363,7 +363,7 @@ function TaxDialog({
             Cancel
           </Button>
           <Button onClick={save} disabled={busy}>
-            {busy && <Loader2 className="size-4 animate-spin mr-1.5" />}
+            {busy && <Loader2 className="size-4 animate-spin me-1.5" />}
             Create
           </Button>
         </DialogFooter>
@@ -444,7 +444,7 @@ export function PromotionsAdminPanel() {
           <TabsTrigger value="credit">
             Credit
             {totalCredit > 0 && (
-              <Badge variant="secondary" className="ml-1.5">
+              <Badge variant="secondary" className="ms-1.5">
                 ${totalCredit.toFixed(2)}
               </Badge>
             )}
@@ -454,7 +454,7 @@ export function PromotionsAdminPanel() {
         {/* Coupons */}
         <TabsContent value="coupons" className="space-y-3">
           <Button size="sm" onClick={() => setCouponOpen(true)}>
-            <Plus className="size-4 mr-1.5" /> New coupon
+            <Plus className="size-4 me-1.5" /> New coupon
           </Button>
           {coupons.length === 0 ? (
             <p className="py-6 text-center text-sm text-muted-foreground">
@@ -464,7 +464,7 @@ export function PromotionsAdminPanel() {
             <div className="overflow-x-auto rounded-md border">
               <table className="w-full text-sm">
                 <thead className="bg-muted/50">
-                  <tr className="text-left">
+                  <tr className="text-start">
                     <th className="p-2 font-medium">Code</th>
                     <th className="p-2 font-medium">Discount</th>
                     <th className="p-2 font-medium">Used</th>
@@ -482,7 +482,7 @@ export function PromotionsAdminPanel() {
                           ? `${c.value}%`
                           : `${c.currency} ${c.value.toFixed(2)}`}
                         {c.recurring && (
-                          <Badge variant="outline" className="ml-1.5 text-[10px]">
+                          <Badge variant="outline" className="ms-1.5 text-[10px]">
                             recurring
                           </Badge>
                         )}
@@ -507,7 +507,7 @@ export function PromotionsAdminPanel() {
                           <Badge variant="outline">off</Badge>
                         )}
                       </td>
-                      <td className="p-2 text-right">
+                      <td className="p-2 text-end">
                         <Button
                           size="sm"
                           variant="ghost"
@@ -527,7 +527,7 @@ export function PromotionsAdminPanel() {
         {/* Tax */}
         <TabsContent value="tax" className="space-y-3">
           <Button size="sm" onClick={() => setTaxOpen(true)}>
-            <Plus className="size-4 mr-1.5" /> New tax rate
+            <Plus className="size-4 me-1.5" /> New tax rate
           </Button>
           {rates.length === 0 ? (
             <p className="py-6 text-center text-sm text-muted-foreground">
@@ -539,7 +539,7 @@ export function PromotionsAdminPanel() {
             <div className="overflow-x-auto rounded-md border">
               <table className="w-full text-sm">
                 <thead className="bg-muted/50">
-                  <tr className="text-left">
+                  <tr className="text-start">
                     <th className="p-2 font-medium">Name</th>
                     <th className="p-2 font-medium">Rate</th>
                     <th className="p-2 font-medium">Applies to</th>
@@ -552,7 +552,7 @@ export function PromotionsAdminPanel() {
                       <td className="p-2">
                         {t.name}
                         {t.compound && (
-                          <Badge variant="outline" className="ml-1.5 text-[10px]">
+                          <Badge variant="outline" className="ms-1.5 text-[10px]">
                             compound
                           </Badge>
                         )}
@@ -588,7 +588,7 @@ export function PromotionsAdminPanel() {
             <div className="overflow-x-auto rounded-md border">
               <table className="w-full text-sm">
                 <thead className="bg-muted/50">
-                  <tr className="text-left">
+                  <tr className="text-start">
                     <th className="p-2 font-medium">Customer</th>
                     <th className="p-2 font-medium">Balance</th>
                   </tr>

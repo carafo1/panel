@@ -81,7 +81,7 @@ export function UsageAdminPanel() {
               Over limit only
             </Button>
             <Button size="sm" onClick={collect} disabled={collecting}>
-              {collecting ? <Loader2 className="mr-2 size-4 animate-spin" /> : <RefreshCw className="mr-2 size-4" />}
+              {collecting ? <Loader2 className="me-2 size-4 animate-spin" /> : <RefreshCw className="me-2 size-4" />}
               Measure everyone now
             </Button>
           </div>

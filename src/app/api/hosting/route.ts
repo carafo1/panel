@@ -26,7 +26,8 @@ export async function GET(request: Request) {
     const where: {
       AND: Array<Record<string, unknown>>
     } = {
-      AND: [accessibleProjectsWhere(decoded.userId)],
+      // Staging copies are managed from their live site's Staging tab.
+      AND: [accessibleProjectsWhere(decoded.userId), { environment: 'production' }],
     }
 
     if (search) {

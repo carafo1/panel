@@ -59,7 +59,7 @@ export function NotFoundPage() {
 
           {/* Popular destinations */}
           <ScrollReveal delay={100}>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-left">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-start">
               {services.map((svc) => {
                 const Icon = resolveIcon(svc.iconName)
                 return (

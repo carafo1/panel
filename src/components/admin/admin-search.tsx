@@ -85,14 +85,14 @@ export function AdminSearch({ onOpenCustomer }: { onOpenCustomer: (email: string
 
   return (
     <div ref={box} className="relative w-full sm:max-w-md">
-      <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+      <Search className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
       <Input
         type="search"
         role="combobox"
         aria-expanded={open && q.trim().length >= 2}
         aria-label="Search customers, websites, domains, mailboxes, invoices, payments"
         placeholder="Find by email, domain, site, invoice or payment ref…"
-        className="pl-9"
+        className="ps-9"
         value={q}
         onChange={(e) => {
           setQ(e.target.value)
@@ -122,7 +122,7 @@ export function AdminSearch({ onOpenCustomer }: { onOpenCustomer: (email: string
                       type="button"
                       onClick={() => pick(r)}
                       disabled={!email}
-                      className="flex w-full items-start gap-3 px-3 py-2 text-left text-sm hover:bg-muted focus:bg-muted focus:outline-none disabled:cursor-default disabled:opacity-70"
+                      className="flex w-full items-start gap-3 px-3 py-2 text-start text-sm hover:bg-muted focus:bg-muted focus:outline-none disabled:cursor-default disabled:opacity-70"
                     >
                       <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
                       <span className="min-w-0 flex-1">

@@ -1,10 +1,38 @@
 'use client'
 
 import { useState } from 'react'
-import { LifeBuoy, Loader2 } from 'lucide-react'
+import { LifeBuoy, Loader2, ShieldAlert } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { useAuthStore } from '@/store/auth-store'
+import { useTranslations } from 'next-intl'
+
+/**
+ * Admin accounts need two-factor authentication. Until it's on, the server
+ * treats the account as a regular user (lib/auth effectiveRole); this says why
+ * the admin tools are missing and how to get them back.
+ */
+export function AdminTwoFactorBanner({ onOpenSettings }: { onOpenSettings: () => void }) {
+  const user = useAuthStore((s) => s.user)
+  const t = useTranslations('banners')
+  if (!user?.adminTwoFactorRequired) return null
+  return (
+    <div
+      role="alert"
+      className="flex flex-col gap-2 border-b border-red-300 bg-red-50 px-4 py-2 text-sm text-red-900 sm:flex-row sm:items-center sm:justify-between dark:border-red-900 dark:bg-red-950/50 dark:text-red-200"
+    >
+      <span className="flex items-start gap-2">
+        <ShieldAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
+        <span>
+          <strong>{t('admin2faTitle')}.</strong> {t('admin2faBody')}
+        </span>
+      </span>
+      <Button size="sm" variant="outline" onClick={onOpenSettings} className="shrink-0 border-red-400 bg-white/60 dark:bg-transparent">
+        {t('admin2faAction')}
+      </Button>
+    </div>
+  )
+}
 
 /**
  * Shown on every page while a super admin is using support access ("Log in as
@@ -45,7 +73,7 @@ export function SupportSessionBanner() {
         </span>
       </span>
       <Button size="sm" variant="outline" onClick={endSupport} disabled={busy} className="shrink-0 border-amber-400 bg-white/60 dark:bg-transparent">
-        {busy && <Loader2 className="mr-2 size-4 animate-spin" />}
+        {busy && <Loader2 className="me-2 size-4 animate-spin" />}
         Return to admin
       </Button>
     </div>

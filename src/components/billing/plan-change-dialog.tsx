@@ -150,7 +150,7 @@ export function PlanChangeDialog({
 
         {loading && (
           <div className="flex items-center justify-center py-10 text-muted-foreground">
-            <Loader2 className="size-5 animate-spin mr-2" />
+            <Loader2 className="size-5 animate-spin me-2" />
             Pricing this change…
           </div>
         )}

@@ -224,7 +224,7 @@ export function EmailManagement({ projectId }: { projectId: string }) {
           <p className="font-medium">Email management unavailable</p>
           <p className="text-sm text-muted-foreground max-w-md mx-auto">{fatal}</p>
           <Button variant="outline" onClick={loadStats}>
-            <RefreshCw className="size-4 mr-2" /> Retry
+            <RefreshCw className="size-4 me-2" /> Retry
           </Button>
         </CardContent>
       </Card>
@@ -291,16 +291,16 @@ export function EmailManagement({ projectId }: { projectId: string }) {
       <Tabs defaultValue="aliases">
         <TabsList className="flex-wrap h-auto">
           <TabsTrigger value="aliases">
-            <AtSign className="size-3.5 mr-1.5" /> Aliases & Forwarding
+            <AtSign className="size-3.5 me-1.5" /> Aliases & Forwarding
           </TabsTrigger>
           <TabsTrigger value="spam">
-            <ShieldCheck className="size-3.5 mr-1.5" /> Spam Protection
+            <ShieldCheck className="size-3.5 me-1.5" /> Spam Protection
           </TabsTrigger>
           <TabsTrigger value="quarantine">
-            <ShieldAlert className="size-3.5 mr-1.5" /> Quarantine
+            <ShieldAlert className="size-3.5 me-1.5" /> Quarantine
           </TabsTrigger>
           <TabsTrigger value="logs">
-            <FileText className="size-3.5 mr-1.5" /> Activity Logs
+            <FileText className="size-3.5 me-1.5" /> Activity Logs
           </TabsTrigger>
         </TabsList>
 
@@ -438,7 +438,7 @@ function AliasesPanel({
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
               <Button size="sm" style={{ background: BRAND.secondary }}>
-                <Plus className="size-4 mr-1.5" /> New alias
+                <Plus className="size-4 me-1.5" /> New alias
               </Button>
             </DialogTrigger>
             <DialogContent>
@@ -488,7 +488,7 @@ function AliasesPanel({
                   Cancel
                 </Button>
                 <Button onClick={create} disabled={saving} style={{ background: BRAND.secondary }}>
-                  {saving ? <Loader2 className="size-4 mr-2 animate-spin" /> : null}
+                  {saving ? <Loader2 className="size-4 me-2 animate-spin" /> : null}
                   Create
                 </Button>
               </DialogFooter>
@@ -519,7 +519,7 @@ function AliasesPanel({
                   <TableHead>Address</TableHead>
                   <TableHead>Delivers to</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableHead className="text-end">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -547,7 +547,7 @@ function AliasesPanel({
                         </Badge>
                       )}
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-end">
                       <div className="flex justify-end gap-1">
                         <Button
                           variant="ghost"
@@ -678,7 +678,7 @@ function CatchAllRow({
               onClick={() => save(false)}
               style={{ background: BRAND.secondary }}
             >
-              {saving ? <Loader2 className="size-4 mr-2 animate-spin" /> : null}
+              {saving ? <Loader2 className="size-4 me-2 animate-spin" /> : null}
               Enable
             </Button>
           </>
@@ -804,7 +804,7 @@ function SpamPanel({ projectId, domains }: { projectId: string; domains: string[
             onClick={add}
             style={{ background: BRAND.secondary }}
           >
-            {saving ? <Loader2 className="size-4 mr-2 animate-spin" /> : <Plus className="size-4 mr-1.5" />}
+            {saving ? <Loader2 className="size-4 me-2 animate-spin" /> : <Plus className="size-4 me-1.5" />}
             Add
           </Button>
         </div>
@@ -852,7 +852,7 @@ function PolicyList({
       <div className="flex items-center gap-2 px-3 py-2 border-b">
         <Icon className={`size-4 ${tone === 'emerald' ? 'text-emerald-600' : 'text-red-600'}`} />
         <span className="text-sm font-medium">{title}</span>
-        <Badge variant="outline" className="ml-auto text-[10px]">
+        <Badge variant="outline" className="ms-auto text-[10px]">
           {entries.length}
         </Badge>
       </div>
@@ -871,7 +871,7 @@ function PolicyList({
               <Button
                 variant="ghost"
                 size="sm"
-                className="ml-auto h-6 text-xs text-red-600 hover:text-red-700"
+                className="ms-auto h-6 text-xs text-red-600 hover:text-red-700"
                 onClick={() => onRemove(e.prefid)}
               >
                 <Trash2 className="size-3" />
@@ -967,7 +967,7 @@ function QuarantinePanel({
                   <TableHead>From</TableHead>
                   <TableHead>To</TableHead>
                   <TableHead>Score</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableHead className="text-end">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -979,7 +979,7 @@ function QuarantinePanel({
                     <TableCell>
                       <Badge variant="outline">{m.score}</Badge>
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-end">
                       <div className="flex justify-end gap-1">
                         <Button
                           variant="ghost"
@@ -988,7 +988,7 @@ function QuarantinePanel({
                           disabled={busy === m.id}
                           onClick={() => act('release', m.id)}
                         >
-                          <Send className="size-3 mr-1" /> Release
+                          <Send className="size-3 me-1" /> Release
                         </Button>
                         <Button
                           variant="ghost"

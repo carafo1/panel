@@ -6,7 +6,8 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
+  /* Arabic glyphs fall through to Noto Sans Arabic (Geist has none). */
+  --font-sans: var(--font-geist-sans), var(--font-arabic), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
@@ -133,6 +134,21 @@
   }
   body {
     @apply bg-background text-foreground;
+  }
+  /* Right-to-left: arrows and chevrons that mean "back/forward" point the
+     other way. Spacing uses logical utilities (ms-/me-/ps-/pe-/start-/end-),
+     which flip on their own. */
+  [dir='rtl'] .lucide-arrow-left,
+  [dir='rtl'] .lucide-arrow-right,
+  [dir='rtl'] .lucide-chevron-left,
+  [dir='rtl'] .lucide-chevron-right,
+  [dir='rtl'] .lucide-chevrons-left,
+  [dir='rtl'] .lucide-chevrons-right {
+    transform: scaleX(-1);
+  }
+  /* Arabic script needs more line height than Latin. */
+  :lang(ar) body {
+    line-height: 1.7;
   }
 }
 

@@ -561,7 +561,7 @@ function PlanDialog({
             Cancel
           </Button>
           <Button onClick={save} disabled={busy}>
-            {busy && <Loader2 className="size-4 animate-spin mr-1.5" />}
+            {busy && <Loader2 className="size-4 animate-spin me-1.5" />}
             {plan ? 'Save changes' : 'Create plan'}
           </Button>
         </DialogFooter>
@@ -671,7 +671,7 @@ export function PlansAdminPanel() {
               setDialogOpen(true)
             }}
           >
-            <Plus className="size-4 mr-1.5" />
+            <Plus className="size-4 me-1.5" />
             New plan
           </Button>
         </div>
@@ -685,7 +685,7 @@ export function PlansAdminPanel() {
         <div className="overflow-x-auto rounded-md border">
           <table className="w-full text-sm">
             <thead className="bg-muted/50">
-              <tr className="text-left">
+              <tr className="text-start">
                 <th className="p-2 font-medium">Plan</th>
                 <th className="p-2 font-medium">Price</th>
                 <th className="p-2 font-medium">Cycle</th>

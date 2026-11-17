@@ -435,7 +435,7 @@ export function CronTab({ projectId }: { projectId: string }) {
     if (status === 'success') {
       return (
         <Badge variant="outline" className="bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/50 text-xs">
-          <CheckCircle2 className="size-3 mr-1" />
+          <CheckCircle2 className="size-3 me-1" />
           Success
         </Badge>
       )
@@ -443,7 +443,7 @@ export function CronTab({ projectId }: { projectId: string }) {
     if (status === 'failed') {
       return (
         <Badge variant="outline" className="bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400 border-red-200 dark:border-red-900/50 text-xs">
-          <XCircle className="size-3 mr-1" />
+          <XCircle className="size-3 me-1" />
           Failed
         </Badge>
       )
@@ -451,7 +451,7 @@ export function CronTab({ projectId }: { projectId: string }) {
     if (status === 'running') {
       return (
         <Badge variant="outline" className="bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400 border-amber-200 dark:border-amber-900/50 text-xs">
-          <Loader2 className="size-3 mr-1 animate-spin" />
+          <Loader2 className="size-3 me-1 animate-spin" />
           Running
         </Badge>
       )
@@ -474,11 +474,11 @@ export function CronTab({ projectId }: { projectId: string }) {
           </div>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" className="h-8 text-xs" onClick={fetchJobs} disabled={loading}>
-              <RefreshCw className={`size-3.5 mr-1 ${loading ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`size-3.5 me-1 ${loading ? 'animate-spin' : ''}`} />
               Refresh
             </Button>
             <Button size="sm" className={primaryBtn} onClick={openCreate}>
-              <Plus className="size-3.5 mr-1" />
+              <Plus className="size-3.5 me-1" />
               New Job
             </Button>
           </div>
@@ -498,7 +498,7 @@ export function CronTab({ projectId }: { projectId: string }) {
               Schedule recurring tasks like backups, cache clears or sync jobs.
             </p>
             <Button className={`${primaryBtn} mt-4`} size="sm" onClick={openCreate}>
-              <Plus className="size-3.5 mr-1" />
+              <Plus className="size-3.5 me-1" />
               Create Your First Job
             </Button>
           </div>
@@ -512,7 +512,7 @@ export function CronTab({ projectId }: { projectId: string }) {
                   <TableHead>Description</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Last Run</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableHead className="text-end">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -524,7 +524,7 @@ export function CronTab({ projectId }: { projectId: string }) {
                     <TableCell>
                       <span className="font-mono text-xs">{j.expression}</span>
                       {!j.enabled && (
-                        <Badge variant="outline" className="ml-2 bg-gray-50 text-gray-600 dark:bg-gray-800/30 dark:text-gray-400 border-gray-200 dark:border-gray-700 text-[10px] h-5">
+                        <Badge variant="outline" className="ms-2 bg-gray-50 text-gray-600 dark:bg-gray-800/30 dark:text-gray-400 border-gray-200 dark:border-gray-700 text-[10px] h-5">
                           Disabled
                         </Badge>
                       )}
@@ -553,7 +553,7 @@ export function CronTab({ projectId }: { projectId: string }) {
                         <TooltipContent>{formatDate(j.lastRunAt)}</TooltipContent>
                       </Tooltip>
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-end">
                       <div className="flex items-center justify-end gap-1">
                         <Tooltip>
                           <TooltipTrigger asChild>
@@ -698,12 +698,12 @@ export function CronTab({ projectId }: { projectId: string }) {
             <Button className={primaryBtn} onClick={handleSave} disabled={creating}>
               {creating ? (
                 <>
-                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  <Loader2 className="size-4 me-2 animate-spin" />
                   Saving...
                 </>
               ) : (
                 <>
-                  <Plus className="size-4 mr-2" />
+                  <Plus className="size-4 me-2" />
                   {editJob ? 'Save Changes' : 'Create'}
                 </>
               )}
@@ -729,15 +729,15 @@ export function CronTab({ projectId }: { projectId: string }) {
               <span className="size-2 rounded-full bg-red-500/80" />
               <span className="size-2 rounded-full bg-amber-500/80" />
               <span className="size-2 rounded-full bg-emerald-500/80" />
-              <span className="ml-2 text-[10px] text-zinc-500 font-mono truncate">
+              <span className="ms-2 text-[10px] text-zinc-500 font-mono truncate">
                 {runJob?.expression} · {runJob?.id.slice(0, 8)}
               </span>
               {runOutput && (
-                <span className="ml-auto text-[10px] font-mono">
+                <span className="ms-auto text-[10px] font-mono">
                   <span className={runOutput.status === 'success' ? 'text-emerald-400' : 'text-red-400'}>
                     {runOutput.status === 'success' ? 'EXIT 0' : `EXIT ${runOutput.exitCode ?? '?'}`}
                   </span>
-                  <span className="text-zinc-500 ml-2">{runOutput.durationMs}ms</span>
+                  <span className="text-zinc-500 ms-2">{runOutput.durationMs}ms</span>
                 </span>
               )}
             </div>
@@ -767,12 +767,12 @@ export function CronTab({ projectId }: { projectId: string }) {
             >
               {running ? (
                 <>
-                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  <Loader2 className="size-4 me-2 animate-spin" />
                   Running...
                 </>
               ) : (
                 <>
-                  <Play className="size-4 mr-2" />
+                  <Play className="size-4 me-2" />
                   Run Now
                 </>
               )}
@@ -804,12 +804,12 @@ export function CronTab({ projectId }: { projectId: string }) {
             >
               {deleting ? (
                 <>
-                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  <Loader2 className="size-4 me-2 animate-spin" />
                   Deleting...
                 </>
               ) : (
                 <>
-                  <Trash2 className="size-4 mr-2" />
+                  <Trash2 className="size-4 me-2" />
                   Delete
                 </>
               )}
@@ -1072,11 +1072,11 @@ export function FtpTab({ projectId }: { projectId: string }) {
           </div>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" className="h-8 text-xs" onClick={fetchAccounts} disabled={loading}>
-              <RefreshCw className={`size-3.5 mr-1 ${loading ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`size-3.5 me-1 ${loading ? 'animate-spin' : ''}`} />
               Refresh
             </Button>
             <Button size="sm" className={primaryBtn} onClick={openCreate}>
-              <Plus className="size-3.5 mr-1" />
+              <Plus className="size-3.5 me-1" />
               New Account
             </Button>
           </div>
@@ -1096,7 +1096,7 @@ export function FtpTab({ projectId }: { projectId: string }) {
               Create an FTP account to upload files without using the panel.
             </p>
             <Button className={`${primaryBtn} mt-4`} size="sm" onClick={openCreate}>
-              <Plus className="size-3.5 mr-1" />
+              <Plus className="size-3.5 me-1" />
               Create Your First Account
             </Button>
           </div>
@@ -1110,7 +1110,7 @@ export function FtpTab({ projectId }: { projectId: string }) {
                   <TableHead>Access</TableHead>
                   <TableHead>Quota</TableHead>
                   <TableHead>Last Login</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableHead className="text-end">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1149,7 +1149,7 @@ export function FtpTab({ projectId }: { projectId: string }) {
                         <TooltipContent>{formatDate(a.lastLoginAt)}</TooltipContent>
                       </Tooltip>
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-end">
                       <div className="flex items-center justify-end gap-1">
                         <Tooltip>
                           <TooltipTrigger asChild>
@@ -1356,12 +1356,12 @@ export function FtpTab({ projectId }: { projectId: string }) {
             <Button className={primaryBtn} onClick={handleCreate} disabled={creating}>
               {creating ? (
                 <>
-                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  <Loader2 className="size-4 me-2 animate-spin" />
                   Creating...
                 </>
               ) : (
                 <>
-                  <Plus className="size-4 mr-2" />
+                  <Plus className="size-4 me-2" />
                   Create
                 </>
               )}
@@ -1488,12 +1488,12 @@ export function FtpTab({ projectId }: { projectId: string }) {
             >
               {patching[changePw?.id || ''] ? (
                 <>
-                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  <Loader2 className="size-4 me-2 animate-spin" />
                   Saving...
                 </>
               ) : (
                 <>
-                  <KeyRound className="size-4 mr-2" />
+                  <KeyRound className="size-4 me-2" />
                   Update Password
                 </>
               )}
@@ -1524,12 +1524,12 @@ export function FtpTab({ projectId }: { projectId: string }) {
             >
               {deleting ? (
                 <>
-                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  <Loader2 className="size-4 me-2 animate-spin" />
                   Deleting...
                 </>
               ) : (
                 <>
-                  <Trash2 className="size-4 mr-2" />
+                  <Trash2 className="size-4 me-2" />
                   Delete
                 </>
               )}
@@ -1721,11 +1721,11 @@ export function RedirectsTab({ projectId }: { projectId: string }) {
           </div>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" className="h-8 text-xs" onClick={fetchRedirects} disabled={loading}>
-              <RefreshCw className={`size-3.5 mr-1 ${loading ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`size-3.5 me-1 ${loading ? 'animate-spin' : ''}`} />
               Refresh
             </Button>
             <Button size="sm" className={primaryBtn} onClick={openCreate}>
-              <Plus className="size-3.5 mr-1" />
+              <Plus className="size-3.5 me-1" />
               New Redirect
             </Button>
           </div>
@@ -1745,7 +1745,7 @@ export function RedirectsTab({ projectId }: { projectId: string }) {
               Redirect old URLs to new locations with 301 (permanent) or 302 (temporary) status codes.
             </p>
             <Button className={`${primaryBtn} mt-4`} size="sm" onClick={openCreate}>
-              <Plus className="size-3.5 mr-1" />
+              <Plus className="size-3.5 me-1" />
               Create Your First Redirect
             </Button>
           </div>
@@ -1760,7 +1760,7 @@ export function RedirectsTab({ projectId }: { projectId: string }) {
                   <TableHead>Type</TableHead>
                   <TableHead>Match Query</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableHead className="text-end">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1791,7 +1791,7 @@ export function RedirectsTab({ projectId }: { projectId: string }) {
                         </Badge>
                       )}
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-end">
                       <div className="flex items-center justify-end gap-1">
                         <Tooltip>
                           <TooltipTrigger asChild>
@@ -1933,12 +1933,12 @@ export function RedirectsTab({ projectId }: { projectId: string }) {
             <Button className={primaryBtn} onClick={handleSave} disabled={creating}>
               {creating ? (
                 <>
-                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  <Loader2 className="size-4 me-2 animate-spin" />
                   Saving...
                 </>
               ) : (
                 <>
-                  <Plus className="size-4 mr-2" />
+                  <Plus className="size-4 me-2" />
                   {editRedirect ? 'Save Changes' : 'Create'}
                 </>
               )}
@@ -1970,12 +1970,12 @@ export function RedirectsTab({ projectId }: { projectId: string }) {
             >
               {deleting ? (
                 <>
-                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  <Loader2 className="size-4 me-2 animate-spin" />
                   Deleting...
                 </>
               ) : (
                 <>
-                  <Trash2 className="size-4 mr-2" />
+                  <Trash2 className="size-4 me-2" />
                   Delete
                 </>
               )}
@@ -2090,7 +2090,7 @@ function MalwareScanCard({ projectId }: { projectId: string }) {
               onClick={fetchStatus}
               disabled={loading || scanning}
             >
-              <RefreshCw className={`size-3.5 mr-1 ${loading ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`size-3.5 me-1 ${loading ? 'animate-spin' : ''}`} />
               Refresh
             </Button>
             {status?.entitled && status.onDemand && (
@@ -2102,12 +2102,12 @@ function MalwareScanCard({ projectId }: { projectId: string }) {
               >
                 {scanning ? (
                   <>
-                    <Loader2 className="size-3.5 mr-1 animate-spin" />
+                    <Loader2 className="size-3.5 me-1 animate-spin" />
                     Scanning…
                   </>
                 ) : (
                   <>
-                    <Shield className="size-3.5 mr-1" />
+                    <Shield className="size-3.5 me-1" />
                     Scan now
                   </>
                 )}
@@ -2380,12 +2380,12 @@ export function SecurityTab({ projectId }: { projectId: string }) {
   const actionBadge = (a: string) =>
     a === 'allow' ? (
       <Badge variant="outline" className="bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/50 text-xs">
-        <ShieldCheck className="size-3 mr-1" />
+        <ShieldCheck className="size-3 me-1" />
         Allow
       </Badge>
     ) : (
       <Badge variant="outline" className="bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400 border-red-200 dark:border-red-900/50 text-xs">
-        <Ban className="size-3 mr-1" />
+        <Ban className="size-3 me-1" />
         Deny
       </Badge>
     )
@@ -2415,11 +2415,11 @@ export function SecurityTab({ projectId }: { projectId: string }) {
           </div>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" className="h-8 text-xs" onClick={fetchBlocks} disabled={loading}>
-              <RefreshCw className={`size-3.5 mr-1 ${loading ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`size-3.5 me-1 ${loading ? 'animate-spin' : ''}`} />
               Refresh
             </Button>
             <Button size="sm" className={primaryBtn} onClick={openCreate}>
-              <Plus className="size-3.5 mr-1" />
+              <Plus className="size-3.5 me-1" />
               New Rule
             </Button>
           </div>
@@ -2459,7 +2459,7 @@ export function SecurityTab({ projectId }: { projectId: string }) {
               Block malicious IPs or whitelist trusted ones (e.g. your office IP).
             </p>
             <Button className={`${primaryBtn} mt-4`} size="sm" onClick={openCreate}>
-              <Plus className="size-3.5 mr-1" />
+              <Plus className="size-3.5 me-1" />
               Create Your First Rule
             </Button>
           </div>
@@ -2473,7 +2473,7 @@ export function SecurityTab({ projectId }: { projectId: string }) {
                   <TableHead>Reason</TableHead>
                   <TableHead>Expires</TableHead>
                   <TableHead>Created</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableHead className="text-end">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -2490,12 +2490,12 @@ export function SecurityTab({ projectId }: { projectId: string }) {
                       <TableCell>
                         <span className="font-mono text-xs">{b.ipAddress}</span>
                         {!b.enabled && (
-                          <Badge variant="outline" className="ml-2 bg-gray-50 text-gray-600 dark:bg-gray-800/30 dark:text-gray-400 border-gray-200 dark:border-gray-700 text-[10px] h-5">
+                          <Badge variant="outline" className="ms-2 bg-gray-50 text-gray-600 dark:bg-gray-800/30 dark:text-gray-400 border-gray-200 dark:border-gray-700 text-[10px] h-5">
                             Disabled
                           </Badge>
                         )}
                         {expired && (
-                          <Badge variant="outline" className="ml-2 bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400 border-amber-200 dark:border-amber-900/50 text-[10px] h-5">
+                          <Badge variant="outline" className="ms-2 bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400 border-amber-200 dark:border-amber-900/50 text-[10px] h-5">
                             Expired
                           </Badge>
                         )}
@@ -2529,7 +2529,7 @@ export function SecurityTab({ projectId }: { projectId: string }) {
                           <TooltipContent>{formatDate(b.createdAt)}</TooltipContent>
                         </Tooltip>
                       </TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="text-end">
                         <div className="flex items-center justify-end gap-1">
                           <Tooltip>
                             <TooltipTrigger asChild>
@@ -2672,12 +2672,12 @@ export function SecurityTab({ projectId }: { projectId: string }) {
             <Button className={primaryBtn} onClick={handleSave} disabled={creating}>
               {creating ? (
                 <>
-                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  <Loader2 className="size-4 me-2 animate-spin" />
                   Saving...
                 </>
               ) : (
                 <>
-                  <Plus className="size-4 mr-2" />
+                  <Plus className="size-4 me-2" />
                   {editBlock ? 'Save Changes' : 'Create'}
                 </>
               )}
@@ -2709,12 +2709,12 @@ export function SecurityTab({ projectId }: { projectId: string }) {
             >
               {deleting ? (
                 <>
-                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  <Loader2 className="size-4 me-2 animate-spin" />
                   Removing...
                 </>
               ) : (
                 <>
-                  <Trash2 className="size-4 mr-2" />
+                  <Trash2 className="size-4 me-2" />
                   Remove
                 </>
               )}

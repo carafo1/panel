@@ -202,7 +202,7 @@ export function NotificationCenter() {
         <Button variant="ghost" size="icon" className="relative">
           <Bell className="size-4" />
           {unreadCount > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] rounded-full bg-orange-500 text-white text-[10px] font-bold flex items-center justify-center px-1">
+            <span className="absolute -top-0.5 -end-0.5 min-w-[18px] h-[18px] rounded-full bg-orange-500 text-white text-[10px] font-bold flex items-center justify-center px-1">
               {unreadCount > 99 ? '99+' : unreadCount}
             </span>
           )}

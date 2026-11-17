@@ -118,10 +118,10 @@ interface TeamDetail {
 
 function RoleBadge({ role }: { role: string }) {
   if (role === 'owner') {
-    return <Badge className="bg-indigo-100 text-indigo-700 border-indigo-200 hover:bg-indigo-100"><Crown className="size-3 mr-1" />Owner</Badge>
+    return <Badge className="bg-indigo-100 text-indigo-700 border-indigo-200 hover:bg-indigo-100"><Crown className="size-3 me-1" />Owner</Badge>
   }
   if (role === 'admin') {
-    return <Badge className="bg-amber-100 text-amber-700 border-amber-200 hover:bg-amber-100"><Shield className="size-3 mr-1" />Admin</Badge>
+    return <Badge className="bg-amber-100 text-amber-700 border-amber-200 hover:bg-amber-100"><Shield className="size-3 me-1" />Admin</Badge>
   }
   if (role === 'viewer') {
     return <Badge variant="outline">Viewer</Badge>
@@ -542,7 +542,7 @@ export default function TeamsPanel() {
                   <TableHead>Email</TableHead>
                   <TableHead>Role</TableHead>
                   <TableHead>Joined</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableHead className="text-end">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -563,7 +563,7 @@ export default function TeamsPanel() {
                     <TableCell className="text-muted-foreground text-sm">
                       {new Date(member.joinedAt).toLocaleDateString()}
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-end">
                       <div className="flex items-center justify-end gap-1">
                         {/* Change Role — owner only */}
                         {isOwner && member.role !== 'owner' && (
@@ -579,19 +579,19 @@ export default function TeamsPanel() {
                                 onClick={() => handleChangeRole(member.id, 'admin')}
                                 disabled={member.role === 'admin'}
                               >
-                                <Shield className="size-3.5 mr-2" /> Admin
+                                <Shield className="size-3.5 me-2" /> Admin
                               </DropdownMenuItem>
                               <DropdownMenuItem
                                 onClick={() => handleChangeRole(member.id, 'developer')}
                                 disabled={member.role === 'developer'}
                               >
-                                <Users className="size-3.5 mr-2" /> Developer
+                                <Users className="size-3.5 me-2" /> Developer
                               </DropdownMenuItem>
                               <DropdownMenuItem
                                 onClick={() => handleChangeRole(member.id, 'viewer')}
                                 disabled={member.role === 'viewer'}
                               >
-                                <Users className="size-3.5 mr-2" /> Viewer (read-only)
+                                <Users className="size-3.5 me-2" /> Viewer (read-only)
                               </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
@@ -775,7 +775,7 @@ export default function TeamsPanel() {
                 Cancel
               </Button>
               <Button onClick={handleInviteMember} disabled={inviting || !inviteEmail.trim()}>
-                {inviting ? <Loader2 className="size-4 animate-spin mr-2" /> : <UserPlus className="size-4 mr-2" />}
+                {inviting ? <Loader2 className="size-4 animate-spin me-2" /> : <UserPlus className="size-4 me-2" />}
                 Invite
               </Button>
             </DialogFooter>
@@ -926,7 +926,7 @@ export default function TeamsPanel() {
               Cancel
             </Button>
             <Button onClick={handleCreateTeam} disabled={creating || !newTeamName.trim()}>
-              {creating ? <Loader2 className="size-4 animate-spin mr-2" /> : <Plus className="size-4 mr-2" />}
+              {creating ? <Loader2 className="size-4 animate-spin me-2" /> : <Plus className="size-4 me-2" />}
               Create Team
             </Button>
           </DialogFooter>

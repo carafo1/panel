@@ -23,10 +23,37 @@ import { removeProjectContainer, dropProjectDatabase, deleteBackup } from '@/lib
 export async function purgeProject(projectId: string): Promise<{ warnings: string[] }> {
   const warnings: string[] = []
 
+  // ── 0. A live site takes its staging copy with it ─────────────────────
+  const stagingSites = await db.project.findMany({ where: { parentProjectId: projectId }, select: { id: true } })
+  for (const s of stagingSites) {
+    const r = await purgeProject(s.id)
+    warnings.push(...r.warnings.map((w) => `Staging: ${w}`))
+  }
+
   const note = (context: string, err: unknown) => {
     const message = err instanceof Error ? err.message : String(err)
     console.error(`[purgeProject] ${context} failed for ${projectId}:`, message)
     warnings.push(`${context} failed: ${message}`)
+  }
+
+  // ── 0a. Cloudflare zones for this site's domains ──────────────────────
+  try {
+    const zones = await db.cdnZone.findMany({ where: { projectId }, select: { id: true, domain: true } })
+    if (zones.length) {
+      const { disableCdn } = await import('@/lib/cdn')
+      for (const z of zones) await disableCdn(projectId, z.id).catch((err) => note(`Cloudflare zone ${z.domain}`, err))
+    }
+  } catch (err) {
+    note('Cloudflare cleanup', err)
+  }
+
+  // ── 0b. SFTP: unmount the site before its directory is removed ────────
+  try {
+    const { revokeSftpQuietly } = await import('@/lib/sftp-access')
+    const sftpWarning = await revokeSftpQuietly(projectId)
+    if (sftpWarning) warnings.push(`SFTP access: ${sftpWarning}`)
+  } catch (err) {
+    note('SFTP access removal', err)
   }
 
   // ── 1. Tear down the real VPS deployment ──────────────────────────────

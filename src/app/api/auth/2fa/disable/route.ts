@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
+import { verifyTokenFresh, extractTokenFromHeader, invalidateUserAuthCache } from '@/lib/auth'
 import { verifyToken as verifyTotpToken } from '@/lib/totp'
 
 /**
@@ -94,6 +94,8 @@ export async function POST(request: Request) {
         twoFactorBackupCodes: null,
       },
     })
+    // Without 2FA an admin is treated as a regular user — apply it now.
+    invalidateUserAuthCache(user.id)
 
     return NextResponse.json({ success: true })
   } catch (error) {

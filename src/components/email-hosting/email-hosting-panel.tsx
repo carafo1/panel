@@ -654,7 +654,7 @@ function PlanLineup({ onPurchased }: { onPurchased: () => void }) {
                   Back
                 </Button>
                 <Button onClick={() => void recheck()} disabled={busy}>
-                  {busy && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+                  {busy && <Loader2 className="h-4 w-4 animate-spin me-1" />}
                   Check again
                 </Button>
               </DialogFooter>
@@ -714,7 +714,7 @@ function PlanLineup({ onPurchased }: { onPurchased: () => void }) {
                   onClick={() => void buy()}
                   disabled={busy || domain.trim().length < 3 || methods.length === 0}
                 >
-                  {busy && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+                  {busy && <Loader2 className="h-4 w-4 animate-spin me-1" />}
                   Continue
                 </Button>
               </DialogFooter>
@@ -1218,7 +1218,7 @@ function ServiceDetailView({
           <span className="font-semibold truncate">{detail.service.domain}</span>
           {statusBadge(detail.service.status)}
         </div>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ms-auto flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => void load()} disabled={refreshing}>
             {refreshing ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -1660,7 +1660,7 @@ function ServiceDetailView({
                   .filter((s) => s.recommended)
                   .map((s, i) => (
                     <div key={i} className="rounded-md border px-3 py-2 text-sm">
-                      <span className="text-xs text-muted-foreground mr-2">
+                      <span className="text-xs text-muted-foreground me-2">
                         {s.protocol}
                       </span>
                       {s.port} · {s.security}
@@ -1821,10 +1821,10 @@ function ServiceDetailView({
                   value={localPart}
                   onChange={(e) => setLocalPart(e.target.value)}
                   placeholder="info"
-                  className="rounded-r-none"
+                  className="rounded-e-none"
                   autoComplete="off"
                 />
-                <span className="border border-l-0 rounded-r-md px-3 h-9 flex items-center text-sm text-muted-foreground bg-muted whitespace-nowrap">
+                <span className="border border-s-0 rounded-r-md px-3 h-9 flex items-center text-sm text-muted-foreground bg-muted whitespace-nowrap">
                   @{detail.service.domain}
                 </span>
               </div>
@@ -1858,7 +1858,7 @@ function ServiceDetailView({
               onClick={() => void createMailbox()}
               disabled={busy || localPart.trim().length === 0 || password.length < 8}
             >
-              {busy && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+              {busy && <Loader2 className="h-4 w-4 animate-spin me-1" />}
               Create mailbox
             </Button>
           </DialogFooter>
@@ -1891,7 +1891,7 @@ function ServiceDetailView({
               Cancel
             </Button>
             <Button onClick={() => void changePassword()} disabled={busy || newPassword.length < 8}>
-              {busy && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+              {busy && <Loader2 className="h-4 w-4 animate-spin me-1" />}
               Update password
             </Button>
           </DialogFooter>
@@ -2048,7 +2048,7 @@ function ServiceDetailView({
                         (ruleDraft.action === 'fileinto' && !ruleDraft.folder?.trim())
                       }
                     >
-                      {busy && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+                      {busy && <Loader2 className="h-4 w-4 animate-spin me-1" />}
                       {typeof ruleDraft.id === 'number' ? 'Save rule' : 'Create rule'}
                     </Button>
                   </div>
@@ -2229,7 +2229,7 @@ function ServiceDetailView({
 
                   <div className="flex justify-end">
                     <Button onClick={() => void saveAutoReply()} disabled={busy}>
-                      {busy && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+                      {busy && <Loader2 className="h-4 w-4 animate-spin me-1" />}
                       Save auto-reply
                     </Button>
                   </div>
@@ -2339,10 +2339,10 @@ function ServiceDetailView({
                   value={aliasLocal}
                   onChange={(e) => setAliasLocal(e.target.value)}
                   placeholder="sales"
-                  className="rounded-r-none"
+                  className="rounded-e-none"
                   autoComplete="off"
                 />
-                <span className="border border-l-0 rounded-r-md px-3 h-9 flex items-center text-sm text-muted-foreground bg-muted whitespace-nowrap">
+                <span className="border border-s-0 rounded-r-md px-3 h-9 flex items-center text-sm text-muted-foreground bg-muted whitespace-nowrap">
                   @{detail.service.domain}
                 </span>
               </div>
@@ -2370,7 +2370,7 @@ function ServiceDetailView({
               onClick={() => void createAliasRow()}
               disabled={busy || !aliasLocal.trim() || !aliasDests.trim()}
             >
-              {busy && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+              {busy && <Loader2 className="h-4 w-4 animate-spin me-1" />}
               Create alias
             </Button>
           </DialogFooter>
@@ -2483,7 +2483,7 @@ function ServiceDetailView({
                   onClick={() => void orderAddons()}
                   disabled={busy || addonPrice <= 0}
                 >
-                  {busy && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+                  {busy && <Loader2 className="h-4 w-4 animate-spin me-1" />}
                   Order
                 </Button>
               </DialogFooter>
@@ -2576,7 +2576,7 @@ function ServiceDetailView({
                         type="button"
                         disabled={current}
                         onClick={() => setUpgradePlanId(p.id)}
-                        className={`w-full text-left rounded-md border p-3 transition-colors ${
+                        className={`w-full text-start rounded-md border p-3 transition-colors ${
                           upgradePlanId === p.id
                             ? 'border-primary bg-primary/5'
                             : 'hover:border-primary/50'
@@ -2586,7 +2586,7 @@ function ServiceDetailView({
                           <span className="font-medium">
                             {p.name}
                             {current && (
-                              <Badge variant="outline" className="ml-2 text-xs">
+                              <Badge variant="outline" className="ms-2 text-xs">
                                 Current
                               </Badge>
                             )}
@@ -2611,7 +2611,7 @@ function ServiceDetailView({
                   Cancel
                 </Button>
                 <Button onClick={() => void changePlan()} disabled={busy || !upgradePlanId}>
-                  {busy && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+                  {busy && <Loader2 className="h-4 w-4 animate-spin me-1" />}
                   Continue
                 </Button>
               </DialogFooter>
@@ -2650,7 +2650,7 @@ function ServiceDetailView({
               onClick={() => void removeMailbox()}
               disabled={busy || deleteConfirm.trim().toLowerCase() !== (deleteTarget || '').toLowerCase()}
             >
-              {busy && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+              {busy && <Loader2 className="h-4 w-4 animate-spin me-1" />}
               Delete permanently
             </Button>
           </DialogFooter>
@@ -2761,7 +2761,7 @@ export default function EmailHostingPanel() {
                   {s.limits.totalStorageGB} GB
                 </span>
                 {!s.dkimGenerated && (
-                  <Badge variant="outline" className="ml-auto text-amber-600 border-amber-500/40">
+                  <Badge variant="outline" className="ms-auto text-amber-600 border-amber-500/40">
                     DNS setup needed
                   </Badge>
                 )}

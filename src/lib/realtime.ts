@@ -35,6 +35,15 @@ async function broadcast(room: string, event: string, data: unknown): Promise<vo
   }
 }
 
+/**
+ * Push an event to a room. Room access is enforced when a browser JOINS
+ * (/api/realtime/authorize), so only call this with rooms that check is
+ * written for.
+ */
+export async function broadcastToRoom(room: string, event: string, data: unknown): Promise<void> {
+  await broadcast(room, event, data)
+}
+
 /** Stream one real log line to everyone watching this deployment. */
 export function broadcastDeploymentLog(deploymentId: string, line: string): void {
   void broadcast(`deployment:${deploymentId}`, 'deployment:log', {

@@ -154,7 +154,7 @@ function ConfirmDialog({
         <div className="space-y-2 rounded-md border p-3 text-sm">
           <div className="flex justify-between">
             <span className="text-muted-foreground">Customer</span>
-            <span className="text-right">
+            <span className="text-end">
               {payment.user?.email || '—'}
             </span>
           </div>
@@ -198,17 +198,17 @@ function ConfirmDialog({
             onClick={() => run('reject')}
           >
             {busy === 'reject' ? (
-              <Loader2 className="size-4 animate-spin mr-1.5" />
+              <Loader2 className="size-4 animate-spin me-1.5" />
             ) : (
-              <X className="size-4 mr-1.5" />
+              <X className="size-4 me-1.5" />
             )}
             Reject
           </Button>
           <Button disabled={busy !== null} onClick={() => run('confirm')}>
             {busy === 'confirm' ? (
-              <Loader2 className="size-4 animate-spin mr-1.5" />
+              <Loader2 className="size-4 animate-spin me-1.5" />
             ) : (
-              <Check className="size-4 mr-1.5" />
+              <Check className="size-4 me-1.5" />
             )}
             Confirm payment
           </Button>
@@ -361,7 +361,7 @@ function InvoiceActionDialog({
               mode === 'refund' ? 'bg-red-600 hover:bg-red-700 text-white' : ''
             }
           >
-            {busy && <Loader2 className="size-4 animate-spin mr-1.5" />}
+            {busy && <Loader2 className="size-4 animate-spin me-1.5" />}
             {mode === 'payment' ? 'Record payment' : 'Refund'}
           </Button>
         </DialogFooter>
@@ -502,7 +502,7 @@ function ChangePlanDialog({
             Cancel
           </Button>
           <Button onClick={run} disabled={busy || !planId}>
-            {busy && <Loader2 className="size-4 animate-spin mr-1.5" />}
+            {busy && <Loader2 className="size-4 animate-spin me-1.5" />}
             Change plan
           </Button>
         </DialogFooter>
@@ -582,7 +582,7 @@ function ExtendDialog({
             Cancel
           </Button>
           <Button onClick={run} disabled={busy}>
-            {busy && <Loader2 className="size-4 animate-spin mr-1.5" />}
+            {busy && <Loader2 className="size-4 animate-spin me-1.5" />}
             Extend
           </Button>
         </DialogFooter>
@@ -664,7 +664,7 @@ export function BillingAdminPanel() {
           <TabsTrigger value="payments">
             Payments
             {pendingCount > 0 && (
-              <Badge variant="secondary" className="ml-1.5">
+              <Badge variant="secondary" className="ms-1.5">
                 {pendingCount}
               </Badge>
             )}
@@ -672,7 +672,7 @@ export function BillingAdminPanel() {
           <TabsTrigger value="invoices">
             Invoices
             {outstanding > 0 && (
-              <Badge variant="secondary" className="ml-1.5">
+              <Badge variant="secondary" className="ms-1.5">
                 ${outstanding.toFixed(2)} due
               </Badge>
             )}
@@ -704,7 +704,7 @@ export function BillingAdminPanel() {
             <div className="overflow-x-auto rounded-md border">
               <table className="w-full text-sm">
                 <thead className="bg-muted/50">
-                  <tr className="text-left">
+                  <tr className="text-start">
                     <th className="p-2 font-medium">Customer</th>
                     <th className="p-2 font-medium">Amount</th>
                     <th className="p-2 font-medium">Reference</th>
@@ -741,7 +741,7 @@ export function BillingAdminPanel() {
                       <td className="p-2 whitespace-nowrap text-xs text-muted-foreground">
                         {new Date(p.createdAt).toLocaleDateString()}
                       </td>
-                      <td className="p-2 text-right">
+                      <td className="p-2 text-end">
                         {p.status === 'pending' && (
                           <Button
                             size="sm"
@@ -774,7 +774,7 @@ export function BillingAdminPanel() {
             <div className="overflow-x-auto rounded-md border">
               <table className="w-full text-sm">
                 <thead className="bg-muted/50">
-                  <tr className="text-left">
+                  <tr className="text-start">
                     <th className="p-2 font-medium">Invoice</th>
                     <th className="p-2 font-medium">Customer</th>
                     <th className="p-2 font-medium">For</th>
@@ -825,7 +825,7 @@ export function BillingAdminPanel() {
                           ? new Date(inv.dueDate).toLocaleDateString()
                           : '—'}
                       </td>
-                      <td className="p-2 text-right">
+                      <td className="p-2 text-end">
                         {inv.rawStatus === 'unpaid' && (
                           <Button
                             size="sm"
@@ -948,7 +948,7 @@ export function BillingAdminPanel() {
             <div className="overflow-x-auto rounded-md border">
               <table className="w-full text-sm">
                 <thead className="bg-muted/50">
-                  <tr className="text-left">
+                  <tr className="text-start">
                     <th className="p-2 font-medium">Customer</th>
                     <th className="p-2 font-medium">Plan</th>
                     <th className="p-2 font-medium">Status</th>
@@ -1005,7 +1005,7 @@ export function BillingAdminPanel() {
                             : `${s.daysLeft}d left`}
                         </div>
                       </td>
-                      <td className="p-2 text-right">
+                      <td className="p-2 text-end">
                         {!s.managedByStripe && (
                           <div className="flex justify-end gap-1">
                             <Button
@@ -1016,7 +1016,7 @@ export function BillingAdminPanel() {
                                 setExtendOpen(true)
                               }}
                             >
-                              <CalendarPlus className="size-4 mr-1.5" />
+                              <CalendarPlus className="size-4 me-1.5" />
                               Extend
                             </Button>
                             <Button

@@ -163,7 +163,7 @@ function BillingDialog({ customer, onClose }: { customer: CustomerRef; onClose: 
                         <TableHead>Date</TableHead>
                         <TableHead>Total</TableHead>
                         <TableHead>Status</TableHead>
-                        <TableHead className="text-right">PDF</TableHead>
+                        <TableHead className="text-end">PDF</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -175,7 +175,7 @@ function BillingDialog({ customer, onClose }: { customer: CustomerRef; onClose: 
                           <TableCell>
                             <Badge variant="outline">{i.status}</Badge>
                           </TableCell>
-                          <TableCell className="text-right">
+                          <TableCell className="text-end">
                             <Button size="sm" variant="ghost" onClick={() => window.open(`/api/invoices/${i.id}/pdf`, '_blank', 'noopener')}>
                               Open
                             </Button>
@@ -316,7 +316,7 @@ function CreditDialog({ customer, onClose }: { customer: CustomerRef; onClose: (
             Close
           </Button>
           <Button onClick={submit} disabled={!valid || saving || !data}>
-            {saving && <Loader2 className="mr-2 size-4 animate-spin" />}
+            {saving && <Loader2 className="me-2 size-4 animate-spin" />}
             {value < 0 ? 'Remove credit' : 'Add credit'}
           </Button>
         </DialogFooter>
@@ -402,11 +402,11 @@ function UsageDialog({ customer, onClose }: { customer: CustomerRef; onClose: ()
         {data && <p className="text-xs text-muted-foreground">{data.history.length} snapshot(s) recorded.</p>}
         <DialogFooter className="gap-2">
           <Button variant="outline" onClick={() => act('reset')} disabled={!!busy || !data}>
-            {busy === 'reset' && <Loader2 className="mr-2 size-4 animate-spin" />}
+            {busy === 'reset' && <Loader2 className="me-2 size-4 animate-spin" />}
             Reset history
           </Button>
           <Button onClick={() => act('snapshot')} disabled={!!busy || !data}>
-            {busy === 'snapshot' ? <Loader2 className="mr-2 size-4 animate-spin" /> : <RefreshCw className="mr-2 size-4" />}
+            {busy === 'snapshot' ? <Loader2 className="me-2 size-4 animate-spin" /> : <RefreshCw className="me-2 size-4" />}
             Measure now
           </Button>
         </DialogFooter>

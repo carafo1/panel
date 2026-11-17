@@ -195,10 +195,10 @@ export function DomainPage({ onGetStarted }: DomainPageProps) {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b bg-muted/40">
-                      <th className="text-left font-semibold p-4">TLD</th>
-                      <th className="text-left font-semibold p-4 hidden sm:table-cell">Category</th>
-                      <th className="text-left font-semibold p-4 hidden md:table-cell">Description</th>
-                      <th className="text-right font-semibold p-4">Price / year</th>
+                      <th className="text-start font-semibold p-4">TLD</th>
+                      <th className="text-start font-semibold p-4 hidden sm:table-cell">Category</th>
+                      <th className="text-start font-semibold p-4 hidden md:table-cell">Description</th>
+                      <th className="text-end font-semibold p-4">Price / year</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -221,7 +221,7 @@ export function DomainPage({ onGetStarted }: DomainPageProps) {
                           </span>
                         </td>
                         <td className="p-4 hidden md:table-cell text-muted-foreground">{row.desc}</td>
-                        <td className="p-4 text-right">
+                        <td className="p-4 text-end">
                           <span className="font-bold text-base text-gradient-brand">${row.price.toFixed(2)}</span>
                         </td>
                       </tr>
@@ -232,7 +232,7 @@ export function DomainPage({ onGetStarted }: DomainPageProps) {
             </Card>
           </ScrollReveal>
           <p className="text-center text-xs text-muted-foreground mt-4">
-            <Tag className="inline size-3 mr-1" />
+            <Tag className="inline size-3 me-1" />
             Prices shown in USD. Renewal pricing may differ for premium TLDs. Search above for live quotes.
           </p>
         </div>
@@ -254,7 +254,7 @@ export function DomainPage({ onGetStarted }: DomainPageProps) {
               return (
                 <StaggerCard key={f.title} index={i}>
                   <Card className="group relative overflow-hidden border hover:border-indigo-500/40 hover:shadow-glow-indigo transition-all duration-500 h-full bg-card/80 backdrop-blur-sm">
-                    <div className="absolute -top-12 -right-12 size-28 rounded-full bg-indigo-500/10 blur-3xl group-hover:bg-indigo-500/20 transition-all duration-500" />
+                    <div className="absolute -top-12 -end-12 size-28 rounded-full bg-indigo-500/10 blur-3xl group-hover:bg-indigo-500/20 transition-all duration-500" />
                     <CardContent className="p-6 relative">
                       <div className="mb-4 flex size-12 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-700 text-white shadow-glow-indigo group-hover:scale-110 transition-transform duration-500">
                         <Icon className="size-5" />
@@ -363,7 +363,7 @@ export function DomainPage({ onGetStarted }: DomainPageProps) {
           <Accordion type="single" collapsible className="w-full">
             {faqs.map((faq, i) => (
               <AccordionItem key={i} value={`item-${i}`}>
-                <AccordionTrigger className="text-left">{faq.q}</AccordionTrigger>
+                <AccordionTrigger className="text-start">{faq.q}</AccordionTrigger>
                 <AccordionContent className="text-muted-foreground">{faq.a}</AccordionContent>
               </AccordionItem>
             ))}
@@ -381,9 +381,9 @@ export function DomainPage({ onGetStarted }: DomainPageProps) {
             <p className="text-zinc-300 text-lg mb-8 max-w-xl mx-auto">Search, register, and connect in minutes. Free WHOIS privacy on every domain, forever.</p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
               <Button size="lg" className="btn-shimmer bg-indigo-500 hover:bg-indigo-600 text-white px-10 h-12 border-0 shadow-glow-indigo hover:scale-105 transition-all" onClick={onGetStarted}>
-                <Globe className="size-4 mr-2" />
+                <Globe className="size-4 me-2" />
                 {getContent('svc.domain-registration.cta.button')}
-                <ArrowRight className="size-4 ml-2" />
+                <ArrowRight className="size-4 ms-2" />
               </Button>
               <button onClick={() => setPublicPage({ page: 'services' })} className="inline-flex items-center justify-center gap-2 h-12 px-8 rounded-md glass text-white hover:bg-white/10 transition-all">
                 <Layers className="size-4 text-indigo-300" />

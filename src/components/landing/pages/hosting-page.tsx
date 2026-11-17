@@ -140,7 +140,7 @@ export function HostingPage({ onGetStarted }: HostingPageProps) {
                 <StaggerCard key={step.title} index={i}>
                   <div className="relative">
                     {i < DEPLOY_FLOW.length - 1 && (
-                      <div className="hidden md:block absolute top-8 left-[60%] w-full">
+                      <div className="hidden md:block absolute top-8 start-[60%] w-full">
                         <ArrowRight className="size-5 text-indigo-400/60" />
                       </div>
                     )}
@@ -178,7 +178,7 @@ export function HostingPage({ onGetStarted }: HostingPageProps) {
               return (
                 <StaggerCard key={f.title} index={i}>
                   <Card className="group relative overflow-hidden border hover:border-indigo-500/40 hover:shadow-glow-indigo transition-all duration-500 h-full bg-card/80 backdrop-blur-sm">
-                    <div className="absolute -top-12 -right-12 size-28 rounded-full bg-indigo-500/10 blur-3xl group-hover:bg-indigo-500/20 transition-all duration-500" />
+                    <div className="absolute -top-12 -end-12 size-28 rounded-full bg-indigo-500/10 blur-3xl group-hover:bg-indigo-500/20 transition-all duration-500" />
                     <CardContent className="p-6 relative">
                       <div className="mb-4 flex size-12 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-700 text-white shadow-glow-indigo group-hover:scale-110 transition-transform duration-500">
                         <Icon className="size-5" />
@@ -218,7 +218,7 @@ export function HostingPage({ onGetStarted }: HostingPageProps) {
             </ScrollReveal>
             <ScrollReveal delay={150}>
               <Card className="relative overflow-hidden border-indigo-500/30 shadow-glow-indigo bg-card/80 backdrop-blur-sm">
-                <div className="absolute -top-20 -right-20 size-56 rounded-full bg-indigo-500/15 blur-3xl" />
+                <div className="absolute -top-20 -end-20 size-56 rounded-full bg-indigo-500/15 blur-3xl" />
                 <CardContent className="p-6 sm:p-8 relative">
                   <div className="flex items-center gap-3 mb-6">
                     <div className="flex size-11 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-700 text-white shadow-glow-indigo">
@@ -282,7 +282,7 @@ export function HostingPage({ onGetStarted }: HostingPageProps) {
           <Accordion type="single" collapsible className="w-full">
             {faqs.map((faq, i) => (
               <AccordionItem key={i} value={`item-${i}`}>
-                <AccordionTrigger className="text-left">{faq.q}</AccordionTrigger>
+                <AccordionTrigger className="text-start">{faq.q}</AccordionTrigger>
                 <AccordionContent className="text-muted-foreground">{faq.a}</AccordionContent>
               </AccordionItem>
             ))}
@@ -300,9 +300,9 @@ export function HostingPage({ onGetStarted }: HostingPageProps) {
             <p className="text-zinc-300 text-lg mb-8 max-w-xl mx-auto">Connect a repo, pick a plan, and go live in under five minutes. No credit card to start.</p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
               <Button size="lg" className="btn-shimmer bg-indigo-500 hover:bg-indigo-600 text-white px-10 h-12 border-0 shadow-glow-indigo hover:scale-105 transition-all" onClick={onGetStarted}>
-                <Server className="size-4 mr-2" />
+                <Server className="size-4 me-2" />
                 {getContent('svc.web-hosting.cta.button')}
-                <ArrowRight className="size-4 ml-2" />
+                <ArrowRight className="size-4 ms-2" />
               </Button>
               <button onClick={() => setPublicPage({ page: 'services' })} className="inline-flex items-center justify-center gap-2 h-12 px-8 rounded-md glass text-white hover:bg-white/10 transition-all">
                 <Layers className="size-4 text-indigo-300" />

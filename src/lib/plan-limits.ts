@@ -75,7 +75,8 @@ async function countUsage(
 ): Promise<number> {
   switch (resource) {
     case 'websites':
-      return db.project.count({ where: { userId } })
+      // Staging copies come with their live site and are not extra websites.
+      return db.project.count({ where: { userId, environment: 'production' } })
 
     case 'domains':
       // Deleted rows are tombstones, not live domains.

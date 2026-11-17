@@ -249,7 +249,7 @@ function StageRow({
         onClick={() => hasDetail && setExpanded((v) => !v)}
         disabled={!hasDetail}
         className={cn(
-          'flex w-full items-center gap-3 px-2 py-2 text-left',
+          'flex w-full items-center gap-3 px-2 py-2 text-start',
           hasDetail && 'cursor-pointer hover:bg-muted/50 rounded-lg'
         )}
       >
@@ -465,7 +465,7 @@ export default function MigrationProgress({
   if (loading || !migration) {
     return (
       <div className="flex items-center justify-center py-12 text-muted-foreground">
-        <Loader2 className="size-5 animate-spin mr-2" />
+        <Loader2 className="size-5 animate-spin me-2" />
         Loading import…
       </div>
     )
@@ -496,7 +496,7 @@ export default function MigrationProgress({
                 variant="ghost"
                 size="sm"
                 onClick={onClose}
-                className="h-7 px-2 -ml-2"
+                className="h-7 px-2 -ms-2"
               >
                 <ArrowLeft className="size-4" />
               </Button>
@@ -531,7 +531,7 @@ export default function MigrationProgress({
           {succeeded && migration.targetUrl && (
             <Button asChild size="sm" className="bg-indigo-600 hover:bg-indigo-700 text-white">
               <a href={migration.targetUrl} target="_blank" rel="noopener noreferrer">
-                <ExternalLink className="size-4 mr-1.5" />
+                <ExternalLink className="size-4 me-1.5" />
                 Visit site
               </a>
             </Button>
@@ -546,9 +546,9 @@ export default function MigrationProgress({
               }
             >
               {busy === 'cancel' ? (
-                <Loader2 className="size-4 mr-1.5 animate-spin" />
+                <Loader2 className="size-4 me-1.5 animate-spin" />
               ) : (
-                <X className="size-4 mr-1.5" />
+                <X className="size-4 me-1.5" />
               )}
               Cancel
             </Button>
@@ -563,9 +563,9 @@ export default function MigrationProgress({
               className="bg-indigo-600 hover:bg-indigo-700 text-white"
             >
               {busy === 'retry' ? (
-                <Loader2 className="size-4 mr-1.5 animate-spin" />
+                <Loader2 className="size-4 me-1.5 animate-spin" />
               ) : (
-                <RefreshCw className="size-4 mr-1.5" />
+                <RefreshCw className="size-4 me-1.5" />
               )}
               Retry import
             </Button>
@@ -578,9 +578,9 @@ export default function MigrationProgress({
               onClick={() => setRollbackConfirm(true)}
             >
               {busy === 'rollback' ? (
-                <Loader2 className="size-4 mr-1.5 animate-spin" />
+                <Loader2 className="size-4 me-1.5 animate-spin" />
               ) : (
-                <RotateCcw className="size-4 mr-1.5" />
+                <RotateCcw className="size-4 me-1.5" />
               )}
               Roll back
             </Button>
@@ -723,7 +723,7 @@ export default function MigrationProgress({
               <Button
                 variant="ghost"
                 size="sm"
-                className="absolute right-2 top-2 z-10 h-7 px-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800"
+                className="absolute end-2 top-2 z-10 h-7 px-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800"
                 onClick={() => {
                   void navigator.clipboard.writeText(logLines.join('\n'))
                   toast.success('Log copied')

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { withRateLimit } from '@/lib/rate-limit'
 import { db } from '@/lib/db'
-import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
+import { verifyTokenFresh, extractTokenFromHeader, invalidateUserAuthCache } from '@/lib/auth'
 import {
   verifyToken as verifyTotpToken,
   generateBackupCodes,
@@ -104,6 +104,8 @@ async function postHandler(request: Request) {
         twoFactorBackupCodes: hashedBackupCodes,
       },
     })
+    // Admin powers wait for 2FA (lib/auth effectiveRole) — grant them now.
+    invalidateUserAuthCache(user.id)
 
     return NextResponse.json({
       success: true,

@@ -5,6 +5,8 @@ import { Loader2, X, KeyRound, Mail, CheckCircle2, Shield, ArrowLeft } from 'luc
 import { LogoMark } from '@/components/ui/logo'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/store/auth-store'
+import { useTranslations } from 'next-intl'
+import { LanguageSwitcher } from '@/components/ui/language-switcher'
 import type { AuthMode } from '@/store/app-store'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -25,6 +27,7 @@ interface AuthModalProps {
 
 export function AuthModal({ mode, onModeChange, onClose, initialResetToken }: AuthModalProps) {
   const { login, register, completeTwoFactorLogin, loginWithBackupCode } = useAuthStore()
+  const t = useTranslations('auth')
   const [isLoading, setIsLoading] = useState(false)
 
   const [loginEmail, setLoginEmail] = useState('')
@@ -63,7 +66,7 @@ export function AuthModal({ mode, onModeChange, onClose, initialResetToken }: Au
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!loginEmail || !loginPassword) {
-      toast.error('Please fill in all fields')
+      toast.error(t('fillAll'))
       return
     }
     setIsLoading(true)
@@ -80,7 +83,7 @@ export function AuthModal({ mode, onModeChange, onClose, initialResetToken }: Au
         onModeChange('two-factor')
         return
       }
-      toast.success('Welcome back!')
+      toast.success(t('welcome'))
       onClose()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Login failed')
@@ -98,7 +101,7 @@ export function AuthModal({ mode, onModeChange, onClose, initialResetToken }: Au
     setIsLoading(true)
     try {
       await completeTwoFactorLogin(twoFactorTempToken, twoFactorCode)
-      toast.success('Welcome back!')
+      toast.success(t('welcome'))
       onClose()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Verification failed')
@@ -118,7 +121,7 @@ export function AuthModal({ mode, onModeChange, onClose, initialResetToken }: Au
       // The tempToken proves the password step; the backup code replaces
       // only the 6-digit code.
       await loginWithBackupCode(twoFactorTempToken, backupCode.trim())
-      toast.success('Welcome back!')
+      toast.success(t('welcome'))
       onClose()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Backup code verification failed')
@@ -130,15 +133,16 @@ export function AuthModal({ mode, onModeChange, onClose, initialResetToken }: Au
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!registerName || !registerEmail || !registerPassword || !registerConfirmPassword) {
-      toast.error('Please fill in all fields')
+      toast.error(t('fillAll'))
       return
     }
     if (registerPassword !== registerConfirmPassword) {
-      toast.error('Passwords do not match')
+      toast.error(t('mismatch'))
       return
     }
-    if (registerPassword.length < 6) {
-      toast.error('Password must be at least 6 characters')
+    // Same rule as the server (api/auth/register).
+    if (registerPassword.length < 8) {
+      toast.error(t('tooShort'))
       return
     }
     setIsLoading(true)
@@ -147,7 +151,7 @@ export function AuthModal({ mode, onModeChange, onClose, initialResetToken }: Au
       // Registration now requires email verification - do NOT auto-login.
       // Show a 'check your email' success state instead of closing the modal.
       setRegisterSuccess(true)
-      toast.success('Account created! Check your email to verify.')
+      toast.success(t('created'))
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Registration failed')
     } finally {
@@ -237,30 +241,34 @@ export function AuthModal({ mode, onModeChange, onClose, initialResetToken }: Au
       <div className="relative w-full max-w-md bg-card rounded-2xl shadow-2xl border overflow-hidden">
         {/* Close button */}
         <button
+          type="button"
           onClick={onClose}
-          className="absolute top-4 right-4 size-8 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          aria-label={t('close')}
+          className="absolute top-4 end-4 size-8 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
         >
           <X className="size-4" />
         </button>
+
+        <LanguageSwitcher compact className="absolute top-3.5 start-3" />
 
         {/* Header */}
         <div className="text-center pt-8 pb-4 px-6">
           <div className="mx-auto mb-3 flex items-center justify-center gap-2">
             <LogoMark className="size-11" />
           </div>
-          <h2 className="text-xl font-bold tracking-tight">Apsamo Technology</h2>
+          <h2 className="text-xl font-bold tracking-tight">{t('brand')}</h2>
           <p className="text-sm text-muted-foreground mt-1">
             {mode === 'login'
-              ? 'Sign in to manage your hosting and domains'
+              ? t('subLogin')
               : mode === 'register'
-                ? 'Get started with Apsamo Technology in seconds'
+                ? t('subRegister')
                 : mode === 'forgot-password'
-                  ? 'Enter your email to receive a reset link'
+                  ? t('subForgot')
                   : mode === 'two-factor'
-                    ? 'Enter the 6-digit code from your authenticator app'
+                    ? t('subTwoFactor')
                     : tokenFromLink
-                      ? 'Set a new password for your account'
-                      : 'Enter your token and set a new password'}
+                      ? t('subResetLink')
+                      : t('subResetToken')}
           </p>
         </div>
 
@@ -269,7 +277,7 @@ export function AuthModal({ mode, onModeChange, onClose, initialResetToken }: Au
           {mode === 'login' && (
             <form onSubmit={handleLogin} className="flex flex-col gap-4">
               <div className="flex flex-col gap-2">
-                <Label htmlFor="login-email">Email</Label>
+                <Label htmlFor="login-email">{t('email')}</Label>
                 <Input
                   id="login-email"
                   type="email"
@@ -281,11 +289,11 @@ export function AuthModal({ mode, onModeChange, onClose, initialResetToken }: Au
                 />
               </div>
               <div className="flex flex-col gap-2">
-                <Label htmlFor="login-password">Password</Label>
+                <Label htmlFor="login-password">{t('password')}</Label>
                 <Input
                   id="login-password"
                   type="password"
-                  placeholder="Enter your password"
+                  placeholder={t('passwordPlaceholder')}
                   value={loginPassword}
                   onChange={(e) => setLoginPassword(e.target.value)}
                   autoComplete="current-password"
@@ -299,11 +307,11 @@ export function AuthModal({ mode, onModeChange, onClose, initialResetToken }: Au
               >
                 {isLoading ? (
                   <>
-                    <Loader2 className="size-4 animate-spin mr-2" />
-                    Signing in...
+                    <Loader2 className="size-4 animate-spin me-2" />
+                    {t('signingIn')}
                   </>
                 ) : (
-                  'Sign In'
+                  t('signIn')
                 )}
               </Button>
               <div className="flex flex-col items-center gap-2">
@@ -317,17 +325,17 @@ export function AuthModal({ mode, onModeChange, onClose, initialResetToken }: Au
                   className="text-sm font-medium text-indigo-600 hover:text-indigo-700 hover:underline"
                   disabled={isLoading}
                 >
-                  Forgot password?
+                  {t('forgot')}
                 </button>
                 <p className="text-sm text-muted-foreground">
-                  Don&apos;t have an account?{' '}
+                  {t('noAccount')}{' '}
                   <button
                     type="button"
                     onClick={() => onModeChange('register')}
                     className="font-medium text-indigo-600 hover:text-indigo-700 hover:underline"
                     disabled={isLoading}
                   >
-                    Sign up
+                    {t('signUp')}
                   </button>
                 </p>
               </div>
@@ -378,7 +386,7 @@ export function AuthModal({ mode, onModeChange, onClose, initialResetToken }: Au
                   >
                     {isLoading ? (
                       <>
-                        <Loader2 className="size-4 animate-spin mr-2" />
+                        <Loader2 className="size-4 animate-spin me-2" />
                         Verifying...
                       </>
                     ) : (
@@ -444,7 +452,7 @@ export function AuthModal({ mode, onModeChange, onClose, initialResetToken }: Au
                   >
                     {isLoading ? (
                       <>
-                        <Loader2 className="size-4 animate-spin mr-2" />
+                        <Loader2 className="size-4 animate-spin me-2" />
                         Verifying...
                       </>
                     ) : (
@@ -515,11 +523,11 @@ export function AuthModal({ mode, onModeChange, onClose, initialResetToken }: Au
             ) : (
               <form onSubmit={handleRegister} className="flex flex-col gap-4">
                 <div className="flex flex-col gap-2">
-                  <Label htmlFor="register-name">Full Name</Label>
+                  <Label htmlFor="register-name">{t('fullName')}</Label>
                   <Input
                     id="register-name"
                     type="text"
-                    placeholder="John Doe"
+                    placeholder={t('namePlaceholder')}
                     value={registerName}
                     onChange={(e) => setRegisterName(e.target.value)}
                     autoComplete="name"
@@ -527,7 +535,7 @@ export function AuthModal({ mode, onModeChange, onClose, initialResetToken }: Au
                   />
                 </div>
                 <div className="flex flex-col gap-2">
-                  <Label htmlFor="register-email">Email</Label>
+                  <Label htmlFor="register-email">{t('email')}</Label>
                   <Input
                     id="register-email"
                     type="email"
@@ -539,11 +547,11 @@ export function AuthModal({ mode, onModeChange, onClose, initialResetToken }: Au
                   />
                 </div>
                 <div className="flex flex-col gap-2">
-                  <Label htmlFor="register-password">Password</Label>
+                  <Label htmlFor="register-password">{t('password')}</Label>
                   <Input
                     id="register-password"
                     type="password"
-                    placeholder="At least 6 characters"
+                    placeholder={t('newPasswordPlaceholder')}
                     value={registerPassword}
                     onChange={(e) => setRegisterPassword(e.target.value)}
                     autoComplete="new-password"
@@ -551,11 +559,11 @@ export function AuthModal({ mode, onModeChange, onClose, initialResetToken }: Au
                   />
                 </div>
                 <div className="flex flex-col gap-2">
-                  <Label htmlFor="register-confirm-password">Confirm Password</Label>
+                  <Label htmlFor="register-confirm-password">{t('confirmPassword')}</Label>
                   <Input
                     id="register-confirm-password"
                     type="password"
-                    placeholder="Repeat your password"
+                    placeholder={t('repeatPassword')}
                     value={registerConfirmPassword}
                     onChange={(e) => setRegisterConfirmPassword(e.target.value)}
                     autoComplete="new-password"
@@ -569,22 +577,22 @@ export function AuthModal({ mode, onModeChange, onClose, initialResetToken }: Au
                 >
                   {isLoading ? (
                     <>
-                      <Loader2 className="size-4 animate-spin mr-2" />
-                      Creating account...
+                      <Loader2 className="size-4 animate-spin me-2" />
+                      {t('creatingAccount')}
                     </>
                   ) : (
-                    'Create Account'
+                    t('createAccount')
                   )}
                 </Button>
                 <p className="text-center text-sm text-muted-foreground">
-                  Already have an account?{' '}
+                  {t('haveAccount')}{' '}
                   <button
                     type="button"
                     onClick={() => onModeChange('login')}
                     className="font-medium text-indigo-600 hover:text-indigo-700 hover:underline"
                     disabled={isLoading}
                   >
-                    Sign in
+                    {t('signInLink')}
                   </button>
                 </p>
               </form>
@@ -638,7 +646,7 @@ export function AuthModal({ mode, onModeChange, onClose, initialResetToken }: Au
                 >
                   {isLoading ? (
                     <>
-                      <Loader2 className="size-4 animate-spin mr-2" />
+                      <Loader2 className="size-4 animate-spin me-2" />
                       Sending reset link...
                     </>
                   ) : (
@@ -718,7 +726,7 @@ export function AuthModal({ mode, onModeChange, onClose, initialResetToken }: Au
               >
                 {isLoading ? (
                   <>
-                    <Loader2 className="size-4 animate-spin mr-2" />
+                    <Loader2 className="size-4 animate-spin me-2" />
                     Resetting password...
                   </>
                 ) : (

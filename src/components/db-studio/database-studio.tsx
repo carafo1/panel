@@ -238,7 +238,7 @@ export function DatabaseStudio({
           <h3 className="text-lg font-semibold">Couldn&apos;t open this database</h3>
           <p className="text-sm text-muted-foreground">{fatal}</p>
           <Button variant="outline" onClick={loadSchema}>
-            <RefreshCw className="mr-2 h-4 w-4" /> Retry
+            <RefreshCw className="me-2 h-4 w-4" /> Retry
           </Button>
         </div>
       </div>
@@ -264,12 +264,12 @@ export function DatabaseStudio({
             </div>
             <p className="text-xs text-muted-foreground">Database Studio</p>
           </div>
-          <div className="ml-auto flex items-center gap-1">
+          <div className="ms-auto flex items-center gap-1">
             <ImportDialog projectId={projectId} dbId={dbId} onDone={loadSchema} />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="sm">
-                  <Download className="mr-2 h-4 w-4" />
+                  <Download className="me-2 h-4 w-4" />
                   Export
                 </Button>
               </DropdownMenuTrigger>
@@ -286,7 +286,7 @@ export function DatabaseStudio({
               </DropdownMenuContent>
             </DropdownMenu>
             <Button variant="ghost" size="sm" onClick={loadSchema} disabled={loadingSchema}>
-              <RefreshCw className={cn('mr-2 h-4 w-4', loadingSchema && 'animate-spin')} />
+              <RefreshCw className={cn('me-2 h-4 w-4', loadingSchema && 'animate-spin')} />
               Refresh
             </Button>
           </div>
@@ -301,15 +301,15 @@ export function DatabaseStudio({
 
       {/* Body: explorer + main */}
       <div className="flex min-h-0 flex-1">
-        <aside className="w-64 shrink-0 border-r flex flex-col">
+        <aside className="w-64 shrink-0 border-e flex flex-col">
           <div className="p-2 border-b">
             <div className="relative">
-              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <Search className="absolute start-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
               <Input
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
                 placeholder="Filter objects…"
-                className="pl-7 h-8 text-sm"
+                className="ps-7 h-8 text-sm"
               />
             </div>
           </div>
@@ -358,13 +358,13 @@ export function DatabaseStudio({
             <div className="border-b px-3 pt-2">
               <TabsList>
                 <TabsTrigger value="browse">
-                  <Rows3 className="mr-1.5 h-3.5 w-3.5" /> Browse
+                  <Rows3 className="me-1.5 h-3.5 w-3.5" /> Browse
                 </TabsTrigger>
                 <TabsTrigger value="structure">
-                  <Table2 className="mr-1.5 h-3.5 w-3.5" /> Structure
+                  <Table2 className="me-1.5 h-3.5 w-3.5" /> Structure
                 </TabsTrigger>
                 <TabsTrigger value="sql">
-                  <Terminal className="mr-1.5 h-3.5 w-3.5" /> SQL
+                  <Terminal className="me-1.5 h-3.5 w-3.5" /> SQL
                 </TabsTrigger>
               </TabsList>
             </div>
@@ -419,7 +419,7 @@ function ExplorerGroup({
       <div className="flex items-center gap-1.5 px-1 mb-1 text-xs font-medium text-muted-foreground uppercase tracking-wide">
         <Icon className="h-3.5 w-3.5" />
         {title}
-        <Badge variant="outline" className="ml-auto h-4 px-1 text-[10px] font-normal">
+        <Badge variant="outline" className="ms-auto h-4 px-1 text-[10px] font-normal">
           {count}
         </Badge>
       </div>
@@ -439,14 +439,14 @@ function ExplorerGroup({
                 disabled={!selectable}
                 onClick={() => selectable && onSelect?.(it.name)}
                 className={cn(
-                  'w-full text-left rounded-md px-2 py-1.5 text-sm flex items-center gap-2 transition-colors',
+                  'w-full text-start rounded-md px-2 py-1.5 text-sm flex items-center gap-2 transition-colors',
                   selectable && 'hover:bg-accent',
                   selected === it.name && selectable && 'bg-accent text-accent-foreground font-medium'
                 )}
               >
                 <span className="truncate font-mono text-[13px]">{it.name}</span>
                 {it.sub && (
-                  <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">{it.sub}</span>
+                  <span className="ms-auto shrink-0 text-[10px] text-muted-foreground">{it.sub}</span>
                 )}
               </button>
             </li>
@@ -574,7 +574,7 @@ function BrowseTab({
         {!editable && !isView && (
           <span className="text-[10px] text-muted-foreground">(no PK — read only)</span>
         )}
-        <div className="ml-auto flex items-center gap-1">
+        <div className="ms-auto flex items-center gap-1">
           {!isView && (
             <TableActions
               projectId={projectId}
@@ -600,7 +600,7 @@ function BrowseTab({
               size="sm"
               onClick={() => downloadCsv(`${table}.csv`, data.columns.map((c) => c.name), data.rows)}
             >
-              <Download className="mr-1.5 h-3.5 w-3.5" /> CSV
+              <Download className="me-1.5 h-3.5 w-3.5" /> CSV
             </Button>
           )}
           <Button variant="outline" size="sm" disabled={page === 0 || loading} onClick={() => setPage((p) => p - 1)}>
@@ -772,7 +772,7 @@ function InsertRowDialog({
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button size="sm">
-          <Plus className="mr-1.5 h-3.5 w-3.5" /> Insert row
+          <Plus className="me-1.5 h-3.5 w-3.5" /> Insert row
         </Button>
       </DialogTrigger>
       <DialogContent className="max-h-[80vh] overflow-y-auto">
@@ -784,9 +784,9 @@ function InsertRowDialog({
             const auto = c.extra?.includes('auto_increment')
             return (
               <div key={c.name} className="grid grid-cols-3 items-center gap-2">
-                <Label className="text-right text-xs font-mono">
+                <Label className="text-end text-xs font-mono">
                   {c.name}
-                  {c.key === 'PRI' && <KeyRound className="inline ml-1 h-3 w-3 text-amber-500" />}
+                  {c.key === 'PRI' && <KeyRound className="inline ms-1 h-3 w-3 text-amber-500" />}
                 </Label>
                 <Input
                   className="col-span-2 h-8 font-mono text-[13px]"
@@ -803,7 +803,7 @@ function InsertRowDialog({
             Cancel
           </Button>
           <Button onClick={submit} disabled={saving}>
-            {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
+            {saving ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : <Plus className="me-2 h-4 w-4" />}
             Insert
           </Button>
         </DialogFooter>
@@ -848,7 +848,7 @@ function ImportDialog({
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button variant="outline" size="sm">
-          <Upload className="mr-2 h-4 w-4" /> Import
+          <Upload className="me-2 h-4 w-4" /> Import
         </Button>
       </DialogTrigger>
       <DialogContent>
@@ -876,7 +876,7 @@ function ImportDialog({
             Cancel
           </Button>
           <Button onClick={run} disabled={!file || busy}>
-            {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+            {busy ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : <Upload className="me-2 h-4 w-4" />}
             Import
           </Button>
         </DialogFooter>
@@ -930,8 +930,8 @@ function TableActions({
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="outline" size="sm">
-            <Wrench className="mr-1.5 h-3.5 w-3.5" /> Table
-            <ChevronDown className="ml-1 h-3.5 w-3.5" />
+            <Wrench className="me-1.5 h-3.5 w-3.5" /> Table
+            <ChevronDown className="ms-1 h-3.5 w-3.5" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
@@ -1123,7 +1123,7 @@ function StructureTab({ projectId, dbId, table }: { projectId: string; dbId: str
               {s.foreignKeys.map((fk) => (
                 <div key={fk.name} className="rounded-lg border px-3 py-2 text-sm font-mono">
                   {fk.column} → {fk.refTable}.{fk.refColumn}
-                  <span className="text-xs text-muted-foreground ml-2 font-sans">
+                  <span className="text-xs text-muted-foreground ms-2 font-sans">
                     ON UPDATE {fk.onUpdate} · ON DELETE {fk.onDelete}
                   </span>
                 </div>
@@ -1179,7 +1179,7 @@ function SqlTab({ projectId, dbId }: { projectId: string; dbId: string }) {
         />
         <div className="flex items-center gap-2">
           <Button onClick={run} disabled={running || !sql.trim()} size="sm">
-            {running ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+            {running ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : <Play className="me-2 h-4 w-4" />}
             Run
           </Button>
           <span className="text-xs text-muted-foreground">⌘/Ctrl + Enter</span>
@@ -1189,11 +1189,11 @@ function SqlTab({ projectId, dbId }: { projectId: string; dbId: string }) {
               size="sm"
               onClick={() => downloadCsv('query-result.csv', result.columns.map((c) => c.name), result.rows)}
             >
-              <Download className="mr-1.5 h-3.5 w-3.5" /> CSV
+              <Download className="me-1.5 h-3.5 w-3.5" /> CSV
             </Button>
           )}
           {result && (
-            <span className="ml-auto text-xs text-muted-foreground tabular-nums">
+            <span className="ms-auto text-xs text-muted-foreground tabular-nums">
               {result.note} · {result.durationMs} ms
             </span>
           )}

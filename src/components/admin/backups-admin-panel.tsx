@@ -177,7 +177,7 @@ function AdminDriveConnect({ onChange }: { onChange: () => void }) {
           </div>
         </div>
         <Button size="sm" onClick={connect} disabled={busy} className="shrink-0">
-          {busy ? <Loader2 className="size-3.5 mr-1 animate-spin" /> : null}
+          {busy ? <Loader2 className="size-3.5 me-1 animate-spin" /> : null}
           Connect Google Drive
         </Button>
       </div>
@@ -307,7 +307,7 @@ function DriveFilesTable() {
             </CardDescription>
           </div>
           <Button variant="outline" size="sm" onClick={load}>
-            <RefreshCw className="size-3.5 mr-1" />
+            <RefreshCw className="size-3.5 me-1" />
             Refresh
           </Button>
         </div>
@@ -339,7 +339,7 @@ function DriveFilesTable() {
                   <TableHead>File</TableHead>
                   <TableHead>Size</TableHead>
                   <TableHead>Uploaded</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableHead className="text-end">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -353,7 +353,7 @@ function DriveFilesTable() {
                       {f.bytes < 200 && (
                         <Badge
                           variant="outline"
-                          className="ml-2 border-amber-500/50 text-amber-600"
+                          className="ms-2 border-amber-500/50 text-amber-600"
                         >
                           empty
                         </Badge>
@@ -363,7 +363,7 @@ function DriveFilesTable() {
                     <TableCell>
                       {f.createdAt ? new Date(f.createdAt).toLocaleString() : '—'}
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-end">
                       <Button
                         variant="ghost"
                         size="sm"
@@ -372,9 +372,9 @@ function DriveFilesTable() {
                         disabled={busy === f.id}
                       >
                         {busy === f.id ? (
-                          <Loader2 className="size-3 mr-1 animate-spin" />
+                          <Loader2 className="size-3 me-1 animate-spin" />
                         ) : (
-                          <Trash2 className="size-3 mr-1" />
+                          <Trash2 className="size-3 me-1" />
                         )}
                         Remove
                       </Button>
@@ -513,14 +513,14 @@ export function BackupsAdminPanel() {
             </div>
             <div className="flex items-center gap-2">
               <Button variant="outline" size="sm" onClick={load}>
-                <RefreshCw className="size-3.5 mr-1" />
+                <RefreshCw className="size-3.5 me-1" />
                 Refresh
               </Button>
               <Button size="sm" onClick={runBackup} disabled={running}>
                 {running ? (
-                  <Loader2 className="size-3.5 mr-1 animate-spin" />
+                  <Loader2 className="size-3.5 me-1 animate-spin" />
                 ) : (
-                  <Play className="size-3.5 mr-1" />
+                  <Play className="size-3.5 me-1" />
                 )}
                 Back up now
               </Button>
@@ -532,9 +532,9 @@ export function BackupsAdminPanel() {
                 title="Encrypt the newest archive and upload it to the connected Google Drive"
               >
                 {shipping ? (
-                  <Loader2 className="size-3.5 mr-1 animate-spin" />
+                  <Loader2 className="size-3.5 me-1 animate-spin" />
                 ) : (
-                  <Cloud className="size-3.5 mr-1" />
+                  <Cloud className="size-3.5 me-1" />
                 )}
                 Send offsite
               </Button>
@@ -593,12 +593,12 @@ export function BackupsAdminPanel() {
               <div className="mt-1">
                 {offsiteOk ? (
                   <Badge variant="outline" className="border-emerald-500/50 text-emerald-600">
-                    <Cloud className="size-3 mr-1" />
+                    <Cloud className="size-3 me-1" />
                     Protected
                   </Badge>
                 ) : (
                   <Badge variant="outline" className="border-amber-500/50 text-amber-600">
-                    <CloudOff className="size-3 mr-1" />
+                    <CloudOff className="size-3 me-1" />
                     Local only
                   </Badge>
                 )}
@@ -645,7 +645,7 @@ export function BackupsAdminPanel() {
                     <TableHead>Archive</TableHead>
                     <TableHead>Size</TableHead>
                     <TableHead>Created</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
+                    <TableHead className="text-end">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -654,7 +654,7 @@ export function BackupsAdminPanel() {
                       <TableCell className="font-mono text-xs break-all">{a.name}</TableCell>
                       <TableCell>{bytes(a.bytes)}</TableCell>
                       <TableCell>{new Date(a.modified).toLocaleString()}</TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="text-end">
                         <div className="flex items-center justify-end gap-1">
                           <Button
                             variant="ghost"
@@ -664,9 +664,9 @@ export function BackupsAdminPanel() {
                             disabled={acting === a.name}
                           >
                             {acting === a.name ? (
-                              <Loader2 className="size-3 mr-1 animate-spin" />
+                              <Loader2 className="size-3 me-1 animate-spin" />
                             ) : (
-                              <Download className="size-3 mr-1" />
+                              <Download className="size-3 me-1" />
                             )}
                             Download
                           </Button>
@@ -677,7 +677,7 @@ export function BackupsAdminPanel() {
                             onClick={() => remove(a.name)}
                             disabled={acting === a.name}
                           >
-                            <Trash2 className="size-3 mr-1" />
+                            <Trash2 className="size-3 me-1" />
                             Delete
                           </Button>
                         </div>

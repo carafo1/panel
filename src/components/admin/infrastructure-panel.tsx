@@ -233,12 +233,12 @@ export function InfrastructurePanel() {
               <table className="w-full text-sm">
                 <thead className="bg-muted/50 text-xs">
                   <tr>
-                    <th className="p-2 text-left">Server</th>
-                    <th className="p-2 text-right">CPU</th>
-                    <th className="p-2 text-right">RAM</th>
-                    <th className="p-2 text-right">Disk</th>
-                    <th className="p-2 text-right">Containers</th>
-                    <th className="p-2 text-right">Uptime</th>
+                    <th className="p-2 text-start">Server</th>
+                    <th className="p-2 text-end">CPU</th>
+                    <th className="p-2 text-end">RAM</th>
+                    <th className="p-2 text-end">Disk</th>
+                    <th className="p-2 text-end">Containers</th>
+                    <th className="p-2 text-end">Uptime</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -263,19 +263,19 @@ export function InfrastructurePanel() {
                           </div>
                           {s.ip && <p className="text-[11px] text-muted-foreground">{s.ip}</p>}
                         </td>
-                        <td className="p-2 text-right tabular-nums">
+                        <td className="p-2 text-end tabular-nums">
                           {s.cpuPercent == null ? '—' : `${s.cpuPercent}%`}
                         </td>
-                        <td className="p-2 text-right tabular-nums">
+                        <td className="p-2 text-end tabular-nums">
                           {s.ramPercent == null
                             ? '—'
                             : `${s.ramPercent}% (${gb(s.ramUsedMB ?? 0)}/${gb(s.ramTotalMB)}G)`}
                         </td>
-                        <td className="p-2 text-right tabular-nums">
+                        <td className="p-2 text-end tabular-nums">
                           {s.diskPercent == null ? '—' : `${s.diskPercent}% (${s.diskUsed}/${s.diskSize})`}
                         </td>
-                        <td className="p-2 text-right tabular-nums">{s.error ? '—' : s.containers}</td>
-                        <td className="p-2 text-right text-xs text-muted-foreground">{s.uptime}</td>
+                        <td className="p-2 text-end tabular-nums">{s.error ? '—' : s.containers}</td>
+                        <td className="p-2 text-end text-xs text-muted-foreground">{s.uptime}</td>
                       </tr>
                     ))
                   )}

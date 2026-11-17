@@ -60,10 +60,10 @@ function renderMarkdown(text: string) {
   html = html.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '<em>$1</em>')
 
   // Unordered lists
-  html = html.replace(/^[-*] (.+)$/gm, '<li class="ml-4 list-disc">$1</li>')
+  html = html.replace(/^[-*] (.+)$/gm, '<li class="ms-4 list-disc">$1</li>')
 
   // Ordered lists
-  html = html.replace(/^\d+\. (.+)$/gm, '<li class="ml-4 list-decimal">$1</li>')
+  html = html.replace(/^\d+\. (.+)$/gm, '<li class="ms-4 list-decimal">$1</li>')
 
   // Headers
   html = html.replace(/^### (.+)$/gm, '<h3 class="text-base font-semibold mt-3 mb-1">$1</h3>')
@@ -247,7 +247,7 @@ export default function AssistantPanel() {
                         key={prompt.label}
                         onClick={() => sendMessage(prompt.prompt)}
                         disabled={isLoading}
-                        className="flex items-center gap-2.5 p-3 rounded-lg border border-border/60 bg-card hover:bg-muted/50 transition-colors text-left group"
+                        className="flex items-center gap-2.5 p-3 rounded-lg border border-border/60 bg-card hover:bg-muted/50 transition-colors text-start group"
                       >
                         <div className="size-8 rounded-lg bg-indigo-500/10 flex items-center justify-center shrink-0 group-hover:bg-indigo-500/20 transition-colors">
                           <Icon className="size-4 text-indigo-600 dark:text-indigo-400" />

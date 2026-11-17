@@ -351,7 +351,7 @@ export function PlanComparisonTable({
       <table className="w-full min-w-[640px] text-sm">
         <thead className="sticky top-0 bg-card/95 backdrop-blur-sm">
           <tr className="border-b">
-            <th className="text-left font-semibold p-4 w-[30%]">Feature</th>
+            <th className="text-start font-semibold p-4 w-[30%]">Feature</th>
             {plans.map((p) => (
               <th key={p.id} className="p-4 text-center">
                 <div className="font-bold">{p.name}</div>

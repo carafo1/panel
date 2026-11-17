@@ -80,7 +80,7 @@ function RequestsChart({ data }: { data: Array<{ date: string; count: number; er
         <div className="space-y-1">
           {/* Y-axis labels */}
           <div className="flex items-end gap-1 h-48">
-            <div className="flex flex-col justify-between h-48 text-[10px] text-muted-foreground font-mono w-8 text-right pr-1">
+            <div className="flex flex-col justify-between h-48 text-[10px] text-muted-foreground font-mono w-8 text-end pe-1">
               <span>{formatNumber(maxCount)}</span>
               <span>{formatNumber(Math.round(maxCount * 0.75))}</span>
               <span>{formatNumber(Math.round(maxCount * 0.5))}</span>
@@ -121,7 +121,7 @@ function RequestsChart({ data }: { data: Array<{ date: string; count: number; er
               })}
             </div>
           </div>
-          <div className="flex items-center gap-4 text-[10px] pl-9">
+          <div className="flex items-center gap-4 text-[10px] ps-9">
             <div className="flex items-center gap-1">
               <div className="size-2.5 rounded-sm bg-indigo-500" />
               <span className="text-muted-foreground">Requests</span>
@@ -155,7 +155,7 @@ function ResponseTimeChart({ data }: { data: Array<{ date: string; avg: number; 
       <CardContent>
         <div className="space-y-1">
           <div className="flex items-end gap-1">
-            <div className="flex flex-col justify-between text-[10px] text-muted-foreground font-mono w-8 text-right pr-1" style={{ height: chartHeight }}>
+            <div className="flex flex-col justify-between text-[10px] text-muted-foreground font-mono w-8 text-end pe-1" style={{ height: chartHeight }}>
               <span>{maxTime}ms</span>
               <span>{Math.round(maxTime * 0.5)}ms</span>
               <span>0ms</span>
@@ -208,7 +208,7 @@ function ResponseTimeChart({ data }: { data: Array<{ date: string; avg: number; 
               </svg>
             </div>
           </div>
-          <div className="flex items-center justify-between pl-9">
+          <div className="flex items-center justify-between ps-9">
             <div className="flex items-center gap-4 text-[10px]">
               <div className="flex items-center gap-1">
                 <div className="size-2.5 rounded-full bg-indigo-500" />
@@ -295,7 +295,7 @@ function GeoDistribution({ data }: { data: Array<{ country: string; count: numbe
                       style={{ width: `${widthPct}%` }}
                     />
                   </div>
-                  <span className="text-xs font-mono text-muted-foreground w-12 text-right shrink-0">
+                  <span className="text-xs font-mono text-muted-foreground w-12 text-end shrink-0">
                     {formatNumber(item.count)}
                   </span>
                 </div>
@@ -496,7 +496,7 @@ export default function AnalyticsPanel() {
                     <Clock className="size-4 text-indigo-600" />
                   </div>
                 </div>
-                <p className="text-2xl font-bold font-mono mt-2">{analytics.avgResponseTime}<span className="text-sm font-normal text-muted-foreground ml-1">ms</span></p>
+                <p className="text-2xl font-bold font-mono mt-2">{analytics.avgResponseTime}<span className="text-sm font-normal text-muted-foreground ms-1">ms</span></p>
                 <div className="flex items-center gap-1 mt-1">
                   <TrendingDown className="size-3 text-indigo-500" />
                   <span className="text-xs text-indigo-600 font-medium">-8.3%</span>
@@ -514,7 +514,7 @@ export default function AnalyticsPanel() {
                     <AlertTriangle className="size-4 text-red-600" />
                   </div>
                 </div>
-                <p className="text-2xl font-bold font-mono mt-2">{analytics.errorRate}<span className="text-sm font-normal text-muted-foreground ml-1">%</span></p>
+                <p className="text-2xl font-bold font-mono mt-2">{analytics.errorRate}<span className="text-sm font-normal text-muted-foreground ms-1">%</span></p>
                 <div className="flex items-center gap-1 mt-1">
                   {analytics.errorRate < 2 ? (
                     <>
@@ -580,7 +580,7 @@ export default function AnalyticsPanel() {
                   onClick={fetchAnalytics}
                   className="h-8 text-xs"
                 >
-                  <Loader2 className="size-3.5 mr-1 animate-spin hidden" />
+                  <Loader2 className="size-3.5 me-1 animate-spin hidden" />
                   Refresh
                 </Button>
               </div>

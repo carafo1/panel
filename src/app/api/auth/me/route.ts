@@ -67,7 +67,9 @@ export async function GET(request: Request) {
         // Deliberately the DB role, not the role baked into the token: a
         // promotion or demotion must take effect on the next page load
         // rather than whenever the 7-day token expires.
-        role: user.role,
+        role: decoded.role,
+        // An admin without 2FA keeps the admin title but not the powers.
+        adminTwoFactorRequired: decoded.role !== user.role && (user.role === 'admin' || user.role === 'super_admin'),
         accountStatus,
         avatar: user.avatar,
         emailVerified: user.emailVerified,

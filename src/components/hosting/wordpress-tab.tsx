@@ -176,7 +176,7 @@ export function WordPressTab({ projectId }: { projectId: string }) {
             <div className="flex flex-wrap gap-1.5">
               {x.update === 'available' && (
                 <Button size="sm" variant="outline" disabled={!!busy} onClick={() => run(k('update'), { action: `${kind}_update`, slug: x.name })}>
-                  {spin(k('update'), ArrowUpCircle)} <span className="ml-1.5">Update</span>
+                  {spin(k('update'), ArrowUpCircle)} <span className="ms-1.5">Update</span>
                 </Button>
               )}
               {kind === 'plugin' && x.status !== 'must-use' && x.status !== 'dropin' && (
@@ -187,12 +187,12 @@ export function WordPressTab({ projectId }: { projectId: string }) {
                   onClick={() => run(k(active ? 'deactivate' : 'activate'), { action: active ? 'plugin_deactivate' : 'plugin_activate', slug: x.name })}
                 >
                   {spin(k(active ? 'deactivate' : 'activate'), active ? PowerOff : Power)}
-                  <span className="ml-1.5">{active ? 'Deactivate' : 'Activate'}</span>
+                  <span className="ms-1.5">{active ? 'Deactivate' : 'Activate'}</span>
                 </Button>
               )}
               {kind === 'theme' && !active && (
                 <Button size="sm" variant="outline" disabled={!!busy} onClick={() => run(k('activate'), { action: 'theme_activate', slug: x.name })}>
-                  {spin(k('activate'), Power)} <span className="ml-1.5">Activate</span>
+                  {spin(k('activate'), Power)} <span className="ms-1.5">Activate</span>
                 </Button>
               )}
               {!(kind === 'theme' && active) && (
@@ -234,7 +234,7 @@ export function WordPressTab({ projectId }: { projectId: string }) {
             {data.adminUrl && (
               <Button size="sm" variant="outline" asChild>
                 <a href={data.adminUrl} target="_blank" rel="noopener noreferrer">
-                  Open wp-admin <ExternalLink className="ml-1.5 size-3.5" />
+                  Open wp-admin <ExternalLink className="ms-1.5 size-3.5" />
                 </a>
               </Button>
             )}
@@ -263,7 +263,7 @@ export function WordPressTab({ projectId }: { projectId: string }) {
                 disabled={!!busy}
                 onClick={() => run('core', { action: 'core_update' }, { confirm: `Update WordPress to ${data.coreUpdate}? Take a backup first if you have not.` })}
               >
-                {spin('core', ArrowUpCircle)} <span className="ml-1.5">Update to {data.coreUpdate}</span>
+                {spin('core', ArrowUpCircle)} <span className="ms-1.5">Update to {data.coreUpdate}</span>
               </Button>
             ) : (
               <p className="mt-2 text-xs text-muted-foreground">Up to date</p>
@@ -301,11 +301,11 @@ export function WordPressTab({ projectId }: { projectId: string }) {
             <div className="flex flex-wrap gap-2">
               {pluginUpdates > 0 && (
                 <Button size="sm" variant="outline" disabled={!!busy} onClick={() => run('plugins_all', { action: 'plugins_update_all' })}>
-                  {spin('plugins_all', ArrowUpCircle)} <span className="ml-1.5">Update all ({pluginUpdates})</span>
+                  {spin('plugins_all', ArrowUpCircle)} <span className="ms-1.5">Update all ({pluginUpdates})</span>
                 </Button>
               )}
               <Button size="sm" onClick={() => setInstall({ kind: 'plugin', slug: '', activate: true })} disabled={!!busy}>
-                <Plus className="mr-1.5 size-3.5" /> Add plugin
+                <Plus className="me-1.5 size-3.5" /> Add plugin
               </Button>
             </div>
           </div>
@@ -319,7 +319,7 @@ export function WordPressTab({ projectId }: { projectId: string }) {
               <Palette className="size-4" /> Themes ({data.themes.length})
             </h3>
             <Button size="sm" variant="outline" onClick={() => setInstall({ kind: 'theme', slug: '', activate: false })} disabled={!!busy}>
-              <Plus className="mr-1.5 size-3.5" /> Add theme
+              <Plus className="me-1.5 size-3.5" /> Add theme
             </Button>
           </div>
           <ExtList kind="theme" items={data.themes} />
@@ -330,10 +330,10 @@ export function WordPressTab({ projectId }: { projectId: string }) {
           <h3 className="text-sm font-semibold">Tools</h3>
           <div className="flex flex-wrap gap-2">
             <Button size="sm" variant="outline" disabled={!!busy} onClick={() => run('cache', { action: 'cache_flush' }, { reload: false })}>
-              {spin('cache', Eraser)} <span className="ml-1.5">Clear cache</span>
+              {spin('cache', Eraser)} <span className="ms-1.5">Clear cache</span>
             </Button>
             <Button size="sm" variant="outline" disabled={!!busy} onClick={() => run('rewrite', { action: 'rewrite_flush' }, { reload: false })}>
-              {spin('rewrite', Link2)} <span className="ml-1.5">Fix permalinks</span>
+              {spin('rewrite', Link2)} <span className="ms-1.5">Fix permalinks</span>
             </Button>
             <Button
               size="sm"
@@ -348,7 +348,7 @@ export function WordPressTab({ projectId }: { projectId: string }) {
                 if (r?.password) setNewPassword({ user: user || 'admin', password: r.password })
               }}
             >
-              {spin('pw', KeyRound)} <span className="ml-1.5">Reset admin password</span>
+              {spin('pw', KeyRound)} <span className="ms-1.5">Reset admin password</span>
             </Button>
           </div>
 
@@ -372,7 +372,7 @@ export function WordPressTab({ projectId }: { projectId: string }) {
                   if (r) setSrPreview(r.replacements ?? 0)
                 }}
               >
-                {spin('sr_preview', Search)} <span className="ml-1.5">Preview</span>
+                {spin('sr_preview', Search)} <span className="ms-1.5">Preview</span>
               </Button>
               <Button
                 size="sm"
@@ -389,7 +389,7 @@ export function WordPressTab({ projectId }: { projectId: string }) {
                   }
                 }}
               >
-                {spin('sr', Wrench)} <span className="ml-1.5">Replace</span>
+                {spin('sr', Wrench)} <span className="ms-1.5">Replace</span>
               </Button>
               {srPreview !== null && (
                 <span className="text-xs text-muted-foreground">
@@ -436,7 +436,7 @@ export function WordPressTab({ projectId }: { projectId: string }) {
                 if (r) setInstall(null)
               }}
             >
-              {busy === 'install' && <Loader2 className="mr-2 size-4 animate-spin" />}
+              {busy === 'install' && <Loader2 className="me-2 size-4 animate-spin" />}
               Install
             </Button>
           </DialogFooter>

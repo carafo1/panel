@@ -756,7 +756,7 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
             className={primaryBtn}
             onClick={() => setCreateOpen(true)}
           >
-            <Plus className="size-3.5 mr-1" />
+            <Plus className="size-3.5 me-1" />
             Create Database
           </Button>
         </div>
@@ -785,7 +785,7 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
                   <TableHead>Host</TableHead>
                   <TableHead>User</TableHead>
                   <TableHead>Password</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableHead className="text-end">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -853,7 +853,7 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
                         )}
                       </div>
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-end">
                       <div className="flex items-center justify-end gap-1">
                         {/* Database Studio speaks MySQL/MariaDB and PostgreSQL;
                             only SQLite is unsupported. */}
@@ -868,7 +868,7 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
                               window.open(`/db-studio/${projectId}/${db.id}`, '_blank')
                             }
                           >
-                            <DatabaseIcon className="size-3 mr-1" />
+                            <DatabaseIcon className="size-3 me-1" />
                             Studio
                           </Button>
                         )}
@@ -883,9 +883,9 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
                               title="Open phpMyAdmin (signed in automatically)"
                             >
                               {openingPma[db.id] ? (
-                                <Loader2 className="size-3 mr-1 animate-spin" />
+                                <Loader2 className="size-3 me-1 animate-spin" />
                               ) : (
-                                <ExternalLink className="size-3 mr-1" />
+                                <ExternalLink className="size-3 me-1" />
                               )}
                               phpMyAdmin
                             </Button>
@@ -899,9 +899,9 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
                           onClick={() => handleTest(db)}
                         >
                           {testing[db.id] ? (
-                            <Loader2 className="size-3 mr-1 animate-spin" />
+                            <Loader2 className="size-3 me-1 animate-spin" />
                           ) : (
-                            <PlugZap className="size-3 mr-1" />
+                            <PlugZap className="size-3 me-1" />
                           )}
                           Test
                         </Button>
@@ -915,9 +915,9 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
                             title="Open pgAdmin (signed in automatically)"
                           >
                             {openingPgAdmin[db.id] ? (
-                              <Loader2 className="size-3 mr-1 animate-spin" />
+                              <Loader2 className="size-3 me-1 animate-spin" />
                             ) : (
-                              <ExternalLink className="size-3 mr-1" />
+                              <ExternalLink className="size-3 me-1" />
                             )}
                             pgAdmin
                           </Button>
@@ -930,7 +930,7 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
                             onClick={() => setResetPwFor(db)}
                             title="Generate a new password for this database user"
                           >
-                            <KeyRound className="size-3 mr-1" />
+                            <KeyRound className="size-3 me-1" />
                             Reset password
                           </Button>
                         )}
@@ -940,7 +940,7 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
                           className="h-7 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/20"
                           onClick={() => setDeleteId(db.id)}
                         >
-                          <Trash2 className="size-3 mr-1" />
+                          <Trash2 className="size-3 me-1" />
                           Delete
                         </Button>
                       </div>
@@ -1002,12 +1002,12 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
             <Button className={primaryBtn} onClick={handleCreate} disabled={creating}>
               {creating ? (
                 <>
-                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  <Loader2 className="size-4 me-2 animate-spin" />
                   Provisioning...
                 </>
               ) : (
                 <>
-                  <Plus className="size-4 mr-2" />
+                  <Plus className="size-4 me-2" />
                   Create
                 </>
               )}
@@ -1051,7 +1051,7 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
                     className="h-7 text-xs"
                     onClick={() => copyToClipboard(createdDb.password, 'Password copied')}
                   >
-                    <Copy className="size-3 mr-1" />
+                    <Copy className="size-3 me-1" />
                     Copy
                   </Button>
                 </div>
@@ -1103,12 +1103,12 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
             >
               {resettingPw ? (
                 <>
-                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  <Loader2 className="size-4 me-2 animate-spin" />
                   Resetting…
                 </>
               ) : (
                 <>
-                  <KeyRound className="size-4 mr-2" />
+                  <KeyRound className="size-4 me-2" />
                   Reset password
                 </>
               )}
@@ -1145,7 +1145,7 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
                     className="h-7 text-xs"
                     onClick={() => copyToClipboard(newPw.password, 'Password copied')}
                   >
-                    <Copy className="size-3 mr-1" />
+                    <Copy className="size-3 me-1" />
                     Copy
                   </Button>
                 </div>
@@ -1185,12 +1185,12 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
             >
               {deleting ? (
                 <>
-                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  <Loader2 className="size-4 me-2 animate-spin" />
                   Deleting...
                 </>
               ) : (
                 <>
-                  <Trash2 className="size-4 mr-2" />
+                  <Trash2 className="size-4 me-2" />
                   Delete
                 </>
               )}
@@ -1295,7 +1295,7 @@ function DriveBackupRow() {
             <p className="font-medium">Backups are not reaching your Google Drive</p>
             <p className="text-muted-foreground mt-0.5 break-words">{d?.lastError}</p>
             <Button size="sm" className="mt-2 h-7 text-xs" onClick={connect} disabled={busy}>
-              {busy ? <Loader2 className="size-3 mr-1 animate-spin" /> : null}
+              {busy ? <Loader2 className="size-3 me-1 animate-spin" /> : null}
               Reconnect
             </Button>
           </div>
@@ -1341,7 +1341,7 @@ function DriveBackupRow() {
         </div>
       </div>
       <Button size="sm" className="h-7 text-xs shrink-0" onClick={connect} disabled={busy}>
-        {busy ? <Loader2 className="size-3 mr-1 animate-spin" /> : null}
+        {busy ? <Loader2 className="size-3 me-1 animate-spin" /> : null}
         Connect
       </Button>
     </div>
@@ -1492,7 +1492,7 @@ export function BackupsTab({ projectId }: { projectId: string }) {
     if (lower === 'completed') {
       return (
         <Badge variant="outline" className="bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/50">
-          <CheckCircle2 className="size-3 mr-1" />
+          <CheckCircle2 className="size-3 me-1" />
           Completed
         </Badge>
       )
@@ -1500,7 +1500,7 @@ export function BackupsTab({ projectId }: { projectId: string }) {
     if (lower === 'failed') {
       return (
         <Badge variant="outline" className="bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400 border-red-200 dark:border-red-900/50">
-          <XCircle className="size-3 mr-1" />
+          <XCircle className="size-3 me-1" />
           Failed
         </Badge>
       )
@@ -1508,7 +1508,7 @@ export function BackupsTab({ projectId }: { projectId: string }) {
     if (lower === 'running' || lower === 'pending') {
       return (
         <Badge variant="outline" className="bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400 border-amber-200 dark:border-amber-900/50">
-          <Loader2 className="size-3 mr-1 animate-spin" />
+          <Loader2 className="size-3 me-1 animate-spin" />
           {lower === 'pending' ? 'Pending' : 'Running'}
         </Badge>
       )
@@ -1554,7 +1554,7 @@ export function BackupsTab({ projectId }: { projectId: string }) {
             </CardDescription>
           </div>
           <Button size="sm" className={primaryBtn} onClick={() => setCreateOpen(true)}>
-            <Plus className="size-3.5 mr-1" />
+            <Plus className="size-3.5 me-1" />
             Create Backup
           </Button>
         </div>
@@ -1584,7 +1584,7 @@ export function BackupsTab({ projectId }: { projectId: string }) {
                   <TableHead>Status</TableHead>
                   <TableHead>Created</TableHead>
                   <TableHead>Note</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableHead className="text-end">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1610,7 +1610,7 @@ export function BackupsTab({ projectId }: { projectId: string }) {
                     <TableCell className="text-xs text-muted-foreground max-w-[160px] truncate">
                       {b.note || '—'}
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-end">
                       <div className="flex items-center justify-end gap-1">
                         <Tooltip>
                           <TooltipTrigger asChild>
@@ -1709,12 +1709,12 @@ export function BackupsTab({ projectId }: { projectId: string }) {
             <Button className={primaryBtn} onClick={handleCreate} disabled={creating}>
               {creating ? (
                 <>
-                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  <Loader2 className="size-4 me-2 animate-spin" />
                   Creating...
                 </>
               ) : (
                 <>
-                  <Plus className="size-4 mr-2" />
+                  <Plus className="size-4 me-2" />
                   Create
                 </>
               )}
@@ -1745,12 +1745,12 @@ export function BackupsTab({ projectId }: { projectId: string }) {
             >
               {restoring ? (
                 <>
-                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  <Loader2 className="size-4 me-2 animate-spin" />
                   Restoring...
                 </>
               ) : (
                 <>
-                  <RotateCwRestore className="size-4 mr-2" />
+                  <RotateCwRestore className="size-4 me-2" />
                   Restore Now
                 </>
               )}
@@ -1780,12 +1780,12 @@ export function BackupsTab({ projectId }: { projectId: string }) {
             >
               {deleting ? (
                 <>
-                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  <Loader2 className="size-4 me-2 animate-spin" />
                   Deleting...
                 </>
               ) : (
                 <>
-                  <Trash2 className="size-4 mr-2" />
+                  <Trash2 className="size-4 me-2" />
                   Delete
                 </>
               )}
@@ -2276,9 +2276,9 @@ export function FilesTab({ projectId }: { projectId: string }) {
                 disabled={uploading}
               >
                 {uploading ? (
-                  <Loader2 className="size-3.5 mr-1 animate-spin" />
+                  <Loader2 className="size-3.5 me-1 animate-spin" />
                 ) : (
-                  <Upload className="size-3.5 mr-1" />
+                  <Upload className="size-3.5 me-1" />
                 )}
                 Upload
               </Button>
@@ -2288,7 +2288,7 @@ export function FilesTab({ projectId }: { projectId: string }) {
                 className="h-8 text-xs"
                 onClick={() => setNewFolderOpen(true)}
               >
-                <FolderPlus className="size-3.5 mr-1" />
+                <FolderPlus className="size-3.5 me-1" />
                 New Folder
               </Button>
               <Button
@@ -2297,7 +2297,7 @@ export function FilesTab({ projectId }: { projectId: string }) {
                 className="h-8 text-xs"
                 onClick={() => setNewFileOpen(true)}
               >
-                <FilePlus className="size-3.5 mr-1" />
+                <FilePlus className="size-3.5 me-1" />
                 New File
               </Button>
               <Button
@@ -2309,9 +2309,9 @@ export function FilesTab({ projectId }: { projectId: string }) {
                 title="Download this folder (or the whole site at the root) as an archive"
               >
                 {exporting ? (
-                  <Loader2 className="size-3.5 mr-1 animate-spin" />
+                  <Loader2 className="size-3.5 me-1 animate-spin" />
                 ) : (
-                  <Download className="size-3.5 mr-1" />
+                  <Download className="size-3.5 me-1" />
                 )}
                 Export
               </Button>
@@ -2324,9 +2324,9 @@ export function FilesTab({ projectId }: { projectId: string }) {
                 title="Upload a .zip / .tar.gz archive and extract it into this folder"
               >
                 {importing ? (
-                  <Loader2 className="size-3.5 mr-1 animate-spin" />
+                  <Loader2 className="size-3.5 me-1 animate-spin" />
                 ) : (
-                  <Archive className="size-3.5 mr-1" />
+                  <Archive className="size-3.5 me-1" />
                 )}
                 Import
               </Button>
@@ -2337,7 +2337,7 @@ export function FilesTab({ projectId }: { projectId: string }) {
                 onClick={() => fetchFiles(currentPath)}
                 disabled={loading}
               >
-                <RefreshCw className={`size-3.5 mr-1 ${loading ? 'animate-spin' : ''}`} />
+                <RefreshCw className={`size-3.5 me-1 ${loading ? 'animate-spin' : ''}`} />
                 Refresh
               </Button>
             </div>
@@ -2426,7 +2426,7 @@ export function FilesTab({ projectId }: { projectId: string }) {
                       <TableHead>Size</TableHead>
                       <TableHead>Modified</TableHead>
                       <TableHead>Perms</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
+                      <TableHead className="text-end">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -2470,7 +2470,7 @@ export function FilesTab({ projectId }: { projectId: string }) {
                         <TableCell className="font-mono text-xs text-muted-foreground">
                           {f.permissions || '—'}
                         </TableCell>
-                        <TableCell className="text-right">
+                        <TableCell className="text-end">
                           <div
                             className="flex items-center justify-end gap-1"
                             onClick={(e) => e.stopPropagation()}
@@ -2548,7 +2548,7 @@ export function FilesTab({ projectId }: { projectId: string }) {
                   <button
                     type="button"
                     onClick={() => navigateTo(parentPath)}
-                    className="w-full text-left p-3 text-xs text-muted-foreground hover:bg-muted/40"
+                    className="w-full text-start p-3 text-xs text-muted-foreground hover:bg-muted/40"
                   >
                     <span className="inline-flex items-center gap-2">
                       <ArrowUp className="size-4" />
@@ -2563,7 +2563,7 @@ export function FilesTab({ projectId }: { projectId: string }) {
                   >
                     <button
                       type="button"
-                      className="w-full text-left"
+                      className="w-full text-start"
                       onClick={() => {
                         if (f.type === 'directory') {
                           navigateTo(f.path)
@@ -2578,13 +2578,13 @@ export function FilesTab({ projectId }: { projectId: string }) {
                         {fileIcon(f)}
                         <span className="font-mono text-sm truncate flex-1">{f.name}</span>
                       </div>
-                      <div className="text-xs text-muted-foreground mt-1 pl-6">
+                      <div className="text-xs text-muted-foreground mt-1 ps-6">
                         {f.type === 'directory' ? 'folder' : formatBytes(f.size)}
                         {f.modifiedAt ? ` · ${timeAgo(f.modifiedAt)}` : ''}
                         {f.permissions ? ` · ${f.permissions}` : ''}
                       </div>
                     </button>
-                    <div className="flex items-center gap-1 mt-2 pl-6">
+                    <div className="flex items-center gap-1 mt-2 ps-6">
                       {f.type === 'file' && (
                         <Button
                           variant="outline"
@@ -2592,7 +2592,7 @@ export function FilesTab({ projectId }: { projectId: string }) {
                           className="h-7 text-xs"
                           onClick={() => handleDownload(f)}
                         >
-                          <Download className="size-3 mr-1" />
+                          <Download className="size-3 me-1" />
                           Download
                         </Button>
                       )}
@@ -2603,7 +2603,7 @@ export function FilesTab({ projectId }: { projectId: string }) {
                           className="h-7 text-xs"
                           onClick={() => openEditor(f)}
                         >
-                          <Edit className="size-3 mr-1" />
+                          <Edit className="size-3 me-1" />
                           Edit
                         </Button>
                       )}
@@ -2616,7 +2616,7 @@ export function FilesTab({ projectId }: { projectId: string }) {
                           setRenameValue(f.name)
                         }}
                       >
-                        <Edit2Pencil className="size-3 mr-1" />
+                        <Edit2Pencil className="size-3 me-1" />
                         Rename
                       </Button>
                       <Button
@@ -2625,7 +2625,7 @@ export function FilesTab({ projectId }: { projectId: string }) {
                         className="h-7 text-xs text-red-600 hover:text-red-700"
                         onClick={() => setDeleteEntry(f)}
                       >
-                        <Trash2 className="size-3 mr-1" />
+                        <Trash2 className="size-3 me-1" />
                         Delete
                       </Button>
                     </div>
@@ -2679,9 +2679,9 @@ export function FilesTab({ projectId }: { projectId: string }) {
               disabled={editorSaving || editorLoading || editorContent === editorOriginal}
             >
               {editorSaving ? (
-                <Loader2 className="size-4 mr-2 animate-spin" />
+                <Loader2 className="size-4 me-2 animate-spin" />
               ) : (
-                <Save className="size-4 mr-2" />
+                <Save className="size-4 me-2" />
               )}
               Save
             </Button>
@@ -2797,7 +2797,7 @@ export function FilesTab({ projectId }: { projectId: string }) {
               onClick={handleDelete}
               className="bg-red-600 hover:bg-red-700 text-white"
             >
-              <Trash2 className="size-4 mr-2" />
+              <Trash2 className="size-4 me-2" />
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -3008,7 +3008,7 @@ export function TerminalTab({ projectId }: { projectId: string }) {
             Start the website to use the terminal.
           </p>
           <Button className={`${primaryBtn} mt-4`} size="sm" onClick={createSession}>
-            <RefreshCw className="size-3.5 mr-1" />
+            <RefreshCw className="size-3.5 me-1" />
             Retry
           </Button>
         </CardContent>
@@ -3032,7 +3032,7 @@ export function TerminalTab({ projectId }: { projectId: string }) {
             Click to start a new session.
           </p>
           <Button className={`${primaryBtn} mt-4`} size="sm" onClick={createSession}>
-            <Plus className="size-3.5 mr-1" />
+            <Plus className="size-3.5 me-1" />
             New Session
           </Button>
         </CardContent>
@@ -3055,7 +3055,7 @@ export function TerminalTab({ projectId }: { projectId: string }) {
           </div>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" className="h-8 text-xs" onClick={handleClear}>
-              <X className="size-3.5 mr-1" />
+              <X className="size-3.5 me-1" />
               Clear
             </Button>
             <Button
@@ -3064,7 +3064,7 @@ export function TerminalTab({ projectId }: { projectId: string }) {
               className="h-8 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/20"
               onClick={handleClose}
             >
-              <XCircle className="size-3.5 mr-1" />
+              <XCircle className="size-3.5 me-1" />
               Close Session
             </Button>
           </div>
@@ -3084,7 +3084,7 @@ export function TerminalTab({ projectId }: { projectId: string }) {
             <span className="size-2 rounded-full bg-red-500/80" />
             <span className="size-2 rounded-full bg-amber-500/80" />
             <span className="size-2 rounded-full bg-emerald-500/80" />
-            <span className="ml-2 text-[10px] text-zinc-500 font-mono truncate">
+            <span className="ms-2 text-[10px] text-zinc-500 font-mono truncate">
               {containerNameRef.current} · session {sessionId.slice(0, 8)}
             </span>
           </div>
@@ -3288,7 +3288,7 @@ export function ResourcesTab({ projectId }: { projectId: string }) {
             Start the website to see resource usage.
           </p>
           <Button className={`${primaryBtn} mt-4`} size="sm" onClick={() => fetchResources(true)}>
-            <RefreshCw className="size-3.5 mr-1" />
+            <RefreshCw className="size-3.5 me-1" />
             Retry
           </Button>
         </CardContent>
@@ -3326,7 +3326,7 @@ export function ResourcesTab({ projectId }: { projectId: string }) {
             className="h-8 text-xs"
             onClick={() => fetchResources(false)}
           >
-            <RefreshCw className="size-3.5 mr-1" />
+            <RefreshCw className="size-3.5 me-1" />
             Refresh
           </Button>
         </div>
@@ -3710,7 +3710,7 @@ export function DomainsTab({
     if (!d.sslEnabled) {
       return (
         <Badge variant="outline" className="bg-gray-50 text-gray-600 dark:bg-gray-800/30 dark:text-gray-400 border-gray-200 dark:border-gray-700 text-xs">
-          <Shield className="size-3 mr-1" />
+          <Shield className="size-3 me-1" />
           SSL off
         </Badge>
       )
@@ -3719,7 +3719,7 @@ export function DomainsTab({
     if (status === 'issued') {
       return (
         <Badge variant="outline" className="bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/50 text-xs">
-          <ShieldCheck className="size-3 mr-1" />
+          <ShieldCheck className="size-3 me-1" />
           Issued
         </Badge>
       )
@@ -3727,7 +3727,7 @@ export function DomainsTab({
     if (status === 'pending' || status === 'renewing') {
       return (
         <Badge variant="outline" className="bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400 border-amber-200 dark:border-amber-900/50 text-xs">
-          <Loader2 className="size-3 mr-1 animate-spin" />
+          <Loader2 className="size-3 me-1 animate-spin" />
           Configuring SSL…
         </Badge>
       )
@@ -3735,14 +3735,14 @@ export function DomainsTab({
     if (status === 'failed') {
       return (
         <Badge variant="outline" className="bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400 border-red-200 dark:border-red-900/50 text-xs">
-          <ShieldAlert className="size-3 mr-1" />
+          <ShieldAlert className="size-3 me-1" />
           Failed
         </Badge>
       )
     }
     return (
       <Badge variant="outline" className="bg-gray-50 text-gray-600 dark:bg-gray-800/30 dark:text-gray-400 border-gray-200 dark:border-gray-700 text-xs">
-        <Shield className="size-3 mr-1" />
+        <Shield className="size-3 me-1" />
         None
       </Badge>
     )
@@ -3765,7 +3765,7 @@ export function DomainsTab({
             </CardDescription>
           </div>
           <Button size="sm" className={primaryBtn} onClick={() => setCreateOpen(true)}>
-            <Plus className="size-3.5 mr-1" />
+            <Plus className="size-3.5 me-1" />
             Add Domain
           </Button>
         </div>
@@ -3785,7 +3785,7 @@ export function DomainsTab({
               Add a custom domain to use your own.
             </p>
             <Button className={`${primaryBtn} mt-4`} size="sm" onClick={() => setCreateOpen(true)}>
-              <Plus className="size-3.5 mr-1" />
+              <Plus className="size-3.5 me-1" />
               Add Your First Domain
             </Button>
           </div>
@@ -3798,7 +3798,7 @@ export function DomainsTab({
                   <TableHead>Type</TableHead>
                   <TableHead>SSL</TableHead>
                   <TableHead>Verified</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableHead className="text-end">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -3850,7 +3850,7 @@ export function DomainsTab({
                         </span>
                       )}
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-end">
                       <div className="flex items-center justify-end gap-1">
                         {!d.isPrimary && (
                           <Tooltip>
@@ -3865,7 +3865,7 @@ export function DomainsTab({
                                 }
                               >
                                 {patching[d.id] ? (
-                                  <Loader2 className="size-3 mr-1 animate-spin" />
+                                  <Loader2 className="size-3 me-1 animate-spin" />
                                 ) : (
                                   <StarIcon />
                                 )}
@@ -3891,9 +3891,9 @@ export function DomainsTab({
                               }
                             >
                               {patching[d.id] ? (
-                                <Loader2 className="size-3 mr-1 animate-spin" />
+                                <Loader2 className="size-3 me-1 animate-spin" />
                               ) : (
-                                <Shield className="size-3 mr-1" />
+                                <Shield className="size-3 me-1" />
                               )}
                               {d.sslEnabled ? 'SSL Off' : 'SSL On'}
                             </Button>
@@ -3907,7 +3907,7 @@ export function DomainsTab({
                             className="h-7 text-xs"
                             onClick={() => setVerifyDomain(d)}
                           >
-                            <CheckCircle2 className="size-3 mr-1" />
+                            <CheckCircle2 className="size-3 me-1" />
                             Verify
                           </Button>
                         )}
@@ -3917,7 +3917,7 @@ export function DomainsTab({
                           className="h-7 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/20"
                           onClick={() => setDeleteDomain(d)}
                         >
-                          <Trash2 className="size-3 mr-1" />
+                          <Trash2 className="size-3 me-1" />
                           Delete
                         </Button>
                       </div>
@@ -3983,12 +3983,12 @@ export function DomainsTab({
             <Button className={primaryBtn} onClick={handleCreate} disabled={creating}>
               {creating ? (
                 <>
-                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  <Loader2 className="size-4 me-2 animate-spin" />
                   Adding...
                 </>
               ) : (
                 <>
-                  <Plus className="size-4 mr-2" />
+                  <Plus className="size-4 me-2" />
                   Add
                 </>
               )}
@@ -4153,12 +4153,12 @@ export function DomainsTab({
             <Button className={primaryBtn} onClick={handleVerify} disabled={verifying}>
               {verifying ? (
                 <>
-                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  <Loader2 className="size-4 me-2 animate-spin" />
                   Checking…
                 </>
               ) : (
                 <>
-                  <CheckCircle2 className="size-4 mr-2" />
+                  <CheckCircle2 className="size-4 me-2" />
                   Verify Now
                 </>
               )}
@@ -4195,12 +4195,12 @@ export function DomainsTab({
             >
               {deleting ? (
                 <>
-                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  <Loader2 className="size-4 me-2 animate-spin" />
                   Removing...
                 </>
               ) : (
                 <>
-                  <Trash2 className="size-4 mr-2" />
+                  <Trash2 className="size-4 me-2" />
                   Remove
                 </>
               )}
@@ -4501,7 +4501,7 @@ export function EmailTab({ projectId }: { projectId: string }) {
             className={primaryBtn}
             onClick={() => setCreateOpen(true)}
           >
-            <Plus className="size-3.5 mr-1" />
+            <Plus className="size-3.5 me-1" />
             Create Mailbox
           </Button>
         </div>
@@ -4521,7 +4521,7 @@ export function EmailTab({ projectId }: { projectId: string }) {
               your domain.
             </p>
             <Button className={`${primaryBtn} mt-4`} size="sm" onClick={() => setCreateOpen(true)}>
-              <Plus className="size-3.5 mr-1" />
+              <Plus className="size-3.5 me-1" />
               Create First Mailbox
             </Button>
           </div>
@@ -4536,7 +4536,7 @@ export function EmailTab({ projectId }: { projectId: string }) {
                     <TableHead>Status</TableHead>
                     <TableHead>DKIM</TableHead>
                     <TableHead>Created</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
+                    <TableHead className="text-end">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -4567,7 +4567,7 @@ export function EmailTab({ projectId }: { projectId: string }) {
                             variant="outline"
                             className="bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/50 text-xs"
                           >
-                            <span className="size-1.5 rounded-full bg-emerald-500 mr-1.5" />
+                            <span className="size-1.5 rounded-full bg-emerald-500 me-1.5" />
                             Active
                           </Badge>
                         ) : (
@@ -4575,7 +4575,7 @@ export function EmailTab({ projectId }: { projectId: string }) {
                             variant="outline"
                             className="bg-gray-50 text-gray-600 dark:bg-gray-800/30 dark:text-gray-400 border-gray-200 dark:border-gray-700 text-xs"
                           >
-                            <span className="size-1.5 rounded-full bg-gray-400 mr-1.5" />
+                            <span className="size-1.5 rounded-full bg-gray-400 me-1.5" />
                             Disabled
                           </Badge>
                         )}
@@ -4606,7 +4606,7 @@ export function EmailTab({ projectId }: { projectId: string }) {
                       <TableCell className="text-xs text-muted-foreground">
                         {timeAgo(mb.createdAt)}
                       </TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="text-end">
                         <div className="flex items-center justify-end gap-1 flex-wrap">
                           <Button
                             variant="ghost"
@@ -4619,7 +4619,7 @@ export function EmailTab({ projectId }: { projectId: string }) {
                               setPwShow(false)
                             }}
                           >
-                            <KeyRound className="size-3 mr-1" />
+                            <KeyRound className="size-3 me-1" />
                             Password
                           </Button>
                           <Button
@@ -4630,11 +4630,11 @@ export function EmailTab({ projectId }: { projectId: string }) {
                             onClick={() => handleToggleActive(mb)}
                           >
                             {toggling[mb.id] ? (
-                              <Loader2 className="size-3 mr-1 animate-spin" />
+                              <Loader2 className="size-3 me-1 animate-spin" />
                             ) : mb.active ? (
-                              <XCircle className="size-3 mr-1" />
+                              <XCircle className="size-3 me-1" />
                             ) : (
-                              <CheckCircle2 className="size-3 mr-1" />
+                              <CheckCircle2 className="size-3 me-1" />
                             )}
                             {mb.active ? 'Disable' : 'Enable'}
                           </Button>
@@ -4644,7 +4644,7 @@ export function EmailTab({ projectId }: { projectId: string }) {
                             className="h-7 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/20"
                             onClick={() => setDeleteMailbox(mb)}
                           >
-                            <Trash2 className="size-3 mr-1" />
+                            <Trash2 className="size-3 me-1" />
                             Delete
                           </Button>
                         </div>
@@ -4895,12 +4895,12 @@ export function EmailTab({ projectId }: { projectId: string }) {
             >
               {creating ? (
                 <>
-                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  <Loader2 className="size-4 me-2 animate-spin" />
                   Creating...
                 </>
               ) : (
                 <>
-                  <Plus className="size-4 mr-2" />
+                  <Plus className="size-4 me-2" />
                   Create
                 </>
               )}
@@ -4935,7 +4935,7 @@ export function EmailTab({ projectId }: { projectId: string }) {
                       copyToClipboard(createdMailbox.address, 'Address copied')
                     }
                   >
-                    <Copy className="size-3 mr-1" />
+                    <Copy className="size-3 me-1" />
                     Copy
                   </Button>
                 </div>
@@ -4954,7 +4954,7 @@ export function EmailTab({ projectId }: { projectId: string }) {
                       copyToClipboard(createdMailbox.password, 'Password copied')
                     }
                   >
-                    <Copy className="size-3 mr-1" />
+                    <Copy className="size-3 me-1" />
                     Copy
                   </Button>
                 </div>
@@ -5053,12 +5053,12 @@ export function EmailTab({ projectId }: { projectId: string }) {
             >
               {pwSaving ? (
                 <>
-                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  <Loader2 className="size-4 me-2 animate-spin" />
                   Saving...
                 </>
               ) : (
                 <>
-                  <KeyRound className="size-4 mr-2" />
+                  <KeyRound className="size-4 me-2" />
                   Update Password
                 </>
               )}
@@ -5093,12 +5093,12 @@ export function EmailTab({ projectId }: { projectId: string }) {
             >
               {deleting ? (
                 <>
-                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  <Loader2 className="size-4 me-2 animate-spin" />
                   Deleting...
                 </>
               ) : (
                 <>
-                  <Trash2 className="size-4 mr-2" />
+                  <Trash2 className="size-4 me-2" />
                   Delete
                 </>
               )}
@@ -5120,7 +5120,7 @@ function StarIcon() {
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
-      className="size-3 mr-1"
+      className="size-3 me-1"
       aria-hidden="true"
     >
       <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />

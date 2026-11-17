@@ -95,7 +95,7 @@ export function TemplatesAdminPanel() {
 
   const ActionButton = ({ t, action, icon: Icon, label }: { t: Template; action: Action; icon: typeof Check; label: string }) => (
     <Button size="sm" variant="outline" onClick={() => act(t, action)} disabled={!!busy}>
-      {busy === t.id + action ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : <Icon className="mr-1.5 size-3.5" />}
+      {busy === t.id + action ? <Loader2 className="me-1.5 size-3.5 animate-spin" /> : <Icon className="me-1.5 size-3.5" />}
       {label}
     </Button>
   )
@@ -190,7 +190,7 @@ export function TemplatesAdminPanel() {
                   {t.status === 'featured' && <ActionButton t={t} action="unfeature" icon={StarOff} label="Unfeature" />}
                   {!t.isOfficial && t.status !== 'rejected' && <ActionButton t={t} action="make_official" icon={BadgeCheck} label="Mark official" />}
                   <Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={() => remove(t)} disabled={!!busy}>
-                    {busy === t.id + 'delete' ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : <Trash2 className="mr-1.5 size-3.5" />}
+                    {busy === t.id + 'delete' ? <Loader2 className="me-1.5 size-3.5 animate-spin" /> : <Trash2 className="me-1.5 size-3.5" />}
                     Delete
                   </Button>
                 </div>

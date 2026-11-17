@@ -196,6 +196,27 @@ export function leaveUserRoom(userId: string): void {
   sock.off('notification')
 }
 
+/**
+ * Live updates for one support ticket. Staff also join the staff-only room,
+ * which carries internal notes. Returns a function that leaves the rooms.
+ */
+export function joinTicketRoom(
+  ticketId: string,
+  staff: boolean,
+  handlers: { onMessage: (m: unknown) => void; onUpdated: (u: unknown) => void }
+): () => void {
+  const sock = getSocket()
+  const rooms = [staff ? `ticketstaff:${ticketId}` : `ticket:${ticketId}`]
+  for (const r of rooms) sock.emit('join-room', r)
+  sock.on('ticket:message', handlers.onMessage)
+  sock.on('ticket:updated', handlers.onUpdated)
+  return () => {
+    for (const r of rooms) sock.emit('leave-room', r)
+    sock.off('ticket:message', handlers.onMessage)
+    sock.off('ticket:updated', handlers.onUpdated)
+  }
+}
+
 export function disconnectSocket(): void {
   if (socket) {
     socket.disconnect()

@@ -57,7 +57,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
                 An unexpected error occurred. This has been logged and we&apos;re looking into it.
               </p>
               {this.state.error && (
-                <details className="text-left text-xs text-muted-foreground bg-muted/50 p-3 rounded-md">
+                <details className="text-start text-xs text-muted-foreground bg-muted/50 p-3 rounded-md">
                   <summary className="cursor-pointer font-medium mb-1">Error details</summary>
                   <pre className="whitespace-pre-wrap break-all mt-2">
                     {this.state.error.message}
@@ -70,7 +70,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
                   size="sm"
                   onClick={this.handleReset}
                 >
-                  <RefreshCw className="h-3 w-3 mr-1" />
+                  <RefreshCw className="h-3 w-3 me-1" />
                   Try Again
                 </Button>
                 <Button

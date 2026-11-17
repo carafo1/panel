@@ -398,10 +398,10 @@ export function ReportsAdminPanel() {
                 <table className="w-full text-sm">
                   <thead className="bg-muted/50 text-xs">
                     <tr>
-                      <th className="p-2 text-left">When</th>
-                      <th className="p-2 text-left">Change</th>
-                      <th className="p-2 text-left">Move</th>
-                      <th className="p-2 text-right">Pro-rated</th>
+                      <th className="p-2 text-start">When</th>
+                      <th className="p-2 text-start">Change</th>
+                      <th className="p-2 text-start">Move</th>
+                      <th className="p-2 text-end">Pro-rated</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -422,7 +422,7 @@ export function ReportsAdminPanel() {
                         <td className="p-2 text-xs">
                           {m.fromPlan || '—'} → {m.toPlan || '—'}
                         </td>
-                        <td className="p-2 text-right tabular-nums">
+                        <td className="p-2 text-end tabular-nums">
                           {money(m.prorationNet)}
                         </td>
                       </tr>
@@ -442,7 +442,7 @@ export function ReportsAdminPanel() {
               <div className="overflow-x-auto rounded-md border">
                 <table className="w-full text-sm">
                   <thead className="bg-muted/50">
-                    <tr className="text-left">
+                    <tr className="text-start">
                       <th className="p-2 font-medium">Gateway</th>
                       <th className="p-2 font-medium">Volume</th>
                       <th className="p-2 font-medium">Completed</th>
@@ -479,7 +479,7 @@ export function ReportsAdminPanel() {
               <div className="overflow-x-auto rounded-md border">
                 <table className="w-full text-sm">
                   <thead className="bg-muted/50">
-                    <tr className="text-left">
+                    <tr className="text-start">
                       <th className="p-2 font-medium">Customer</th>
                       <th className="p-2 font-medium">Lifetime value</th>
                     </tr>

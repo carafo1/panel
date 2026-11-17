@@ -119,7 +119,7 @@ export function DomainSearchWidget({
         <div className="flex flex-col sm:flex-row gap-2">
           <div className={cn('relative flex-1 rounded-xl transition-colors', isHero ? 'focus-within:bg-white/5' : '')}>
             <Globe className={cn(
-              'absolute left-3 top-1/2 -translate-y-1/2 size-5 pointer-events-none transition-colors',
+              'absolute start-3 top-1/2 -translate-y-1/2 size-5 pointer-events-none transition-colors',
               isHero ? 'text-indigo-300' : 'text-indigo-500'
             )} />
             <Input
@@ -128,7 +128,7 @@ export function DomainSearchWidget({
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={onKeyDown}
               className={cn(
-                'h-12 sm:h-14 text-base pl-11 border-0 bg-transparent shadow-none focus-visible:ring-0',
+                'h-12 sm:h-14 text-base ps-11 border-0 bg-transparent shadow-none focus-visible:ring-0',
                 isHero
                   ? 'text-white placeholder:text-indigo-200/50'
                   : 'text-foreground placeholder:text-muted-foreground'
@@ -148,7 +148,7 @@ export function DomainSearchWidget({
             )}
           >
             {loading ? <Loader2 className="size-5 animate-spin" /> : <Search className="size-5" />}
-            <span className="hidden sm:inline ml-1 font-semibold tracking-wide">Search</span>
+            <span className="hidden sm:inline ms-1 font-semibold tracking-wide">Search</span>
           </Button>
         </div>
       </div>
@@ -156,7 +156,7 @@ export function DomainSearchWidget({
       {/* Popular TLD chips */}
       {!result && !loading && !error && (
         <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
-          <span className={cn('text-xs font-medium mr-1', isHero ? 'text-indigo-200/70' : 'text-muted-foreground')}>
+          <span className={cn('text-xs font-medium me-1', isHero ? 'text-indigo-200/70' : 'text-muted-foreground')}>
             Popular:
           </span>
           {POPULAR_TLDS.map((tld) => (
@@ -211,7 +211,7 @@ export function DomainSearchWidget({
           <p className="text-sm font-semibold text-red-300">Couldn&apos;t check that domain</p>
           <p className={cn('text-xs mt-1 mb-3', isHero ? 'text-red-200/70' : 'text-muted-foreground')}>{error}</p>
           <Button variant="outline" size="sm" onClick={() => handleSearch()}>
-            <RefreshCw className="size-3.5 mr-1.5" /> Try again
+            <RefreshCw className="size-3.5 me-1.5" /> Try again
           </Button>
         </div>
       )}
@@ -240,7 +240,7 @@ export function DomainSearchWidget({
                   </h3>
                   {result.premium && (
                     <Badge className="bg-amber-500/20 text-amber-300 border-amber-400/40">
-                      <Sparkles className="size-3 mr-1" /> Premium
+                      <Sparkles className="size-3 me-1" /> Premium
                     </Badge>
                   )}
                 </div>
@@ -248,7 +248,7 @@ export function DomainSearchWidget({
                   <div className="flex items-center gap-2 text-indigo-300">
                     <CheckCircle2 className="size-4" />
                     <span className="text-sm font-semibold">Available</span>
-                    <Badge variant="outline" className={cn('ml-1 text-[10px]', isHero ? 'border-indigo-300/40 text-indigo-200' : 'border-indigo-500/30 text-indigo-600 dark:text-indigo-400')}>{result.provider}</Badge>
+                    <Badge variant="outline" className={cn('ms-1 text-[10px]', isHero ? 'border-indigo-300/40 text-indigo-200' : 'border-indigo-500/30 text-indigo-600 dark:text-indigo-400')}>{result.provider}</Badge>
                   </div>
                 ) : (
                   <div className="flex items-center gap-2 text-red-300">
@@ -258,7 +258,7 @@ export function DomainSearchWidget({
                 )}
               </div>
               {result.available && result.registrationPrice != null && (
-                <div className="text-right shrink-0">
+                <div className="text-end shrink-0">
                   <div className={cn(
                     'text-3xl sm:text-4xl font-extrabold leading-none',
                     isHero ? 'text-gradient-brand' : 'text-indigo-600 dark:text-indigo-400'
@@ -310,9 +310,9 @@ export function DomainSearchWidget({
                     onClick={onGetStarted}
                     className="btn-shimmer flex-1 bg-gradient-to-r from-indigo-500 to-indigo-400 hover:from-indigo-600 hover:to-indigo-500 text-white border-0 h-12 shadow-glow-indigo hover:shadow-glow-indigo-lg hover:scale-[1.01] active:scale-95 transition-all duration-300"
                   >
-                    <ShoppingBag className="size-4 mr-2" />
+                    <ShoppingBag className="size-4 me-2" />
                     Register This Domain
-                    <ArrowRight className="size-4 ml-2" />
+                    <ArrowRight className="size-4 ms-2" />
                   </Button>
                   <Button
                     variant="outline"
@@ -322,7 +322,7 @@ export function DomainSearchWidget({
                       isHero && 'bg-white/10 border-white/20 text-white hover:bg-white/20 hover:text-white hover:border-white/30'
                     )}
                   >
-                    <RefreshCw className="size-4 mr-2" />
+                    <RefreshCw className="size-4 me-2" />
                     New Search
                   </Button>
                 </div>
@@ -339,7 +339,7 @@ export function DomainSearchWidget({
                     isHero && 'bg-white/10 border-white/20 text-white hover:bg-white/20 hover:text-white hover:border-white/30'
                   )}
                 >
-                  <RefreshCw className="size-4 mr-2" />
+                  <RefreshCw className="size-4 me-2" />
                   Search Another Domain
                 </Button>
               </div>
@@ -363,7 +363,7 @@ export function DomainSearchWidget({
                     key={s.domain}
                     onClick={() => handleSearch(s.domain)}
                     className={cn(
-                      'flex items-center justify-between rounded-xl border p-3 text-left transition-all duration-200 hover:shadow-md hover:scale-[1.01] active:scale-95',
+                      'flex items-center justify-between rounded-xl border p-3 text-start transition-all duration-200 hover:shadow-md hover:scale-[1.01] active:scale-95',
                       s.available
                         ? isHero
                           ? 'border-indigo-300/30 bg-white/5 hover:border-indigo-300/60 hover:bg-indigo-500/20 hover:shadow-glow-indigo'
@@ -386,7 +386,7 @@ export function DomainSearchWidget({
                     </div>
                     {s.available && (
                       <span className={cn(
-                        'text-sm font-mono font-semibold shrink-0 ml-2',
+                        'text-sm font-mono font-semibold shrink-0 ms-2',
                         isHero ? 'text-indigo-200' : 'text-indigo-600 dark:text-indigo-400'
                       )}>
                         ${s.registrationPrice}

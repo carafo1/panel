@@ -283,13 +283,13 @@ function AddMonitorDialog({
           <div className="space-y-2">
             <Label htmlFor="monitor-url">URL to monitor</Label>
             <div className="relative">
-              <Globe className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+              <Globe className="absolute start-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
               <Input
                 id="monitor-url"
                 placeholder="https://myapp.apsamo.com"
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
-                className="pl-9"
+                className="ps-9"
                 autoComplete="url"
               />
             </div>
@@ -339,12 +339,12 @@ function AddMonitorDialog({
           >
             {submitting ? (
               <>
-                <Loader2 className="size-4 animate-spin mr-2" />
+                <Loader2 className="size-4 animate-spin me-2" />
                 Creating…
               </>
             ) : (
               <>
-                <Plus className="size-4 mr-2" />
+                <Plus className="size-4 me-2" />
                 Create Monitor
               </>
             )}
@@ -407,7 +407,7 @@ function ResponseTimeGraph({ checks }: { checks: CheckRecord[] }) {
     <div className="space-y-1">
       <div className="flex items-end gap-1">
         <div
-          className="flex flex-col justify-between text-[10px] text-muted-foreground font-mono w-10 text-right pr-1"
+          className="flex flex-col justify-between text-[10px] text-muted-foreground font-mono w-10 text-end pe-1"
           style={{ height: chartHeight }}
         >
           <span>{maxTime}ms</span>
@@ -499,7 +499,7 @@ function MonitorDetailDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 pr-6">
+          <DialogTitle className="flex items-center gap-2 pe-6">
             <span className={`size-2.5 rounded-full ${meta.dot} animate-pulse`} />
             <span className="truncate">{monitor.url}</span>
           </DialogTitle>
@@ -507,7 +507,7 @@ function MonitorDetailDialog({
             <span>{monitor.project.name}</span>
             <span>·</span>
             <Badge variant="outline" className={meta.badge}>
-              <StatusIcon className="size-3 mr-1" />
+              <StatusIcon className="size-3 me-1" />
               {meta.label}
             </Badge>
             <span>·</span>
@@ -556,8 +556,8 @@ function MonitorDetailDialog({
           </Button>
         </div>
 
-        <ScrollArea className="flex-1 pr-2 -mr-2">
-          <div className="space-y-4 pr-2">
+        <ScrollArea className="flex-1 pe-2 -me-2">
+          <div className="space-y-4 pe-2">
             {/* Stats grid */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <Card className="p-3">
@@ -700,7 +700,7 @@ function MonitorDetailDialog({
             }}
             className="bg-indigo-600 hover:bg-indigo-700"
           >
-            <RefreshCw className="size-4 mr-2" />
+            <RefreshCw className="size-4 me-2" />
             Refresh
           </Button>
         </DialogFooter>
@@ -747,7 +747,7 @@ function MonitorCard({
                 <span className="truncate">{monitor.url}</span>
               </CardTitle>
               <Badge variant="outline" className={`text-[10px] py-0 ${meta.badge}`}>
-                <StatusIcon className="size-2.5 mr-1" />
+                <StatusIcon className="size-2.5 me-1" />
                 {meta.label}
               </Badge>
             </div>
@@ -962,9 +962,9 @@ export default function UptimePanel() {
             disabled={running || total === 0}
           >
             {running ? (
-              <Loader2 className="size-4 animate-spin mr-2" />
+              <Loader2 className="size-4 animate-spin me-2" />
             ) : (
-              <RefreshCw className="size-4 mr-2" />
+              <RefreshCw className="size-4 me-2" />
             )}
             Run checks
           </Button>
@@ -973,7 +973,7 @@ export default function UptimePanel() {
             size="sm"
             className="bg-indigo-600 hover:bg-indigo-700"
           >
-            <Plus className="size-4 mr-2" />
+            <Plus className="size-4 me-2" />
             Add Monitor
           </Button>
         </div>
@@ -1068,7 +1068,7 @@ export default function UptimePanel() {
               onClick={() => setAddOpen(true)}
               className="bg-indigo-600 hover:bg-indigo-700"
             >
-              <Plus className="size-4 mr-2" />
+              <Plus className="size-4 me-2" />
               Add your first monitor
             </Button>
           )}
@@ -1145,9 +1145,9 @@ export default function UptimePanel() {
               className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
             >
               {deleting ? (
-                <Loader2 className="size-4 animate-spin mr-2" />
+                <Loader2 className="size-4 animate-spin me-2" />
               ) : (
-                <Trash2 className="size-4 mr-2" />
+                <Trash2 className="size-4 me-2" />
               )}
               Delete
             </AlertDialogAction>
