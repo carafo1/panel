@@ -60,6 +60,8 @@ import {
   Ban,
   LayoutDashboard,
   Users,
+  Wrench,
+  TerminalSquare,
 } from 'lucide-react'
 import {
   Card,
@@ -131,6 +133,8 @@ import {
   DomainsTab,
   EmailTab,
 } from '@/components/hosting/website-management-tabs'
+import { WordPressTab } from '@/components/hosting/wordpress-tab'
+import { AppToolsTab } from '@/components/hosting/app-tools-tab'
 import {
   CronTab,
   FtpTab,
@@ -163,6 +167,26 @@ const PROJECT_SUBTABS: { id: string; label: string; icon: React.ElementType }[] 
   { id: 'resources', label: 'Resources', icon: Activity },
 ]
 
+/** Stack-specific management, shown right after Overview for matching sites. */
+function siteKind(p: { deploymentMethod?: string | null; stack?: string | null; framework?: string | null }): 'wordpress' | 'apptools' | null {
+  if (p.deploymentMethod === 'wordpress' || p.stack === 'wordpress' || p.framework === 'wordpress') return 'wordpress'
+  const m = p.deploymentMethod || ''
+  if (['laravel', 'nodejs', 'python', 'php'].includes(m)) return 'apptools'
+  if (['nodejs', 'python', 'php'].includes(p.stack || '')) return 'apptools'
+  if (['laravel', 'django', 'flask', 'fastapi'].includes(p.framework || '')) return 'apptools'
+  return null
+}
+
+function subtabsFor(p: Parameters<typeof siteKind>[0]) {
+  const kind = siteKind(p)
+  if (!kind) return PROJECT_SUBTABS
+  const extra =
+    kind === 'wordpress'
+      ? { id: 'wordpress', label: 'WordPress', icon: Wrench }
+      : { id: 'apptools', label: 'App tools', icon: TerminalSquare }
+  return [PROJECT_SUBTABS[0], extra, ...PROJECT_SUBTABS.slice(1)]
+}
+
 // Types
 interface Project {
   id: string
@@ -170,6 +194,8 @@ interface Project {
   slug: string
   description?: string
   framework: string
+  stack?: string | null
+  deploymentMethod?: string | null
   status: string
   subdomain: string
   customDomain?: string
@@ -1753,7 +1779,7 @@ function ProjectDetailView({
           Deployments without scrolling through the whole page. */}
       <div className="sticky top-0 z-20 -mx-1 px-1 py-2 bg-background/95 backdrop-blur border-b">
         <div className="flex items-center gap-1 overflow-x-auto pb-1 [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/20">
-          {PROJECT_SUBTABS.map((tab) => {
+          {subtabsFor(project).map((tab) => {
             const Icon = tab.icon
             const isActive = activeSection === tab.id
             return (
@@ -2955,6 +2981,12 @@ function ProjectDetailView({
             spam policy, quarantine and activity logs. */}
         <EmailManagement projectId={project.id} />
       </section>
+      {siteKind(project) === 'wordpress' && (
+        <section id="wordpress" className="scroll-mt-32"><WordPressTab projectId={project.id} /></section>
+      )}
+      {siteKind(project) === 'apptools' && (
+        <section id="apptools" className="scroll-mt-32"><AppToolsTab projectId={project.id} /></section>
+      )}
       <section id="backups" className="scroll-mt-32"><BackupsTab projectId={project.id} /></section>
       {/* Importing into an existing website replaces its files and database,
           so it lives beside Backups rather than in the creation flow — the

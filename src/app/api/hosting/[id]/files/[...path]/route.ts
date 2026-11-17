@@ -1,6 +1,14 @@
 import { NextResponse } from 'next/server'
 import { authenticateRequest } from '@/lib/auth'
 import { requireProjectAccess } from '@/lib/project-access'
+import { PathError } from '@/lib/vps/files'
+
+/** A refused path is the caller's mistake (400); anything else is ours (500). */
+function fileError(error: unknown, label: string) {
+  if (error instanceof PathError) return NextResponse.json({ error: error.message }, { status: 400 })
+  console.error(label, error)
+  return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+}
 import {
   downloadFile,
   getFileContent,
@@ -43,8 +51,10 @@ export async function GET(
         const result = await getFileContent(projectId, filePath)
         return NextResponse.json(result)
       } catch (err) {
-        const msg = 'Invalid request'
-        return NextResponse.json({ error: msg }, { status: 400 })
+        return NextResponse.json(
+          { error: err instanceof PathError ? err.message : 'Invalid request' },
+          { status: 400 }
+        )
       }
     }
 
@@ -60,12 +70,13 @@ export async function GET(
         },
       })
     } catch (err) {
-      const msg = 'Invalid request'
-      return NextResponse.json({ error: msg }, { status: 400 })
+      return NextResponse.json(
+        { error: err instanceof PathError ? err.message : 'Invalid request' },
+        { status: 400 }
+      )
     }
   } catch (error) {
-    console.error('Get file error:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return fileError(error, 'Get file error:')
   }
 }
 
@@ -90,12 +101,13 @@ export async function PUT(
       const result = await saveFileContent(projectId, filePath, body.content)
       return NextResponse.json(result)
     } catch (err) {
-      const msg = 'Invalid request'
-      return NextResponse.json({ error: msg }, { status: 400 })
+      return NextResponse.json(
+        { error: err instanceof PathError ? err.message : 'Invalid request' },
+        { status: 400 }
+      )
     }
   } catch (error) {
-    console.error('Save file error:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return fileError(error, 'Save file error:')
   }
 }
 
@@ -116,12 +128,13 @@ export async function DELETE(
       const result = await deleteFile(projectId, filePath)
       return NextResponse.json(result)
     } catch (err) {
-      const msg = 'Invalid request'
-      return NextResponse.json({ error: msg }, { status: 400 })
+      return NextResponse.json(
+        { error: err instanceof PathError ? err.message : 'Invalid request' },
+        { status: 400 }
+      )
     }
   } catch (error) {
-    console.error('Delete file error:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return fileError(error, 'Delete file error:')
   }
 }
 
@@ -144,8 +157,10 @@ export async function POST(
         const result = await renameFile(projectId, filePath, body.newPath)
         return NextResponse.json(result)
       } catch (err) {
-        const msg = 'Invalid request'
-        return NextResponse.json({ error: msg }, { status: 400 })
+        return NextResponse.json(
+          { error: err instanceof PathError ? err.message : 'Invalid request' },
+          { status: 400 }
+        )
       }
     }
     if (body.action === 'mkdir' && typeof body.newPath === 'string') {
@@ -154,8 +169,10 @@ export async function POST(
         const result = await createDirectory(projectId, body.newPath)
         return NextResponse.json(result, { status: 201 })
       } catch (err) {
-        const msg = 'Invalid request'
-        return NextResponse.json({ error: msg }, { status: 400 })
+        return NextResponse.json(
+          { error: err instanceof PathError ? err.message : 'Invalid request' },
+          { status: 400 }
+        )
       }
     }
     return NextResponse.json(
@@ -163,7 +180,6 @@ export async function POST(
       { status: 400 }
     )
   } catch (error) {
-    console.error('File action error:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return fileError(error, 'File action error:')
   }
 }

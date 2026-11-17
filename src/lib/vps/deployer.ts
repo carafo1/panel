@@ -961,7 +961,15 @@ async function deployMethodProject(
             adminPass = ''
           }
         }
-        if (!adminPass) adminPass = 'changeme123!'
+        // SECURITY: never fall back to a fixed password — every site created
+        // without one would share it. Generate one and keep it (encrypted) so
+        // the owner can reset or reveal it from the WordPress tab.
+        if (!adminPass) {
+          const { randomBytes } = await import('crypto')
+          adminPass = randomBytes(18).toString('base64url')
+          await db.project.update({ where: { id: projectId }, data: { wpAdminPassword: encrypt(adminPass) } })
+          stageLog('No admin password was chosen — generated a random one (see the WordPress tab).')
+        }
         // Re-fetch the DB credentials from the Project row. The in-memory
         // `project` object was loaded BEFORE provision_database ran, so its
         // database* fields are still null here — reading them directly used to
@@ -1014,9 +1022,17 @@ require_once ABSPATH . 'wp-settings.php';
         await putFile(client, `${deployPath}/wp-config-docker.php`, cfg, { mode: 0o644 })
         // Run wp core install via the wp-cli container.
         const url = `https://${project.customDomain || project.subdomain}`
-        const wpCmd = `docker run --rm --network deployhub -v ${shellQuote(deployPath)}:/var/www/html wordpress:cli sh -c 'wp core install --path=/var/www/html --url=${shellQuote(url)} --title=${shellQuote(project.name)} --admin_user=${shellQuote(adminUser)} --admin_password=${shellQuote(adminPass)} --admin_email=${shellQuote(adminEmail)} --skip-email 2>&1 || true'`
-        const r = await exec(client, wpCmd, { timeoutMs: 120000 })
-        stageLog(r.stdout.slice(-800))
+        // --user 33:33: the apache image serves files as www-data (uid 33); the
+        // cli image defaults to uid 82, which would leave files Apache can't write.
+        const wpCmd = `docker run --rm --network deployhub --user 33:33 -v ${shellQuote(deployPath)}:/var/www/html wordpress:cli wp core install --path=/var/www/html --url=${shellQuote(url)} --title=${shellQuote(project.name)} --admin_user=${shellQuote(adminUser)} --admin_password=${shellQuote(adminPass)} --admin_email=${shellQuote(adminEmail)} --skip-email`
+        const r = await exec(client, `${wpCmd} 2>&1`, { timeoutMs: 120000 })
+        stageLog(r.stdout.split(adminPass).join('***').slice(-800))
+        // SECURITY: a failed install leaves WordPress at its setup screen, where
+        // the first visitor can claim the site. Fail the deployment instead of
+        // reporting success. ("already installed" on a redeploy is fine.)
+        if (r.exitCode !== 0 && !/already installed/i.test(r.stdout)) {
+          throw new Error('WordPress install failed — see the log above. Redeploy once the cause is fixed.')
+        }
       })
     })
   } else if (methodId === 'laravel') {

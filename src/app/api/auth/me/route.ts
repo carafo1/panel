@@ -47,8 +47,20 @@ export async function GET(request: Request) {
       )
     }
 
+    // Support access: a super admin is viewing as this customer. The UI shows
+    // a banner with "Return to admin" for as long as this is set.
+    let supportSession: { adminEmail: string | null } | null = null
+    if (decoded.impersonatedBy) {
+      const admin = await db.user.findUnique({
+        where: { id: decoded.impersonatedBy },
+        select: { email: true },
+      })
+      supportSession = { adminEmail: admin?.email ?? null }
+    }
+
     return NextResponse.json({
       user: {
+        supportSession,
         id: user.id,
         name: user.name,
         email: user.email,

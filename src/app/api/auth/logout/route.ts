@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { verifyTokenFresh, extractTokenFromHeader, sessionIdOf, revokeSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
-import { clearSession } from '@/lib/session'
+import { clearSession, clearSupportReturn } from '@/lib/session'
 
 /**
  * POST /api/auth/logout
@@ -28,7 +28,8 @@ export async function POST(request: Request) {
       })
     }
 
-    return clearSession(NextResponse.json({ message: 'Logged out successfully' }))
+    // Also forget a remembered admin login from support access.
+    return clearSupportReturn(clearSession(NextResponse.json({ message: 'Logged out successfully' })))
   } catch (error) {
     console.error('Logout error:', error)
     // Still end the browser session even if the server-side step failed.

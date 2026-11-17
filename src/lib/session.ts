@@ -147,3 +147,34 @@ export function clearSession<R extends Response>(res: R): R {
   res.headers.append('Set-Cookie', sessionClearCookie())
   return res
 }
+
+/* ── Support access ─────────────────────────────────────────────────────────
+ * While a super admin views the panel as a customer, the session cookie holds
+ * the 1-hour support session and the admin's own login waits in this second
+ * httpOnly cookie, so "Return to admin" can restore it without a password.
+ * It is only ever read back by /api/auth/support/end, which re-verifies it.
+ */
+export function supportReturnCookieName(): string {
+  return isProd() ? '__Host-apsamo_support_return' : 'apsamo_support_return'
+}
+
+export function readSupportReturnCookie(cookieHeader: string | null): string | null {
+  if (!cookieHeader) return null
+  const name = supportReturnCookieName()
+  for (const part of cookieHeader.split(';')) {
+    const eq = part.indexOf('=')
+    if (eq !== -1 && part.slice(0, eq).trim() === name) return part.slice(eq + 1).trim() || null
+  }
+  return null
+}
+
+/** Remember the admin's own session while they use support access (≤ 1 hour). */
+export function attachSupportReturn<R extends Response>(res: R, adminToken: string): R {
+  res.headers.append('Set-Cookie', `${supportReturnCookieName()}=${adminToken}; ${cookieAttributes(60 * 60)}`)
+  return res
+}
+
+export function clearSupportReturn<R extends Response>(res: R): R {
+  res.headers.append('Set-Cookie', `${supportReturnCookieName()}=; ${cookieAttributes(0)}`)
+  return res
+}

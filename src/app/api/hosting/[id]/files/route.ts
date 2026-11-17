@@ -1,6 +1,14 @@
 import { NextResponse } from 'next/server'
 import { authenticateRequest } from '@/lib/auth'
 import { requireProjectAccess } from '@/lib/project-access'
+import { PathError } from '@/lib/vps/files'
+
+/** A refused path is the caller's mistake (400); anything else is ours (500). */
+function fileError(error: unknown, label: string) {
+  if (error instanceof PathError) return NextResponse.json({ error: error.message }, { status: 400 })
+  console.error(label, error)
+  return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+}
 import {
   listFiles,
   uploadFile,
@@ -69,8 +77,10 @@ export async function GET(
     try {
       files = await listFiles(projectId, subdir)
     } catch (err) {
-      const msg = 'Invalid request'
-      return NextResponse.json({ error: msg }, { status: 400 })
+      return NextResponse.json(
+        { error: err instanceof PathError ? err.message : 'Invalid request' },
+        { status: 400 }
+      )
     }
     const currentPath = subdir === '.' ? '' : subdir
     const parentPath =
@@ -91,8 +101,7 @@ export async function GET(
       { headers: { 'Cache-Control': 'no-store, max-age=0' } }
     )
   } catch (error) {
-    console.error('List files error:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return fileError(error, 'List files error:')
   }
 }
 
@@ -167,8 +176,6 @@ export async function POST(
       { status: 400 }
     )
   } catch (error) {
-    const msg = 'Internal server error'
-    console.error('Upload file error:', error)
-    return NextResponse.json({ error: msg }, { status: 500 })
+    return fileError(error, 'Upload file error:')
   }
 }

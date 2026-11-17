@@ -43,6 +43,14 @@ If you discover a security vulnerability in Apsamo Panel, please report it respo
   "Sign out all devices" ends every earlier login (`User.sessionsRevokedAt`
   also covers tokens issued before sessions were tracked). Support access
   (impersonation) is a visible, revocable 1-hour session.
+- Support access ("Log in as customer", super admins only, never on admins):
+  the admin's own login waits in a separate httpOnly cookie, a banner shows on
+  every page while it is active, and "Return to admin" restores the admin only
+  if that remembered login is still a valid super-admin session belonging to
+  the admin who started it. Every action is audited with `impersonatedBy`.
+- WordPress and App tools run only a fixed catalogue of WP-CLI / framework
+  commands; customer-supplied names (plugin/theme slugs, usernames) are
+  pattern-validated and shell-quoted, and permissions are checked per action.
 - Password-reset links are single-use, expire after 1 hour, are stored only
   as a SHA-256 hash in their own fields (`passwordResetTokenHash`), and are
   never logged; email-verification tokens cannot reset a password. A reset
