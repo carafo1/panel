@@ -3,8 +3,11 @@
 
 version: 2
 updates:
-  # Bun/npm dependencies
-  - package-ecosystem: "npm"
+  # JavaScript dependencies. CI and the installer use Bun, and CI installs with
+  # `bun install --frozen-lockfile`, so updates must rewrite bun.lock. The
+  # "npm" ecosystem only rewrote package-lock.json, which left bun.lock stale
+  # and failed every Dependabot merge at the install step.
+  - package-ecosystem: "bun"
     directory: "/"
     schedule:
       interval: "weekly"
