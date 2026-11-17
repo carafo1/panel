@@ -60,6 +60,7 @@ import SupportPanel from '@/components/support/support-panel'
 import { IncidentsAdminPanel } from '@/components/admin/incidents-admin-panel'
 import { HelpAdminPanel } from '@/components/admin/help-admin-panel'
 import { CloudflareAdminCard } from '@/components/admin/cloudflare-admin-card'
+import { DynadotAdminCard } from '@/components/admin/dynadot-admin-card'
 import { ReferralsAdminCard } from '@/components/admin/referrals-admin-card'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/store/auth-store'
@@ -832,6 +833,7 @@ export function AdminPanel() {
         <TabsContent value="servers">
           <div className="space-y-4">
             <ServersPanel />
+            <DynadotAdminCard />
             <CloudflareAdminCard />
           </div>
         </TabsContent>

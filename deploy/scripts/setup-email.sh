@@ -284,6 +284,40 @@ $MAIL_HOSTNAME
 UTC
 EOF
 
+    # Caddy already owns ports 80/443 on this server and serves every website.
+    # Mailcow's web UI must listen on localhost only, behind Caddy, and must
+    # not run its own Let's Encrypt client (Caddy issues the certificate and
+    # sync-mail-cert.sh copies it into Mailcow for SMTP/IMAP).
+    set_mc() {
+      if grep -qE "^$1=" mailcow.conf; then sed -i "s|^$1=.*|$1=$2|" mailcow.conf; else echo "$1=$2" >> mailcow.conf; fi
+    }
+    set_mc HTTP_PORT 8080
+    set_mc HTTP_BIND 127.0.0.1
+    set_mc HTTPS_PORT 8443
+    set_mc HTTPS_BIND 127.0.0.1
+    set_mc HTTP_REDIRECT n
+    set_mc SKIP_LETS_ENCRYPT y
+    ok "Mailcow web UI bound to 127.0.0.1:8080 (served publicly by Caddy)"
+
+    # Caddy site for the mail hostname (webmail + admin). Validated before it is
+    # used; on any error the previous Caddyfile is restored.
+    if ! grep -qE "^\s*${MAIL_HOSTNAME//./\\.}\s*\{" /etc/caddy/Caddyfile 2>/dev/null; then
+      cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.before-mailcow
+      cat >> /etc/caddy/Caddyfile <<CADDY
+
+# ─── Mailcow webmail / admin (added by setup-email.sh) ────────────────
+${MAIL_HOSTNAME} {
+    reverse_proxy 127.0.0.1:8080
+}
+CADDY
+      if caddy validate --config /etc/caddy/Caddyfile >/dev/null 2>&1; then
+        systemctl reload caddy && ok "Caddy now serves https://${MAIL_HOSTNAME}"
+      else
+        cp /etc/caddy/Caddyfile.before-mailcow /etc/caddy/Caddyfile
+        warn "Caddy rejected the mail site; the previous Caddyfile was restored."
+      fi
+    fi
+
     # Start Mailcow
     echo "  Starting Mailcow containers (~2 minutes)..."
     docker compose up -d
@@ -321,6 +355,16 @@ EOF
     env_set "MAIL_SERVER_HOSTNAME" "$MAIL_HOSTNAME"
 
     ok "Mailcow configured: https://$MAIL_HOSTNAME"
+
+    # SMTP/IMAP use the certificate Caddy obtained for $MAIL_HOSTNAME.
+    SYNC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/sync-mail-cert.sh"
+    if [[ -f "$SYNC" ]]; then
+      curl -s -o /dev/null "https://$MAIL_HOSTNAME" || true   # makes Caddy request the certificate
+      sleep 15
+      MAIL_CERT_DOMAIN="$MAIL_HOSTNAME" bash "$SYNC" || warn "Certificate not copied yet; cron will retry."
+      ( crontab -l 2>/dev/null | grep -v 'sync-mail-cert.sh'; echo "17 */6 * * * MAIL_CERT_DOMAIN=$MAIL_HOSTNAME bash $SYNC >> /var/log/apsamo-mail-cert.log 2>&1" ) | crontab -
+      ok "Mail certificate sync scheduled every 6 hours"
+    fi
 
   elif [[ "$INSTALL_MAILCOW" == "skip" ]]; then
     # ── Just reconfigure existing Mailcow ─────────────────────────────
