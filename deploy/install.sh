@@ -513,13 +513,15 @@ cat > /etc/caddy/Caddyfile <<EOF
 $PANEL_DOMAIN, $SERVER_HOSTNAME, www.$SERVER_HOSTNAME {
     encode gzip zstd
 
-    # Realtime (Socket.IO) — routed via XTransformPort query param
+    # Realtime (Socket.IO). Clients still send ?XTransformPort=3003, so the
+    # matcher keeps accepting it, but the upstream port is FIXED: proxying to
+    # {query.XTransformPort} let anyone reach any localhost service.
     @realtime {
         query XTransformPort=*
         path /socket.io/*
     }
     handle @realtime {
-        reverse_proxy localhost:{query.XTransformPort} {
+        reverse_proxy localhost:3003 {
             header_up Host {host}
             header_up X-Forwarded-For {remote_host}
             header_up X-Forwarded-Proto {scheme}

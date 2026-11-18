@@ -53,13 +53,13 @@ YOUR_DOMAIN, www.YOUR_DOMAIN {
         Access-Control-Allow-Headers "Authorization, Content-Type, X-Cron-Key"
     }
 
-    # Realtime (Socket.IO) — routed via XTransformPort query param
+    # Realtime (Socket.IO). Clients send ?XTransformPort=3003; the port is fixed here, never taken from the query.
     @realtime {
         query XTransformPort=*
         path /socket.io/*
     }
     handle @realtime {
-        reverse_proxy localhost:{query.XTransformPort} {
+        reverse_proxy localhost:3003 {
             header_up Host {host}
             header_up X-Forwarded-For {remote_host}
             header_up X-Forwarded-Proto {scheme}

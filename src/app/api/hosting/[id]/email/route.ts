@@ -9,6 +9,7 @@ import {
   createMailbox as mailcowCreateMailbox,
   generateDkim as mailcowGenerateDkim,
 } from '@/lib/mailcow'
+import { mailDomainNames, decideMailboxDomain } from '@/lib/mailcow-tenant'
 
 /**
  * Project Email Mailboxes Endpoint (collection)
@@ -19,11 +20,12 @@ import {
  *   POST /api/hosting/[id]/email            — create a new mailbox.
  *            body: { localPart, domainName, password, quota? }
  *
- * Mailboxes are stored against the `Domain` model (a project's domains are
- * `project.customDomain` plus all `WebsiteDomain` rows). When the requested
- * domain doesn't yet exist in the Domain table, we create it on the fly
- * (status='active', emailHosted=true, projectId=project.id) so the mailbox
- * can be linked immediately.
+ * Mailboxes are stored against the `Domain` model (a project's mail domains
+ * are `project.customDomain` plus its VERIFIED `WebsiteDomain` rows). The
+ * requested domain must be one of those. An existing Domain row must already
+ * belong to the project owner; a new row is only created for a verified
+ * WebsiteDomain (status='active', emailHosted=true, projectId=project.id).
+ * See decideMailboxDomain in lib/mailcow-tenant.
  *
  * The plaintext password is only sent to Mailcow itself; at-rest storage is
  * always AES-256-GCM encrypted via `encrypt()`.
@@ -59,32 +61,31 @@ function isValidDomain(domain: string): boolean {
 }
 
 /**
- * Collect every domain name that belongs to this project: the project's
- * customDomain (legacy primary), its apsamo.app subdomain, and every
- * WebsiteDomain row. We dedupe and lowercase.
+ * The project's mail domains: its customDomain plus every VERIFIED
+ * WebsiteDomain (the same set lib/mailcow-tenant uses for every other mail
+ * route). Unverified WebsiteDomains are only claims and are excluded.
  */
-async function collectProjectDomainNames(
-  projectId: string,
-  includeSubdomain = false
-): Promise<string[]> {
+async function loadProjectMailDomains(
+  projectId: string
+): Promise<{ allowed: string[]; verifiedWebsiteDomains: string[] }> {
   const project = await db.project.findUnique({
     where: { id: projectId },
-    select: { customDomain: true, subdomain: true },
+    select: { customDomain: true },
   })
-  if (!project) return []
+  if (!project) return { allowed: [], verifiedWebsiteDomains: [] }
 
   const websiteDomains = await db.websiteDomain.findMany({
-    where: { projectId },
-    select: { domain: true },
+    where: { projectId, verified: true },
+    select: { domain: true, verified: true },
   })
-
-  const names = new Set<string>()
-  if (project.customDomain) names.add(normaliseDomain(project.customDomain))
-  if (includeSubdomain && project.subdomain) names.add(normaliseDomain(project.subdomain))
-  for (const r of websiteDomains) {
-    if (r.domain) names.add(normaliseDomain(r.domain))
+  return {
+    allowed: mailDomainNames({ customDomain: project.customDomain, websiteDomains }),
+    verifiedWebsiteDomains: websiteDomains.map((r) => normaliseDomain(r.domain)).filter(Boolean),
   }
-  return Array.from(names)
+}
+
+async function collectProjectDomainNames(projectId: string): Promise<string[]> {
+  return (await loadProjectMailDomains(projectId)).allowed
 }
 
 export async function GET(
@@ -198,33 +199,73 @@ export async function POST(
       )
     }
 
-    // Find-or-create the Domain row owned by the PROJECT OWNER (a team member
-    // adding a mailbox must not end up owning the domain). The domain must be one
-    // the user manages — we accept either an existing Domain row, or a name
-    // that matches one of the project's domains (customDomain or a
-    // WebsiteDomain row), creating a fresh Domain row on the fly when needed.
-    const projectDomainNames = await collectProjectDomainNames(projectId)
-    const belongsToProject = projectDomainNames.includes(domainName)
-    const domainRow = await db.domain.upsert({
+    // SECURITY: decide ownership BEFORE any write. The domain must be one of
+    // this project's verified domains (customDomain or a verified
+    // WebsiteDomain); an existing Domain row must already belong to the
+    // project owner (a team member adding a mailbox must not end up owning
+    // it) and is never re-assigned. The old upsert accepted any name
+    // (another tenant's domain, gmail.com) and moved another user's Domain
+    // row onto this project before its ownership check ran.
+    const { allowed, verifiedWebsiteDomains } = await loadProjectMailDomains(projectId)
+    const existingDomain = await db.domain.findFirst({
       where: { name: domainName },
-      update: belongsToProject
-        ? { projectId, emailHosted: true, status: 'active' }
-        : {},
-      create: {
-        name: domainName,
-        userId: access.ownerId,
-        projectId: belongsToProject ? projectId : null,
-        status: 'active',
-        emailHosted: true,
+      select: {
+        id: true,
+        userId: true,
+        projectId: true,
+        status: true,
+        verification: { select: { verified: true } },
       },
     })
+    const decision = decideMailboxDomain({
+      domainName,
+      allowedDomains: allowed,
+      verifiedWebsiteDomains,
+      existing: existingDomain
+        ? {
+            id: existingDomain.id,
+            userId: existingDomain.userId,
+            projectId: existingDomain.projectId,
+            status: existingDomain.status,
+            verified: existingDomain.verification?.verified ?? null,
+          }
+        : null,
+      ownerId: access.ownerId,
+      projectId,
+    })
+    if (!decision.ok) {
+      return NextResponse.json({ error: decision.error }, { status: decision.status })
+    }
 
-    // Ownership guard — the Domain row must belong to the project's owner.
-    if (domainRow.userId !== access.ownerId) {
-      return NextResponse.json(
-        { error: 'You do not own this domain.' },
-        { status: 403 }
-      )
+    let domainRow: { id: string }
+    if (decision.action === 'reuse') {
+      domainRow = await db.domain.update({
+        where: { id: decision.domainId },
+        data: { emailHosted: true, ...(decision.linkProject ? { projectId } : {}) },
+        select: { id: true },
+      })
+    } else {
+      try {
+        domainRow = await db.domain.create({
+          data: {
+            name: domainName,
+            userId: access.ownerId,
+            projectId,
+            status: 'active',
+            emailHosted: true,
+          },
+          select: { id: true },
+        })
+      } catch (err) {
+        // Unique-name race: someone created the row between our read and now.
+        if ((err as { code?: string })?.code === 'P2002') {
+          return NextResponse.json(
+            { error: 'This domain was just added elsewhere. Please retry.' },
+            { status: 409 }
+          )
+        }
+        throw err
+      }
     }
 
     // Provision the domain in Mailcow (idempotent — re-adding an existing

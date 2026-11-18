@@ -75,6 +75,18 @@ interface DynadotResponse {
     ContactId?: string | number
     [k: string]: unknown
   }
+  SetDnsResponse?: {
+    ResponseCode?: string | number
+    Status?: string
+    Error?: string
+    [k: string]: unknown
+  }
+  GetDnsResponse?: {
+    ResponseCode?: string | number
+    Status?: string
+    Error?: string
+    [k: string]: unknown
+  }
   [k: string]: unknown
 }
 
@@ -118,6 +130,10 @@ async function callDynadot(params: Record<string, string>): Promise<DynadotRespo
     json.GetNsResponse,
     json.ListDomainInfoResponse,
     json.CreateContactResponse,
+    // DNS commands: set_dns2 answers under SetDnsResponse, get_dns under
+    // GetDnsResponse. Without these a failed DNS write looked like a non-error.
+    json.SetDnsResponse,
+    json.GetDnsResponse,
   ].filter(Boolean) as Array<Record<string, unknown>>
   for (const env of envelopes) {
     if (env.Status === 'error' || env.ResponseCode === '-1' || env.ResponseCode === -1) {
@@ -612,43 +628,538 @@ export async function getDomainInfo(domain: string): Promise<DomainInfo> {
 
 // ─── DNS records ───────────────────────────────────────────────────────────────
 
-interface DnsRecordInput {
-  type: string // A, AAAA, CNAME, MX, TXT, etc.
-  name: string // subdomain or @
+//
+// Dynadot's `set_dns2` REPLACES the whole zone unless
+// `add_dns_to_current_setting=1` is sent. The previous implementation never
+// sent it, pushed at most four apex records (dropping every record name), and
+// invented `A @ 127.0.0.1` when the list was empty — so adding or deleting one
+// record wiped the customer's zone. The rules now are:
+//
+//   ADD             append with add_dns_to_current_setting=1, sending only the
+//                   new records (records already present are skipped).
+//   DELETE/UPDATE   read the live zone with get_dns, change only the targeted
+//                   record, and write back EVERY remaining record — including
+//                   ones the panel never knew about.
+//   ALWAYS          refuse an empty zone, refuse more records than Dynadot
+//                   accepts (truncating would delete the rest), refuse the
+//                   brand/panel domains, and report success only when Dynadot
+//                   answered Status "success".
+//
+// set_dns2 parameters: apex records use main_record_type{N} / main_record{N} /
+// main_recordx{N} (N = 0..19); subdomain records use subdomain{N} /
+// sub_record_type{N} / sub_record{N} / sub_recordx{N} (N = 0..99). The "x"
+// field carries the MX distance (and the forward/stealth/email extras). TTL is
+// a single zone-wide `ttl` parameter — Dynadot has no per-record TTL.
+//
+// The pure helpers below are exported so they can be unit-tested without a
+// network (tests/unit/dynadot-dns.test.ts).
+
+export interface DnsRecordInput {
+  type: string // A, AAAA, CNAME, MX, TXT, SRV
+  name: string // '@', '', a relative label ('www', 'mail._domainkey') or an FQDN
   value: string
   ttl?: number
-  priority?: number
+  priority?: number | null
+}
+
+/** One record as Dynadot stores it. */
+export interface DynadotDnsRecord {
+  /** '@' for the apex, otherwise the relative subhost, lowercased. */
+  name: string
+  /** Dynadot record type, lowercased: a, aaaa, cname, txt, mx, srv, forward, stealth, email. */
+  type: string
+  value: string
+  /** main_recordx / sub_recordx — MX distance, forward type, stealth title, email alias. */
+  valueX?: string
+}
+
+export interface DynadotDnsZone {
+  records: DynadotDnsRecord[]
+  /** Zone-wide TTL as returned by get_dns, preserved on full rewrites. */
+  ttl?: string
+  /** NameServerSettings.Type as returned by get_dns (informational). */
+  settingsType?: string
+}
+
+export const DYNADOT_MAX_MAIN_RECORDS = 20
+export const DYNADOT_MAX_SUB_RECORDS = 100
+
+const APEX_RECORD_TYPES = new Set(['a', 'aaaa', 'cname', 'forward', 'txt', 'mx', 'stealth', 'email'])
+const SUB_RECORD_TYPES = new Set([...APEX_RECORD_TYPES, 'srv'])
+
+export type DnsRefusalCode =
+  | 'protected_domain'
+  | 'empty_zone'
+  | 'too_many_records'
+  | 'unsupported_record'
+  | 'record_not_found'
+  | 'zone_unreadable'
+
+/**
+ * A DNS write the panel refused to send. Messages are safe to show customers
+ * (they never name the registrar).
+ */
+export class DnsWriteRefusedError extends Error {
+  readonly code: DnsRefusalCode
+  constructor(code: DnsRefusalCode, message: string) {
+    super(message)
+    this.name = 'DnsWriteRefusedError'
+    this.code = code
+  }
+}
+
+/** HTTP status a route should answer with for a refused DNS write. */
+export function dnsRefusalStatus(code: DnsRefusalCode): number {
+  switch (code) {
+    case 'protected_domain':
+      return 403
+    case 'record_not_found':
+      return 404
+    case 'empty_zone':
+      return 409
+    case 'too_many_records':
+    case 'unsupported_record':
+      return 422
+    case 'zone_unreadable':
+      return 502
+  }
+}
+
+const normaliseHost = (v: string) => (v || '').trim().toLowerCase().replace(/\.+$/, '')
+
+function hostOf(raw: string | undefined): string | null {
+  if (!raw || !raw.trim()) return null
+  const s = raw.trim()
+  try {
+    const host = new URL(s.includes('://') ? s : `https://${s}`).hostname
+    return normaliseHost(host) || null
+  } catch {
+    return null
+  }
+}
+
+type EnvLike = Record<string, string | undefined>
+
+/**
+ * Hostnames whose DNS the panel must never write: the brand domain and the
+ * panel's own host (PANEL_DOMAIN, APP_URL, NEXT_PUBLIC_APP_URL). Read at call
+ * time so tests and runtime setting changes are honoured.
+ */
+export function protectedDnsHosts(env: EnvLike = process.env): string[] {
+  const hosts = new Set<string>()
+  for (const raw of [env.BRAND_DOMAIN || 'apsamo.com', env.PANEL_DOMAIN, env.APP_URL, env.NEXT_PUBLIC_APP_URL]) {
+    const h = hostOf(raw)
+    // A bare label ("localhost") is not a zone anyone can write.
+    if (h && h.includes('.')) hosts.add(h)
+  }
+  return [...hosts]
 }
 
 /**
- * Set DNS records for a domain via Dynadot's DNS management.
+ * True when `domain` is a protected host, a parent zone of one (the zone that
+ * holds panel.apsamo.com is apsamo.com), or a name inside one.
+ */
+export function isProtectedDnsDomain(domain: string, env: EnvLike = process.env): boolean {
+  const d = normaliseHost(domain)
+  if (!d) return false
+  return protectedDnsHosts(env).some(
+    (p) => p === d || p.endsWith(`.${d}`) || d.endsWith(`.${p}`)
+  )
+}
+
+export function assertDnsWriteAllowed(domain: string, env: EnvLike = process.env): void {
+  if (isProtectedDnsDomain(domain, env)) {
+    throw new DnsWriteRefusedError(
+      'protected_domain',
+      `DNS for ${normaliseHost(domain)} is managed by the platform and cannot be changed from the panel.`
+    )
+  }
+}
+
+/** '@', '' or the domain itself → '@'; 'www.example.com' → 'www'; lowercased. */
+export function normaliseRecordName(name: string, domain: string): string {
+  const d = normaliseHost(domain)
+  let n = normaliseHost(name || '')
+  if (n === '' || n === '@' || n === d) return '@'
+  if (d && n.endsWith(`.${d}`)) n = n.slice(0, -(d.length + 1))
+  return n || '@'
+}
+
+/**
+ * Convert a panel record to Dynadot's shape. With `strict` (the default) the
+ * record must be one Dynadot can store at that position; non-strict is for
+ * matching a stored record against the live zone.
+ */
+export function toDynadotRecord(
+  r: DnsRecordInput,
+  domain: string,
+  opts: { strict?: boolean } = {}
+): DynadotDnsRecord {
+  const strict = opts.strict !== false
+  const type = String(r.type || '').trim().toLowerCase()
+  const name = normaliseRecordName(r.name, domain)
+  const value = String(r.value ?? '').trim()
+  if (strict) {
+    if (!value) {
+      throw new DnsWriteRefusedError('unsupported_record', 'DNS record value is required.')
+    }
+    const allowed = name === '@' ? APEX_RECORD_TYPES : SUB_RECORD_TYPES
+    if (!allowed.has(type)) {
+      throw new DnsWriteRefusedError(
+        'unsupported_record',
+        name === '@'
+          ? `${type.toUpperCase() || 'This'} records are not supported at the domain apex by the registrar DNS.`
+          : `${type.toUpperCase() || 'This'} records are not supported by the registrar DNS.`
+      )
+    }
+  }
+  let valueX: string | undefined
+  if (r.priority !== undefined && r.priority !== null && Number.isFinite(Number(r.priority))) {
+    valueX = String(Math.trunc(Number(r.priority)))
+  } else if (type === 'mx' && strict) {
+    valueX = '10' // set_dns2 requires a distance for MX
+  }
+  return valueX === undefined ? { name, type, value } : { name, type, value, valueX }
+}
+
+function comparableValue(rec: DynadotDnsRecord): string {
+  // TXT content is case-sensitive; hostnames and addresses are not.
+  return rec.type === 'txt' ? rec.value : normaliseHost(rec.value)
+}
+
+/** Same record: name, type and value; the x-field only when both sides have one. */
+export function sameDnsRecord(a: DynadotDnsRecord, b: DynadotDnsRecord): boolean {
+  if (a.name !== b.name || a.type !== b.type) return false
+  if (comparableValue(a) !== comparableValue(b)) return false
+  if (a.valueX !== undefined && b.valueX !== undefined && a.valueX !== b.valueX) return false
+  return true
+}
+
+function asArray(v: unknown): Array<Record<string, unknown>> {
+  if (Array.isArray(v)) return v.filter((x) => x && typeof x === 'object') as Array<Record<string, unknown>>
+  if (v && typeof v === 'object') return [v as Record<string, unknown>]
+  return []
+}
+
+function str(v: unknown): string {
+  return v === undefined || v === null ? '' : String(v)
+}
+
+/**
+ * Parse a get_dns response (GetDnsResponse.GetDns.NameServerSettings).
+ *
+ * Throws `zone_unreadable` for anything it cannot account for fully. A partly
+ * parsed zone written back would silently delete the records we missed, so
+ * an unreadable zone must stop the write, never shrink it.
+ */
+export function parseGetDnsZone(json: Record<string, unknown>): DynadotDnsZone {
+  const resp = json?.GetDnsResponse as Record<string, unknown> | undefined
+  if (!resp || typeof resp !== 'object') {
+    throw new DnsWriteRefusedError('zone_unreadable', 'Could not read the current DNS zone from the registrar.')
+  }
+  const status = str(resp.Status).toLowerCase()
+  if (status && status !== 'success') {
+    throw new DnsWriteRefusedError('zone_unreadable', 'Could not read the current DNS zone from the registrar.')
+  }
+  const getDns = (resp.GetDns || resp.GetDnsContent) as Record<string, unknown> | undefined
+  const settings = (getDns?.NameServerSettings ?? resp.NameServerSettings) as
+    | Record<string, unknown>
+    | undefined
+  if (!settings || typeof settings !== 'object') {
+    throw new DnsWriteRefusedError('zone_unreadable', 'Could not read the current DNS zone from the registrar.')
+  }
+
+  const records: DynadotDnsRecord[] = []
+  const take = (row: Record<string, unknown>, name: string) => {
+    const type = str(row.RecordType).trim().toLowerCase()
+    const value = str(row.Value).trim()
+    if (!type || !value || !name) {
+      throw new DnsWriteRefusedError(
+        'zone_unreadable',
+        'The current DNS zone contains a record the panel cannot read, so it was left unchanged.'
+      )
+    }
+    const x = str(row.Value2).trim()
+    records.push(x ? { name, type, value, valueX: x } : { name, type, value })
+  }
+  for (const row of asArray(settings.MainDomains)) take(row, '@')
+  for (const row of asArray(settings.SubDomains)) {
+    take(row, normaliseHost(str(row.Subhost ?? row.SubHost)))
+  }
+
+  const ttl = str(settings.TTL ?? settings.Ttl).trim()
+  const settingsType = str(settings.Type).trim()
+  return {
+    records,
+    ...(ttl ? { ttl } : {}),
+    ...(settingsType ? { settingsType } : {}),
+  }
+}
+
+/** Drop exact duplicates, keeping the first occurrence. */
+export function dedupeDnsRecords(records: DynadotDnsRecord[]): DynadotDnsRecord[] {
+  const out: DynadotDnsRecord[] = []
+  for (const r of records) if (!out.some((o) => sameDnsRecord(o, r))) out.push(r)
+  return out
+}
+
+/** Records in `wanted` that the zone does not already contain. */
+export function recordsMissingFromZone(
+  zone: DynadotDnsRecord[],
+  wanted: DynadotDnsRecord[]
+): DynadotDnsRecord[] {
+  return dedupeDnsRecords(wanted).filter((w) => !zone.some((z) => sameDnsRecord(z, w)))
+}
+
+/** The zone without `target` (every exact copy of it). */
+export function removeRecordFromZone(
+  zone: DynadotDnsRecord[],
+  target: DynadotDnsRecord
+): { records: DynadotDnsRecord[]; removed: number } {
+  const records = zone.filter((z) => !sameDnsRecord(z, target))
+  return { records, removed: zone.length - records.length }
+}
+
+/** The zone with `target` replaced in place by `replacement`. */
+export function replaceRecordInZone(
+  zone: DynadotDnsRecord[],
+  target: DynadotDnsRecord,
+  replacement: DynadotDnsRecord
+): DynadotDnsRecord[] {
+  const idx = zone.findIndex((z) => sameDnsRecord(z, target))
+  if (idx === -1) {
+    throw new DnsWriteRefusedError('record_not_found', 'That DNS record is not present in the live zone.')
+  }
+  const out: DynadotDnsRecord[] = []
+  zone.forEach((z, i) => {
+    if (i === idx) out.push(replacement)
+    else if (!sameDnsRecord(z, target)) out.push(z)
+  })
+  return dedupeDnsRecords(out)
+}
+
+function countByPosition(records: DynadotDnsRecord[]): { main: number; sub: number } {
+  let main = 0
+  let sub = 0
+  for (const r of records) (r.name === '@' ? main++ : sub++)
+  return { main, sub }
+}
+
+/** Throws when Dynadot could not hold `records` in one zone. */
+export function assertZoneCapacity(records: DynadotDnsRecord[]): void {
+  const { main, sub } = countByPosition(records)
+  if (main > DYNADOT_MAX_MAIN_RECORDS || sub > DYNADOT_MAX_SUB_RECORDS) {
+    throw new DnsWriteRefusedError(
+      'too_many_records',
+      `The registrar DNS holds at most ${DYNADOT_MAX_MAIN_RECORDS} records at the domain apex and ` +
+        `${DYNADOT_MAX_SUB_RECORDS} subdomain records; this change would exceed that.`
+    )
+  }
+}
+
+/**
+ * Build set_dns2 parameters.
+ *
+ *   append: true   → add_dns_to_current_setting=1; `records` are only the new ones.
+ *   append: false  → `records` is the COMPLETE zone and replaces what is there.
+ *
+ * Never returns an empty write: replacing a zone with nothing (or inventing a
+ * placeholder record) is exactly the failure this module exists to prevent.
+ */
+export function buildSetDns2Params(
+  domain: string,
+  records: DynadotDnsRecord[],
+  opts: { append: boolean; ttl?: string }
+): Record<string, string> {
+  if (records.length === 0) {
+    throw new DnsWriteRefusedError(
+      'empty_zone',
+      opts.append
+        ? 'There are no DNS records to add.'
+        : 'Refusing to replace the DNS zone with an empty record set.'
+    )
+  }
+  assertZoneCapacity(records)
+
+  const params: Record<string, string> = { command: 'set_dns2', domain: normaliseHost(domain) }
+  let m = 0
+  let s = 0
+  for (const r of records) {
+    if (!r.value) {
+      throw new DnsWriteRefusedError('unsupported_record', 'DNS record value is required.')
+    }
+    if (r.name === '@') {
+      if (!APEX_RECORD_TYPES.has(r.type)) {
+        throw new DnsWriteRefusedError('unsupported_record', `${r.type.toUpperCase()} records are not supported at the domain apex.`)
+      }
+      params[`main_record_type${m}`] = r.type
+      params[`main_record${m}`] = r.value
+      if (r.valueX !== undefined) params[`main_recordx${m}`] = r.valueX
+      m++
+    } else {
+      if (!SUB_RECORD_TYPES.has(r.type)) {
+        throw new DnsWriteRefusedError('unsupported_record', `${r.type.toUpperCase()} records are not supported.`)
+      }
+      params[`subdomain${s}`] = r.name
+      params[`sub_record_type${s}`] = r.type
+      params[`sub_record${s}`] = r.value
+      if (r.valueX !== undefined) params[`sub_recordx${s}`] = r.valueX
+      s++
+    }
+  }
+  if (opts.append) params.add_dns_to_current_setting = '1'
+  if (opts.ttl) params.ttl = opts.ttl
+  return params
+}
+
+/** True only when Dynadot answered a set_dns2 with Status "success". */
+export function isSetDnsSuccess(json: Record<string, unknown> | null | undefined): boolean {
+  if (!json) return false
+  for (const key of ['SetDnsResponse', 'SetDns2Response', 'Response']) {
+    const env = json[key] as Record<string, unknown> | undefined
+    if (env && typeof env === 'object' && str(env.Status).toLowerCase() === 'success') return true
+  }
+  return false
+}
+
+// ── DNS operations (shared by this module and lib/dynadot-service) ─────────
+
+/** A function that sends one Dynadot API command and returns the parsed JSON. */
+export type DynadotCall = (params: Record<string, string>) => Promise<Record<string, unknown>>
+
+export interface DnsWriteResult {
+  /** True only when Dynadot confirmed the write (or nothing needed writing). */
+  success: boolean
+  /** Records sent in the set_dns2 call (0 when nothing needed writing). */
+  written: number
+  /** ADD: records skipped because the zone already had them. */
+  skipped?: number
+  /** DELETE: the record was not in the live zone, so nothing was written. */
+  notFound?: boolean
+}
+
+export async function fetchDnsZoneVia(call: DynadotCall, domain: string): Promise<DynadotDnsZone> {
+  const json = await call({ command: 'get_dns', domain: normaliseHost(domain) })
+  return parseGetDnsZone(json)
+}
+
+/**
+ * Append records to the live zone (add_dns_to_current_setting=1). Records the
+ * zone already holds are skipped so a retry does not create duplicates.
+ */
+export async function addDnsRecordsVia(
+  call: DynadotCall,
+  domain: string,
+  records: DnsRecordInput[]
+): Promise<DnsWriteResult> {
+  assertDnsWriteAllowed(domain)
+  const wanted = dedupeDnsRecords(records.map((r) => toDynadotRecord(r, domain)))
+  if (wanted.length === 0) {
+    throw new DnsWriteRefusedError('empty_zone', 'There are no DNS records to add.')
+  }
+
+  let toAdd = wanted
+  let zone: DynadotDnsZone | null = null
+  try {
+    zone = await fetchDnsZoneVia(call, domain)
+  } catch {
+    // Reading is only for de-duplication and the capacity check; an append
+    // without it cannot remove anything, so carry on.
+    zone = null
+  }
+  if (zone) {
+    toAdd = recordsMissingFromZone(zone.records, wanted)
+    if (toAdd.length === 0) return { success: true, written: 0, skipped: wanted.length }
+    assertZoneCapacity([...zone.records, ...toAdd])
+  }
+
+  const json = await call(buildSetDns2Params(domain, toAdd, { append: true }))
+  return {
+    success: isSetDnsSuccess(json),
+    written: toAdd.length,
+    skipped: wanted.length - toAdd.length,
+  }
+}
+
+/**
+ * Remove one record: read the live zone, drop the record, write back every
+ * remaining record. Refuses (empty_zone) when it was the last record.
+ */
+export async function deleteDnsRecordVia(
+  call: DynadotCall,
+  domain: string,
+  target: DnsRecordInput
+): Promise<DnsWriteResult> {
+  assertDnsWriteAllowed(domain)
+  const t = toDynadotRecord(target, domain, { strict: false })
+  const zone = await fetchDnsZoneVia(call, domain)
+  const { records, removed } = removeRecordFromZone(zone.records, t)
+  if (removed === 0) return { success: true, written: 0, notFound: true }
+  if (records.length === 0) {
+    throw new DnsWriteRefusedError(
+      'empty_zone',
+      'This is the last DNS record on the domain. Add its replacement first, or change the nameservers instead.'
+    )
+  }
+  const json = await call(buildSetDns2Params(domain, records, { append: false, ttl: zone.ttl }))
+  return { success: isSetDnsSuccess(json), written: records.length }
+}
+
+/**
+ * Replace one record in place: read the live zone, swap the record, write back
+ * the full zone.
+ */
+export async function updateDnsRecordVia(
+  call: DynadotCall,
+  domain: string,
+  target: DnsRecordInput,
+  replacement: DnsRecordInput
+): Promise<DnsWriteResult> {
+  assertDnsWriteAllowed(domain)
+  const t = toDynadotRecord(target, domain, { strict: false })
+  const next = toDynadotRecord(replacement, domain)
+  const zone = await fetchDnsZoneVia(call, domain)
+  const records = replaceRecordInZone(zone.records, t, next)
+  const json = await call(buildSetDns2Params(domain, records, { append: false, ttl: zone.ttl }))
+  return { success: isSetDnsSuccess(json), written: records.length }
+}
+
+const dynadotCall: DynadotCall = (params) => callDynadot(params)
+
+/** Read the live Dynadot zone for a domain. */
+export async function getDnsZone(domain: string): Promise<DynadotDnsZone> {
+  return fetchDnsZoneVia(dynadotCall, domain)
+}
+
+/**
+ * Add DNS records for a domain. APPENDS to the live zone — it never replaces
+ * it. (Kept under its historical name for existing callers such as
+ * lib/orchestration.) Throws DnsWriteRefusedError for refused writes.
  */
 export async function setDnsRecords(
   domain: string,
   records: DnsRecordInput[]
-): Promise<{ success: boolean }> {
-  const dnsConfig = records.map((r, i) => ({
-    index: i,
-    type: r.type,
-    name: r.name,
-    value: r.value,
-    ttl: r.ttl || 3600,
-  }))
+): Promise<DnsWriteResult> {
+  return addDnsRecordsVia(dynadotCall, domain, records)
+}
 
-  const json = await callDynadot({
-    command: 'set_dns2',
-    domain,
-    main_record_type0: dnsConfig[0]?.type || 'A',
-    main_record0: dnsConfig[0]?.value || '127.0.0.1',
-    main_record_type1: dnsConfig[1]?.type || '',
-    main_record1: dnsConfig[1]?.value || '',
-    main_record_type2: dnsConfig[2]?.type || '',
-    main_record2: dnsConfig[2]?.value || '',
-    main_record_type3: dnsConfig[3]?.type || '',
-    main_record3: dnsConfig[3]?.value || '',
-  })
-  const status = json.Response?.Status?.toLowerCase()
-  return { success: status === 'success' }
+export const addDnsRecords = setDnsRecords
+
+/** Delete one record from the live zone, keeping every other record. */
+export async function deleteDnsRecord(
+  domain: string,
+  target: DnsRecordInput
+): Promise<DnsWriteResult> {
+  return deleteDnsRecordVia(dynadotCall, domain, target)
+}
+
+/** Replace one record in the live zone, keeping every other record. */
+export async function updateDnsRecord(
+  domain: string,
+  target: DnsRecordInput,
+  replacement: DnsRecordInput
+): Promise<DnsWriteResult> {
+  return updateDnsRecordVia(dynadotCall, domain, target, replacement)
 }
 
 // ─── Renew ─────────────────────────────────────────────────────────────────────

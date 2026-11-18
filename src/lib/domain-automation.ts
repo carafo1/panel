@@ -340,23 +340,33 @@ export async function runRegistrationPipeline(
     }
 
     try {
-      await dynadotService.setDnsRecords(domainLower, dnsRecords)
-      // Persist DNS records to DB (replace existing)
-      await db.dnsRecord.deleteMany({ where: { domainId } }).catch(() => {})
-      for (const r of dnsRecords) {
-        await db.dnsRecord.create({
-          data: {
-            domainId,
-            type: r.type,
-            name: r.name,
-            value: r.value,
-            ttl: r.ttl || 3600,
-            priority: r.priority || null,
-            proxied: false,
-          },
-        })
+      // Appends to the live zone (never replaces it). Records are persisted —
+      // and the step reported as configured — only when the registrar
+      // confirmed the write; otherwise the panel would show records that are
+      // not actually published.
+      const dnsResult = await dynadotService.setDnsRecords(domainLower, dnsRecords)
+      if (!dnsResult.success) {
+        fail('configure_dns', 'The registrar did not confirm the DNS update')
+      } else {
+        // Persist DNS records to DB (replace existing)
+        await db.$transaction([
+          db.dnsRecord.deleteMany({ where: { domainId } }),
+          ...dnsRecords.map((r) =>
+            db.dnsRecord.create({
+              data: {
+                domainId,
+                type: r.type,
+                name: r.name,
+                value: r.value,
+                ttl: r.ttl || 3600,
+                priority: r.priority ?? null,
+                proxied: false,
+              },
+            })
+          ),
+        ])
+        ok('configure_dns', `${dnsRecords.length} DNS records configured`)
       }
-      ok('configure_dns', `${dnsRecords.length} DNS records configured`)
     } catch (err) {
       fail('configure_dns', (err as Error).message)
       // non-fatal

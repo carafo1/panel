@@ -1,7 +1,13 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
-import { setDnsRecords } from '@/lib/dynadot'
+import {
+  setDnsRecords,
+  isProtectedDnsDomain,
+  DnsWriteRefusedError,
+  dnsRefusalStatus,
+} from '@/lib/dynadot'
+import { isRegistrarManaged } from '@/lib/domain-ownership'
 import { logAudit } from '@/lib/audit'
 
 export async function PUT(
@@ -32,7 +38,6 @@ export async function PUT(
     // Verify domain ownership
     const domain = await db.domain.findFirst({
       where: { id, userId: decoded.userId },
-      include: { dnsRecords: true },
     })
 
     if (!domain) {
@@ -108,10 +113,23 @@ export async function PUT(
       return null
     }
 
-    const createdRecords: Awaited<ReturnType<typeof db.dnsRecord.create>>[] = []
+    // Validate EVERYTHING before writing anything. The old loop created rows
+    // one by one and could return 400 halfway, leaving a partial set behind.
+    const toCreate: Array<{
+      type: string
+      name: string
+      value: string
+      ttl: number
+      priority: number | null
+      proxied: boolean
+    }> = []
     for (const record of records) {
+      if (!record || typeof record !== 'object') continue
       if (!record.type || !record.name || !record.value) {
         continue
+      }
+      if (typeof record.type !== 'string' || typeof record.name !== 'string') {
+        return NextResponse.json({ error: 'Invalid DNS record' }, { status: 400 })
       }
 
       // SECURITY: validate the record before persisting — H4
@@ -122,51 +140,67 @@ export async function PUT(
           { status: 400 }
         )
       }
-
-      const dnsRecord = await db.dnsRecord.create({
-        data: {
-          domainId: domain.id,
-          type: record.type.toUpperCase(),
-          name: record.name,
-          value: record.value,
-          ttl: record.ttl || 3600,
-          priority: record.priority || null,
-          proxied: record.proxied || false,
-        },
+      toCreate.push({
+        type: record.type.toUpperCase(),
+        name: record.name,
+        value: record.value,
+        ttl: Number(record.ttl) || 3600,
+        priority: typeof record.priority === 'number' ? record.priority : null,
+        proxied: record.proxied === true,
       })
-      createdRecords.push(dnsRecord)
     }
 
-    // ─── Push to Dynadot if this is a Dynadot-managed domain ─────
-    // Local DB remains the source of truth - Dynadot is synced best-effort.
-    let dynadotSync: { success: boolean; message?: string } | null = null
-    if (domain.provider === 'dynadot' && createdRecords.length > 0) {
-      try {
-        // Build the full set of records (existing + newly created) so Dynadot
-        // gets a complete picture. We push at most the first 10 records.
-        const allRecords = [...domain.dnsRecords, ...createdRecords]
-          .slice(0, 10)
-          .map((r) => ({
-            type: r.type,
-            name: r.name,
-            value: r.value,
-            ttl: r.ttl,
-          }))
+    if (toCreate.length === 0) {
+      return NextResponse.json(
+        { error: 'No valid DNS records were supplied' },
+        { status: 400 }
+      )
+    }
 
-        const result = await setDnsRecords(domain.name, allRecords)
-        dynadotSync = {
-          success: result.success,
-          message: result.success
-            ? 'Pushed to the registrar'
-            : 'Failed to push to the registrar',
+    // The brand/panel zones are never edited from here.
+    if (isProtectedDnsDomain(domain.name)) {
+      return NextResponse.json(
+        {
+          error: 'DNS for this domain is managed by the platform and cannot be changed from the panel.',
+          code: 'protected_domain',
+        },
+        { status: 403 }
+      )
+    }
+
+    // ─── Registrar-managed domain: publish first, then record ─────
+    // The DB rows are created only once the registrar confirmed the write, so
+    // the panel never lists records that are not actually live. The write
+    // APPENDS to the live zone; it never replaces it.
+    let dynadotSync: { success: boolean; message?: string } | null = null
+    if (isRegistrarManaged(domain)) {
+      let failure: { status: number; error: string; code?: string } | null = null
+      try {
+        const result = await setDnsRecords(domain.name, toCreate)
+        dynadotSync = result.success
+          ? {
+              success: true,
+              message:
+                result.written === 0
+                  ? 'Already present at the registrar'
+                  : 'Pushed to the registrar',
+            }
+          : { success: false, message: 'The registrar did not confirm the DNS update' }
+        if (!result.success) {
+          failure = { status: 502, error: 'The registrar did not confirm the DNS update. Nothing was changed.' }
         }
       } catch (err) {
-        console.error('[dns] registrar sync error:', err)
-        // SECURITY: never expose the raw registrar error to the customer
-        dynadotSync = {
-          success: false,
-          message: 'Registrar sync failed. Please try again or contact support.',
+        if (err instanceof DnsWriteRefusedError) {
+          failure = { status: dnsRefusalStatus(err.code), error: err.message, code: err.code }
+        } else {
+          console.error('[dns] registrar sync error:', err)
+          // SECURITY: never expose the raw registrar error to the customer
+          failure = {
+            status: 502,
+            error: 'Registrar sync failed. Nothing was changed. Please try again or contact support.',
+          }
         }
+        dynadotSync = { success: false, message: failure.error }
       }
 
       await logAudit({
@@ -176,12 +210,47 @@ export async function PUT(
         resourceId: domain.id,
         req: request,
         metadata: {
-          addedCount: createdRecords.length,
-          success: dynadotSync.success,
-          message: dynadotSync.message,
+          addedCount: toCreate.length,
+          success: dynadotSync?.success ?? false,
+          message: dynadotSync?.message,
         },
       })
+
+      if (failure) {
+        return NextResponse.json(
+          { error: failure.error, ...(failure.code ? { code: failure.code } : {}), dynadotSync },
+          { status: failure.status }
+        )
+      }
     }
+
+    // The DNS editor re-sends its whole list on every save; only store rows
+    // the panel does not already have, so saving twice does not duplicate.
+    // (The registrar write above is de-duplicated against the live zone, so
+    // re-saving also retries any record a previous sync failed to publish.)
+    const existing = await db.dnsRecord.findMany({
+      where: { domainId: domain.id },
+      select: { type: true, name: true, value: true, priority: true },
+    })
+    const key = (r: { type: string; name: string; value: string; priority: number | null }) =>
+      `${r.type.toUpperCase()}|${r.name.toLowerCase()}|${r.value}|${r.priority ?? ''}`
+    const seen = new Set(existing.map(key))
+    const fresh = toCreate.filter((r) => {
+      const k = key(r)
+      if (seen.has(k)) return false
+      seen.add(k)
+      return true
+    })
+
+    const createdRecords = fresh.length
+      ? await db.$transaction(
+          fresh.map((r) =>
+            db.dnsRecord.create({
+              data: { domainId: domain.id, ...r },
+            })
+          )
+        )
+      : []
 
     return NextResponse.json({
       message: `${createdRecords.length} DNS records added`,
