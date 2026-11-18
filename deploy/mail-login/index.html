@@ -112,6 +112,9 @@ body{transition:background-color .25s ease;}
 .div::before,.div::after{content:"";flex:1;height:1px;background:var(--border);}
 .alt{display:flex;justify-content:center;align-items:center;gap:10px;height:48px;border-radius:13px;background:var(--input);border:1px solid var(--input-bd);color:var(--text2);font-size:14.5px;font-weight:600;cursor:pointer;transition:border-color .2s,color .2s,transform .2s;}
 .alt:hover{border-color:rgba(136,136,255,.5);color:var(--text);transform:translateY(-1px);}
+.roles{margin:16px 0 0;display:flex;justify-content:center;flex-wrap:wrap;gap:4px 10px;font-size:13px;color:var(--muted);}
+.roles a{color:var(--muted);}.roles a:hover{color:var(--accent);}
+.roles a:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
 .foot{margin-top:26px;padding-top:18px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;justify-content:space-between;font-size:12.5px;color:var(--muted);}
 .foot a{color:var(--muted);}.foot a:hover{color:var(--accent);}
 .foot .lks{display:flex;gap:14px;}
@@ -153,20 +156,23 @@ body{transition:background-color .25s ease;}
             <button type="button" class="ibtn tgl" id="tgl" aria-label="Switch between light and dark theme"><span class="sun" aria-hidden="true">☀</span><span class="moon" aria-hidden="true">🌙</span></button>
           </div>
         </div>
-        <h1 class="h2">Sign In</h1>
-        <p class="sub">Access your Apsamo Mail account.</p>
-        <!-- Works without JavaScript too: a plain POST to Mailcow's login. -->
-        <form class="form" id="f" method="post" action="/" novalidate>
+        <h1 class="h2" id="ttl">Sign In</h1>
+        <p class="sub" id="sub">Access your Apsamo Mail account.</p>
+        <!-- No action attribute: the form posts to the page's own address
+             (/, /admin/ or /domainadmin/), which is Mailcow's login for that
+             role. So it also works without JavaScript. -->
+        <form class="form" id="f" method="post" novalidate>
           <div class="err" id="err" role="alert" aria-live="assertive"></div>
-          <label class="lab" for="em">Email address</label>
-          <div class="field"><span class="ic" aria-hidden="true">✉</span><input id="em" name="login_user" type="email" inputmode="email" placeholder="you@apsamo.com" autocomplete="username" autocapitalize="none" spellcheck="false" required></div>
+          <label class="lab" for="em" id="emlab">Email address</label>
+          <div class="field"><span class="ic" aria-hidden="true" id="emic">✉</span><input id="em" name="login_user" type="email" inputmode="email" placeholder="you@apsamo.com" autocomplete="username" autocapitalize="none" spellcheck="false" required></div>
           <label class="lab" for="pw">Password</label>
           <div class="field"><span class="ic" aria-hidden="true">🔒</span><input id="pw" name="pass_user" type="password" placeholder="Enter your password" autocomplete="current-password" required><button type="button" class="eye" id="eye" aria-label="Show password" aria-pressed="false">👁</button></div>
-          <div class="row"><a class="help" href="/reset-password">Forgot password?</a></div>
+          <div class="row" id="forgotrow"><a class="help" href="/reset-password">Forgot password?</a></div>
           <button type="submit" class="btn" id="go"><span class="spin" aria-hidden="true"></span><span id="golbl">Sign In</span></button>
         </form>
         <div class="div">or</div>
-        <a class="alt" href="/?classic=1" title="Opens the mail server's sign-in page, which supports passkeys">🛡 Use Passkey</a>
+        <a class="alt" id="passkey" href="/?classic=1" title="Opens the mail server's sign-in page, which supports passkeys">🛡 Use Passkey</a>
+        <p class="roles" id="roles"></p>
         <div class="foot"><span>© <span id="yr">2026</span> Apsamo Technology</span><span class="lks"><a href="https://apsamo.com/#/privacy">Privacy</a><a href="https://apsamo.com/#/terms">Terms</a><a href="https://apsamo.com/status">Status</a></span></div>
       </div>
     </main>
@@ -195,6 +201,54 @@ body{transition:background-color .25s ease;}
   var form = document.getElementById('f'), em = document.getElementById('em');
   var err = document.getElementById('err'), go = document.getElementById('go'), lbl = document.getElementById('golbl');
 
+  // One page, three Mailcow sign-ins. The address it is opened at decides
+  // which one: Mailcow's login for each role lives at that same address.
+  var ROLES = {
+    user: {
+      base: '/', title: 'Sign In', sub: 'Access your Apsamo Mail account.',
+      label: 'Email address', icon: '✉', type: 'email', placeholder: 'you@apsamo.com',
+      bad: 'That email address and password do not match. Check both and try again.',
+      forgot: true,
+      links: [['/admin/', 'Administrator'], ['/domainadmin/', 'Domain administrator']]
+    },
+    admin: {
+      base: '/admin/', title: 'Administrator Sign In', sub: 'Manage the Apsamo mail server.',
+      label: 'Username', icon: '👤', type: 'text', placeholder: 'admin',
+      bad: 'That username and password do not match. Check both and try again.',
+      forgot: false,
+      links: [['/', 'Mailbox sign-in'], ['/domainadmin/', 'Domain administrator']]
+    },
+    domainadmin: {
+      base: '/domainadmin/', title: 'Domain Administrator Sign In', sub: 'Manage mailboxes for your domains.',
+      label: 'Username', icon: '👤', type: 'text', placeholder: 'Your domain administrator username',
+      bad: 'That username and password do not match. Check both and try again.',
+      forgot: false,
+      links: [['/', 'Mailbox sign-in'], ['/admin/', 'Administrator']]
+    }
+  };
+  var p0 = location.pathname.replace(/\/+$/, '');
+  var role = p0 === '/admin' ? 'admin' : (p0 === '/domainadmin' ? 'domainadmin' : 'user');
+  var R = ROLES[role];
+  var BASE = R.base;                       // Mailcow login URL for this role
+  var CLASSIC = BASE + '?classic=1';       // Mailcow's own page for this role (passkeys, two-factor)
+
+  if (role !== 'user') {
+    document.title = R.title + ' — Apsamo Mail';
+    document.getElementById('ttl').textContent = R.title;
+    document.getElementById('sub').textContent = R.sub;
+    document.getElementById('emlab').textContent = R.label;
+    document.getElementById('emic').textContent = R.icon;
+    em.type = R.type; em.placeholder = R.placeholder;
+    em.removeAttribute('inputmode');
+    document.getElementById('forgotrow').style.display = R.forgot ? '' : 'none';
+    lbl.textContent = 'Sign In';
+  }
+  form.setAttribute('action', BASE);
+  document.getElementById('passkey').setAttribute('href', CLASSIC);
+  document.getElementById('roles').innerHTML = R.links.map(function (l) {
+    return '<a href="' + l[0] + '">' + l[1] + '</a>';
+  }).join('<span aria-hidden="true">·</span>');
+
   function showError(msg, field) {
     err.textContent = msg; err.classList.add('show');
     em.setAttribute('aria-invalid', field === 'em' || field === 'both' ? 'true' : 'false');
@@ -206,12 +260,14 @@ body{transition:background-color .25s ease;}
   }
   function busy(on) { go.disabled = on; lbl.textContent = on ? 'Signing in…' : 'Sign In'; }
   function pathOf(u) { try { return new URL(u, location.href).pathname; } catch (e) { return '/'; } }
+  // Still on this role's login page (Mailcow did not send us anywhere)?
+  function atLogin(u) { return pathOf(u).replace(/\/+$/, '') === BASE.replace(/\/+$/, ''); }
 
-  // Already signed in to the mail server? Go straight to the mailbox.
-  // "/?classic=1" is answered by Mailcow, which redirects a live session.
+  // Already signed in? Mailcow redirects a live session from its login page
+  // (to webmail, /user, /admin/dashboard or /domainadmin/mailbox).
   if (window.fetch) {
-    fetch('/?classic=1', { credentials: 'same-origin' }).then(function (res) {
-      if (pathOf(res.url) !== '/') location.replace(res.url);
+    fetch(CLASSIC, { credentials: 'same-origin' }).then(function (res) {
+      if (!atLogin(res.url)) location.replace(res.url);
     }).catch(function () {});
   }
 
@@ -220,7 +276,8 @@ body{transition:background-color .25s ease;}
     ev.preventDefault();
     clearError();
     var user = em.value.trim();
-    if (!user || user.indexOf('@') < 1) { showError('Enter your full email address, for example you@apsamo.com.', 'em'); em.focus(); return; }
+    if (role === 'user' && (!user || user.indexOf('@') < 1)) { showError('Enter your full email address, for example you@apsamo.com.', 'em'); em.focus(); return; }
+    if (!user) { showError('Enter your username.', 'em'); em.focus(); return; }
     if (!pw.value) { showError('Enter your password.', 'pw'); pw.focus(); return; }
     busy(true);
 
@@ -228,23 +285,23 @@ body{transition:background-color .25s ease;}
     body.set('login_user', user);
     body.set('pass_user', pw.value);
 
-    // Mailcow answers a login with a redirect: to webmail (/SOGo/so/) or
-    // /user on success, back to "/" on a wrong password or when a second
-    // factor / password change is still pending.
-    fetch('/', { method: 'POST', body: body, credentials: 'same-origin' })
+    // Mailcow answers a successful login with a redirect away from its login
+    // page. A wrong password, or a second factor / password change that is
+    // still pending, leaves us on the login page.
+    fetch(BASE, { method: 'POST', body: body, credentials: 'same-origin' })
       .then(function (res) {
-        if (pathOf(res.url) !== '/') { location.assign(res.url); return; }
-        // Back at "/": ask Mailcow which case it is.
-        return fetch('/?classic=1', { credentials: 'same-origin' }).then(function (chk) {
-          if (pathOf(chk.url) !== '/') { location.assign(chk.url); return; }
+        if (!atLogin(res.url)) { location.assign(res.url); return; }
+        // Still on the login page: ask Mailcow which case it is.
+        return fetch(CLASSIC, { credentials: 'same-origin' }).then(function (chk) {
+          if (!atLogin(chk.url)) { location.assign(chk.url); return; }
           return chk.text().then(function (html) {
             if (/ConfirmTFAModal|pending_tfa_setup|pending_pw_update/.test(html)) {
-              location.assign('/?classic=1'); // finish two-factor / password change on Mailcow's own screen
+              location.assign(CLASSIC); // finish two-factor / password change on Mailcow's own screen
               return;
             }
             busy(false);
             pw.value = '';
-            showError('That email address and password do not match. Check both and try again.', 'both');
+            showError(R.bad, 'both');
             pw.focus();
           });
         });

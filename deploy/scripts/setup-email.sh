@@ -395,11 +395,13 @@ if [[ "${SKIP_MAILCOW:-0}" != "1" ]]; then
 
 # ─── Mailcow webmail / admin (added by setup-email.sh) ────────────────
 ${MAIL_SITES} {
-    # Apsamo Mail sign-in page for a plain GET / on the mail host.
+    # Apsamo Mail sign-in page for every Mailcow login on the mail host:
+    # mailboxes (/), administrator (/admin/) and domain administrator
+    # (/domainadmin/). ?classic=1 shows Mailcow's own page (passkeys, 2FA).
     @apsamo_login {
         host ${MAIL_HOSTNAME}
         method GET HEAD
-        path /
+        path / /admin /admin/ /domainadmin /domainadmin/
         not query classic=*
     }
     handle @apsamo_login {
@@ -472,6 +474,12 @@ CADDY
       MAIL_CERT_DOMAIN="$MAIL_HOSTNAME" bash "$SYNC" || warn "Certificate not copied yet; cron will retry."
       ( crontab -l 2>/dev/null | grep -v 'sync-mail-cert.sh'; echo "17 */6 * * * MAIL_CERT_DOMAIN=$MAIL_HOSTNAME bash $SYNC >> /var/log/apsamo-mail-cert.log 2>&1" ) | crontab -
       ok "Mail certificate sync scheduled every 6 hours"
+    fi
+
+    # Apsamo look for Mailcow's pages and SOGo webmail (theme, logos, names).
+    THEME="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/apply-mail-theme.sh"
+    if [[ -f "$THEME" ]]; then
+      INSTALL_DIR="$INSTALL_DIR" bash "$THEME" || warn "Mail theme not applied; run: bash $THEME"
     fi
 
   elif [[ "$INSTALL_MAILCOW" == "skip" ]]; then
