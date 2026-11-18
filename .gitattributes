@@ -8,3 +8,18 @@ deploy/**       text eol=lf
 deploy/bin/*    text eol=lf
 mini-services/**/*.sh text eol=lf
 Caddyfile       text eol=lf
+
+# Binary files must never be converted, including those under deploy/
+# (the deploy/** rule above would otherwise treat them as text and corrupt
+# them). These lines come last so they win.
+*.png           binary
+*.jpg           binary
+*.jpeg          binary
+*.gif           binary
+*.webp          binary
+*.ico           binary
+*.woff          binary
+*.woff2         binary
+*.pdf           binary
+*.zip           binary
+*.gz            binary
