@@ -376,13 +376,45 @@ if [[ "${SKIP_MAILCOW:-0}" != "1" ]]; then
     for h in "autodiscover.$BRAND_DOMAIN" "autoconfig.$BRAND_DOMAIN"; do
       [[ "$(getent ahostsv4 "$h" 2>/dev/null | awk 'NR==1 {print $1}')" == "$VPS_IP" ]] && MAIL_SITES="$MAIL_SITES, $h"
     done
+    # Apsamo Mail sign-in page (deploy/mail-login). Served by Caddy in front of
+    # Mailcow for a plain GET / on the mail host; its form posts Mailcow's own
+    # login fields to "/", so no Mailcow file is changed and Mailcow updates
+    # cannot remove it. Everything else (/admin, /SOGo, /api, /?classic=1 for
+    # passkeys and two-factor) still goes to Mailcow.
+    LOGIN_SRC="$INSTALL_DIR/deploy/mail-login"
+    if [[ -f "$LOGIN_SRC/index.html" ]]; then
+      mkdir -p /srv/apsamo-mail-login
+      cp "$LOGIN_SRC"/index.html "$LOGIN_SRC"/*.png /srv/apsamo-mail-login/
+      chmod 755 /srv/apsamo-mail-login; chmod 644 /srv/apsamo-mail-login/*
+      ok "Apsamo Mail sign-in page installed (/srv/apsamo-mail-login)"
+    fi
+
     if ! grep -qE "^\s*${MAIL_HOSTNAME//./\\.}[ ,{]" /etc/caddy/Caddyfile 2>/dev/null; then
       cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.before-mailcow
       cat >> /etc/caddy/Caddyfile <<CADDY
 
 # ─── Mailcow webmail / admin (added by setup-email.sh) ────────────────
 ${MAIL_SITES} {
-    reverse_proxy 127.0.0.1:8080
+    # Apsamo Mail sign-in page for a plain GET / on the mail host.
+    @apsamo_login {
+        host ${MAIL_HOSTNAME}
+        method GET HEAD
+        path /
+        not query classic=*
+    }
+    handle @apsamo_login {
+        root * /srv/apsamo-mail-login
+        rewrite * /index.html
+        header Cache-Control "no-store"
+        file_server
+    }
+    handle_path /apsamo-login/* {
+        root * /srv/apsamo-mail-login
+        file_server
+    }
+    handle {
+        reverse_proxy 127.0.0.1:8080
+    }
 }
 CADDY
       if caddy validate --config /etc/caddy/Caddyfile >/dev/null 2>&1; then

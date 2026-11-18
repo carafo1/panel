@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="referrer" content="same-origin">
+<title>Apsamo Mail — Sign in</title>
+<link rel="icon" href="/apsamo-login/logo-light.png">
+<!--
+  Apsamo Mail sign-in page, served by Caddy in front of Mailcow at GET /.
+  Design: "Apsamo Mail — Login Preview". The form posts Mailcow's own login
+  fields (login_user / pass_user) to "/", which Caddy passes to Mailcow, so
+  no Mailcow file is modified and Mailcow updates cannot remove this page.
+  Installed by deploy/scripts/setup-email.sh into /srv/apsamo-mail-login.
+-->
+<script>
+  // Apply the saved theme before first paint (no flash of the wrong theme).
+  (function () {
+    var t = null;
+    try { t = localStorage.getItem('apsamo_prev_theme'); } catch (e) {}
+    if (t !== 'light' && t !== 'dark') {
+      t = (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark';
+    }
+    document.documentElement.setAttribute('data-theme', t);
+  })();
+</script>
+<style>
+:root[data-theme='dark']{
+  --primary:#1E1A47;--secondary:#706FD3;--accent:#8888FF;
+  --bg:#0B1020;--surface:#171B2F;--card:rgba(23,27,47,.80);
+  --text:#fff;--text2:#B8BED6;--border:rgba(255,255,255,.08);
+  --input:rgba(255,255,255,.045);--input-bd:rgba(255,255,255,.12);--ph:#6b7490;--muted:#8b93b5;--menu:#171B2F;
+  --err-bg:rgba(239,68,68,.12);--err-bd:rgba(239,68,68,.35);--err:#fca5a5;
+  --logo-l:none;--logo-d:inline-block;
+}
+:root[data-theme='light']{
+  --primary:#1E1A47;--secondary:#706FD3;--accent:#8888FF;
+  --bg:#F5F7FC;--surface:#fff;--card:rgba(255,255,255,.82);
+  --text:#1B1F33;--text2:#5C647A;--border:rgba(0,0,0,.08);
+  --input:rgba(12,18,45,.03);--input-bd:rgba(12,18,45,.13);--ph:#9aa1b5;--muted:#7a8296;--menu:#fff;
+  --err-bg:#fef2f2;--err-bd:#fecaca;--err:#b91c1c;
+  --logo-l:inline-block;--logo-d:none;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+html,body{background:var(--bg);}
+body{transition:background-color .25s ease;}
+.wrap{position:relative;min-height:100vh;overflow:hidden;background:var(--bg);color:var(--text);
+  font-family:'Inter','Segoe UI',system-ui,-apple-system,Arial,sans-serif;-webkit-font-smoothing:antialiased;transition:background-color .25s,color .25s;}
+.wrap a{text-decoration:none;}
+.lg-l{display:var(--logo-l);}.lg-d{display:var(--logo-d);}
+.bg{position:fixed;inset:0;overflow:hidden;z-index:0;pointer-events:none;}
+.bg::before{content:"";position:absolute;inset:-20%;filter:blur(10px);animation:bgshift 18s ease-in-out infinite alternate;
+  background:radial-gradient(40% 40% at 18% 28%,rgba(112,111,211,.30),transparent 60%),radial-gradient(35% 35% at 82% 20%,rgba(136,136,255,.22),transparent 60%),radial-gradient(45% 45% at 70% 85%,rgba(30,26,71,.55),transparent 60%);}
+:root[data-theme='light'] .bg::before{background:radial-gradient(45% 45% at 16% 22%,rgba(112,111,211,.16),transparent 62%),radial-gradient(40% 40% at 84% 18%,rgba(136,136,255,.14),transparent 62%),radial-gradient(50% 50% at 72% 88%,rgba(180,196,240,.55),transparent 62%);}
+.grid{position:absolute;inset:0;background-size:46px 46px;-webkit-mask-image:radial-gradient(circle at 50% 40%,#000 30%,transparent 78%);mask-image:radial-gradient(circle at 50% 40%,#000 30%,transparent 78%);
+  background-image:linear-gradient(rgba(255,255,255,.045) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.045) 1px,transparent 1px);}
+:root[data-theme='light'] .grid{background-image:linear-gradient(rgba(30,26,71,.06) 1px,transparent 1px),linear-gradient(90deg,rgba(30,26,71,.06) 1px,transparent 1px);}
+.shape{position:absolute;border-radius:50%;filter:blur(48px);opacity:.55;}
+:root[data-theme='light'] .shape{opacity:.4;}
+.shape.s1{width:340px;height:340px;left:-80px;top:12%;background:radial-gradient(circle,#706FD3,transparent 70%);animation:flt 14s ease-in-out infinite;}
+.shape.s2{width:280px;height:280px;right:6%;top:6%;background:radial-gradient(circle,#8888FF,transparent 70%);animation:flt 17s ease-in-out infinite reverse;}
+.shape.s3{width:420px;height:420px;right:18%;bottom:-140px;background:radial-gradient(circle,#1E1A47,transparent 70%);animation:flt 20s ease-in-out infinite;}
+:root[data-theme='light'] .shape.s3{background:radial-gradient(circle,#c9d2f5,transparent 70%);}
+.split{position:relative;z-index:1;display:flex;min-height:100vh;}
+.hero{flex:1.05;display:flex;align-items:center;padding:64px 60px;background:linear-gradient(155deg,rgba(30,26,71,.72) 0%,rgba(11,16,32,.18) 55%,transparent 100%);}
+:root[data-theme='light'] .hero{background:linear-gradient(155deg,rgba(112,111,211,.14) 0%,rgba(245,247,252,.2) 55%,transparent 100%);}
+.hero-in{max-width:520px;animation:fade .7s ease both;}
+.hero-logo{height:46px;width:auto;margin-bottom:38px;}
+.hero-t{font-size:clamp(32px,3.2vw,50px);line-height:1.06;font-weight:800;margin:0 0 18px;letter-spacing:-.02em;text-wrap:balance;color:var(--text);}
+:root[data-theme='dark'] .hero-t{background:linear-gradient(90deg,#fff,#B8BED6);-webkit-background-clip:text;background-clip:text;color:transparent;}
+.hero-d{font-size:17px;line-height:1.6;color:var(--text2);margin:0 0 38px;max-width:470px;}
+.feats{display:flex;flex-direction:column;gap:14px;}
+.feat{display:flex;align-items:flex-start;gap:16px;padding:16px 18px;border-radius:16px;background:var(--input);border:1px solid var(--border);transition:transform .25s,border-color .25s,background .25s;animation:up .6s ease both;}
+.feat:nth-child(2){animation-delay:.08s;}.feat:nth-child(3){animation-delay:.16s;}
+.feat:hover{transform:translateY(-3px);border-color:rgba(136,136,255,.45);}
+.feat .ic{flex:0 0 44px;height:44px;display:grid;place-items:center;font-size:20px;border-radius:12px;background:linear-gradient(140deg,rgba(112,111,211,.95),rgba(30,26,71,.95));box-shadow:0 6px 18px rgba(112,111,211,.35);color:#fff;}
+.feat h2{margin:0;font-size:15px;font-weight:700;color:var(--text);}
+.feat p{margin:3px 0 0;font-size:13px;line-height:1.5;color:var(--text2);}
+.fw{flex:1;display:flex;align-items:center;justify-content:center;padding:40px 24px;}
+.card{width:100%;max-width:440px;background:var(--card);border:1px solid var(--border);border-radius:24px;padding:38px 36px;backdrop-filter:blur(22px) saturate(140%);-webkit-backdrop-filter:blur(22px) saturate(140%);
+  box-shadow:0 30px 80px rgba(8,10,25,.45),0 1px 0 rgba(255,255,255,.05) inset;animation:up .55s cubic-bezier(.2,.7,.2,1) both;transition:background-color .25s,border-color .25s;}
+.ctop{display:flex;align-items:center;margin-bottom:24px;}
+.clogo{height:30px;width:auto;}
+.ctrls{margin-left:auto;display:flex;align-items:center;gap:8px;}
+.ibtn{width:36px;height:36px;border-radius:10px;border:1px solid var(--border);background:var(--input);color:var(--text2);display:grid;place-items:center;cursor:pointer;font-size:15px;transition:border-color .2s,color .2s;padding:0;}
+.ibtn:hover{color:var(--text);border-color:rgba(136,136,255,.5);}
+:root[data-theme='dark'] .tgl .moon{display:none;}:root[data-theme='light'] .tgl .sun{display:none;}
+.h2{font-size:26px;font-weight:800;margin:0 0 4px;letter-spacing:-.01em;color:var(--text);}
+.sub{font-size:14px;color:var(--text2);margin:0 0 26px;}
+.form{display:flex;flex-direction:column;}
+.lab{font-size:13px;font-weight:600;color:var(--text2);margin:0 0 8px;}
+.field{position:relative;display:flex;align-items:center;margin-bottom:18px;}
+.field .ic{position:absolute;left:15px;color:var(--muted);font-size:14px;pointer-events:none;}
+.field input{width:100%;height:50px;padding:0 46px 0 40px;border-radius:13px;background:var(--input);border:1px solid var(--input-bd);color:var(--text);font-size:15px;font-family:inherit;transition:border-color .2s,box-shadow .2s;outline:none;}
+.field input::placeholder{color:var(--ph);}
+.field input:focus{border-color:var(--accent);box-shadow:0 0 0 4px rgba(136,136,255,.16);}
+.field input[aria-invalid="true"]{border-color:var(--err-bd);}
+.eye{position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:0;color:var(--muted);width:34px;height:34px;border-radius:9px;cursor:pointer;display:grid;place-items:center;font-size:15px;}
+.eye:hover{color:var(--text);}
+.eye:focus-visible,.ibtn:focus-visible,.btn:focus-visible,.alt:focus-visible,.help:focus-visible,.foot a:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+.row{display:flex;align-items:center;justify-content:flex-end;gap:12px;margin:-2px 0 20px;}
+.help{font-size:13px;color:var(--muted);}.help:hover{color:var(--accent);}
+.err{display:none;margin:0 0 16px;padding:11px 14px;border-radius:12px;background:var(--err-bg);border:1px solid var(--err-bd);color:var(--err);font-size:13.5px;line-height:1.45;}
+.err.show{display:block;}
+.btn{position:relative;height:50px;border:0;border-radius:13px;cursor:pointer;background:linear-gradient(180deg,var(--secondary),var(--primary));color:#fff;font-size:15.5px;font-weight:700;font-family:inherit;box-shadow:0 10px 26px rgba(112,111,211,.35);transition:transform .2s,box-shadow .2s,filter .2s,opacity .2s;}
+.btn:hover{transform:translateY(-2px);box-shadow:0 16px 40px rgba(112,111,211,.55);filter:brightness(1.06);}
+.btn[disabled]{cursor:progress;opacity:.75;transform:none;}
+.btn .spin{display:none;width:16px;height:16px;margin-right:8px;vertical-align:-3px;border:2px solid rgba(255,255,255,.45);border-top-color:#fff;border-radius:50%;animation:rot .8s linear infinite;}
+.btn[disabled] .spin{display:inline-block;}
+.div{display:flex;align-items:center;gap:14px;margin:24px 0 18px;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.12em;}
+.div::before,.div::after{content:"";flex:1;height:1px;background:var(--border);}
+.alt{display:flex;justify-content:center;align-items:center;gap:10px;height:48px;border-radius:13px;background:var(--input);border:1px solid var(--input-bd);color:var(--text2);font-size:14.5px;font-weight:600;cursor:pointer;transition:border-color .2s,color .2s,transform .2s;}
+.alt:hover{border-color:rgba(136,136,255,.5);color:var(--text);transform:translateY(-1px);}
+.foot{margin-top:26px;padding-top:18px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;justify-content:space-between;font-size:12.5px;color:var(--muted);}
+.foot a{color:var(--muted);}.foot a:hover{color:var(--accent);}
+.foot .lks{display:flex;gap:14px;}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;}
+@keyframes bgshift{0%{transform:translate3d(0,0,0) scale(1);}100%{transform:translate3d(2%,-2%,0) scale(1.08);}}
+@keyframes flt{0%,100%{transform:translate(0,0);}50%{transform:translate(24px,-30px);}}
+@keyframes fade{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:none;}}
+@keyframes up{from{opacity:0;transform:translateY(22px);}to{opacity:1;transform:none;}}
+@keyframes rot{to{transform:rotate(360deg);}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;}}
+@media (max-width:900px){
+  .split{flex-direction:column;}.hero{flex:none;padding:52px 26px 6px;background:none;text-align:center;}
+  .hero-in{max-width:100%;margin:0 auto;}.hero-d,.feats{display:none;}.hero-t{font-size:28px;}
+  .fw{padding:20px 16px 48px;align-items:flex-start;}.card{padding:30px 22px;}.shape.s3{display:none;}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="bg" aria-hidden="true"><div class="grid"></div><div class="shape s1"></div><div class="shape s2"></div><div class="shape s3"></div></div>
+  <div class="split">
+    <aside class="hero">
+      <div class="hero-in">
+        <img class="hero-logo lg-l" src="/apsamo-login/logo-light.png" alt="Apsamo" width="232" height="46"><img class="hero-logo lg-d" src="/apsamo-login/logo-dark.png" alt="Apsamo" width="232" height="46">
+        <h1 class="hero-t">Welcome to Apsamo Mail</h1>
+        <p class="hero-d">Secure business email with enterprise-grade protection, collaboration, and anywhere access.</p>
+        <div class="feats">
+          <div class="feat"><div class="ic" aria-hidden="true">✉️</div><div><h2>Professional Email</h2><p>Business email for your custom domain with reliable delivery.</p></div></div>
+          <div class="feat"><div class="ic" aria-hidden="true">🛡️</div><div><h2>Advanced Protection</h2><p>Spam filtering, TLS encryption, two-factor sign-in and passkey support.</p></div></div>
+          <div class="feat"><div class="ic" aria-hidden="true">🌍</div><div><h2>Anywhere Access</h2><p>Use Webmail, Outlook, Apple Mail, Thunderbird, or your mobile devices.</p></div></div>
+        </div>
+      </div>
+    </aside>
+    <main class="fw">
+      <div class="card">
+        <div class="ctop">
+          <img class="clogo lg-l" src="/apsamo-login/logo-light.png" alt="Apsamo" width="152" height="30"><img class="clogo lg-d" src="/apsamo-login/logo-dark.png" alt="Apsamo" width="152" height="30">
+          <div class="ctrls">
+            <button type="button" class="ibtn tgl" id="tgl" aria-label="Switch between light and dark theme"><span class="sun" aria-hidden="true">☀</span><span class="moon" aria-hidden="true">🌙</span></button>
+          </div>
+        </div>
+        <h1 class="h2">Sign In</h1>
+        <p class="sub">Access your Apsamo Mail account.</p>
+        <!-- Works without JavaScript too: a plain POST to Mailcow's login. -->
+        <form class="form" id="f" method="post" action="/" novalidate>
+          <div class="err" id="err" role="alert" aria-live="assertive"></div>
+          <label class="lab" for="em">Email address</label>
+          <div class="field"><span class="ic" aria-hidden="true">✉</span><input id="em" name="login_user" type="email" inputmode="email" placeholder="you@apsamo.com" autocomplete="username" autocapitalize="none" spellcheck="false" required></div>
+          <label class="lab" for="pw">Password</label>
+          <div class="field"><span class="ic" aria-hidden="true">🔒</span><input id="pw" name="pass_user" type="password" placeholder="Enter your password" autocomplete="current-password" required><button type="button" class="eye" id="eye" aria-label="Show password" aria-pressed="false">👁</button></div>
+          <div class="row"><a class="help" href="/reset-password">Forgot password?</a></div>
+          <button type="submit" class="btn" id="go"><span class="spin" aria-hidden="true"></span><span id="golbl">Sign In</span></button>
+        </form>
+        <div class="div">or</div>
+        <a class="alt" href="/?classic=1" title="Opens the mail server's sign-in page, which supports passkeys">🛡 Use Passkey</a>
+        <div class="foot"><span>© <span id="yr">2026</span> Apsamo Technology</span><span class="lks"><a href="https://apsamo.com/#/privacy">Privacy</a><a href="https://apsamo.com/#/terms">Terms</a><a href="https://apsamo.com/status">Status</a></span></div>
+      </div>
+    </main>
+  </div>
+</div>
+<script>
+(function () {
+  var r = document.documentElement;
+  document.getElementById('yr').textContent = String(new Date().getFullYear());
+
+  document.getElementById('tgl').addEventListener('click', function () {
+    var n = r.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+    r.setAttribute('data-theme', n);
+    try { localStorage.setItem('apsamo_prev_theme', n); } catch (e) {}
+  });
+
+  var eye = document.getElementById('eye'), pw = document.getElementById('pw');
+  eye.addEventListener('click', function () {
+    var show = pw.type === 'password';
+    pw.type = show ? 'text' : 'password';
+    eye.textContent = show ? '🙈' : '👁';
+    eye.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+    eye.setAttribute('aria-pressed', show ? 'true' : 'false');
+  });
+
+  var form = document.getElementById('f'), em = document.getElementById('em');
+  var err = document.getElementById('err'), go = document.getElementById('go'), lbl = document.getElementById('golbl');
+
+  function showError(msg, field) {
+    err.textContent = msg; err.classList.add('show');
+    em.setAttribute('aria-invalid', field === 'em' || field === 'both' ? 'true' : 'false');
+    pw.setAttribute('aria-invalid', field === 'pw' || field === 'both' ? 'true' : 'false');
+  }
+  function clearError() {
+    err.classList.remove('show'); err.textContent = '';
+    em.removeAttribute('aria-invalid'); pw.removeAttribute('aria-invalid');
+  }
+  function busy(on) { go.disabled = on; lbl.textContent = on ? 'Signing in…' : 'Sign In'; }
+  function pathOf(u) { try { return new URL(u, location.href).pathname; } catch (e) { return '/'; } }
+
+  // Already signed in to the mail server? Go straight to the mailbox.
+  // "/?classic=1" is answered by Mailcow, which redirects a live session.
+  if (window.fetch) {
+    fetch('/?classic=1', { credentials: 'same-origin' }).then(function (res) {
+      if (pathOf(res.url) !== '/') location.replace(res.url);
+    }).catch(function () {});
+  }
+
+  form.addEventListener('submit', function (ev) {
+    if (!window.fetch || !window.URLSearchParams) return; // plain POST fallback
+    ev.preventDefault();
+    clearError();
+    var user = em.value.trim();
+    if (!user || user.indexOf('@') < 1) { showError('Enter your full email address, for example you@apsamo.com.', 'em'); em.focus(); return; }
+    if (!pw.value) { showError('Enter your password.', 'pw'); pw.focus(); return; }
+    busy(true);
+
+    var body = new URLSearchParams();
+    body.set('login_user', user);
+    body.set('pass_user', pw.value);
+
+    // Mailcow answers a login with a redirect: to webmail (/SOGo/so/) or
+    // /user on success, back to "/" on a wrong password or when a second
+    // factor / password change is still pending.
+    fetch('/', { method: 'POST', body: body, credentials: 'same-origin' })
+      .then(function (res) {
+        if (pathOf(res.url) !== '/') { location.assign(res.url); return; }
+        // Back at "/": ask Mailcow which case it is.
+        return fetch('/?classic=1', { credentials: 'same-origin' }).then(function (chk) {
+          if (pathOf(chk.url) !== '/') { location.assign(chk.url); return; }
+          return chk.text().then(function (html) {
+            if (/ConfirmTFAModal|pending_tfa_setup|pending_pw_update/.test(html)) {
+              location.assign('/?classic=1'); // finish two-factor / password change on Mailcow's own screen
+              return;
+            }
+            busy(false);
+            pw.value = '';
+            showError('That email address and password do not match. Check both and try again.', 'both');
+            pw.focus();
+          });
+        });
+      })
+      .catch(function () {
+        busy(false);
+        showError('Could not reach the mail server. Check your connection and try again.', 'none');
+      });
+  });
+})();
+</script>
+</body>
+</html>
