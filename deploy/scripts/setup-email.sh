@@ -79,7 +79,7 @@ echo "  you just need an account with one of these providers:"
 echo ""
 echo "    • Mailgun   — 5,000 free emails/mo for 3 months  → https://mailgun.com"
 echo "    • SendGrid  — 12,000 free emails/mo forever       → https://sendgrid.com"
-echo "    • AWS SES   — $0.10 per 1,000 emails             → https://aws.amazon.com/ses"
+echo "    • AWS SES   — \$0.10 per 1,000 emails           → https://aws.amazon.com/ses"
 echo "    • Or any SMTP provider (Zoho, Postmark, etc.)"
 echo ""
 
@@ -182,8 +182,8 @@ echo "    • DigitalOcean:   BLOCKED (request unblock via support ticket)"
 echo "    • AWS:            BLOCKED (fill out port-25 request form)"
 echo "    • Vultr:          BLOCKED on new accounts"
 echo ""
-echo "  If port 25 is blocked, Mailcow can still SEND email but CANNOT RECEIVE."
-echo "  In that case, skip Mailcow and use Zoho Mail (free, hosted) or Google Workspace."
+echo "  If outbound port 25 is blocked, Mailcow can receive mail but cannot deliver it."
+echo "  Ask your provider to unblock it, or use Zoho Mail / Google Workspace instead."
 echo ""
 
 CURRENT_MAILCOW=$(env_get MAILCOW_API_URL)
@@ -353,9 +353,13 @@ if [[ "${SKIP_MAILCOW:-0}" != "1" ]]; then
     if [[ "$LOW_MEMORY" == 1 ]]; then
       set_mc SKIP_OLEFY y
       set_mc SKIP_FTS y
+      # SOGo (webmail) starts 20 workers by default; 5 serve a small user base
+      # and cut its memory from ~260 MB to ~95 MB (measured on a 4 GB VPS,
+      # Mailcow total ~1.35 GB). Raise it again if webmail feels slow under load.
+      sed -i 's/WOWorkersCount = "[0-9]*";/WOWorkersCount = "5";/' data/conf/sogo/sogo.conf
     fi
     ok "Mailcow web UI bound to 127.0.0.1:8080 (served publicly by Caddy)"
-    [[ "$LOW_MEMORY" == 1 ]] && ok "Low-memory mode: ClamAV, Olefy and full-text search off"
+    [[ "$LOW_MEMORY" == 1 ]] && ok "Low-memory mode: ClamAV, Olefy and full-text search off; SOGo 5 workers"
 
     # Firewall: mail ports. (Docker-published ports bypass ufw anyway, but the
     # rules make the intent visible in `ufw status`.)
