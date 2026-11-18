@@ -17,6 +17,16 @@ interface DeliverWebhookResult {
   createdAt: string
   skipped?: boolean
   skipReason?: string
+  /**
+   * The failure will not change on retry: the receiver answered 4xx (other
+   * than 408/429) or the SSRF guard refused the URL.
+   */
+  permanent?: boolean
+}
+
+/** 4xx means the request itself is refused; 408 and 429 are worth retrying. */
+function isPermanentStatus(status: number | null): boolean {
+  return status !== null && status >= 400 && status < 500 && status !== 408 && status !== 429
 }
 
 /**
@@ -107,10 +117,18 @@ export async function deliverWebhook(
   let statusCode: number | null = null
   let success = false
   let responseBody: string | null = null
+  let blockedUrl = false
 
   try {
     // SSRF guard: refuse to POST to private/loopback/metadata addresses.
-    await assertPublicUrl(webhook.url)
+    try {
+      await assertPublicUrl(webhook.url)
+    } catch (guardErr) {
+      // A refused URL stays refused; a DNS lookup failure may be temporary.
+      const m = guardErr instanceof Error ? guardErr.message : ''
+      blockedUrl = !/^(Cannot resolve host|Host did not resolve)/.test(m)
+      throw guardErr
+    }
     const response = await fetch(webhook.url, {
       method: 'POST',
       headers: {
@@ -181,6 +199,7 @@ export async function deliverWebhook(
     success: delivery.success,
     duration: delivery.duration,
     createdAt: delivery.createdAt.toISOString(),
+    permanent: !delivery.success && (blockedUrl || isPermanentStatus(delivery.statusCode)),
   }
 }
 
@@ -295,7 +314,8 @@ export async function emitWebhookEvent(
     await Promise.all(
       matching.map(async (w) => {
         const result = await deliverWebhook(w.id, event, body).catch(() => null)
-        if (result && (result.success || result.skipped)) return
+        // A 4xx or a refused URL would fail the same way on every retry.
+        if (result && (result.success || result.skipped || result.permanent)) return
         await db.jobQueue
           .create({
             data: {

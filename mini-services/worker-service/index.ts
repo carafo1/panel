@@ -216,8 +216,10 @@ async function runTask(task: TaskDef): Promise<void> {
   s.lastRunAt = new Date().toISOString()
   const t0 = Date.now()
   let ok = false
+  let timedOut = false
   try {
     const res = await callNextApi(task.path, task.timeoutMs)
+    timedOut = !res.ok && res.status === 0 && /^timed out/.test(res.error || '')
     if (res.ok) {
       ok = true
       const body = (res.body && typeof res.body === 'object' ? res.body : {}) as Record<string, unknown>
@@ -252,7 +254,14 @@ async function runTask(task: TaskDef): Promise<void> {
     console.error(
       `[worker] ${level} ${task.name} failed (${s.consecutiveFailures} in a row): ${s.lastError}`
     )
-    schedule(task, retryDelay(task, s.consecutiveFailures))
+    // Aborting our request does not stop the panel's sweep: it keeps running
+    // server-side. After a timeout, wait at least as long again (capped at the
+    // normal interval) so a retry does not start a second, overlapping sweep
+    // (billing: 30s → 10 min).
+    const delay = timedOut
+      ? Math.max(retryDelay(task, s.consecutiveFailures), Math.min(task.everyMs, task.timeoutMs))
+      : retryDelay(task, s.consecutiveFailures)
+    schedule(task, delay)
   }
 }
 

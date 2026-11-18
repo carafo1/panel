@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { autoDeploySweep } from '@/lib/auto-deploy'
 import { reapStaleDeployments } from '@/lib/deploy-guard'
 import { requireAdminRole } from '@/lib/auth'
+import { safeCompare } from '@/lib/security'
 
 // Same posture as the other sweeps: the cron-key path is disabled entirely
 // unless CRON_API_KEY is set to something that is not a placeholder.
@@ -13,7 +14,8 @@ const CRON_API_KEY =
 
 async function authorise(request: Request): Promise<boolean> {
   const cronKey = request.headers.get('x-cron-key')
-  if (CRON_API_KEY && cronKey && cronKey === CRON_API_KEY) return true
+  // Constant-time compare, as the other cron routes do.
+  if (CRON_API_KEY && cronKey && safeCompare(cronKey, CRON_API_KEY)) return true
   return Boolean(await requireAdminRole(request))
 }
 

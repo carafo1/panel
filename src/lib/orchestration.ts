@@ -22,6 +22,7 @@
  *    Mailcow into a single end-to-end provisioning flow.
  */
 import crypto from 'crypto'
+import type { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
 import { logAudit } from '@/lib/audit'
 import { createNotification } from '@/lib/notifications'
@@ -359,7 +360,14 @@ export async function runProvisioningPipeline(
     throw new Error(`ProvisioningJob not found: ${jobId}`)
   }
   if (job.status === 'running') {
-    throw new Error(`Pipeline already running for job ${jobId}`)
+    // A run interrupted by a panel restart stays 'running' forever. Only a
+    // run with no activity for STALE_PROVISIONING_MS is treated as dead: it
+    // is marked failed (conditionally) and this call re-runs it.
+    const swept = await failStaleProvisioningJobs({ jobId })
+    if (swept === 0) {
+      throw new Error(`Pipeline already running for job ${jobId}`)
+    }
+    job.status = 'failed'
   }
   if (job.status === 'success' || job.status === 'failed' || job.status === 'rolled_back') {
     // Already completed — return the stored result if available.
@@ -373,10 +381,15 @@ export async function runProvisioningPipeline(
   }
 
   const startedAt = new Date()
-  await db.provisioningJob.update({
-    where: { id: jobId },
-    data: { status: 'running', startedAt, currentStep: 'domain' },
+  // Conditional claim: two callers racing to (re-)run the same job cannot
+  // both get here; the loser sees count 0.
+  const claimed = await db.provisioningJob.updateMany({
+    where: { id: jobId, status: { not: 'running' } },
+    data: { status: 'running', startedAt, currentStep: 'domain', error: null, errorCode: null },
   })
+  if (claimed.count === 0) {
+    throw new Error(`Pipeline already running for job ${jobId}`)
+  }
 
   const req = JSON.parse(job.steps[0]?.input || '{}') as ProvisioningRequest
   const ctx: PipelineContext = {
@@ -726,6 +739,93 @@ export async function runProvisioningPipeline(
   })
 
   return result
+}
+
+// ─── Stale pipeline recovery ─────────────────────────────────────────────
+
+/**
+ * How long a provisioning job may show no activity before it is treated as
+ * dead. The pipeline runs in-process, so a panel restart kills it silently.
+ * Must exceed the longest single step attempt: a hosting build may run up to
+ * 30 min (plus clone/setup), and deploy-guard reaps deployments at 45 min.
+ * The health check flags jobs stuck for 2h, so 60 min sits between the two.
+ */
+export const STALE_PROVISIONING_MS = 60 * 60 * 1000
+
+/**
+ * A job is stale when it is 'running' (or never left 'pending') since before
+ * the cutoff, the job row has not changed since, and no step has started an
+ * attempt since. The step check keeps a long-running step (its attempts bump
+ * lastAttemptAt) from being mistaken for a dead one.
+ */
+function staleProvisioningWhere(cutoff: Date): Prisma.ProvisioningJobWhereInput {
+  return {
+    OR: [
+      { status: 'running', OR: [{ startedAt: { lt: cutoff } }, { startedAt: null }] },
+      { status: 'pending' },
+    ],
+    createdAt: { lt: cutoff },
+    updatedAt: { lt: cutoff },
+    steps: {
+      none: { OR: [{ startedAt: { gte: cutoff } }, { lastAttemptAt: { gte: cutoff } }] },
+    },
+  }
+}
+
+/**
+ * Mark provisioning jobs left 'running'/'pending' by a restart as failed, with
+ * a clear reason, so they stop blocking a re-run (runProvisioningPipeline
+ * refuses a 'running' job). No rollback: steps that finished (e.g. a paid
+ * domain registration) are kept, and a re-run skips them.
+ *
+ * Called from the job worker's periodic tick. Each row is updated with the
+ * stale condition re-checked, so a job that just made progress is untouched.
+ * Returns the number of jobs marked failed.
+ */
+export async function failStaleProvisioningJobs(
+  opts: { jobId?: string; staleAfterMs?: number } = {}
+): Promise<number> {
+  const cutoff = new Date(Date.now() - (opts.staleAfterMs ?? STALE_PROVISIONING_MS))
+  const where = {
+    ...staleProvisioningWhere(cutoff),
+    ...(opts.jobId ? { id: opts.jobId } : {}),
+  }
+  const candidates = await db.provisioningJob.findMany({
+    where,
+    select: { id: true, userId: true, domainName: true, status: true },
+    take: 50,
+  })
+
+  let failed = 0
+  for (const job of candidates) {
+    const reason =
+      job.status === 'pending'
+        ? 'Provisioning never started (the panel restarted before it began). It can be retried.'
+        : 'Provisioning was interrupted (the panel restarted mid-run). It can be retried; completed steps are kept.'
+    const now = new Date()
+    const res = await db.provisioningJob.updateMany({
+      where: { ...where, id: job.id },
+      data: { status: 'failed', error: reason, errorCode: 'interrupted', completedAt: now },
+    })
+    if (res.count === 0) continue
+    failed++
+    await db.provisioningStep.updateMany({
+      where: { jobId: job.id, status: 'running' },
+      data: { status: 'failed', error: 'Interrupted by a panel restart', completedAt: now },
+    })
+    console.error(
+      `[orchestration] job=${job.id} domain=${job.domainName} was ${job.status} with no activity; marked failed (interrupted)`
+    )
+    await logAudit({
+      userId: job.userId,
+      action: 'provisioning.interrupted',
+      resource: 'provisioning_job',
+      resourceId: job.id,
+      metadata: { domainName: job.domainName, previousStatus: job.status },
+      status: 'failure',
+    }).catch(() => {})
+  }
+  return failed
 }
 
 // ─── Build the ProvisioningResult from the per-step outputs ──────────────
