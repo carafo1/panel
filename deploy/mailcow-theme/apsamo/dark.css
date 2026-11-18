@@ -1,0 +1,175 @@
+/*
+ * Apsamo theme for Mailcow, dark mode. Mailcow bundles this after its core
+ * dark mode (css/themes/mailcow-darkmode.css), so these tokens and rules win.
+ * Palette from the Apsamo Mail sign-in design (dark): page #0B1020,
+ * surface #171B2F, accent #8888FF.
+ */
+:root {
+  --ap-primary: #706FD3;
+  --ap-primary-hover: #8180E0;
+  --ap-primary-active: #8888FF;
+  --ap-primary-soft: rgba(136, 136, 255, .22);
+  --ap-primary-tint: rgba(136, 136, 255, .10);
+  --ap-link: #A9A8FF;
+  --ap-link-hover: #CFCEFF;
+
+  --ap-ink: #E8EAF4;
+  --ap-ink-soft: #C9CEE3;
+  --ap-muted: #8B93B5;
+  --ap-placeholder: #6B7490;
+  --ap-bg: #0B1020;
+  --ap-surface: #151A2E;
+  --ap-cap: #1A2038;
+  --ap-addon: #20263F;
+  --ap-line: #2E3553;
+  --ap-divider: #252B46;
+  --ap-stripe: rgba(255, 255, 255, .025);
+  --ap-hover: rgba(136, 136, 255, .08);
+  --ap-focus-border: #8888FF;
+  --ap-focus: rgba(136, 136, 255, .28);
+
+  --ap-success-text: #4ADE80;
+  --ap-warning-text: #FBBF24;
+  --ap-danger-text: #F87171;
+
+  --ap-shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 10px 30px rgba(0, 0, 0, .35);
+  --ap-shadow-lg: 0 24px 64px rgba(0, 0, 0, .55);
+
+  --bs-body-color: var(--ap-ink);
+  --bs-body-bg: var(--ap-bg);
+  --bs-link-color: var(--ap-link);
+  --bs-link-hover-color: var(--ap-link-hover);
+  --bs-border-color: var(--ap-divider);
+
+  /* Mailcow core dark tokens */
+  --mc-body-bg: var(--ap-bg);
+  --mc-body-color: var(--ap-ink);
+  --mc-surface: var(--ap-surface);
+  --mc-surface-alt: var(--ap-cap);
+  --mc-text: var(--ap-ink);
+  --mc-text-soft: var(--ap-ink-soft);
+  --mc-muted: var(--ap-muted);
+  --mc-border: var(--ap-divider);
+  --mc-tab-border: var(--ap-divider);
+  --mc-link: var(--ap-link);
+  --mc-link-hover: var(--ap-link-hover);
+  --mc-btn-bg: var(--ap-cap);
+  --mc-btn-border: var(--ap-line);
+  --mc-input-bg: #10152A;
+  --mc-input-color: var(--ap-ink);
+  --mc-input-border: var(--ap-line);
+  --mc-dropdown-bg: var(--ap-surface);
+  --mc-table-bg: transparent;
+  --mc-table-stripe: var(--ap-stripe);
+  --mc-table-stripe-row: transparent;
+  --mc-table-hover: var(--ap-hover);
+  --mc-table-border: var(--ap-divider);
+  --mc-progress-bg: var(--ap-addon);
+  --mc-placeholder: var(--ap-placeholder);
+  --mc-hr: var(--ap-divider);
+  --mc-btn-outline-color: var(--ap-ink);
+  --mc-btn-outline-border: var(--ap-line);
+  --mc-btn-outline-hover-bg: var(--ap-primary-tint);
+  --mc-btn-outline-active-bg: var(--ap-primary);
+  --mc-btn-light-active-color: #fff;
+  --mc-btn-light-active-bg: var(--ap-primary);
+  --mc-btn-light-active-border: var(--ap-primary);
+  --mc-btn-dark-bg: var(--ap-primary);
+  --mc-input-disabled-bg: var(--ap-cap);
+  --mc-input-disabled-color: var(--ap-muted);
+  --mc-list-header-bg: var(--ap-cap);
+  --mc-list-details-bg: var(--ap-surface);
+  --mc-chip-bg: var(--ap-cap);
+  --mc-table-child-bg: var(--ap-surface);
+  --mc-dtr-bg: var(--ap-cap);
+  --mc-dtr-border: var(--ap-line);
+  --mc-dtr-color: var(--ap-link);
+  --mc-dtr-hover-bg: var(--ap-hover);
+  --mc-dtr-active-bg: var(--ap-primary-soft);
+}
+
+body { color: var(--ap-ink); background-color: var(--ap-bg); }
+h1, h2, h3, h4, h5, h6, .h1, .h2, .h3, .h4, .h5, .h6, legend, .modal-title { color: var(--ap-ink); }
+
+/* navbar */
+.navbar.bg-light {
+  background-color: rgba(21, 26, 46, .92) !important;
+  box-shadow: 0 1px 0 var(--ap-divider);
+}
+.navbar-light .navbar-nav .nav-link { color: var(--ap-ink-soft) !important; }
+.navbar-light .navbar-nav .nav-link:hover,
+.navbar-light .navbar-nav .nav-link:focus,
+.navbar-light .navbar-nav .nav-link.active,
+.navbar-light .navbar-nav .show > .nav-link { color: var(--ap-link) !important; }
+.navbar-light .navbar-toggler { border-color: var(--ap-line); }
+.navbar-light .navbar-toggler-icon { filter: invert(1) grayscale(100%) brightness(200%); }
+.dropdown-menu { background-color: var(--ap-surface); border-color: var(--ap-divider); }
+.dropdown-item { color: var(--ap-ink); }
+.dropdown-item:hover, .dropdown-item:focus { color: var(--ap-link) !important; background-color: var(--ap-primary-tint); }
+
+/* surfaces */
+.card { background-color: var(--ap-surface); border-color: var(--ap-divider) !important; }
+.card-header, .card-footer, .modal-header { color: var(--ap-ink); background-color: var(--ap-cap); border-color: var(--ap-divider); }
+.card-header.bg-danger, .card-header.bg-success, .card-header.bg-primary, .card-header.bg-info { background-color: var(--ap-cap) !important; }
+.modal-content { background-color: var(--ap-surface); border-color: var(--ap-divider); }
+.modal-backdrop.show { background-color: #000; opacity: .6; }
+.list-group-item { color: var(--ap-ink); background-color: var(--ap-surface); border-color: var(--ap-divider); }
+kbd { color: var(--ap-ink); background-color: var(--ap-cap); }
+
+/* forms */
+.form-control, .form-select { color: var(--ap-ink); background-color: #10152A; border-color: var(--ap-line); }
+.form-control:disabled, .form-control[readonly], .form-select:disabled { color: var(--ap-muted); background-color: var(--ap-cap); }
+.input-group-text { color: var(--ap-muted); background-color: var(--ap-addon); border-color: var(--ap-line); }
+.form-control::file-selector-button { color: var(--ap-ink); background-color: var(--ap-cap); border-color: var(--ap-line); }
+.form-check-input:not(:checked) { background-color: #10152A; border-color: var(--ap-line); }
+
+/* buttons */
+.btn-secondary, .btn-light, .btn-default { color: var(--ap-ink); background-color: var(--ap-cap); border-color: var(--ap-line); }
+.btn-secondary:hover, .btn-secondary:focus, .btn-light:hover, .btn-light:focus, .btn-default:hover, .page-link:hover {
+  color: var(--ap-link) !important;
+  background-color: var(--ap-addon) !important;
+  border-color: var(--ap-line) !important;
+}
+.btn-check:checked + .btn-secondary, .btn-secondary.active, .show > .btn-secondary.dropdown-toggle,
+.page-item.active .page-link {
+  color: #fff !important;
+  background-color: var(--ap-primary) !important;
+  border-color: var(--ap-primary) !important;
+}
+.btn-close { filter: invert(1) grayscale(100%) brightness(200%); }
+
+/* tabs */
+.nav-tabs .nav-link { color: var(--ap-muted) !important; border-bottom-color: transparent !important; }
+.nav-tabs .nav-link:not(.disabled):hover, .nav-tabs .nav-link:not(.disabled):focus,
+.card .nav-tabs .nav-link:not(.disabled):hover, .card .nav-tabs .nav-link:not(.disabled):focus {
+  color: var(--ap-link) !important;
+}
+.nav-tabs .nav-link.active, .card .nav-tabs .nav-link.active {
+  color: var(--ap-link) !important;
+  border-bottom-color: var(--ap-accent) !important;
+}
+
+/* tables and pagination */
+.table > thead > tr > th, table.dataTable thead th { color: var(--ap-muted); border-bottom-color: var(--ap-line); }
+.pagination > li > a, .pagination > li > span, .pagination .page-link { color: var(--ap-link); background-color: var(--ap-surface); border-color: var(--ap-divider); }
+.page-item.disabled .page-link { color: var(--ap-placeholder); background-color: var(--ap-surface); }
+
+/* alerts, opaque dark tints (also used for floating notifications) */
+.alert-primary, .alert-info { color: #D9D9FF !important; background-color: #23264A !important; border-color: #3A3D74 !important; }
+.alert-success { color: #BBF7D0; background-color: #12291E; border-color: #1E4A33; }
+.alert-danger { color: #FECACA; background-color: #34161A; border-color: #5E2329; }
+.alert-warning { color: #FDE68A; background-color: #33240E; border-color: #5C4012; }
+.alert-secondary, .alert-light { color: var(--ap-ink) !important; background-color: var(--ap-cap) !important; border-color: var(--ap-divider) !important; }
+.alert .btn-close { filter: invert(1) grayscale(100%) brightness(200%); }
+
+/* badges */
+.badge.bg-secondary, .badge.bg-light { color: var(--ap-ink); background-color: var(--ap-addon) !important; }
+
+/* slider */
+.noUi-target { background: #10152A; border-color: var(--ap-line); box-shadow: none; }
+.noUi-handle { background: var(--ap-cap); border-color: var(--ap-line); box-shadow: none; }
+.noUi-handle::before, .noUi-handle::after { background: var(--ap-line); }
+.noUi-connect { background: var(--ap-primary); }
+
+.footer, .footer a { color: var(--ap-muted); }
+.footer a:hover { color: var(--ap-link); }

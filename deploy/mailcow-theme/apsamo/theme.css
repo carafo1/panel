@@ -1,0 +1,365 @@
+/*
+ * Apsamo theme for Mailcow (light). Installed to
+ * /opt/mailcow/data/web/css/themes/apsamo/ by deploy/scripts/apply-mail-theme.sh
+ * and selected with Redis UI_THEME=apsamo (same as System > Customize > Theme).
+ * Mailcow appends this file after its own CSS, so equal selectors win here.
+ * Tokens follow the Apsamo Mail sign-in design (deploy/mail-login) and the
+ * panel's design system (src/app/globals.css).
+ */
+
+/* ── tokens ─────────────────────────────────────────────────────────── */
+:root {
+  --ap-primary: #706FD3;
+  --ap-primary-hover: #5F5EC4;
+  --ap-primary-active: #4F4EAE;
+  --ap-deep: #1E1A47;
+  --ap-accent: #8888FF;
+  --ap-primary-soft: rgba(112, 111, 211, .16);
+  --ap-primary-tint: rgba(112, 111, 211, .08);
+  --ap-link: #5B5AC7;
+  --ap-link-hover: #1E1A47;
+
+  --ap-ink: #1B1F33;
+  --ap-ink-soft: #2E3450;
+  --ap-muted: #5C647A;
+  --ap-placeholder: #9AA1B5;
+  --ap-bg: #F5F7FC;
+  --ap-surface: #FFFFFF;
+  --ap-cap: #F8F9FD;
+  --ap-addon: #EEF0F8;
+  --ap-line: #D6DAE8;
+  --ap-divider: #E6E9F2;
+  --ap-stripe: rgba(112, 111, 211, .035);
+  --ap-hover: rgba(112, 111, 211, .07);
+  --ap-focus-border: #8888FF;
+  --ap-focus: rgba(136, 136, 255, .22);
+
+  --ap-success: #16A34A;
+  --ap-success-text: #15803D;
+  --ap-warning: #D97706;
+  --ap-warning-text: #B45309;
+  --ap-danger: #E5484D;
+  --ap-danger-hover: #D63B40;
+  --ap-danger-text: #C62F35;
+  --ap-info: #3B82F6;
+
+  --ap-radius: 12px;
+  --ap-radius-sm: 10px;
+  --ap-radius-lg: 16px;
+  --ap-shadow: 0 1px 2px rgba(16, 24, 64, .04), 0 8px 24px rgba(16, 24, 64, .06);
+  --ap-shadow-lg: 0 24px 64px rgba(16, 24, 64, .18);
+  --ap-font: 'Inter', 'Segoe UI', system-ui, -apple-system, Roboto, 'Helvetica Neue', Arial, sans-serif;
+
+  --bs-body-color: var(--ap-ink);
+  --bs-body-bg: var(--ap-bg);
+  --bs-body-font-family: var(--ap-font);
+  --bs-primary: #706FD3;
+  --bs-primary-rgb: 112, 111, 211;
+  --bs-link-color: var(--ap-link);
+  --bs-link-hover-color: var(--ap-link-hover);
+  --bs-border-color: var(--ap-divider);
+  --bs-border-radius: var(--ap-radius-sm);
+
+  /* Mailcow core tokens (css/build/014-mailcow.css) */
+  --mc-font-family: var(--ap-font);
+  --mc-body-bg: var(--ap-bg);
+  --mc-primary: var(--ap-primary);
+  --mc-primary-border: var(--ap-primary);
+  --mc-info: var(--ap-accent);
+  --mc-info-border: var(--ap-accent);
+  --mc-border: var(--ap-divider);
+  --mc-surface: var(--ap-surface);
+  --mc-surface-alt: var(--ap-cap);
+  --mc-muted: var(--ap-muted);
+  --mc-hr: var(--ap-divider);
+  --mc-progress-bg: var(--ap-addon);
+  --mc-placeholder: var(--ap-placeholder);
+  --mc-btn-outline-color: var(--ap-ink);
+  --mc-btn-outline-border: var(--ap-line);
+  --mc-btn-outline-hover-bg: var(--ap-primary-tint);
+  --mc-btn-outline-active-bg: var(--ap-primary);
+  --mc-btn-light-active-color: #fff;
+  --mc-btn-light-active-bg: var(--ap-primary);
+  --mc-btn-light-active-border: var(--ap-primary);
+  --mc-dtr-bg: var(--ap-surface);
+  --mc-dtr-border: var(--ap-line);
+  --mc-dtr-color: var(--ap-primary);
+  --mc-dtr-hover-bg: var(--ap-primary-tint);
+  --mc-dtr-active-bg: var(--ap-primary-soft);
+  --mc-login-user: var(--ap-primary);
+  --mc-login-domainadmin: var(--ap-accent);
+  --mc-login-admin: var(--ap-deep);
+}
+
+/* ── base ───────────────────────────────────────────────────────────── */
+body {
+  color: var(--ap-ink);
+  background-color: var(--ap-bg);
+  font-family: var(--ap-font);
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3, h4, h5, h6, .h1, .h2, .h3, .h4, .h5, .h6, legend, .modal-title {
+  font-family: var(--ap-font);
+  font-weight: 700;
+  letter-spacing: -.01em;
+  color: var(--ap-ink);
+}
+a { color: var(--ap-link); }
+a:hover { color: var(--ap-link-hover); }
+.text-muted, .text-secondary { color: var(--ap-muted) !important; }
+::selection { background: var(--ap-primary-soft); }
+hr { border-color: var(--ap-divider); opacity: 1; }
+::placeholder { color: var(--ap-placeholder) !important; }
+:focus-visible { outline: 2px solid var(--ap-accent); outline-offset: 2px; }
+
+/* ── navbar: clean white bar with the brand gradient as a thin top line ─ */
+.navbar.bg-light {
+  background-color: rgba(255, 255, 255, .92) !important;
+  -webkit-backdrop-filter: saturate(140%) blur(10px);
+  backdrop-filter: saturate(140%) blur(10px);
+  border: 0;
+  border-top: 3px solid transparent;
+  border-image: linear-gradient(90deg, var(--ap-deep), var(--ap-primary), var(--ap-accent)) 1;
+  border-image-width: 3px 0 0 0;
+  box-shadow: 0 1px 0 var(--ap-divider);
+}
+.navbar .navbar-brand img.main-logo,
+.navbar .navbar-brand img.main-logo-dark { height: 30px; width: auto; max-width: 180px; }
+.navbar-light .navbar-nav .nav-link { color: var(--ap-ink-soft); font-weight: 500; }
+.navbar-light .navbar-nav .nav-link:hover,
+.navbar-light .navbar-nav .nav-link:focus,
+.navbar-light .navbar-nav .nav-link.active,
+.navbar-light .navbar-nav .show > .nav-link { color: var(--ap-primary); }
+.dropdown-menu {
+  border: 1px solid var(--ap-divider);
+  border-radius: var(--ap-radius);
+  box-shadow: var(--ap-shadow);
+  padding: .35rem;
+}
+.dropdown-item { color: var(--ap-ink); border-radius: 8px; }
+.dropdown-item:hover, .dropdown-item:focus {
+  color: var(--ap-primary) !important;
+  background-color: var(--ap-primary-tint);
+}
+.dropdown-item.active, .dropdown-item:active { color: #fff; background-color: var(--ap-primary); }
+.dropdown-header { color: var(--ap-muted); }
+
+/* ── cards ──────────────────────────────────────────────────────────── */
+.card {
+  border: 1px solid var(--ap-divider) !important;
+  border-radius: var(--ap-radius-lg);
+  background-color: var(--ap-surface);
+  box-shadow: var(--ap-shadow);
+  overflow: hidden;
+}
+.card-header, .card-header:first-child {
+  font-weight: 650;
+  font-size: 1rem;
+  color: var(--ap-ink);
+  background-color: var(--ap-cap);
+  border-bottom: 1px solid var(--ap-divider);
+  border-radius: 0;
+  padding: .7rem 1.1rem;
+}
+.card-header .btn, .card-header .form-control, .card-header .form-select { font-size: .875rem; }
+.card-footer { background-color: var(--ap-cap); border-top: 1px solid var(--ap-divider); }
+.card .card { box-shadow: none; border-radius: var(--ap-radius); }
+/* coloured headers become a brand line instead of a filled bar */
+.card:has(> .card-header.bg-danger) { border-top: 3px solid var(--ap-danger) !important; }
+.card:has(> .card-header.bg-success),
+.card:has(> .card-header.bg-primary),
+.card:has(> .card-header.bg-info) { border-top: 3px solid var(--ap-primary) !important; }
+.card-header.bg-danger, .card-header.bg-success, .card-header.bg-primary, .card-header.bg-info {
+  color: var(--ap-ink) !important;
+  background-color: var(--ap-cap) !important;
+}
+.list-group-item { border-color: var(--ap-divider); }
+
+/* ── modals ─────────────────────────────────────────────────────────── */
+.modal-content {
+  border: 1px solid var(--ap-divider);
+  border-radius: var(--ap-radius-lg);
+  box-shadow: var(--ap-shadow-lg);
+  overflow: hidden;
+}
+.modal-header { background-color: var(--ap-cap); border-bottom: 1px solid var(--ap-divider); }
+.modal-footer { border-top: 1px solid var(--ap-divider); }
+.modal-backdrop.show { opacity: .45; background-color: var(--ap-deep); }
+
+/* ── buttons ────────────────────────────────────────────────────────── */
+.btn {
+  border-width: 1px;
+  border-radius: var(--ap-radius-sm);
+  font-weight: 600;
+  transition: background-color .15s, border-color .15s, color .15s, box-shadow .15s;
+}
+.btn:not(.disabled):hover, .btn:not(.disabled):active { margin-top: 0; border-bottom-width: 1px; }
+.btn:focus, .btn-check:focus + .btn { box-shadow: 0 0 0 .2rem var(--ap-focus); }
+.btn-xs, .btn-group-xs > .btn, .btn-sm { border-radius: 8px; }
+.btn-group > .btn:not(:last-child):not(.dropdown-toggle) { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.btn-group > .btn:not(:first-child) { border-top-left-radius: 0; border-bottom-left-radius: 0; }
+
+.btn-primary, .btn-primary:disabled, .btn-primary.disabled,
+.btn-success, .btn-success:disabled, .btn-success.disabled {
+  color: #fff;
+  background: var(--ap-primary);
+  border-color: var(--ap-primary);
+}
+.btn-primary:hover, .btn-primary:focus, .btn-primary:active,
+.btn-success:hover, .btn-success:focus, .btn-success:active {
+  color: #fff !important;
+  background: var(--ap-primary-hover) !important;
+  border-color: var(--ap-primary-active) !important;
+}
+.btn-danger, .btn-danger:disabled, .btn-danger.disabled { color: #fff; background-color: var(--ap-danger); border-color: var(--ap-danger); }
+.btn-danger:hover, .btn-danger:active, .btn-danger:focus { color: #fff !important; background-color: var(--ap-danger-hover) !important; border-color: var(--ap-danger-hover) !important; }
+.btn-warning, .btn-warning:hover, .btn-warning:focus, .btn-warning:active { color: #fff; background-color: var(--ap-warning); border-color: var(--ap-warning); }
+.btn-info, .btn-info:hover, .btn-info:focus, .btn-info:active { color: #fff; background-color: var(--ap-accent); border-color: var(--ap-accent); }
+.btn-secondary, .btn-light, .btn-default {
+  color: var(--ap-ink);
+  background-color: var(--ap-surface);
+  border-color: var(--ap-line);
+}
+.btn-secondary:hover, .btn-secondary:focus, .btn-light:hover, .btn-light:focus, .btn-default:hover {
+  color: var(--ap-primary) !important;
+  background-color: var(--ap-primary-tint) !important;
+  border-color: var(--ap-line) !important;
+}
+.btn-check:checked + .btn-secondary, .btn-secondary.active, .show > .btn-secondary.dropdown-toggle,
+.btn-check:checked + .btn-light, .btn-light.active,
+.btn-check:checked + .btn-outline-secondary, .btn-outline-secondary.active,
+.btn-dark, .btn-dark:hover, .btn-dark:focus, .btn-dark:active {
+  color: #fff !important;
+  background-color: var(--ap-primary) !important;
+  border-color: var(--ap-primary) !important;
+}
+.btn-outline-primary { color: var(--ap-primary); border-color: var(--ap-primary); }
+.btn-outline-primary:hover { color: #fff; background-color: var(--ap-primary); border-color: var(--ap-primary); }
+
+/* ── forms ──────────────────────────────────────────────────────────── */
+.form-control, .form-select {
+  color: var(--ap-ink);
+  background-color: var(--ap-surface);
+  border-color: var(--ap-line);
+  border-radius: var(--ap-radius-sm);
+  box-shadow: none;
+}
+.form-control:focus, .form-select:focus {
+  border-color: var(--ap-focus-border);
+  box-shadow: 0 0 0 .25rem var(--ap-focus);
+}
+.form-control:disabled, .form-control[readonly], .form-select:disabled { background-color: var(--ap-addon); }
+.form-control::file-selector-button { color: var(--ap-ink); background-color: var(--ap-addon); border-color: var(--ap-line); }
+.input-group-text { color: var(--ap-muted); background-color: var(--ap-addon); border-color: var(--ap-line); }
+.input-group > .form-control:not(:last-child), .input-group > .form-select:not(:last-child),
+.input-group > .input-group-text:not(:last-child) { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.input-group > :not(:first-child) { border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.input-group > .form-control:first-child, .input-group > .input-group-text:first-child,
+.input-group > .form-select:first-child { border-top-left-radius: var(--ap-radius-sm); border-bottom-left-radius: var(--ap-radius-sm); }
+.input-group > :last-child { border-top-right-radius: var(--ap-radius-sm); border-bottom-right-radius: var(--ap-radius-sm); }
+.form-check-input { border-color: var(--ap-line); }
+.form-check-input:checked { background-color: var(--ap-primary); border-color: var(--ap-primary); }
+.form-check-input:focus { border-color: var(--ap-focus-border); box-shadow: 0 0 0 .25rem var(--ap-focus); }
+.bootstrap-select > .dropdown-toggle { border-radius: var(--ap-radius-sm); }
+.bootstrap-select > .dropdown-toggle.bs-placeholder,
+.bootstrap-select > .dropdown-toggle.bs-placeholder:hover { color: var(--mc-placeholder); }
+.bootstrap-select .dropdown-menu li a.active, .bootstrap-select .dropdown-menu li a:active { color: #fff; background-color: var(--ap-primary); }
+div.numberedtextarea-number { color: var(--ap-muted); }
+
+/* ── tabs ───────────────────────────────────────────────────────────── */
+.nav-tabs { border-bottom: 1px solid var(--ap-divider); }
+.nav-tabs .nav-link,
+.nav-tabs .nav-link.disabled, .nav-tabs .nav-link.disabled:hover, .nav-tabs .nav-link.disabled:focus {
+  margin-top: 0;
+  color: var(--ap-muted);
+  font-weight: 600;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: none;
+}
+.nav-tabs .nav-link:not(.disabled):hover, .nav-tabs .nav-link:not(.disabled):focus { color: var(--ap-primary); }
+.nav-tabs .nav-link.active, .nav-tabs .nav-item.show .nav-link, .nav-tabs .nav-link:not(.disabled).active {
+  color: var(--ap-primary);
+  background: none;
+  border-bottom: 2px solid var(--ap-primary);
+}
+.nav-pills .nav-link { border-radius: var(--ap-radius-sm); color: var(--ap-ink); }
+.nav-pills .nav-link.active, .nav-pills .show > .nav-link { background-color: var(--ap-primary); }
+
+/* ── tables ─────────────────────────────────────────────────────────── */
+.table {
+  --bs-table-bg: transparent;
+  --bs-table-striped-bg: var(--ap-stripe);
+  --bs-table-striped-color: var(--ap-ink);
+  --bs-table-hover-color: var(--ap-ink);
+  --bs-table-hover-bg: var(--ap-hover);
+  color: var(--ap-ink);
+  border-color: var(--ap-divider);
+}
+.table > thead > tr > th, table.dataTable thead th {
+  color: var(--ap-muted);
+  font-size: .78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  border-bottom: 1px solid var(--ap-line);
+}
+table.dataTable.table-striped > tbody > tr.odd > * { box-shadow: inset 0 0 0 9999px var(--ap-stripe); }
+table.dataTable.table-hover > tbody > tr:hover > * { box-shadow: inset 0 0 0 9999px var(--ap-hover); }
+.table > :not(:first-child) { border-top: 0; }
+.dataTables_wrapper .dataTables_filter input,
+.dataTables_wrapper .dataTables_length select { border: 1px solid var(--ap-line); border-radius: var(--ap-radius-sm); }
+.pagination > li > a, .pagination > li > span, .pagination .page-link,
+.pagination > li > a:hover, .pagination > li > a:focus, .pagination > li > a:active {
+  top: 0;
+  color: var(--ap-primary);
+  font-weight: 600;
+  text-transform: none;
+  background-color: var(--ap-surface);
+  border: 1px solid var(--ap-divider);
+}
+.pagination .page-item:first-child .page-link { border-top-left-radius: var(--ap-radius-sm); border-bottom-left-radius: var(--ap-radius-sm); }
+.pagination .page-item:last-child .page-link { border-top-right-radius: var(--ap-radius-sm); border-bottom-right-radius: var(--ap-radius-sm); }
+.pagination > li > a:hover, .pagination > li > a:focus { background-color: var(--ap-primary-tint); }
+.pagination > .disabled > a, .page-item.disabled .page-link { color: var(--ap-placeholder); background-color: var(--ap-surface); border-color: var(--ap-divider); }
+.page-item.active .page-link { color: #fff; background-color: var(--ap-primary); border-color: var(--ap-primary); }
+.breadcrumb { border: 1px solid var(--ap-divider); border-radius: var(--ap-radius-sm); }
+
+/* ── alerts, badges, semantic colours ──────────────────────────────── */
+.alert { border: 1px solid; border-radius: var(--ap-radius); }
+.alert-primary, .alert-info { color: #2E2C78 !important; background-color: #EEEEFC !important; border-color: #D9D9F7 !important; }
+.alert-success { color: #14532D; background-color: #E9F8EE; border-color: #C9EDD5; }
+.alert-danger { color: #8E1F24; background-color: #FDECEC; border-color: #F8CFD0; }
+.alert-warning { color: #7A3E06; background-color: #FEF4E3; border-color: #F8DFB5; }
+.alert-secondary, .alert-light { color: var(--ap-ink); background-color: var(--ap-cap); border-color: var(--ap-divider); }
+.alert .alert-link { color: inherit; }
+.badge { font-weight: 600; border-radius: 999px; padding: .32em .65em; }
+.bg-primary { background-color: var(--ap-primary) !important; }
+.bg-info { color: #fff !important; background-color: var(--ap-accent) !important; }
+.bg-success { color: #fff !important; background-color: var(--ap-success) !important; }
+.bg-warning { color: #fff !important; background-color: var(--ap-warning) !important; }
+.bg-danger { color: #fff !important; background-color: var(--ap-danger) !important; }
+.badge.bg-secondary, .badge.bg-light { color: var(--ap-ink); background-color: var(--ap-addon) !important; }
+.badge.bg-info > a, .bg-info a { color: #fff !important; }
+.text-primary { color: var(--ap-primary) !important; }
+.text-success { color: var(--ap-success-text) !important; }
+.text-danger { color: var(--ap-danger-text) !important; }
+.text-warning { color: var(--ap-warning-text) !important; }
+.text-info { color: var(--ap-primary) !important; }
+.progress { border-radius: 999px; background-color: var(--ap-addon); }
+.progress-bar { color: #fff; background-color: var(--ap-primary); }
+.progress-bar.bg-success { background-color: var(--ap-success) !important; }
+.progress-bar.bg-danger, .progress-bar-danger { background-color: var(--ap-danger) !important; }
+.progress-bar.bg-warning, .progress-bar-warning { background-color: var(--ap-warning) !important; }
+
+/* ── Mailcow's own sign-in pages (?classic=1, two-factor) ──────────── */
+.login-card, .card.login-card { border-radius: var(--ap-radius-lg); }
+.login-card::before { border-radius: var(--ap-radius-lg) var(--ap-radius-lg) 0 0; }
+
+/* ── footer ─────────────────────────────────────────────────────────── */
+.footer, .footer a { color: var(--ap-muted); }
+.footer a:hover { color: var(--ap-primary); }
+.footer hr { border-color: var(--ap-divider); }
+
+@media (prefers-reduced-motion: reduce) { .btn { transition: none; } }

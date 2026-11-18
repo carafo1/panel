@@ -476,6 +476,12 @@ CADDY
       ok "Mail certificate sync scheduled every 6 hours"
     fi
 
+    # Apsamo look for Mailcow's pages and SOGo webmail (theme, logos, names).
+    THEME="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/apply-mail-theme.sh"
+    if [[ -f "$THEME" ]]; then
+      INSTALL_DIR="$INSTALL_DIR" bash "$THEME" || warn "Mail theme not applied; run: bash $THEME"
+    fi
+
   elif [[ "$INSTALL_MAILCOW" == "skip" ]]; then
     # ── Just reconfigure existing Mailcow ─────────────────────────────
     BRAND_DOMAIN=$(env_get BRAND_DOMAIN)
