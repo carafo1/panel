@@ -395,11 +395,13 @@ if [[ "${SKIP_MAILCOW:-0}" != "1" ]]; then
 
 # ─── Mailcow webmail / admin (added by setup-email.sh) ────────────────
 ${MAIL_SITES} {
-    # Apsamo Mail sign-in page for a plain GET / on the mail host.
+    # Apsamo Mail sign-in page for every Mailcow login on the mail host:
+    # mailboxes (/), administrator (/admin/) and domain administrator
+    # (/domainadmin/). ?classic=1 shows Mailcow's own page (passkeys, 2FA).
     @apsamo_login {
         host ${MAIL_HOSTNAME}
         method GET HEAD
-        path /
+        path / /admin /admin/ /domainadmin /domainadmin/
         not query classic=*
     }
     handle @apsamo_login {
