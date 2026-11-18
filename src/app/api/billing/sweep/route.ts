@@ -3,7 +3,12 @@ import { db } from '@/lib/db'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { createNotification } from '@/lib/notifications'
 import { sendEmail } from '@/lib/email'
-import { runAutoRenewals, NOT_STRIPE_MANAGED } from '@/lib/renewals'
+import {
+  runAutoRenewals,
+  NOT_STRIPE_MANAGED,
+  acquireCronLease,
+  releaseCronLease,
+} from '@/lib/renewals'
 import { runEmailLifecycle } from '@/lib/email-lifecycle'
 import {
   OVERDUE_GRACE_DAYS,
@@ -68,12 +73,42 @@ function parseMeta(raw: string | null): Record<string, unknown> {
   }
 }
 
-export async function POST(request: Request) {
-  try {
-    if (!await authorise(request)) {
-      return NextResponse.json({ error: 'Unauthorised' }, { status: 403 })
-    }
+/** Longest a sweep may hold the lease before another run may take over. */
+const SWEEP_LEASE_MS = 30 * 60 * 1000
+const SWEEP_LEASE_NAME = 'billing-sweep'
 
+export async function POST(request: Request) {
+  if (!await authorise(request).catch(() => false)) {
+    return NextResponse.json({ error: 'Unauthorised' }, { status: 403 })
+  }
+
+  // One sweep at a time. The worker aborts its request after 10 minutes and
+  // retries within seconds, but the aborted sweep keeps running server-side —
+  // two overlapping runs used to renew / invoice the same subscriptions twice.
+  let lease: string | null
+  try {
+    lease = await acquireCronLease(SWEEP_LEASE_NAME, SWEEP_LEASE_MS)
+  } catch (error) {
+    console.error('[billing-sweep] could not acquire lease:', error)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
+  if (!lease) {
+    // 200 so the worker records a skipped run rather than retrying at once.
+    return NextResponse.json({
+      success: true,
+      skipped: 'another billing sweep is still running',
+    })
+  }
+
+  try {
+    return await runSweep()
+  } finally {
+    await releaseCronLease(SWEEP_LEASE_NAME, lease)
+  }
+}
+
+async function runSweep() {
+  try {
     const now = new Date()
     const remindBefore = new Date(
       now.getTime() + REMIND_DAYS * 24 * 60 * 60 * 1000

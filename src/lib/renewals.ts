@@ -100,7 +100,7 @@ export async function renewSubscription(opts: {
   // now (see billing-enforcement); an admin can still force a renewal.
   if (!opts.force) {
     const unpaid = await db.invoice.findFirst({
-      where: { subscriptionId: sub.id, status: 'unpaid' },
+      where: { subscriptionId: sub.id, status: { in: ['unpaid', 'partially_paid'] } },
       select: { number: true },
     })
     if (unpaid) {
@@ -128,6 +128,30 @@ export async function renewSubscription(opts: {
   const amount = (sub.plan?.price ?? 0) + addons.total
   const currency = (sub.plan as { currency?: string })?.currency || 'USD'
 
+  // ── Claim this period atomically ─────────────────────────────────
+  // Two overlapping sweeps (a worker retry after its fetch timed out, or an
+  // admin "Renew" during the sweep) both read the same period above and both
+  // raised an invoice. Rolling the period forward is now a conditional update
+  // on the period we read: only one caller matches; the other skips.
+  const nextStatus =
+    sub.status === 'past_due' || sub.status === 'suspended' ? sub.status : 'active'
+  const claimed = await db.subscription.updateMany({
+    where: {
+      id: sub.id,
+      currentPeriodStart: sub.currentPeriodStart,
+      currentPeriodEnd: sub.currentPeriodEnd,
+    },
+    data: {
+      currentPeriodStart: newStart,
+      currentPeriodEnd: newEnd,
+      status: nextStatus,
+      lastRenewedAt: now,
+    },
+  })
+  if (claimed.count !== 1) {
+    return { success: false, skipped: 'already renewed by a concurrent run' }
+  }
+
   try {
     // 1. Raise the invoice for the new period (idempotent).
     const invoice = await createSubscriptionInvoice({
@@ -147,19 +171,14 @@ export async function renewSubscription(opts: {
         (addons.lines.length ? ` (incl. add-ons — ${addons.lines.join('; ')})` : ''),
     })
 
-    // 2. Move the period forward and reset the failure counter. The service
+    // 2. The period was moved forward by the claim above. The service
     // carries on while the new invoice is inside its payment window, but a
     // past-due or suspended subscription is NOT reinstated by raising an
     // invoice — only by paying it (billing-enforcement.onInvoiceSettled).
-    const nextStatus =
-      sub.status === 'past_due' || sub.status === 'suspended' ? sub.status : 'active'
+    // Reset the failure counter now that the invoice exists.
     await db.subscription.update({
       where: { id: sub.id },
       data: {
-        currentPeriodStart: newStart,
-        currentPeriodEnd: newEnd,
-        status: nextStatus,
-        lastRenewedAt: now,
         renewalAttempts: 0,
         lastRenewalError: null,
       },
@@ -198,13 +217,29 @@ export async function renewSubscription(opts: {
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    // Record the failure so repeated breakage is visible rather than silent.
+    // Record the failure so repeated breakage is visible rather than silent,
+    // and put the period back if no invoice was raised for it — otherwise the
+    // customer would get a period for free and the retry would never come.
+    const raised = await db.invoice
+      .findFirst({
+        where: { subscriptionId: sub.id, periodStart: newStart },
+        select: { id: true },
+      })
+      .catch(() => null)
     await db.subscription
       .update({
         where: { id: sub.id },
         data: {
           renewalAttempts: { increment: 1 },
           lastRenewalError: msg.slice(0, 500),
+          ...(raised
+            ? {}
+            : {
+                currentPeriodStart: sub.currentPeriodStart,
+                currentPeriodEnd: sub.currentPeriodEnd,
+                status: sub.status,
+                lastRenewedAt: sub.lastRenewedAt,
+              }),
         },
       })
       .catch(() => {})
@@ -254,4 +289,44 @@ export async function runAutoRenewals(): Promise<{
     else failed++
   }
   return { renewed, failed, skipped }
+}
+
+// ── Scheduled-job lease ─────────────────────────────────────────────────────
+
+/**
+ * Claim a named server-side lease (CronLock row) for `ttlMs`. Returns a holder
+ * token when this caller got it, or null when another run still holds it.
+ *
+ * The worker calls the billing sweep with a timeout and retries quickly after
+ * a failure, so a slow sweep could be re-entered while it was still renewing
+ * and invoicing. The claim is atomic: a conditional update that only matches
+ * an expired lease, or the insert of a missing row (the primary key makes a
+ * concurrent second insert fail). An expired lease is taken over, so a crashed
+ * run cannot block the job forever.
+ */
+export async function acquireCronLease(name: string, ttlMs: number): Promise<string | null> {
+  const holder = `${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  const now = new Date()
+  const until = new Date(now.getTime() + ttlMs)
+
+  const taken = await db.cronLock.updateMany({
+    where: { name, lockedUntil: { lte: now } },
+    data: { holder, lockedUntil: until },
+  })
+  if (taken.count === 1) return holder
+
+  try {
+    await db.cronLock.create({ data: { name, holder, lockedUntil: until } })
+    return holder
+  } catch {
+    // The row exists and its lease has not expired: someone else holds it.
+    return null
+  }
+}
+
+/** Release a lease this caller holds (no-op if it was already taken over). */
+export async function releaseCronLease(name: string, holder: string): Promise<void> {
+  await db.cronLock
+    .updateMany({ where: { name, holder }, data: { lockedUntil: new Date(0), holder: null } })
+    .catch(() => {})
 }

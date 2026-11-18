@@ -13,8 +13,7 @@ import {
   findPendingEmailOrder,
   duplicateOrderMessage,
 } from '@/lib/email-order-guard'
-import { provisionForPayment } from '@/lib/provision-on-payment'
-import { createNotification } from '@/lib/notifications'
+import { activatePayment } from '@/lib/payment-activation'
 import { createSubscriptionInvoice, cycleDays } from '@/lib/invoices'
 import {
   processPayment,
@@ -83,6 +82,26 @@ async function postHandler(request: Request) {
       return NextResponse.json(
         { error: 'Plan not found' },
         { status: 404 }
+      )
+    }
+    // Disabled, retired and hidden (admin-assign-only) plans cannot be bought
+    // here, whatever planId the client sends.
+    if (!plan.active || plan.archived || plan.hidden) {
+      return NextResponse.json(
+        { error: 'This plan is not available for purchase' },
+        { status: 400 }
+      )
+    }
+
+    // Charge in the plan's own currency. Domain fees come from the USD
+    // DomainPrice catalogue, so a domain-only order is USD, and a plan +
+    // domain bundle is only possible when the plan is priced in USD too.
+    const planCurrency = (plan.currency || 'USD').toLowerCase()
+    const chargeCurrency = type === 'domain' ? 'usd' : planCurrency
+    if (type === 'both' && planCurrency !== 'usd') {
+      return NextResponse.json(
+        { error: 'This plan cannot be bundled with a domain in one order' },
+        { status: 400 }
       )
     }
 
@@ -300,12 +319,35 @@ async function postHandler(request: Request) {
     const cancelUrl = `${appUrl}/?tab=billing&payment=cancelled`
 
     // ── Create or get Subscription ────────────────────────────────
-    let subscription = await db.subscription.findFirst({
-      where: {
-        userId: decoded.userId,
-        status: { in: ['active', 'pending'] },
-      },
-    })
+    // The payment is linked to exactly one subscription and one invoice, and
+    // activation settles only those. This used to reuse ANY active or pending
+    // subscription of the user regardless of plan — so buying plan B while on
+    // plan A attached the money to plan A — and a domain-only order inherited
+    // whatever subscription the user had. Now:
+    //   - domain-only orders have no subscription;
+    //   - an earlier, unpaid checkout for the SAME plan and the same price is
+    //     reused together with its invoice, so retries don't pile up pending
+    //     subscriptions;
+    //   - anything else gets its own pending subscription + invoice.
+    let subscription: Awaited<ReturnType<typeof db.subscription.findFirst>> = null
+    let checkoutInvoice: { id: string; total: number; amountPaid: number; creditApplied: number } | null = null
+
+    if (type !== 'domain') {
+      const pendingSame = await db.subscription.findFirst({
+        where: { userId: decoded.userId, planId: plan.id, status: 'pending' },
+        orderBy: { createdAt: 'desc' },
+      })
+      if (pendingSame) {
+        const open = await db.invoice.findFirst({
+          where: { subscriptionId: pendingSame.id, status: 'unpaid', type: 'standard' },
+          orderBy: { createdAt: 'desc' },
+        })
+        if (open && Math.abs(open.subtotal - amount) < 0.005) {
+          subscription = pendingSame
+          checkoutInvoice = open
+        }
+      }
+    }
 
     if (!subscription && type !== 'domain') {
       const now = new Date()
@@ -330,7 +372,7 @@ async function postHandler(request: Request) {
       // Raise an unpaid invoice for the period so the customer has a real
       // document to pay against (essential for bank transfer) and a record
       // afterwards. Settled automatically when the payment is confirmed.
-      await createSubscriptionInvoice({
+      checkoutInvoice = await createSubscriptionInvoice({
         userId: decoded.userId,
         subscriptionId: subscription.id,
         planId: plan.id,
@@ -339,10 +381,27 @@ async function postHandler(request: Request) {
         currency: (plan as { currency?: string }).currency || 'USD',
         periodStart: now,
         periodEnd,
-      }).catch((err) =>
+      }).catch((err) => {
         console.error('[checkout] invoice creation failed:', err)
-      )
+        return null
+      })
     }
+
+    // Charge what the invoice says is due (it includes any tax), so the
+    // payment settles the invoice in full rather than leaving it part-paid.
+    // Without tax rates configured this equals `amount`.
+    if (checkoutInvoice) {
+      const due =
+        Math.round(
+          (checkoutInvoice.total -
+            (checkoutInvoice.creditApplied || 0) -
+            (checkoutInvoice.amountPaid || 0)) *
+            100
+        ) / 100
+      if (due > 0) amount = due
+    }
+    // Explicit link from the payment to the bill it pays (read by activation).
+    const linkMetadata = checkoutInvoice ? { invoiceId: checkoutInvoice.id } : undefined
 
     // ═══════════════════════════════════════════════════════════════
     // SPECIAL PATH: Stripe demo mode keeps the original inline-success
@@ -460,7 +519,7 @@ async function postHandler(request: Request) {
         planId: plan.id,
         planName: plan.name,
         amount,
-        currency: 'usd',
+        currency: chargeCurrency,
         userId: decoded.userId,
         email: user.email,
         successUrl,
@@ -470,6 +529,7 @@ async function postHandler(request: Request) {
         projectName: projectName || null,
         framework: framework || null,
         subscriptionId: subscription?.id || null,
+        extraMetadata: linkMetadata,
       })
 
       if (!result.success || !result.paymentId) {
@@ -485,66 +545,28 @@ async function postHandler(request: Request) {
         )
       }
 
-      // Mark the demo payment as completed.
-      //
-      // The projectId is written into the metadata so provisionForPayment
-      // reuses the Project created above instead of building a second one.
-      let demoMeta: Record<string, unknown> = {}
-      try {
-        const existing = await db.payment.findUnique({
-          where: { id: result.paymentId },
-          select: { metadata: true },
-        })
-        demoMeta = existing?.metadata ? JSON.parse(existing.metadata) : {}
-      } catch {
-        demoMeta = {}
+      // Confirm the demo payment through the SAME activation path as every
+      // real gateway: completes it atomically, activates its own
+      // subscription, settles its invoice (so the sweep does not later find
+      // an "overdue" checkout invoice and suspend a paid customer) and
+      // provisions once. The projectId goes into the metadata so
+      // provisionForPayment reuses the Project created above instead of
+      // building a second one.
+      const activation = await activatePayment({
+        paymentId: result.paymentId,
+        method: 'stripe',
+        stripePaymentId: result.transactionId || null,
+        extraMetadata: project ? { projectId: project.id } : {},
+        notifyTitle: 'Payment Successful',
+        notifyMessage: `Your ${plan.name} plan purchase has been completed (demo mode).`,
+      })
+      if (!activation.success) {
+        console.error('[checkout/demo] activation failed:', activation.error)
       }
-
-      const payment = await db.payment.update({
+      const automationResult = activation.automation ?? null
+      const payment = (await db.payment.findUnique({
         where: { id: result.paymentId },
-        data: {
-          status: 'completed',
-          stripePaymentId: result.transactionId,
-          stripeInvoiceId: `in_demo_${Date.now()}`,
-          metadata: JSON.stringify({
-            ...demoMeta,
-            ...(project ? { projectId: project.id } : {}),
-          }),
-        },
-      })
-
-      // Activate the subscription
-      if (subscription && subscription.status === 'pending') {
-        await db.subscription.update({
-          where: { id: subscription.id },
-          data: { status: 'active' },
-        })
-      }
-
-      // REAL provisioning — every other payment path (Stripe webhook, Stripe
-      // return, Waafi callback, offline confirmation) calls this. Only the
-      // demo path called the simulated processEvent('payment_success'), whose
-      // actions just send notifications: a demo purchase reported success and
-      // built nothing — no container deployed, and for email no mail domain
-      // at all. Idempotent, so it cannot double-provision.
-      const provision = await provisionForPayment(payment.id).catch(
-        (err: unknown) => {
-          console.error('[checkout/demo] provisioning failed:', err)
-          return { provisioned: false, detail: 'provisioning error' }
-        }
-      )
-      console.log(
-        `[checkout/demo] provisioning for ${payment.id}: ${provision.detail}`
-      )
-      const automationResult = provision
-
-      await createNotification({
-        userId: decoded.userId,
-        title: 'Payment Successful',
-        message: `Your ${plan.name} plan purchase has been completed (demo mode).`,
-        type: 'success',
-        link: '/?tab=billing',
-      })
+      }))!
 
       // Build the response — preserve existing shape so the UI keeps working
       const response: Record<string, unknown> = {
@@ -633,7 +655,7 @@ async function postHandler(request: Request) {
       planId: plan.id,
       planName: plan.name,
       amount,
-      currency: 'usd',
+      currency: chargeCurrency,
       userId: decoded.userId,
       email: user.email,
       successUrl,
@@ -643,6 +665,7 @@ async function postHandler(request: Request) {
       projectName: projectName || null,
       framework: framework || null,
       subscriptionId: subscription?.id || null,
+      extraMetadata: linkMetadata,
     })
 
     if (!result.success) {

@@ -480,12 +480,28 @@ export async function fulfilDomainOrder(
     return { success: false, error: 'Order was cancelled' }
   }
 
-  // Claim the order before touching the registrar so a concurrent call bails
-  // at the guard above.
-  await db.domainOrder.update({
-    where: { id: orderId },
+  // Claim the order before touching the registrar. The claim is a conditional
+  // update on the status we just read: two concurrent confirmations used to
+  // both pass the checks above and both register (and pay for) the domain.
+  // Only the caller whose update matched may continue.
+  const claim = await db.domainOrder.updateMany({
+    where: { id: orderId, status: order.status },
     data: { status: 'processing' },
   })
+  if (claim.count !== 1) {
+    const now = await db.domainOrder.findUnique({
+      where: { id: orderId },
+      select: { status: true, domainId: true },
+    })
+    if (now?.status === 'completed') {
+      return {
+        success: true,
+        alreadyFulfilled: true,
+        domainId: now.domainId || undefined,
+      }
+    }
+    return { success: false, error: 'Order is already being processed' }
+  }
 
   let meta: Record<string, unknown> = {}
   try {

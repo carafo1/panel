@@ -8,8 +8,9 @@
  *
  * They all need the same three things to happen, in the same order:
  *   1. flip the Payment to 'completed'
- *   2. activate the user's pending Subscription
- *   3. drive the automation pipeline so the service is actually provisioned
+ *   2. activate the Subscription linked to that payment (never a guess)
+ *   3. settle the invoice linked to that payment (partial if underpaid)
+ *   4. drive the automation pipeline so the service is actually provisioned
  *
  * Keeping that in one place means offline payments provision exactly like
  * card payments — no second, half-implemented path.
@@ -32,6 +33,8 @@ export interface ActivatePaymentOptions {
   note?: string | null
   /** Merged into the payment metadata. */
   extraMetadata?: Record<string, unknown>
+  /** Provider payment id to store (Stripe payment_intent). Never the lookup key. */
+  stripePaymentId?: string | null
   /** Override the notification shown to the customer. */
   notifyTitle?: string
   notifyMessage?: string
@@ -72,6 +75,16 @@ export async function activatePayment(
       subscriptionId: payment.subscriptionId ?? null,
     }
   }
+  // Only a pending payment can be confirmed. A failed / rejected / refunded
+  // one stays as it is: completing it would provision on money we either
+  // never received or already gave back.
+  if (payment.status !== 'pending') {
+    return {
+      success: false,
+      paymentId: payment.id,
+      error: `Payment is ${payment.status} and cannot be confirmed.`,
+    }
+  }
 
   let metadata: Record<string, unknown> = {}
   try {
@@ -83,10 +96,22 @@ export async function activatePayment(
   const method = opts.method || payment.method || 'manual'
   const now = new Date()
 
-  const updatedPayment = await db.payment.update({
-    where: { id: payment.id },
+  // The invoice this payment was raised against, linked at checkout.
+  const linkedInvoiceId =
+    payment.invoiceId ||
+    (typeof metadata.invoiceId === 'string' && metadata.invoiceId
+      ? metadata.invoiceId
+      : null)
+
+  // Atomic claim: flip pending → completed only if it is STILL pending. The
+  // old read-then-update let a webhook and the browser return (or two admin
+  // clicks) both get past the status check and both activate.
+  const claimed = await db.payment.updateMany({
+    where: { id: payment.id, status: 'pending' },
     data: {
       status: 'completed',
+      ...(linkedInvoiceId ? { invoiceId: linkedInvoiceId } : {}),
+      ...(opts.stripePaymentId ? { stripePaymentId: opts.stripePaymentId } : {}),
       metadata: JSON.stringify({
         ...metadata,
         ...(opts.extraMetadata || {}),
@@ -103,15 +128,37 @@ export async function activatePayment(
       }),
     },
   })
+  if (claimed.count !== 1) {
+    const current = await db.payment.findUnique({
+      where: { id: payment.id },
+      select: { status: true, subscriptionId: true },
+    })
+    if (current?.status === 'completed') {
+      return {
+        success: true,
+        alreadyCompleted: true,
+        paymentId: payment.id,
+        subscriptionId: current.subscriptionId ?? null,
+      }
+    }
+    return {
+      success: false,
+      paymentId: payment.id,
+      error: `Payment is ${current?.status ?? 'missing'} and cannot be confirmed.`,
+    }
+  }
+  const updatedPayment = (await db.payment.findUnique({
+    where: { id: payment.id },
+  }))!
 
-  // ── Activate the pending subscription ────────────────────────────
+  // ── Activate the payment's own subscription ──────────────────────
+  // Only the subscription linked to THIS payment. The old fallback activated
+  // "the user's most recent pending subscription", which could be an
+  // unrelated order (or a different plan) the customer never paid for.
   let subscriptionId: string | null = null
   const subscription = payment.subscriptionId
     ? await db.subscription.findUnique({ where: { id: payment.subscriptionId } })
-    : await db.subscription.findFirst({
-        where: { userId: payment.userId, status: 'pending' },
-        orderBy: { createdAt: 'desc' },
-      })
+    : null
 
   if (subscription) {
     subscriptionId = subscription.id
@@ -124,8 +171,8 @@ export async function activatePayment(
       const lengthMs = Math.max(end.getTime() - start.getTime(), 0)
       const periodExpired = end.getTime() <= now.getTime()
 
-      await db.subscription.update({
-        where: { id: subscription.id },
+      await db.subscription.updateMany({
+        where: { id: subscription.id, status: 'pending' },
         data: {
           status: 'active',
           ...(periodExpired && lengthMs > 0
@@ -165,12 +212,29 @@ export async function activatePayment(
   // ── Settle the matching invoice ──────────────────────────────────
   // The customer paid against an invoice; mark it paid and record the
   // money in the ledger. Never let this break the confirmation.
+  //
+  // A domain order's invoice is settled by its fulfilment (fulfilDomainOrder),
+  // which deliberately leaves it unpaid when registration fails so it shows
+  // up for reconciliation — so it is not settled here.
   try {
-    const invoice = await findInvoiceForPayment({
-      userId: payment.userId,
-      subscriptionId: subscriptionId ?? payment.subscriptionId,
-    })
-    if (invoice) {
+    const isDomainOrder =
+      typeof metadata.domainOrderId === 'string' && metadata.domainOrderId
+    const invoice = isDomainOrder
+      ? null
+      : await findInvoiceForPayment({
+          userId: payment.userId,
+          subscriptionId: payment.subscriptionId,
+          invoiceId: linkedInvoiceId,
+        })
+    if (invoice && !['paid', 'void', 'cancelled', 'refunded'].includes(invoice.status)) {
+      if (!linkedInvoiceId) {
+        await db.payment.update({
+          where: { id: payment.id },
+          data: { invoiceId: invoice.id },
+        })
+      }
+      // markInvoicePaid records the REAL amount: less than the balance is
+      // booked as a partial payment, not as the invoice paid in full.
       await markInvoicePaid(invoice.id, {
         gateway: method,
         reference: payment.transactionId,
@@ -276,4 +340,121 @@ export async function rejectPayment(opts: {
   }).catch(() => {})
 
   return { success: true }
+}
+
+/** The parts of a Stripe Checkout Session this module reads. */
+export interface StripeCheckoutSessionLike {
+  id: string
+  payment_status?: string | null
+  payment_intent?: string | { id?: string } | null
+  amount_total?: number | null
+  currency?: string | null
+  metadata?: Record<string, string> | null
+}
+
+export type StripeConfirmOutcome =
+  | 'activated'
+  | 'already_completed'
+  | 'not_paid'
+  | 'no_payment'
+  | 'mismatch'
+  | 'refused'
+
+export interface StripeConfirmResult {
+  outcome: StripeConfirmOutcome
+  paymentId?: string
+  userId?: string
+  amount?: number
+  currency?: string
+  detail?: string
+}
+
+/**
+ * Confirm a paid Stripe Checkout Session. Shared by the webhook
+ * (checkout.session.completed) and the browser return (/api/billing/success),
+ * so whichever arrives first activates and the other is a no-op.
+ *
+ * The Payment is found by the CHECKOUT SESSION ID, which checkout stores in
+ * `transactionId` and which never changes. The old code looked it up in
+ * `stripePaymentId` and then overwrote that column with the payment_intent,
+ * so every later lookup missed — and fell back to creating a brand-new
+ * completed Payment (another container) or completing the user's most recent
+ * unrelated pending payment. Neither fallback exists any more: no matching
+ * Payment means nothing is activated.
+ */
+export async function confirmStripeCheckoutSession(
+  session: StripeCheckoutSessionLike
+): Promise<StripeConfirmResult> {
+  if (!session?.id) return { outcome: 'no_payment', detail: 'session has no id' }
+  if (session.payment_status !== 'paid') {
+    return { outcome: 'not_paid', detail: `payment_status=${session.payment_status ?? 'n/a'}` }
+  }
+
+  const payment = await db.payment.findFirst({
+    where: {
+      method: 'stripe',
+      OR: [{ transactionId: session.id }, { stripePaymentId: session.id }],
+    },
+    orderBy: { createdAt: 'asc' },
+  })
+  if (!payment) {
+    console.warn(`[stripe-confirm] no Payment for checkout session ${session.id}; nothing activated`)
+    return { outcome: 'no_payment' }
+  }
+
+  const base = {
+    paymentId: payment.id,
+    userId: payment.userId,
+    amount: payment.amount,
+    currency: payment.currency,
+  }
+
+  if (payment.status === 'completed') {
+    return { outcome: 'already_completed', ...base }
+  }
+
+  // The session must belong to the payer and cover what we asked for.
+  const sessionUserId = session.metadata?.userId
+  if (sessionUserId && sessionUserId !== payment.userId) {
+    console.error(`[stripe-confirm] session ${session.id} user does not match payment ${payment.id}`)
+    return { outcome: 'mismatch', ...base, detail: 'user mismatch' }
+  }
+  const expectedCents = Math.round(payment.amount * 100)
+  if (typeof session.amount_total === 'number' && session.amount_total < expectedCents) {
+    console.error(
+      `[stripe-confirm] session ${session.id} paid ${session.amount_total} < expected ${expectedCents} for payment ${payment.id}`
+    )
+    return { outcome: 'mismatch', ...base, detail: 'amount below expected' }
+  }
+  if (
+    session.currency &&
+    payment.currency &&
+    session.currency.toLowerCase() !== payment.currency.toLowerCase()
+  ) {
+    console.error(`[stripe-confirm] session ${session.id} currency ${session.currency} != ${payment.currency}`)
+    return { outcome: 'mismatch', ...base, detail: 'currency mismatch' }
+  }
+
+  const paymentIntentId =
+    typeof session.payment_intent === 'string'
+      ? session.payment_intent
+      : session.payment_intent?.id || null
+
+  const result = await activatePayment({
+    paymentId: payment.id,
+    method: 'stripe',
+    stripePaymentId: paymentIntentId,
+    extraMetadata: {
+      checkoutSessionId: session.id,
+      ...(paymentIntentId ? { stripePaymentIntentId: paymentIntentId } : {}),
+    },
+    notifyTitle: 'Payment Successful',
+  })
+  if (!result.success) {
+    return { outcome: 'refused', ...base, detail: result.error }
+  }
+  return {
+    outcome: result.alreadyCompleted ? 'already_completed' : 'activated',
+    ...base,
+  }
 }
