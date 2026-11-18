@@ -1,9 +1,24 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
-import { processEvent } from '@/lib/automation'
 import { requireProjectAccess } from '@/lib/project-access'
 
+/**
+ * POST /api/deployments/[id]/rollback
+ *
+ * Not implemented yet, and it says so.
+ *
+ * This endpoint used to mark the deployment 'rolled_back' and insert a NEW
+ * deployment with status 'live' and a hand-written "✅ Previous version
+ * restored successfully" log — without touching the server. The site kept
+ * running whatever it was running, while the panel claimed otherwise.
+ *
+ * A real rollback needs the deployer to build a specific earlier commit (it
+ * currently always deploys the branch head) through claimDeploySlot, so until
+ * that exists the honest answer is 501 and no rows are written. Auth and
+ * access checks still run first so the endpoint leaks nothing about other
+ * tenants' deployments.
+ */
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -31,7 +46,7 @@ export async function POST(
 
     const deployment = await db.deployment.findUnique({
       where: { id },
-      include: { project: true },
+      select: { id: true, projectId: true },
     })
 
     if (!deployment) {
@@ -44,61 +59,14 @@ export async function POST(
     const access = await requireProjectAccess(decoded, deployment.projectId, 'deploy')
     if (!access.ok) return access.response
 
-    if (deployment.status !== 'live') {
-      return NextResponse.json(
-        { error: 'Only live deployments can be rolled back' },
-        { status: 400 }
-      )
-    }
-
-    // Mark the current deployment as rolled back
-    await db.deployment.update({
-      where: { id: deployment.id },
-      data: { status: 'rolled_back' },
-    })
-
-    // Trigger rollback automation
-    await processEvent({
-      type: 'deployment_triggered',
-      userId: decoded.userId,
-      payload: {
-        projectId: deployment.projectId,
-        deploymentId: deployment.id,
-        action: 'rollback_deployment',
-        framework: deployment.project.framework,
+    return NextResponse.json(
+      {
+        error:
+          'Rollback is not available yet. To go back to an earlier version, revert the change in your repository and deploy again.',
+        code: 'rollback_not_implemented',
       },
-    })
-
-    // Create a new deployment from the previous state
-    const rollbackDeployment = await db.deployment.create({
-      data: {
-        projectId: deployment.projectId,
-        // Deployment.userId is the project OWNER (lists and counts read it
-        // that way); the actor is in triggeredBy / the automation log.
-        userId: access.ownerId,
-        commit: deployment.commit,
-        branch: deployment.branch,
-        status: 'live',
-        deployUrl: deployment.deployUrl,
-        duration: 15,
-        triggeredBy: 'user',
-        buildLog: `🔄 Rollback initiated from deployment ${deployment.id}\n✅ Previous version restored successfully\n✅ Deployment is live at ${deployment.deployUrl}`,
-      },
-    })
-
-    return NextResponse.json({
-      message: 'Deployment rolled back successfully',
-      rolledBackDeployment: {
-        id: deployment.id,
-        status: 'rolled_back',
-      },
-      newDeployment: {
-        id: rollbackDeployment.id,
-        status: 'live',
-        deployUrl: rollbackDeployment.deployUrl,
-        createdAt: rollbackDeployment.createdAt,
-      },
-    })
+      { status: 501 }
+    )
   } catch (error) {
     console.error('Rollback deployment error:', error)
     return NextResponse.json(

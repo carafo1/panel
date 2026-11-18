@@ -13,9 +13,11 @@
  *
  * The Project model's `sslCertStatus` field is the source of truth for
  * the dashboard. It's updated by:
- *   - deployer.ts when a project is deployed (status → 'issued')
- *   - proxy.ts when SSL is enabled/disabled (status → 'issued' or 'none')
- *   - this module's health check (status → 'renewing' or 'failed')
+ *   - proxy.ts after every Caddy reload, via recordCertificateStatus: a
+ *     verified TLS handshake → 'issued' with the certificate's real expiry,
+ *     otherwise 'pending' (never a made-up expiry)
+ *   - this module's cert-info lookup (same probe, persisted) and forceRenew
+ *   - 'none' when SSL is off, 'failed' when the proxy update itself fails
  */
 import { db } from '@/lib/db'
 import {
@@ -25,6 +27,75 @@ import {
   isServerInDemoMode,
 } from './ssh'
 import { getServerCredentials } from './provisioner'
+import { isValidHostname } from '@/lib/custom-domains'
+
+// ─── Real certificate check ──────────────────────────────────────────────
+
+export interface CertProbe {
+  ok: boolean
+  issuer?: string
+  notBefore?: Date
+  notAfter?: Date
+}
+
+/**
+ * Ask the host's Caddy for the certificate it serves for `hostname` and
+ * verify it (chain + hostname). Only a verified, unexpired certificate counts.
+ * Retries briefly because Caddy obtains certificates in the background right
+ * after a reload.
+ */
+export async function probeCertificate(
+  client: Parameters<typeof exec>[0],
+  hostname: string,
+  opts: { attempts?: number } = {}
+): Promise<CertProbe> {
+  if (!isValidHostname(hostname)) return { ok: false }
+  const h = shellQuote(hostname)
+  const attempts = Math.max(1, Math.min(opts.attempts ?? 3, 10))
+  const cmd =
+    `for i in $(seq 1 ${attempts}); do ` +
+    `out=$(echo | timeout 10 openssl s_client -servername ${h} -verify_hostname ${h} -verify_return_error ` +
+    `-connect 127.0.0.1:443 2>/dev/null | openssl x509 -noout -issuer -dates 2>/dev/null); ` +
+    `if [ -n "$out" ]; then echo "$out"; exit 0; fi; [ "$i" -lt ${attempts} ] && sleep 3; done; exit 1`
+  const r = await exec(client, cmd, { timeoutMs: attempts * 15000 + 5000 }).catch(() => null)
+  if (!r || r.exitCode !== 0 || !r.stdout.trim()) return { ok: false }
+  const lines = r.stdout.split('\n').map((l) => l.trim())
+  const field = (k: string) => lines.find((l) => l.startsWith(k + '='))?.slice(k.length + 1)
+  const notAfterRaw = field('notAfter')
+  const notBeforeRaw = field('notBefore')
+  const notAfter = notAfterRaw ? new Date(notAfterRaw) : undefined
+  const notBefore = notBeforeRaw ? new Date(notBeforeRaw) : undefined
+  if (!notAfter || Number.isNaN(notAfter.getTime()) || notAfter.getTime() <= Date.now()) {
+    return { ok: false }
+  }
+  return {
+    ok: true,
+    issuer: field('issuer') || '',
+    notAfter,
+    notBefore: notBefore && !Number.isNaN(notBefore.getTime()) ? notBefore : undefined,
+  }
+}
+
+/**
+ * Probe and persist: 'issued' with the certificate's REAL expiry, or
+ * 'pending' (expiry cleared) when no verified certificate is being served.
+ */
+export async function recordCertificateStatus(
+  client: Parameters<typeof exec>[0],
+  projectId: string,
+  hostname: string
+): Promise<CertProbe> {
+  const cert = await probeCertificate(client, hostname)
+  await db.project
+    .update({
+      where: { id: projectId },
+      data: cert.ok
+        ? { sslCertStatus: 'issued', sslCertExpiry: cert.notAfter }
+        : { sslCertStatus: 'pending', sslCertExpiry: null },
+    })
+    .catch(() => {})
+  return cert
+}
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -87,13 +158,15 @@ export async function getProjectCertInfo(projectId: string): Promise<CertInfo | 
   try {
     const creds = await getServerCredentials(project.serverId!)
     return await withConnection(creds, async (client) => {
-      // Use openssl to grab the cert chain
-      const r = await exec(
-        client,
-        `echo | timeout 10 openssl s_client -servername ${shellQuote(hostname)} -connect 127.0.0.1:443 2>/dev/null | openssl x509 -noout -issuer -subject -dates -ext subjectAltIdentifier 2>/dev/null`,
-        { timeoutMs: 20000 }
-      )
-      if (r.exitCode !== 0 || !r.stdout.trim()) {
+      // Verified TLS handshake against the host's Caddy. (This used to pass
+      // `-ext subjectAltIdentifier`, which is not an extension name, and did
+      // not verify the chain, so any certificate — or none — was reported.)
+      // The result is persisted, so a site left 'pending' after deploy flips
+      // to 'issued' with its real expiry the next time anyone looks.
+      const cert = project.sslEnabled
+        ? await recordCertificateStatus(client, projectId, hostname)
+        : { ok: false as const }
+      if (!cert.ok) {
         return {
           hostname,
           issuer: '',
@@ -106,16 +179,9 @@ export async function getProjectCertInfo(projectId: string): Promise<CertInfo | 
           sans: [],
         }
       }
-      const lines = r.stdout.split('\n')
-      const issuer = lines.find((l) => l.startsWith('issuer='))?.replace('issuer=', '') || ''
-      const notBefore = lines
-        .find((l) => l.startsWith('notBefore='))
-        ?.replace('notBefore=', '')
-      const notAfter = lines
-        .find((l) => l.startsWith('notAfter='))
-        ?.replace('notAfter=', '')
-      const issuedAt = notBefore ? new Date(notBefore).toISOString() : null
-      const expiresAt = notAfter ? new Date(notAfter).toISOString() : null
+      const issuer = cert.issuer || ''
+      const issuedAt = cert.notBefore ? cert.notBefore.toISOString() : null
+      const expiresAt = cert.notAfter ? cert.notAfter.toISOString() : null
       const days = expiresAt
         ? Math.round((new Date(expiresAt).getTime() - Date.now()) / (24 * 60 * 60 * 1000))
         : null
@@ -208,8 +274,18 @@ export async function forceRenew(projectId: string): Promise<{ ok: boolean; mess
     return { ok: true, message: `Demo mode: cert renewed for ${hostname} (simulated)` }
   }
 
+  // SECURITY: the hostname becomes part of an `rm -rf` path run as root. It
+  // used to be interpolated unquoted, so a value with a space, `*`, `..` or a
+  // `;` reached the shell. Only a strict DNS name is accepted, and it is
+  // quoted (the glob stays outside the quotes).
+  if (!isValidHostname(hostname)) {
+    return { ok: false, message: 'This website does not have a valid hostname to renew a certificate for.' }
+  }
+  const hostDir = shellQuote(hostname.toLowerCase())
+
   try {
     const creds = await getServerCredentials(project.serverId!)
+    let cert: CertProbe = { ok: false }
     await withConnection(creds, async (client) => {
       // Mark as renewing
       await db.project.update({
@@ -217,10 +293,10 @@ export async function forceRenew(projectId: string): Promise<{ ok: boolean; mess
         data: { sslCertStatus: 'renewing' },
       })
       // Delete Caddy's on-disk cert for this hostname so it re-issues on reload
-      const escapedHost = hostname.replace(/\./g, '_').replace(/\*/g, 'wildcard_')
       await exec(
         client,
-        `rm -rf /opt/deployhub/caddy/data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/${hostname}/* 2>/dev/null; rm -rf /var/lib/caddy/.local/share/caddy/certificates/*/${hostname}/* 2>/dev/null; true`,
+        `rm -rf /opt/deployhub/caddy/data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/${hostDir}/* 2>/dev/null; ` +
+          `rm -rf /var/lib/caddy/.local/share/caddy/certificates/*/${hostDir}/* 2>/dev/null; true`,
         { timeoutMs: 10000 }
       )
       // Reload Caddy
@@ -228,17 +304,16 @@ export async function forceRenew(projectId: string): Promise<{ ok: boolean; mess
       if (r.exitCode !== 0) {
         throw new Error(`Caddy reload failed: ${r.stderr}`)
       }
-      // Give Caddy a moment to re-issue
-      await exec(client, `sleep 5`, { timeoutMs: 10000 })
+      // Issued only once a verified certificate is actually served; otherwise
+      // 'pending' (Caddy keeps retrying in the background).
+      cert = await recordCertificateStatus(client, projectId, hostname)
     })
-    await db.project.update({
-      where: { id: projectId },
-      data: {
-        sslCertStatus: 'issued',
-        sslCertExpiry: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
-      },
-    })
-    return { ok: true, message: `Certificate renewed for ${hostname}` }
+    return cert.ok
+      ? { ok: true, message: `Certificate renewed for ${hostname}` }
+      : {
+          ok: true,
+          message: `Renewal requested for ${hostname}. The new certificate is not being served yet — it usually appears within a few minutes.`,
+        }
   } catch (err) {
     await db.project.update({
       where: { id: projectId },

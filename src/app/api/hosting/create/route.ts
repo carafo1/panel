@@ -6,6 +6,7 @@ import { authenticateRequest } from '@/lib/auth'
 import { encrypt } from '@/lib/encryption'
 import { logAudit } from '@/lib/audit'
 import { deployProject } from '@/lib/vps'
+import { validateGitUrl } from '@/lib/vps/deploy-safety'
 import { getDeploymentMethod, type DeploymentMethodId } from '@/lib/deployment-methods'
 import { BRAND_DOMAIN } from '@/lib/brand-config'
 import { emitWebhookEvent } from '@/lib/webhook-delivery'
@@ -191,6 +192,16 @@ async function handleWizardCreate(
       { error: 'gitUrl is required when source is "git"' },
       { status: 400 }
     )
+  }
+  // SECURITY: the URL is handed to `git clone` as root on the VPS. A local
+  // path such as /opt/deployhub/projects/<another site>, or a file:// URL,
+  // would clone another tenant's code. Same rule as PATCH /api/hosting/[id].
+  if (body.gitUrl !== undefined && body.gitUrl !== null && body.gitUrl !== '') {
+    const git = validateGitUrl(body.gitUrl)
+    if (!git.ok) {
+      return NextResponse.json({ error: git.error }, { status: 400 })
+    }
+    body.gitUrl = git.url
   }
   if (source === 'zip' && !body.uploadId) {
     return NextResponse.json(
@@ -645,12 +656,21 @@ async function handleLegacyCreate(
   decoded: { userId: string; email: string; role: string },
   body: LegacyPayload
 ) {
-  const { name, framework, planId, repoUrl, branch } = body
+  const { name, framework, planId, branch } = body
+  let { repoUrl } = body
   if (!name || !framework) {
     return NextResponse.json(
       { error: 'Name and framework are required' },
       { status: 400 }
     )
+  }
+  // Same rule as the wizard path: only remote https:// / git@ repositories.
+  if (repoUrl !== undefined && repoUrl !== null && repoUrl !== '') {
+    const git = validateGitUrl(repoUrl)
+    if (!git.ok) {
+      return NextResponse.json({ error: git.error }, { status: 400 })
+    }
+    repoUrl = git.url
   }
 
   const subscription = await db.subscription.findFirst({

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { authenticateRequest } from '@/lib/auth'
 import { requireProjectAccess } from '@/lib/project-access'
 import { logAudit } from '@/lib/audit'
-import { listRedirects, createRedirect } from '@/lib/vps'
+import { listRedirects, createRedirect, RedirectValidationError } from '@/lib/vps'
 
 /**
  * Project Redirects Endpoint (collection)
@@ -89,6 +89,9 @@ export async function POST(
 
     return NextResponse.json({ redirect }, { status: 201 })
   } catch (error) {
+    if (error instanceof RedirectValidationError) {
+      return NextResponse.json({ error: error.message }, { status: 400 })
+    }
     const msg = 'Internal server error'
     console.error('Create redirect error:', error)
     return NextResponse.json({ error: msg }, { status: 500 })

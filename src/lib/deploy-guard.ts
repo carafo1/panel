@@ -22,12 +22,37 @@ import { db } from './db'
 export const ACTIVE_DEPLOY_STATUSES = ['queued', 'building', 'deploying']
 
 /**
- * How long a deployment may stay active before we assume its process died.
+ * How long an active deployment may go without a heartbeat before we assume
+ * its process died.
  *
- * Must exceed the deployer's own build timeout (1800s) with room to spare, or
- * a legitimately slow build would be reaped out from under itself.
+ * This used to be measured from createdAt (45 min), but a legitimate deploy —
+ * a 30-minute image build plus clone, pipeline checks, start and probes — can
+ * run past that and was then reaped out from under itself. The deployer now
+ * bumps the row's updatedAt every minute while it runs (see
+ * DEPLOY_HEARTBEAT_MS in lib/vps/deployer), so silence is the real signal.
  */
-export const STALE_DEPLOY_MS = 45 * 60 * 1000
+export const STALE_DEPLOY_MS = 15 * 60 * 1000
+
+/** How often a running deployer refreshes its heartbeat. */
+export const DEPLOY_HEARTBEAT_MS = 60 * 1000
+
+/**
+ * Absolute ceiling regardless of heartbeat, so a wedged process that keeps
+ * its timer alive cannot hold the project forever.
+ */
+export const MAX_DEPLOY_AGE_MS = 3 * 60 * 60 * 1000
+
+/**
+ * Refresh the heartbeat of a deployment that is still active. Returns false
+ * once the row has left the active states (reaped, failed or finished).
+ */
+export async function touchDeploymentHeartbeat(deploymentId: string): Promise<boolean> {
+  const res = await db.deployment.updateMany({
+    where: { id: deploymentId, status: { in: ACTIVE_DEPLOY_STATUSES } },
+    data: { updatedAt: new Date() },
+  })
+  return res.count > 0
+}
 
 export interface InFlight {
   id: string
@@ -43,12 +68,13 @@ export interface InFlight {
  * indefinitely. Returns how many were reaped.
  */
 export async function reapStaleDeployments(projectId?: string): Promise<number> {
-  const cutoff = new Date(Date.now() - STALE_DEPLOY_MS)
+  const heartbeatCutoff = new Date(Date.now() - STALE_DEPLOY_MS)
+  const ageCutoff = new Date(Date.now() - MAX_DEPLOY_AGE_MS)
   const res = await db.deployment.updateMany({
     where: {
       ...(projectId ? { projectId } : {}),
       status: { in: ACTIVE_DEPLOY_STATUSES },
-      createdAt: { lt: cutoff },
+      OR: [{ updatedAt: { lt: heartbeatCutoff } }, { createdAt: { lt: ageCutoff } }],
     },
     data: {
       status: 'failed',

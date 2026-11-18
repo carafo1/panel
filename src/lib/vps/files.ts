@@ -45,6 +45,13 @@ import {
 } from './ssh'
 import { ensureDir } from './local-exec'
 import { getServerCredentials } from './provisioner'
+import {
+  assertConfinedLocal,
+  confinementGuardScript,
+  guardFailureMessage,
+  PathConfinementError,
+  type ConfineMode,
+} from './path-confine'
 
 /**
  * A path the customer asked for that we refuse (absolute, `..`, escapes the
@@ -218,6 +225,50 @@ async function resolveProjectPath(
   }
 }
 
+// ─── Symlink confinement ─────────────────────────────────────────────────
+//
+// The checks above are textual. The panel runs as root, so a symlink inside
+// the site (`leak -> /opt/apsamo/.env`, or a directory pointing at `/etc`)
+// would otherwise let a download read, or an upload write, anywhere on the
+// host. Every operation below therefore re-checks the real location: in
+// process with fs.realpath/lstat when the files live on the panel host, and
+// with a bash guard (realpath -m) that runs in the same shell as the
+// operation, for both local and SSH servers.
+
+type AnyClient = Parameters<typeof exec>[0]
+
+async function checkLocalConfinement(
+  r: ResolvedPath,
+  target: string,
+  mode: ConfineMode
+): Promise<void> {
+  if (!r.localMode) return
+  try {
+    await assertConfinedLocal(r.base, target, mode)
+  } catch (err) {
+    if (err instanceof PathConfinementError) throw new PathError(err.message)
+    throw err
+  }
+}
+
+/**
+ * Run `command` on the host only if every guarded path still resolves inside
+ * the site. Guard failures become a PathError (400), not a 500.
+ */
+async function guardedExec(
+  client: AnyClient,
+  base: string,
+  guards: Array<[string, ConfineMode]>,
+  command: string,
+  timeoutMs: number
+) {
+  const prelude = guards.map(([t, m]) => confinementGuardScript(base, t, m)).join('\n')
+  const r = await exec(client, `${prelude}\n${command}`, { timeoutMs })
+  const refused = guardFailureMessage(r.exitCode)
+  if (refused) throw new PathError(refused)
+  return r
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
 function shellQuote(s: string): string {
@@ -293,19 +344,23 @@ export async function listFiles(
   })
   if (!project) throw new Error('Project not found')
 
-  const { abs: resolved, base, isDemo } = await resolveProjectPath(project, subdir || '.')
+  const rp = await resolveProjectPath(project, subdir || '.')
+  const { abs: resolved, base, isDemo } = rp
 
   // Demo mode: synthetic listing.
   if (isDemo) {
     return demoListing(resolved, base)
   }
 
+  await checkLocalConfinement(rp, resolved, 'list')
   const creds: SshCredentials = await getServerCredentials(project.serverId!)
   return await withConnection(creds, async (client) => {
-    const r = await exec(
+    const r = await guardedExec(
       client,
+      base,
+      [[resolved, 'list']],
       `ls -la --time-style=full-iso ${shellQuote(resolved)} 2>&1`,
-      { timeoutMs: 15000 }
+      15000
     )
     if (r.exitCode !== 0) {
       throw new Error(`ls failed: ${(r.stderr || r.stdout).trim()}`)
@@ -334,17 +389,21 @@ export async function uploadFile(
   })
   if (!project) throw new Error('Project not found')
 
-  const { abs, isDemo } = await resolveProjectPath(project, pathArg)
+  const rp = await resolveProjectPath(project, pathArg)
+  const { abs, isDemo } = rp
 
   if (isDemo) {
     return { ok: true, message: `[demo] Uploaded ${path.basename(abs)} (${content.length} bytes)` }
   }
 
+  await checkLocalConfinement(rp, abs, 'write')
   const creds = await getServerCredentials(project.serverId!)
   await withConnection(creds, async (client) => {
-    // Ensure parent dir exists, then upload.
+    // Ensure parent dir exists (only once the target is proven to resolve
+    // inside the site), then upload.
     const parent = path.posix.dirname(abs)
-    await exec(client, `mkdir -p ${shellQuote(parent)}`, { timeoutMs: 10000 })
+    await guardedExec(client, rp.base, [[abs, 'write']], `mkdir -p ${shellQuote(parent)}`, 10000)
+    await checkLocalConfinement(rp, abs, 'write')
     await putFile(client, abs, content, { mode: 0o644 })
   })
   return { ok: true, message: `Uploaded ${path.basename(abs)}` }
@@ -362,7 +421,8 @@ export async function downloadFile(
   })
   if (!project) throw new Error('Project not found')
 
-  const { abs, isDemo } = await resolveProjectPath(project, pathArg)
+  const rp = await resolveProjectPath(project, pathArg)
+  const { abs, isDemo } = rp
   const filename = path.posix.basename(abs)
 
   if (isDemo) {
@@ -373,8 +433,10 @@ export async function downloadFile(
     return { content: body, filename, size: body.length }
   }
 
+  await checkLocalConfinement(rp, abs, 'read')
   const creds = await getServerCredentials(project.serverId!)
   const content = await withConnection(creds, async (client) => {
+    await guardedExec(client, rp.base, [[abs, 'read']], 'true', 10000)
     return await getFile(client, abs)
   })
   return { content, filename, size: content.length }
@@ -392,15 +454,23 @@ export async function deleteFile(
   })
   if (!project) throw new Error('Project not found')
 
-  const { abs, isDemo } = await resolveProjectPath(project, pathArg)
+  const rp = await resolveProjectPath(project, pathArg)
+  const { abs, isDemo } = rp
+
+  if (abs.replace(/\/+$/, '') === rp.base.replace(/\/+$/, '')) {
+    throw new PathError('The website root folder cannot be deleted.')
+  }
 
   if (isDemo) {
     return { ok: true, message: `[demo] Deleted ${path.posix.basename(abs)}` }
   }
 
+  // 'remove' lets a symlink itself be deleted (rm never follows the final
+  // component) but requires its parent to resolve inside the site.
+  await checkLocalConfinement(rp, abs, 'remove')
   const creds = await getServerCredentials(project.serverId!)
   await withConnection(creds, async (client) => {
-    await exec(client, `rm -rf ${shellQuote(abs)}`, { timeoutMs: 30000 })
+    await guardedExec(client, rp.base, [[abs, 'remove']], `rm -rf -- ${shellQuote(abs)}`, 30000)
   })
   return { ok: true, message: 'Deleted' }
 }
@@ -417,15 +487,17 @@ export async function createDirectory(
   })
   if (!project) throw new Error('Project not found')
 
-  const { abs, isDemo } = await resolveProjectPath(project, pathArg)
+  const rp = await resolveProjectPath(project, pathArg)
+  const { abs, isDemo } = rp
 
   if (isDemo) {
     return { ok: true, message: `[demo] Created directory ${path.posix.basename(abs)}` }
   }
 
+  await checkLocalConfinement(rp, abs, 'write')
   const creds = await getServerCredentials(project.serverId!)
   await withConnection(creds, async (client) => {
-    await exec(client, `mkdir -p ${shellQuote(abs)}`, { timeoutMs: 10000 })
+    await guardedExec(client, rp.base, [[abs, 'write']], `mkdir -p ${shellQuote(abs)}`, 10000)
   })
   return { ok: true, message: 'Directory created' }
 }
@@ -450,14 +522,20 @@ export async function renameFile(
     return { ok: true, message: `[demo] Renamed ${oldPath} → ${newPath}` }
   }
 
+  await checkLocalConfinement(resolvedOld, resolvedOld.abs, 'read')
+  await checkLocalConfinement(resolvedNew, resolvedNew.abs, 'write')
   const creds = await getServerCredentials(project.serverId!)
   await withConnection(creds, async (client) => {
     const parent = path.posix.dirname(resolvedNew.abs)
-    await exec(client, `mkdir -p ${shellQuote(parent)}`, { timeoutMs: 10000 })
-    await exec(
+    await guardedExec(
       client,
-      `mv ${shellQuote(resolvedOld.abs)} ${shellQuote(resolvedNew.abs)}`,
-      { timeoutMs: 30000 }
+      resolvedOld.base,
+      [
+        [resolvedOld.abs, 'read'],
+        [resolvedNew.abs, 'write'],
+      ],
+      `mkdir -p ${shellQuote(parent)} && mv -- ${shellQuote(resolvedOld.abs)} ${shellQuote(resolvedNew.abs)}`,
+      30000
     )
   })
   return { ok: true, message: 'Renamed' }
@@ -478,20 +556,24 @@ export async function getFileContent(
   })
   if (!project) throw new Error('Project not found')
 
-  const { abs, isDemo } = await resolveProjectPath(project, pathArg)
+  const rp = await resolveProjectPath(project, pathArg)
+  const { abs, isDemo } = rp
 
   if (isDemo) {
     const demo = `# ${path.posix.basename(abs)}\n\nThis is a demo-mode placeholder.\n`
     return { content: demo, size: demo.length, truncated: false }
   }
 
+  await checkLocalConfinement(rp, abs, 'read')
   const creds = await getServerCredentials(project.serverId!)
   return await withConnection(creds, async (client) => {
     // Use head -c so we never pull a multi-GB file into memory.
-    const r = await exec(
+    const r = await guardedExec(
       client,
-      `wc -c < ${shellQuote(abs)}; echo "---"; head -c ${maxBytes + 1} ${shellQuote(abs)} 2>/dev/null`,
-      { timeoutMs: 30000 }
+      rp.base,
+      [[abs, 'read']],
+      `wc -c < ${shellQuote(abs)}; echo "---"; head -c ${Math.trunc(maxBytes) + 1} ${shellQuote(abs)} 2>/dev/null`,
+      30000
     )
     const parts = r.stdout.split('---')
     const sizeStr = (parts[0] || '').trim()
@@ -514,16 +596,19 @@ export async function saveFileContent(
   })
   if (!project) throw new Error('Project not found')
 
-  const { abs, isDemo } = await resolveProjectPath(project, pathArg)
+  const rp = await resolveProjectPath(project, pathArg)
+  const { abs, isDemo } = rp
 
   if (isDemo) {
     return { ok: true, message: `[demo] Saved ${path.posix.basename(abs)} (${content.length} bytes)` }
   }
 
+  await checkLocalConfinement(rp, abs, 'write')
   const creds = await getServerCredentials(project.serverId!)
   await withConnection(creds, async (client) => {
     const parent = path.posix.dirname(abs)
-    await exec(client, `mkdir -p ${shellQuote(parent)}`, { timeoutMs: 10000 })
+    await guardedExec(client, rp.base, [[abs, 'write']], `mkdir -p ${shellQuote(parent)}`, 10000)
+    await checkLocalConfinement(rp, abs, 'write')
     await putFile(client, abs, content, { mode: 0o644 })
   })
   return { ok: true, message: 'Saved' }
@@ -549,7 +634,8 @@ export async function exportArchive(
   })
   if (!project) throw new Error('Project not found')
 
-  const { abs, isDemo } = await resolveProjectPath(project, subdir || '.')
+  const rp = await resolveProjectPath(project, subdir || '.')
+  const { abs, isDemo } = rp
   const label = (
     path.posix.basename(abs.replace(/\/+$/, '')) || project.slug || 'files'
   ).replace(/[^A-Za-z0-9._-]/g, '_')
@@ -563,16 +649,20 @@ export async function exportArchive(
     return { content: body, filename: `${label}-${stamp}.zip`, size: body.length }
   }
 
+  await checkLocalConfinement(rp, abs, 'list')
   const creds = await getServerCredentials(project.serverId!)
   return await withConnection(creds, async (client) => {
     const rand = Math.random().toString(36).slice(2, 8)
 
     // Prefer zip — most end users can open a .zip natively.
+    // -y stores symlinks AS symlinks. Without it zip follows them, so a link
+    // to /opt/apsamo/.env inside the site would export the panel's secrets.
+    // (tar below never follows symlinks unless given -h.)
     const zipTmp = `/tmp/apsamo-export-${Date.now()}-${rand}.zip`
     const zipCmd =
       `cd ${shellQuote(abs)} && ` +
-      `zip -r -q ${shellQuote(zipTmp)} . -x '.git/*' '*/.git/*' && echo __APSAMO_OK__`
-    const zr = await exec(client, zipCmd, { timeoutMs: 300000 })
+      `zip -r -q -y ${shellQuote(zipTmp)} . -x '.git/*' '*/.git/*' && echo __APSAMO_OK__`
+    const zr = await guardedExec(client, rp.base, [[abs, 'list']], zipCmd, 300000)
     if (zr.exitCode === 0 && /__APSAMO_OK__/.test(zr.stdout)) {
       const content = await getFile(client, zipTmp)
       await exec(client, `rm -f ${shellQuote(zipTmp)}`, { timeoutMs: 10000 })
@@ -584,7 +674,7 @@ export async function exportArchive(
     const tarTmp = `/tmp/apsamo-export-${Date.now()}-${rand}.tar.gz`
     const tarCmd =
       `tar -czf ${shellQuote(tarTmp)} --exclude='.git' -C ${shellQuote(abs)} . && echo __APSAMO_OK__`
-    const tr = await exec(client, tarCmd, { timeoutMs: 300000 })
+    const tr = await guardedExec(client, rp.base, [[abs, 'list']], tarCmd, 300000)
     if (tr.exitCode !== 0 || !/__APSAMO_OK__/.test(tr.stdout)) {
       await exec(client, `rm -f ${shellQuote(tarTmp)}`, { timeoutMs: 10000 })
       const detail = (tr.stderr || tr.stdout || zr.stderr || zr.stdout || '').trim().slice(0, 300)
@@ -617,7 +707,8 @@ export async function importArchive(
   })
   if (!project) throw new Error('Project not found')
 
-  const { abs, isDemo } = await resolveProjectPath(project, subdir || '.')
+  const rp = await resolveProjectPath(project, subdir || '.')
+  const { abs, isDemo } = rp
   const lower = (originalName || '').toLowerCase()
   const isTarGz = /\.(tar\.gz|tgz)$/.test(lower)
   const isTar = /\.tar$/.test(lower)
@@ -630,19 +721,29 @@ export async function importArchive(
     }
   }
 
+  await checkLocalConfinement(rp, abs, 'write')
   const creds = await getServerCredentials(project.serverId!)
   await withConnection(creds, async (client) => {
     const rand = Math.random().toString(36).slice(2, 8)
     const ext = isTarGz ? 'tar.gz' : isTar ? 'tar' : 'zip'
     const tmp = `/tmp/apsamo-import-${Date.now()}-${rand}.${ext}`
     await putFile(client, tmp, content, { mode: 0o644 })
-    await exec(client, `mkdir -p ${shellQuote(abs)}`, { timeoutMs: 15000 })
 
     const extractCmd = useTar
       ? `tar -x${isTarGz ? 'z' : ''}f ${shellQuote(tmp)} -C ${shellQuote(abs)} && echo __APSAMO_OK__`
       : `unzip -o -q ${shellQuote(tmp)} -d ${shellQuote(abs)} && echo __APSAMO_OK__`
-    const r = await exec(client, extractCmd, { timeoutMs: 300000 })
-    await exec(client, `rm -f ${shellQuote(tmp)}`, { timeoutMs: 10000 })
+    let r
+    try {
+      r = await guardedExec(
+        client,
+        rp.base,
+        [[abs, 'write']],
+        `mkdir -p ${shellQuote(abs)} && ${extractCmd}`,
+        300000
+      )
+    } finally {
+      await exec(client, `rm -f ${shellQuote(tmp)}`, { timeoutMs: 10000 })
+    }
     if (r.exitCode !== 0 || !/__APSAMO_OK__/.test(r.stdout)) {
       const detail = (r.stderr || r.stdout || '').trim().slice(0, 300)
       throw new Error(
