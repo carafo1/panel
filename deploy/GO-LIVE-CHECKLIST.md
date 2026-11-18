@@ -257,8 +257,13 @@ and confirm the verification email arrives, and not in spam.
 **Receiving:** make sure `support@yourdomain.com` and `billing@yourdomain.com`
 exist as real mailboxes or forwarders. Customers reply to these addresses.
 
-**Hosting customer mailboxes (optional, Mailcow)** — needs 8 GB RAM, the `mail`
-A record (Step 2) and rDNS (Step 1). First check outgoing port 25 is open:
+**Hosting customer mailboxes (optional, Mailcow)** — 8 GB RAM recommended; on a
+smaller server (4 GB) `setup-email` switches to low-memory mode by itself, aiming for
+Mailcow to use under ~1.5 GB: it adds a 4 GB swap file and leaves off the ClamAV virus
+scanner, Olefy (Office macro scanner) and full-text search. Spam filtering and SOGo
+webmail stay on. After a RAM upgrade, set `SKIP_CLAMD=n`, `SKIP_OLEFY=n`, `SKIP_FTS=n`
+in `/opt/mailcow/mailcow.conf` and run `docker compose up -d` in `/opt/mailcow`. Also needs the `mail` A record (Step 2) and rDNS set to `mail.yourdomain.com`
+(Step 1). First check outgoing port 25 is open:
 
 ```bash
 nc -vz gmail-smtp-in.l.google.com 25
@@ -272,8 +277,11 @@ apsamo setup-email
 
 It installs Mailcow behind Caddy (webmail at `https://mail.yourdomain.com`), shares
 Caddy's certificate with the mail server, and asks you for a Mailcow API key. In the
-Mailcow admin: **change the default password (`admin` / `moohoo`) immediately**, add
-`yourdomain.com`, and copy its **MX, SPF and DKIM** records into your DNS.
+Mailcow admin: **change the default password (`admin` / `moohoo`) immediately**, then
+create the Read/Write API key with your server IP in "Allow API access from these IPs".
+Add `yourdomain.com` as a mail domain, and copy its **MX, SPF and DKIM** records into
+your DNS. It also opens the mail ports in ufw and serves `autodiscover.` /
+`autoconfig.yourdomain.com` when those DNS records point at the server.
 
 ---
 
