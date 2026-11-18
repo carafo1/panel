@@ -39,6 +39,7 @@
  * containerId + simulated build logs, so the dashboard UX is intact.
  */
 import { readFile } from 'fs/promises'
+import path from 'path'
 import { db } from '@/lib/db'
 import { STACK_DEFINITIONS, getStackDefinition } from '@/lib/stacks'
 import { isValidEnvKey, yamlQuoted, safeRuntimeVersion, safeDocumentRoot } from '@/lib/safe-values'
@@ -60,6 +61,22 @@ import {
 import { getServerCredentials } from './provisioner'
 import { configureProjectProxy, removeProjectProxy } from './proxy'
 import { provisionProjectDatabase } from './database'
+import {
+  ACTIVE_DEPLOY_STATUSES,
+  DEPLOY_HEARTBEAT_MS,
+  touchDeploymentHeartbeat,
+} from '@/lib/deploy-guard'
+import {
+  checkComposeModel,
+  composeProjectName,
+  DANGEROUS_COMPOSE_ENV_RE,
+  exactContainerNameFilter,
+  httpProbeScript,
+  isRemoteGitUrl,
+  isSafeGitBranch,
+  scanComposeText,
+  siblingContainerCleanupCommand,
+} from './deploy-safety'
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -361,13 +378,28 @@ export async function deployProject(req: DeployRequest): Promise<DeployResult> {
     }
   }
 
+  // Heartbeat: the stale-deploy reaper (lib/deploy-guard) judges liveness by
+  // the row's updatedAt, so keep it fresh for as long as this process works
+  // on the deployment. A crashed panel stops the timer and the row is reaped.
+  const heartbeat = setInterval(() => {
+    void touchDeploymentHeartbeat(deploymentId).catch(() => {})
+  }, DEPLOY_HEARTBEAT_MS)
+  heartbeat.unref?.()
+
+  // Whether `docker compose up` has started replacing the running container.
+  // Before that point the previous version is still serving, so a failure
+  // must not mark the project 'error' — the Caddyfile only includes 'running'
+  // projects, and the next proxy regeneration would drop a working site.
+  const deployState: DeployState = { containerReplaced: false }
+  const previousStatus = project.status
+
   // Decide which pipeline to run.
   const method = project.deploymentMethod as DeploymentMethodId | null
   try {
     const result =
       method && getDeploymentMethod(method)
-        ? await deployMethodProject(req, project, method, runStage, stageLog, buildLog, start)
-        : await deployLegacyProject(req, project, runStage, stageLog, buildLog, start)
+        ? await deployMethodProject(req, project, method, runStage, stageLog, buildLog, start, deployState)
+        : await deployLegacyProject(req, project, runStage, stageLog, buildLog, start, deployState)
     broadcastDeploymentStatus(deploymentId, projectId, result.ok ? 'live' : 'failed')
     void announceDeployment({
       projectId,
@@ -381,10 +413,18 @@ export async function deployProject(req: DeployRequest): Promise<DeployResult> {
     const message = err instanceof Error ? err.message : String(err)
     log(`DEPLOY FAILED: ${message}`)
     buildLog.push(`[FATAL] ${message}`)
-    await db.project.update({
-      where: { id: projectId },
-      data: { status: 'error' },
-    })
+    const keepStatus =
+      !deployState.containerReplaced && (previousStatus === 'running' || previousStatus === 'stopped')
+    if (keepStatus) {
+      buildLog.push(
+        `[info] The failure happened before the running container was replaced — the site keeps its previous state (${previousStatus}).`
+      )
+    } else {
+      await db.project.update({
+        where: { id: projectId },
+        data: { status: 'error' },
+      })
+    }
     await db.deployment.update({
       where: { id: deploymentId },
       data: {
@@ -409,6 +449,8 @@ export async function deployProject(req: DeployRequest): Promise<DeployResult> {
       durationMs: Date.now() - start,
       error: message,
     }
+  } finally {
+    clearInterval(heartbeat)
   }
 }
 
@@ -421,6 +463,234 @@ type RunStage = <T>(
   opts?: { skip?: boolean; skipReason?: string }
 ) => Promise<T | undefined>
 type StageLog = (msg: string) => void
+
+interface DeployState {
+  /** Set just before `docker compose up` starts replacing the old container. */
+  containerReplaced: boolean
+}
+
+// ─── Hardening helpers (shared by both pipelines) ────────────────────────
+
+/**
+ * Environment for every `docker compose` the deployer runs.
+ *
+ * On a localhost server the shell inherits the panel's own process.env —
+ * JWT_SECRET, ENCRYPTION_KEY, DATABASE_URL — and compose interpolates
+ * `${VAR}` in compose files from it, so a customer compose file (or an env
+ * value) referencing `${ENCRYPTION_KEY}` received the panel's key. `env -i`
+ * keeps only what the docker CLI needs to find its daemon and plugins.
+ */
+const COMPOSE_ENV =
+  'env -i PATH="$PATH" HOME="$HOME" ' +
+  '${DOCKER_HOST:+DOCKER_HOST="$DOCKER_HOST"} ' +
+  '${DOCKER_CONFIG:+DOCKER_CONFIG="$DOCKER_CONFIG"} ' +
+  '${DOCKER_CONTEXT:+DOCKER_CONTEXT="$DOCKER_CONTEXT"} '
+
+/**
+ * `-p <name> ` pinning the compose project to the one derived from the
+ * project's directory. Without it a compose file's `name:` (or
+ * COMPOSE_PROJECT_NAME in .env) chose the project — a customer could edit
+ * their file to `name: <another tenant>` and have `down -v` on delete remove
+ * that tenant's containers and volumes. Empty when no deploy path is known.
+ */
+function composeProjectFlag(deployPath: string | null | undefined): string {
+  const name = deployPath ? composeProjectName(deployPath) : ''
+  return name ? `-p ${shellQuote(name)} ` : ''
+}
+
+const COMPOSE_FILE_NAMES = [
+  'docker-compose.yml',
+  'docker-compose.yaml',
+  'compose.yml',
+  'compose.yaml',
+  'docker-compose.override.yml',
+  'docker-compose.override.yaml',
+  'compose.override.yml',
+  'compose.override.yaml',
+]
+
+/**
+ * Remove symlinks sitting where the deployer is about to write a file.
+ *
+ * putFile follows symlinks (SFTP open, or copyFile locally) and runs as root,
+ * so a repository shipping `Dockerfile -> /etc/cron.d/x` turned "write the
+ * generated Dockerfile" into "overwrite any file on the host". A symlink at
+ * one of these names is never something we want to keep.
+ */
+async function unlinkSymlinks(
+  client: Parameters<typeof exec>[0],
+  deployPath: string,
+  names: string[]
+): Promise<void> {
+  const list = names.map((n) => shellQuote(`${deployPath}/${n}`)).join(' ')
+  await exec(client, `for f in ${list}; do [ -L "$f" ] && rm -f -- "$f"; done; true`, {
+    timeoutMs: 15000,
+  })
+}
+
+/**
+ * Validate the compose configuration `docker compose` will actually run,
+ * before anything is built or started. Throws with every reason on failure.
+ *
+ * Applies to the panel's own generated files as well as customer ones: a
+ * repository can ship a compose.yaml (which compose prefers over our
+ * docker-compose.yml), an override file (merged automatically), or a `.env`
+ * that sets COMPOSE_FILE / COMPOSE_PROJECT_NAME.
+ */
+async function validateComposeOnHost(
+  client: Parameters<typeof exec>[0],
+  opts: {
+    deployPath: string
+    externalPort: number
+    allowedContainerName: string
+    stageLog: StageLog
+  }
+): Promise<void> {
+  const dp = opts.deployPath
+  const errors: string[] = []
+  const envFiles: string[] = []
+
+  // 1. Files compose reads implicitly: no symlinks, no redirecting variables.
+  const names = ['.env', ...COMPOSE_FILE_NAMES]
+  const pre = await exec(
+    client,
+    `cd ${shellQuote(dp)} || exit 1; for f in ${names.map(shellQuote).join(' ')}; do ` +
+      `if [ -L "$f" ]; then echo "@@SYMLINK $f"; elif [ -f "$f" ]; then echo "@@FILE $f $(head -c 262144 -- "$f" | base64 -w0)"; fi; done`,
+    { timeoutMs: 20000 }
+  )
+  if (pre.exitCode !== 0) throw new Error('Could not read the project directory to check its compose files.')
+  for (const line of pre.stdout.split('\n')) {
+    const sym = line.match(/^@@SYMLINK (\S+)$/)
+    if (sym) {
+      errors.push(`${sym[1]} is a symbolic link — compose files and .env must be regular files in the project`)
+      continue
+    }
+    const file = line.match(/^@@FILE (\S+) ?(\S*)$/)
+    if (!file) continue
+    const text = Buffer.from(file[2] || '', 'base64').toString('utf8')
+    if (file[1] === '.env') {
+      if (DANGEROUS_COMPOSE_ENV_RE.test(text)) {
+        errors.push('.env must not set COMPOSE_FILE, COMPOSE_PROJECT_NAME, COMPOSE_ENV_FILES or COMPOSE_PATH_SEPARATOR')
+      }
+      continue
+    }
+    const scan = scanComposeText(text)
+    for (const e of scan.errors) errors.push(`${file[1]}: ${e}`)
+    envFiles.push(...scan.envFiles)
+  }
+
+  // 2. The effective model, exactly as compose resolves it.
+  let model: unknown = null
+  if (errors.length === 0) {
+    const cfg = await exec(
+      client,
+      `cd ${shellQuote(dp)} && ${COMPOSE_ENV}docker compose config --format json`,
+      { timeoutMs: 60000 }
+    )
+    if (cfg.exitCode !== 0) {
+      errors.push(
+        `docker compose could not read the configuration: ${(cfg.stderr || cfg.stdout).trim().slice(-600)}`
+      )
+    } else {
+      try {
+        model = JSON.parse(cfg.stdout)
+      } catch {
+        errors.push('docker compose printed a configuration that could not be parsed')
+      }
+    }
+  }
+
+  // 3. Rules on the model, then symlink-aware containment of every host path.
+  if (model) {
+    const res = checkComposeModel(model, {
+      projectDir: dp,
+      projectName: composeProjectName(dp),
+      hostPort: opts.externalPort,
+      allowedContainerName: opts.allowedContainerName,
+    })
+    errors.push(...res.errors)
+    const paths = [
+      ...res.hostPaths,
+      ...envFiles.map((f) => path.posix.join(dp, f)),
+    ]
+    if (errors.length === 0 && paths.length > 0) {
+      const rp = await exec(
+        client,
+        `realpath -m -- ${shellQuote(dp)}; for p in ${[...new Set(paths)].map(shellQuote).join(' ')}; do realpath -m -- "$p"; done`,
+        { timeoutMs: 20000 }
+      )
+      const lines = rp.stdout.split('\n').map((l) => l.trim()).filter(Boolean)
+      const realBase = lines.shift()
+      if (rp.exitCode !== 0 || !realBase) {
+        errors.push('Could not resolve the paths used by the compose configuration')
+      } else {
+        const unique = [...new Set(paths)]
+        lines.forEach((real, i) => {
+          if (real !== realBase && !real.startsWith(realBase + '/')) {
+            errors.push(`"${unique[i] ?? real}" resolves outside the project directory (symbolic link?)`)
+          }
+        })
+      }
+    }
+  }
+
+  if (errors.length > 0) {
+    opts.stageLog('Compose configuration rejected:')
+    for (const e of errors) opts.stageLog(`  - ${e}`)
+    throw new Error(
+      `The compose configuration was rejected for safety reasons: ${errors.slice(0, 5).join('; ')}` +
+        (errors.length > 5 ? ` (and ${errors.length - 5} more)` : '')
+    )
+  }
+  opts.stageLog('Compose configuration checked: no host access, ports or names outside this site.')
+}
+
+/**
+ * Probe the app over HTTP before declaring it live. A container in state
+ * "running" can still be crash-looping inside, or listening on another port;
+ * any HTTP answer below 500 counts as up.
+ */
+async function verifyHttpUpstream(
+  client: Parameters<typeof exec>[0],
+  opts: { externalPort: number; containerName: string; containerPort: number; stageLog: StageLog }
+): Promise<void> {
+  const r = await exec(
+    client,
+    httpProbeScript({
+      hostPort: opts.externalPort,
+      containerName: opts.containerName,
+      containerPort: opts.containerPort,
+      attempts: 10,
+      delaySec: 3,
+    }),
+    { timeoutMs: 180000 }
+  )
+  const out = r.stdout.trim().split('\n').pop() || ''
+  if (r.exitCode === 0 && out.startsWith('PROBE_OK')) {
+    opts.stageLog(`HTTP check passed (${out.replace('PROBE_OK ', '')}).`)
+    return
+  }
+  throw new Error(
+    `The site is not answering HTTP requests (${out.replace('PROBE_FAIL ', '') || 'no response'}). ` +
+      `Check that the app listens on port ${opts.containerPort} and starts without errors.`
+  )
+}
+
+/**
+ * Mark the deployment live only if it is still active. The stale-deploy
+ * reaper may have marked it failed meanwhile; overwriting that would report a
+ * run as live that the panel had already given up on.
+ */
+async function markDeploymentLive(
+  deploymentId: string,
+  data: { buildLog: string; deployUrl: string; duration: number }
+): Promise<boolean> {
+  const res = await db.deployment.updateMany({
+    where: { id: deploymentId, status: { in: ACTIVE_DEPLOY_STATUSES } },
+    data: { status: 'live', ...data },
+  })
+  return res.count > 0
+}
 
 // ─── NEW: Method-based deploy pipeline ───────────────────────────────────
 
@@ -445,7 +715,8 @@ async function deployMethodProject(
   runStage: RunStage,
   stageLog: StageLog,
   buildLog: string[],
-  start: number
+  start: number,
+  deployState: DeployState
 ): Promise<DeployResult> {
   const { projectId, deploymentId } = req
   const method = getDeploymentMethod(methodId)!
@@ -583,6 +854,15 @@ async function deployMethodProject(
       if (source === 'git' && project.repoUrl) {
         stageLog(`Cloning ${project.repoUrl}…`)
         const branch = project.sourceBranch || 'main'
+        // Defence in depth: the create/PATCH endpoints validate repoUrl, but a
+        // row that predates that check could hold a local path or file:// URL,
+        // which would clone another tenant's directory off this host.
+        if (!isRemoteGitUrl(project.repoUrl)) {
+          throw new Error('The repository URL must be an https:// or git@host:owner/repo address.')
+        }
+        if (!isSafeGitBranch(branch)) {
+          throw new Error(`"${branch}" is not a valid branch name.`)
+        }
         // Decrypt the token the wizard collected, if there is one.
         let gitToken: string | null = null
         const tokenEnc = settingsGet<string>(settings, 'gitTokenEnc')
@@ -600,7 +880,7 @@ async function deployMethodProject(
         // GIT_TERMINAL_PROMPT=0: without it git blocks trying to prompt for a
         // username on a private repo and only dies at the 180s timeout.
         const G = creds2.prefix
-        const cloneCmd = `if [ -d ${shellQuote(deployPath + '/.git')} ]; then cd ${shellQuote(deployPath)} && ${G}fetch --all && ${G}checkout ${shellQuote(branch)} && ${G}reset --hard origin/${shellQuote(branch)}; else rm -rf ${shellQuote(deployPath)}/* ${shellQuote(deployPath)}/.[!.]* 2>/dev/null; ${G}clone --branch ${shellQuote(branch)} ${shellQuote(cloneUrl)} ${shellQuote(deployPath)}; fi`
+        const cloneCmd = `if [ -d ${shellQuote(deployPath + '/.git')} ]; then cd ${shellQuote(deployPath)} && ${G}fetch --all && ${G}checkout ${shellQuote(branch)} && ${G}reset --hard origin/${shellQuote(branch)}; else rm -rf ${shellQuote(deployPath)}/* ${shellQuote(deployPath)}/.[!.]* 2>/dev/null; ${G}clone --branch ${shellQuote(branch)} -- ${shellQuote(cloneUrl)} ${shellQuote(deployPath)}; fi`
         const r = await exec(client, cloneCmd, { timeoutMs: 180000 }).finally(
           () => void creds2.cleanup()
         )
@@ -717,10 +997,16 @@ async function deployMethodProject(
           /* probing is an optimisation; failing it just keeps the safe image */
         }
       }
+      // Files we write below must not be symlinks planted by the repository.
+      await unlinkSymlinks(
+        client,
+        deployPath,
+        usesOwnBuildFiles ? ['.dockerignore'] : ['Dockerfile', '.dockerignore']
+      )
       const theirs = usesOwnBuildFiles
         ? await exec(
             client,
-            `test -f ${shellQuote(deployPath + '/Dockerfile')} && echo yes || echo no`,
+            `test -f ${shellQuote(deployPath + '/Dockerfile')} && ! test -L ${shellQuote(deployPath + '/Dockerfile')} && echo yes || echo no`,
             { timeoutMs: 15000 }
           )
         : null
@@ -772,11 +1058,22 @@ async function deployMethodProject(
         if (found) {
           usingProvidedCompose = true
           stageLog(`Using ${found} from your project (not overwriting it).`)
-          return
         }
       }
-      await putFile(client, `${deployPath}/docker-compose.yml`, composeYml, { mode: 0o644 })
-      stageLog('docker-compose.yml written')
+      if (!usingProvidedCompose) {
+        await unlinkSymlinks(client, deployPath, ['docker-compose.yml'])
+        await putFile(client, `${deployPath}/docker-compose.yml`, composeYml, { mode: 0o644 })
+        stageLog('docker-compose.yml written')
+      }
+      // Validate what compose will really run, for customer and generated
+      // files alike, before anything is built. A customer file may not name
+      // containers; the panel's own file names exactly one.
+      await validateComposeOnHost(client, {
+        deployPath,
+        externalPort,
+        allowedContainerName: usingProvidedCompose ? `deployhub-${project.slug}` : containerName,
+        stageLog,
+      })
     })
   })
 
@@ -785,6 +1082,7 @@ async function deployMethodProject(
     await runStage('run_migrations', 'Writing .env + running migrations…', async () => {
       await withConnection(creds, async (client) => {
         const envContent = generateLaravelEnv(project)
+        await unlinkSymlinks(client, deployPath, ['.env'])
         await putFile(client, `${deployPath}/.env`, envContent, { mode: 0o644 })
         // We'll actually run the migrations AFTER the container is up — for
         // now just stage the .env. Mark as completed; the post_install stage
@@ -804,7 +1102,7 @@ async function deployMethodProject(
         // The timeout was 600s. A real customer build measured 660s for the
         // image step alone, so this was already past the limit and a slightly
         // larger app would have been killed mid-build with a confusing error.
-        `cd ${shellQuote(deployPath)} && BUILDX_NO_DEFAULT_ATTESTATIONS=1 docker compose build --progress=plain 2>&1`,
+        `cd ${shellQuote(deployPath)} && ${COMPOSE_ENV}BUILDX_NO_DEFAULT_ATTESTATIONS=1 docker compose ${composeProjectFlag(deployPath)}build --progress=plain 2>&1`,
         { timeoutMs: 1800000 }
       )
       let final: ExecResult | undefined
@@ -874,16 +1172,25 @@ async function deployMethodProject(
   // Start container.
   await runStage('start_container', 'Starting container…', async () => {
     await withConnection(creds, async (client) => {
+      // From here on the previous container may be stopped or replaced.
+      deployState.containerReplaced = true
       const upGen = execStream(
         client,
-        `cd ${shellQuote(deployPath)} && docker compose up -d 2>&1`,
+        `cd ${shellQuote(deployPath)} && ${COMPOSE_ENV}docker compose ${composeProjectFlag(deployPath)}up -d 2>&1`,
         { timeoutMs: 180000 }
       )
+      let upResult: ExecResult | undefined
       while (true) {
         const r = await upGen.next()
-        if (r.done) break
+        if (r.done) {
+          upResult = r.value
+          break
+        }
         req.onStreamChunk?.(r.value)
         stageLog(r.value.data.replace(/\n$/, ''))
+      }
+      if (upResult && upResult.exitCode !== 0) {
+        throw new Error(`docker compose up failed (exit ${upResult.exitCode})`)
       }
       // A project-supplied compose file names its own containers, so the name
       // we assumed does not exist. Ask compose which container it actually
@@ -892,7 +1199,7 @@ async function deployMethodProject(
       if (usingProvidedCompose) {
         const ids = await exec(
           client,
-          `cd ${shellQuote(deployPath)} && (docker compose ps -q 2>/dev/null || docker-compose ps -q 2>/dev/null) | head -1`,
+          `cd ${shellQuote(deployPath)} && (${COMPOSE_ENV}docker compose ${composeProjectFlag(deployPath)}ps -q 2>/dev/null || docker-compose ps -q 2>/dev/null) | head -1`,
           { timeoutMs: 30000 }
         )
         const firstId = ids.stdout.trim().split('\n')[0]?.trim()
@@ -1019,6 +1326,7 @@ define('WP_DEBUG', false);
 if (!defined('ABSPATH')) define('ABSPATH', dirname(__FILE__) . '/');
 require_once ABSPATH . 'wp-settings.php';
 `
+        await unlinkSymlinks(client, deployPath, ['wp-config-docker.php'])
         await putFile(client, `${deployPath}/wp-config-docker.php`, cfg, { mode: 0o644 })
         // Run wp core install via the wp-cli container.
         const url = `https://${project.customDomain || project.subdomain}`
@@ -1063,15 +1371,27 @@ require_once ABSPATH . 'wp-settings.php';
     })
   }
 
-  // Configure reverse proxy.
+  // Configure reverse proxy. configureProjectProxy reports failure as
+  // {ok:false} rather than throwing; ignoring it marked deploys live with no
+  // working route to them.
   await runStage('configure_proxy', 'Configuring reverse proxy…', async () => {
-    await configureProjectProxy(project.id, { onLog: stageLog })
+    const proxy = await configureProjectProxy(project.id, { onLog: stageLog })
+    if (!proxy.ok) throw new Error(`Reverse proxy configuration failed: ${proxy.message}`)
   })
 
-  // Configure SSL.
+  // Configure SSL. The proxy stage already ran a verified TLS check and
+  // recorded 'issued' (with the real expiry) or 'pending'.
   await runStage('configure_ssl', 'Configuring SSL…', async () => {
     if (project.sslEnabled) {
-      stageLog('SSL handled by Caddy automatic HTTPS — issuing cert on first request.')
+      const row = await db.project.findUnique({
+        where: { id: projectId },
+        select: { sslCertStatus: true },
+      })
+      stageLog(
+        row?.sslCertStatus === 'issued'
+          ? 'SSL certificate verified.'
+          : 'SSL certificate not served yet — Caddy is obtaining it; status stays "pending" until a TLS check confirms it.'
+      )
     } else {
       stageLog('SSL is disabled for this project.')
     }
@@ -1100,10 +1420,13 @@ require_once ABSPATH . 'wp-settings.php';
       const state = inspect.stdout.trim()
       if (state !== 'running') throw new Error(`Container state is ${state}, expected running`)
       stageLog(`Container ${containerName} verified running.`)
+      await verifyHttpUpstream(client, { externalPort, containerName, containerPort, stageLog })
     })
   })
 
-  // Persist final state.
+  // Persist final state. SSL status is NOT written here: it was recorded from
+  // a real TLS check in the proxy stage (this used to stamp 'issued' with a
+  // made-up 90-day expiry).
   await db.project.update({
     where: { id: projectId },
     data: {
@@ -1114,22 +1437,30 @@ require_once ABSPATH . 'wp-settings.php';
       externalPort,
       deployPath,
       lastDeployedAt: new Date(),
-      sslCertStatus: project.sslEnabled ? 'issued' : 'none',
-      sslCertExpiry: project.sslEnabled
-        ? new Date(Date.now() + 90 * 24 * 60 * 60 * 1000)
-        : null,
+      ...(project.sslEnabled ? {} : { sslCertStatus: 'none', sslCertExpiry: null }),
     },
   })
 
-  await db.deployment.update({
-    where: { id: deploymentId },
-    data: {
-      status: 'live',
-      buildLog: buildLog.join('\n'),
-      deployUrl: `https://${project.customDomain || project.subdomain}`,
-      duration: Math.round((Date.now() - start) / 1000),
-    },
+  const stillActive = await markDeploymentLive(deploymentId, {
+    buildLog: buildLog.join('\n'),
+    deployUrl: `https://${project.customDomain || project.subdomain}`,
+    duration: Math.round((Date.now() - start) / 1000),
   })
+  if (!stillActive) {
+    return {
+      ok: false,
+      projectId,
+      deploymentId,
+      containerId,
+      containerName,
+      containerPort,
+      externalPort,
+      deployPath,
+      buildLog: buildLog.join('\n'),
+      durationMs: Date.now() - start,
+      error: 'This deployment had already been marked abandoned; its result was not recorded as live.',
+    }
+  }
 
   return {
     ok: true,
@@ -1153,7 +1484,8 @@ async function deployLegacyProject(
   runStage: RunStage,
   stageLog: StageLog,
   buildLog: string[],
-  start: number
+  start: number,
+  deployState: DeployState
 ): Promise<DeployResult> {
   const { projectId, deploymentId } = req
   const log = (m: string) => req.onLog?.(m)
@@ -1256,9 +1588,12 @@ async function deployLegacyProject(
     await withConnection(creds, async (client) => {
       if (project.repoUrl) {
         log(`Cloning ${project.repoUrl}…`)
+        if (!isRemoteGitUrl(project.repoUrl)) {
+          throw new Error('The repository URL must be an https:// or git@host:owner/repo address.')
+        }
         const clone = await exec(
           client,
-          `if [ -d ${shellQuote(deployPath + '/.git')} ]; then cd ${shellQuote(deployPath)} && GIT_TERMINAL_PROMPT=0 git pull; else rm -rf ${shellQuote(deployPath)}/* ${shellQuote(deployPath)}/.[!.]* 2>/dev/null; GIT_TERMINAL_PROMPT=0 git clone ${shellQuote(project.repoUrl)} ${shellQuote(deployPath)}; fi`,
+          `if [ -d ${shellQuote(deployPath + '/.git')} ]; then cd ${shellQuote(deployPath)} && GIT_TERMINAL_PROMPT=0 git pull; else rm -rf ${shellQuote(deployPath)}/* ${shellQuote(deployPath)}/.[!.]* 2>/dev/null; GIT_TERMINAL_PROMPT=0 git clone -- ${shellQuote(project.repoUrl)} ${shellQuote(deployPath)}; fi`,
           { timeoutMs: 120000 }
         )
         stageLog(clone.stdout.slice(-400))
@@ -1286,6 +1621,7 @@ async function deployLegacyProject(
   await runStage('write_dockerfile', 'Writing Dockerfile…', async () => {
     if (stack.dockerfile && project.stack !== 'docker') {
       await withConnection(creds, async (client) => {
+        await unlinkSymlinks(client, deployPath, ['Dockerfile'])
         await putFile(client, `${deployPath}/Dockerfile`, stack.dockerfile, { mode: 0o644 })
       })
       stageLog(`Dockerfile written (${stack.dockerfile.length} bytes)`)
@@ -1311,9 +1647,16 @@ async function deployLegacyProject(
       ramMB: project.resourceRamMB,
     })
     await withConnection(creds, async (client) => {
+      await unlinkSymlinks(client, deployPath, ['docker-compose.yml'])
       await putFile(client, `${deployPath}/docker-compose.yml`, composeYml, { mode: 0o644 })
+      stageLog('docker-compose.yml written')
+      await validateComposeOnHost(client, {
+        deployPath,
+        externalPort,
+        allowedContainerName: containerName,
+        stageLog,
+      })
     })
-    stageLog('docker-compose.yml written')
   })
 
   await runStage('build_image', 'Building Docker image…', async () => {
@@ -1326,29 +1669,46 @@ async function deployLegacyProject(
         // The timeout was 600s. A real customer build measured 660s for the
         // image step alone, so this was already past the limit and a slightly
         // larger app would have been killed mid-build with a confusing error.
-        `cd ${shellQuote(deployPath)} && BUILDX_NO_DEFAULT_ATTESTATIONS=1 docker compose build --progress=plain 2>&1`,
+        `cd ${shellQuote(deployPath)} && ${COMPOSE_ENV}BUILDX_NO_DEFAULT_ATTESTATIONS=1 docker compose ${composeProjectFlag(deployPath)}build --progress=plain 2>&1`,
         { timeoutMs: 1800000 }
       )
+      let final: ExecResult | undefined
       while (true) {
         const r = await buildGen.next()
-        if (r.done) break
+        if (r.done) {
+          final = r.value
+          break
+        }
         req.onStreamChunk?.(r.value)
         stageLog(r.value.data.replace(/\n$/, ''))
+      }
+      // The exit code used to be ignored, so a failed build went on to start
+      // whatever image was left over from the previous deploy.
+      if (final && final.exitCode !== 0) {
+        throw new Error(`docker build failed (exit ${final.exitCode})`)
       }
     })
   })
 
   await runStage('start_container', 'Starting container…', async () => {
     await withConnection(creds, async (client) => {
+      deployState.containerReplaced = true
       const upGen = execStream(
         client,
-        `cd ${shellQuote(deployPath)} && docker compose up -d 2>&1`,
+        `cd ${shellQuote(deployPath)} && ${COMPOSE_ENV}docker compose ${composeProjectFlag(deployPath)}up -d 2>&1`,
         { timeoutMs: 120000 }
       )
+      let upResult: ExecResult | undefined
       while (true) {
         const r = await upGen.next()
-        if (r.done) break
+        if (r.done) {
+          upResult = r.value
+          break
+        }
         req.onStreamChunk?.(r.value)
+      }
+      if (upResult && upResult.exitCode !== 0) {
+        throw new Error(`docker compose up failed (exit ${upResult.exitCode})`)
       }
       await exec(client, `docker network connect deployhub ${shellQuote(containerName)} 2>/dev/null || true`, { timeoutMs: 15000 })
       const inspect = await exec(
@@ -1366,12 +1726,34 @@ async function deployLegacyProject(
     })
   })
 
+  // The proxy generator only includes projects whose status is 'running', so
+  // the container details must be persisted before configuring it (the
+  // method pipeline already did this; here a first deploy was left out of
+  // the Caddyfile).
+  await db.project.update({
+    where: { id: projectId },
+    data: { status: 'running', containerId, containerName, containerPort, externalPort, deployPath },
+  })
+
   await runStage('configure_proxy', 'Configuring reverse proxy…', async () => {
-    await configureProjectProxy(project.id, { onLog: stageLog })
+    const proxy = await configureProjectProxy(project.id, { onLog: stageLog })
+    if (!proxy.ok) throw new Error(`Reverse proxy configuration failed: ${proxy.message}`)
   })
 
   await runStage('configure_ssl', 'Configuring SSL…', async () => {
-    stageLog(project.sslEnabled ? 'SSL auto-provisioned via Caddy.' : 'SSL disabled.')
+    if (!project.sslEnabled) {
+      stageLog('SSL disabled.')
+      return
+    }
+    const row = await db.project.findUnique({
+      where: { id: projectId },
+      select: { sslCertStatus: true },
+    })
+    stageLog(
+      row?.sslCertStatus === 'issued'
+        ? 'SSL certificate verified.'
+        : 'SSL certificate not served yet — status stays "pending" until a TLS check confirms it.'
+    )
   })
 
   await runStage('run_migrations', 'Running migrations…', async () => undefined, {
@@ -1384,8 +1766,19 @@ async function deployLegacyProject(
     skipReason: 'Legacy stack',
   })
 
+  // This stage used to only print "Container running" without checking
+  // anything.
   await runStage('verify', 'Verifying deployment…', async () => {
-    stageLog('Container running, proxy + SSL configured.')
+    await withConnection(creds, async (client) => {
+      const inspect = await exec(
+        client,
+        `docker inspect --format '{{.State.Status}}' ${shellQuote(containerName)}`,
+        { timeoutMs: 10000 }
+      )
+      const state = inspect.stdout.trim()
+      if (state !== 'running') throw new Error(`Container state is ${state}, expected running`)
+      await verifyHttpUpstream(client, { externalPort, containerName, containerPort, stageLog })
+    })
   })
 
   await db.project.update({
@@ -1398,22 +1791,30 @@ async function deployLegacyProject(
       externalPort,
       deployPath,
       lastDeployedAt: new Date(),
-      sslCertStatus: project.sslEnabled ? 'issued' : 'none',
-      sslCertExpiry: project.sslEnabled
-        ? new Date(Date.now() + 90 * 24 * 60 * 60 * 1000)
-        : null,
+      ...(project.sslEnabled ? {} : { sslCertStatus: 'none', sslCertExpiry: null }),
     },
   })
 
-  await db.deployment.update({
-    where: { id: deploymentId },
-    data: {
-      status: 'live',
-      buildLog: buildLog.join('\n'),
-      deployUrl: `https://${project.customDomain || project.subdomain}`,
-      duration: Math.round((Date.now() - start) / 1000),
-    },
+  const stillActive = await markDeploymentLive(deploymentId, {
+    buildLog: buildLog.join('\n'),
+    deployUrl: `https://${project.customDomain || project.subdomain}`,
+    duration: Math.round((Date.now() - start) / 1000),
   })
+  if (!stillActive) {
+    return {
+      ok: false,
+      projectId,
+      deploymentId,
+      containerId,
+      containerName,
+      containerPort,
+      externalPort,
+      deployPath,
+      buildLog: buildLog.join('\n'),
+      durationMs: Date.now() - start,
+      error: 'This deployment had already been marked abandoned; its result was not recorded as live.',
+    }
+  }
 
   return {
     ok: true,
@@ -1443,7 +1844,7 @@ export async function stopProject(projectId: string): Promise<{ ok: boolean; mes
   try {
     const creds = await getServerCredentials(project.serverId!)
     await withConnection(creds, async (client) => {
-      await exec(client, `cd ${shellQuote(project.deployPath || '.')} && docker compose down 2>&1`, {
+      await exec(client, `cd ${shellQuote(project.deployPath || '.')} && ${COMPOSE_ENV}docker compose ${composeProjectFlag(project.deployPath)}down 2>&1`, {
         timeoutMs: 60000,
       })
     })
@@ -1468,7 +1869,7 @@ export async function restartProject(projectId: string): Promise<{ ok: boolean; 
   try {
     const creds = await getServerCredentials(project.serverId!)
     await withConnection(creds, async (client) => {
-      await exec(client, `cd ${shellQuote(project.deployPath || '.')} && docker compose restart 2>&1`, {
+      await exec(client, `cd ${shellQuote(project.deployPath || '.')} && ${COMPOSE_ENV}docker compose ${composeProjectFlag(project.deployPath)}restart 2>&1`, {
         timeoutMs: 60000,
       })
     })
@@ -1579,10 +1980,17 @@ export async function applyEnvironment(
           'This project uses its own docker-compose.yml, so the panel will not rewrite it. Set the variables in that file, or redeploy.'
         )
       }
+      await unlinkSymlinks(client, deployPath, ['docker-compose.yml'])
       await putFile(client, `${deployPath}/docker-compose.yml`, composeYml, { mode: 0o644 })
+      await validateComposeOnHost(client, {
+        deployPath,
+        externalPort,
+        allowedContainerName: containerName,
+        stageLog: (m) => console.log(`[apply-env ${projectId.slice(0, 8)}] ${m}`),
+      })
       const r = await exec(
         client,
-        `cd ${shellQuote(deployPath)} && docker compose up -d --no-build 2>&1`,
+        `cd ${shellQuote(deployPath)} && ${COMPOSE_ENV}docker compose ${composeProjectFlag(deployPath)}up -d --no-build 2>&1`,
         { timeoutMs: 180000 }
       )
       out = (r.stdout || r.stderr || '').slice(-1200)
@@ -1633,7 +2041,7 @@ export async function removeProjectContainer(projectId: string): Promise<{ ok: b
         if (project.deployPath) {
           await exec(
             client,
-            `cd ${shellQuote(project.deployPath)} && docker compose down --rmi local -v 2>&1 || true`,
+            `cd ${shellQuote(project.deployPath)} && ${COMPOSE_ENV}docker compose ${composeProjectFlag(project.deployPath)}down --rmi local -v 2>&1 || true`,
             { timeoutMs: 60000 }
           )
         }
@@ -1642,13 +2050,16 @@ export async function removeProjectContainer(projectId: string): Promise<{ ok: b
         await exec(client, `docker rm -f ${shellQuote(containerName)} 2>&1 || true`, {
           timeoutMs: 30000,
         })
-        // Any sibling containers from the same compose project (e.g. the
-        // WordPress DB) share the name prefix.
-        await exec(
-          client,
-          `docker ps -aq --filter name=^${shellQuote(containerName)} | xargs -r docker rm -f 2>&1 || true`,
-          { timeoutMs: 30000 }
+        // Sibling containers from the same compose project (e.g. the
+        // WordPress DB). SECURITY: these used to be found with the
+        // unanchored regex `name=^deployhub-<slug>`, so deleting "shop" also
+        // force-removed another tenant's "deployhub-shop-online". Select by
+        // the compose project label (exact match) and the exact name only.
+        const siblingCmd = siblingContainerCleanupCommand(
+          containerName,
+          composeProjectName(project.deployPath || `/opt/deployhub/projects/${project.slug}`)
         )
+        if (siblingCmd) await exec(client, siblingCmd, { timeoutMs: 30000 })
         // Derived, not trusted from the row — the same reasoning as
         // containerName above. deployPath is only written once a deploy gets
         // far enough to persist it, so a project whose very first deploy failed
@@ -1662,7 +2073,7 @@ export async function removeProjectContainer(projectId: string): Promise<{ ok: b
         // success without checking anything.
         const check = await exec(
           client,
-          `docker ps -aq --filter name=^${shellQuote(containerName)}$ | wc -l`,
+          `docker ps -aq --filter ${shellQuote(exactContainerNameFilter(containerName))} | wc -l`,
           { timeoutMs: 15000 }
         )
         removalVerified = check.stdout.trim() === '0'
@@ -2414,8 +2825,19 @@ function envEntries(envVars: Record<string, string>): string {
       )
       return false
     })
-    .map(([k, v]) => `      ${k}: ${yamlQuoted(v)}`)
+    .map(([k, v]) => `      ${k}: ${composeLiteral(v)}`)
     .join('\n')
+}
+
+/**
+ * A value compose must take literally. Compose interpolates `$VAR` / `${VAR}`
+ * inside compose files from the shell environment and the project's .env, so
+ * an environment value of `${ENCRYPTION_KEY}` was replaced with the panel's
+ * own secret on localhost servers (and `pa$word` silently lost `$word`).
+ * `$$` is compose's escape for a literal `$`.
+ */
+function composeLiteral(v: string): string {
+  return yamlQuoted(v.replace(/\$/g, '$$$$'))
 }
 
 function envBlock(envVars: Record<string, string>): string {
@@ -2458,7 +2880,7 @@ function generateMethodCompose(
   const buildArgs = buildTimeEnv(opts.envVars)
   const buildBlock = buildArgs.length
     ? `build:\n      context: .\n      args:\n` +
-      buildArgs.map(([k, v]) => `        ${k}: ${yamlQuoted(v)}`).join('\n')
+      buildArgs.map(([k, v]) => `        ${k}: ${composeLiteral(v)}`).join('\n')
     : 'build: .'
 
   // For WordPress — wire up the DB container as a service.

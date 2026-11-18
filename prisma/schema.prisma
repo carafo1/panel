@@ -330,9 +330,31 @@ model Payment {
   stripeInvoiceId String?
   metadata        String?  // JSON string for extra data
   createdAt       DateTime @default(now())
+  /// The invoice this payment settles, linked explicitly at checkout so a
+  /// confirmed payment never has to guess ("newest unpaid") which bill it pays.
+  /// Null on rows created before the link existed.
+  invoiceId          String?
+  /// Set by a conditional update when provisioning is claimed. Only the caller
+  /// whose update flips it from null may provision, so two concurrent
+  /// confirmations cannot both build a container or register a domain.
+  provisionClaimedAt DateTime?
 
   user          User          @relation(fields: [userId], references: [id])
   subscription  Subscription? @relation(fields: [subscriptionId], references: [id])
+
+  @@index([transactionId])
+  @@index([invoiceId])
+}
+
+/// Server-side lease for scheduled jobs (e.g. the billing sweep). A run claims
+/// the row with a conditional update and holds it until `lockedUntil`, so a
+/// worker retry that arrives while the previous run is still going is refused
+/// instead of renewing / invoicing the same subscriptions twice.
+model CronLock {
+  name        String   @id
+  holder      String?
+  lockedUntil DateTime
+  updatedAt   DateTime @updatedAt
 }
 
 model Project {

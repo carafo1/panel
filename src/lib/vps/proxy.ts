@@ -31,8 +31,28 @@ import {
 import { getServerCredentials } from './provisioner'
 import { isLocalHost, ensureDir } from './local-exec'
 import { ADMIN_EMAIL, BRAND_DOMAIN } from '@/lib/brand-config'
+import { caddyRedirLine, isSafeRedirect } from './redirect-rules'
+import { recordCertificateStatus } from './ssl'
 import path from 'path'
 import fs from 'fs'
+
+/**
+ * Drop stored redirects that are unsafe to write (rows saved before input
+ * validation existed). generateCaddyBlock would throw on them, and because the
+ * Caddyfile is regenerated for EVERY site on the server at once, one bad row
+ * would otherwise stop all tenants' proxy updates.
+ */
+function safeRedirectRows<T extends { fromPath: string; toUrl: string; statusCode: number }>(
+  rows: T[]
+): T[] {
+  return rows.filter((r) => {
+    if (isSafeRedirect(r)) return true
+    console.error(
+      `[proxy] skipping unsafe stored redirect ${JSON.stringify(r.fromPath).slice(0, 80)} — fix or delete it`
+    )
+    return false
+  })
+}
 
 // ─── Local storage paths (for localhost servers) ─────────────────────────
 
@@ -115,7 +135,7 @@ export async function configureProjectProxy(
       hostname,
       upstream,
       ssl,
-      redirects: redirects.map((r) => ({
+      redirects: safeRedirectRows(redirects).map((r) => ({
         fromPath: r.fromPath,
         toUrl: r.toUrl,
         statusCode: r.statusCode,
@@ -191,7 +211,7 @@ export async function configureProjectProxy(
           ? `localhost:${p.externalPort || p.containerPort || 3000}`
           : `${p.containerName}:${p.containerPort || 3000}`,
         ssl: p.sslEnabled,
-        redirects: allRedirects
+        redirects: safeRedirectRows(allRedirects)
           .filter((r) => r.projectId === p.id)
           .map((r) => ({
             fromPath: r.fromPath,
@@ -234,17 +254,20 @@ export async function configureProjectProxy(
           /* noop */
         }
       }
+      // SSL status comes from a real TLS handshake, not from "we wrote the
+      // config". This used to record 'issued' with a made-up 90-day expiry
+      // whether or not Caddy ever obtained a certificate.
+      if (ssl) {
+        const cert = await recordCertificateStatus(client, projectId, hostname)
+        log(
+          cert.ok
+            ? `Certificate verified for ${hostname} (expires ${cert.notAfter?.toISOString().slice(0, 10)}).`
+            : `Certificate for ${hostname} not verified yet — status left as pending (Caddy issues it in the background).`
+        )
+      }
     })
 
-    if (ssl) {
-      await db.project.update({
-        where: { id: projectId },
-        data: {
-          sslCertStatus: 'issued',
-          sslCertExpiry: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
-        },
-      })
-    } else {
+    if (!ssl) {
       await db.project.update({
         where: { id: projectId },
         data: { sslCertStatus: 'none', sslCertExpiry: null },
@@ -269,7 +292,7 @@ export async function configureProjectProxy(
         hostname,
         upstream,
         ssl,
-        redirects: snippetRedirects.map((r) => ({
+        redirects: safeRedirectRows(snippetRedirects).map((r) => ({
           fromPath: r.fromPath,
           toUrl: r.toUrl,
           statusCode: r.statusCode,
@@ -358,7 +381,7 @@ export async function removeProjectProxy(projectId: string): Promise<ProjectProx
           ? `localhost:${p.externalPort || p.containerPort || 3000}`
           : `${p.containerName}:${p.containerPort || 3000}`,
         ssl: p.sslEnabled,
-        redirects: allRedirects
+        redirects: safeRedirectRows(allRedirects)
           .filter((r) => r.projectId === p.id)
           .map((r) => ({
             fromPath: r.fromPath,
@@ -472,8 +495,11 @@ export function generateCaddyBlock(cfg: ProxyConfig): string {
 
   // ── Redirects — injected BEFORE reverse_proxy so they short-circuit. ──
   // Caddy syntax: `redir <from> <to> [code]` (code defaults to 301).
+  // SECURITY: caddyRedirLine re-validates and throws, for the same reason as
+  // the hostname check above — a newline plus `}` in either value would end
+  // this site block and start one of the author's choosing.
   for (const r of cfg.redirects || []) {
-    lines.push(`    redir ${r.fromPath} ${r.toUrl} ${r.statusCode}`)
+    lines.push(`    ${caddyRedirLine(r)}`)
   }
 
   lines.push(`    reverse_proxy ${cfg.upstream} {`)
@@ -578,7 +604,8 @@ export function generateFullCaddyfile(
 /**
  * The panel's own Caddy site block (control plane). Serves the dashboard on the
  * APP_URL host + the brand apex → the Next.js server on :3000, with Socket.IO
- * (realtime) routed via the XTransformPort query param. Included in the
+ * (realtime) on the fixed port 3003 (requests still carry the XTransformPort
+ * query param, but its value is ignored). Included in the
  * generated Caddyfile only on single-box (localhost) servers, where the panel
  * shares Caddy with the projects it hosts.
  */
@@ -601,7 +628,11 @@ function generatePanelBlock(): string {
     `        path /socket.io/*`,
     `    }`,
     `    handle @realtime {`,
-    `        reverse_proxy localhost:{query.XTransformPort} {`,
+    // SECURITY: never take the upstream port from the request. Proxying to
+    // localhost:{query.XTransformPort} let any client reach any local port
+    // (Mailcow on 8080, databases, …). The realtime server listens on 3003;
+    // the matcher above is kept so existing clients still match.
+    `        reverse_proxy localhost:3003 {`,
     `            header_up Host {host}`,
     `        }`,
     `    }`,
@@ -800,7 +831,7 @@ export async function getServerCaddyfile(serverId: string): Promise<string> {
       hostname: p.customDomain || p.subdomain,
       upstream: `${p.containerName}:${p.containerPort || 3000}`,
       ssl: p.sslEnabled,
-      redirects: allRedirects
+      redirects: safeRedirectRows(allRedirects)
         .filter((r) => r.projectId === p.id)
         .map((r) => ({
           fromPath: r.fromPath,

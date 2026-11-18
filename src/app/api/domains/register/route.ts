@@ -4,6 +4,7 @@ import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { processEvent } from '@/lib/automation'
 import { logAudit } from '@/lib/audit'
 import { isAdmin } from '@/lib/security'
+import { requireProjectAccess } from '@/lib/project-access'
 import {
   registerDomain as dynadotRegister,
   isDynadotDemoMode,
@@ -70,7 +71,18 @@ export async function POST(request: Request) {
       )
     }
 
-    const providerValue = (provider || 'dynadot').toLowerCase() // 'dynadot' | 'custom'
+    const providerValue = String(provider || 'dynadot').toLowerCase() // 'dynadot' | 'custom'
+
+    // SECURITY: a projectId from the body must be a project the caller may
+    // configure. Without this, any user could link their domain to — and
+    // overwrite the customDomain of — another tenant's project.
+    if (projectId !== undefined && projectId !== null && projectId !== '') {
+      if (typeof projectId !== 'string') {
+        return NextResponse.json({ error: 'Invalid projectId' }, { status: 400 })
+      }
+      const access = await requireProjectAccess(decoded, projectId, 'configure')
+      if (!access.ok) return access.response
+    }
     // SECURITY: cap duration at 10 years — M10 (was unbounded)
     const durationYears = Math.min(Math.max(Number(duration) > 0 ? Number(duration) : 1, 1), 10)
 
@@ -120,25 +132,13 @@ export async function POST(request: Request) {
         },
       })
 
-      // Link domain to project if projectId is provided
-      if (projectId) {
-        await db.project.update({
-          where: { id: projectId },
-          data: { customDomain: domainLower },
-        })
-      }
-
-      // Trigger automation for domain_requested event
-      const automationResult = await processEvent({
-        type: 'domain_requested',
-        userId: decoded.userId,
-        payload: {
-          domainId: domain.id,
-          domainName: domainLower,
-          projectId: projectId || null,
-          provider: 'custom',
-        },
-      })
+      // NOT linked as the project's customDomain yet, and NO domain_requested
+      // event: customDomain is what the proxy serves and what mail tenancy
+      // trusts, and domain_requested is the registration pipeline (it marked
+      // the domain active with a made-up expiry). A custom domain only goes
+      // live through the separate DNS verification flow. The Domain row keeps
+      // its projectId so that flow knows which project to attach it to.
+      const automationResult = null
 
       // Audit
       await logAudit({

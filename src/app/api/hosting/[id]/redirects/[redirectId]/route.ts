@@ -3,7 +3,7 @@ import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
 import { requireProjectAccess } from '@/lib/project-access'
 import { logAudit } from '@/lib/audit'
-import { updateRedirect, deleteRedirect } from '@/lib/vps'
+import { updateRedirect, deleteRedirect, RedirectValidationError } from '@/lib/vps'
 
 /**
  * Project Redirect Endpoint (single)
@@ -54,6 +54,9 @@ export async function PATCH(
 
     return NextResponse.json({ redirect })
   } catch (error) {
+    if (error instanceof RedirectValidationError) {
+      return NextResponse.json({ error: error.message }, { status: 400 })
+    }
     const msg = 'Internal server error'
     console.error('Update redirect error:', error)
     return NextResponse.json({ error: msg }, { status: 500 })

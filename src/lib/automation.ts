@@ -2,7 +2,18 @@ import { db } from '@/lib/db'
 import { createNotification } from '@/lib/notifications'
 import { slugify } from '@/lib/utils'
 import { BRAND_DOMAIN } from '@/lib/brand-config'
-import { getContainerStatus, isVpsDemoMode } from '@/lib/vps'
+
+/**
+ * A job failure that retrying cannot fix (unknown job type, a record that no
+ * longer exists, a webhook receiver answering 4xx, an unparsable payload).
+ * processJob marks the job failed at once instead of spending its retries.
+ */
+export class PermanentJobError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'PermanentJobError'
+  }
+}
 
 export type EventType =
   | 'payment_success'
@@ -133,7 +144,11 @@ async function executeAction(
       const hookEvent = String(payload.event || '')
       const r = await deliverWebhook(webhookId, hookEvent, payload.body)
       if (!r.success && !r.skipped) {
-        throw new Error(`delivery failed: ${r.statusCode ? `HTTP ${r.statusCode}` : 'no response'}`)
+        const reason = `delivery failed: ${r.statusCode ? `HTTP ${r.statusCode}` : 'no response'}`
+        // A 4xx (other than 408/429) or a URL the SSRF guard refuses will
+        // answer the same way on every retry.
+        if (r.permanent) throw new PermanentJobError(`${reason} (not retried)`)
+        throw new Error(reason)
       }
       return { delivered: r.success, skipped: r.skipped ?? false, statusCode: r.statusCode }
     }
@@ -172,7 +187,9 @@ async function executeAction(
         }
         return { serverId: server.id, serverIp: server.ip, status: 'assigned' }
       }
-      return { serverId: null, status: 'no_server_available' }
+      // Used to be logged as a completed job, hiding that the customer got
+      // no server. An operator has to add capacity, so retrying is pointless.
+      throw new PermanentJobError('No active server available to assign')
     }
 
     case 'enable_ssl': {
@@ -221,12 +238,23 @@ async function executeAction(
           message: 'Your project deployment failed. Please try again.',
           type: 'error',
         })
+        // Recorded as a failure, not a completed job with status 'failed'.
+        throw new PermanentJobError(`Project ${projectId} not found`)
       }
-      return { deploymentId: `dep-${Date.now()}`, status: deployed ? 'deployed' : 'failed', url: deployed ? `https://${slugify((payload.projectName as string) || 'app')}.${BRAND_DOMAIN}` : undefined }
+      return { deploymentId: `dep-${Date.now()}`, status: 'deployed', url: `https://${slugify((payload.projectName as string) || 'app')}.${BRAND_DOMAIN}` }
     }
 
     case 'register_domain': {
       const domainId = payload.domainId as string | undefined
+      // A customer-owned ('custom') domain is not registered by us: it stays
+      // pending until DNS verification. This used to flip it to active with an
+      // invented one-year expiry the moment it was added.
+      const existing = domainId
+        ? await db.domain.findUnique({ where: { id: domainId }, select: { provider: true } })
+        : null
+      if (payload.provider === 'custom' || existing?.provider === 'custom') {
+        return { domainId: domainId ?? null, status: 'skipped', reason: 'custom_domain_awaits_verification' }
+      }
       if (domainId) {
         await db.domain.update({
           where: { id: domainId },
@@ -341,291 +369,42 @@ async function executeAction(
     }
 
     case 'deployment_status_check': {
-      // Real container health monitor: polls the VPS for the actual Docker
-      // container state and transitions the Deployment row accordingly.
-      //
-      //   running              → mark deployment 'live' (set deployUrl + duration)
-      //   exited / not_found   → mark deployment 'failed' (only if currently
-      //                          'building' — a 'queued' deployment may not
-      //                          have started the container yet)
-      //   paused / restarting  → leave as 'building', re-check later
-      //
-      // In DEMO MODE (no sshHost configured) the container status is
-      // simulated, so we fall back to the original attempt-count-based
-      // transition to keep the UX snappy in dev/demo environments.
-      const deploymentId = payload.deploymentId as string | undefined
-      const projectId = payload.projectId as string | undefined
-      const userId = event.userId || (payload.userId as string | undefined) || ''
-
-      if (!deploymentId || !projectId) {
-        return { status: 'skipped', reason: 'missing_deployment_or_project' }
-      }
-
-      const deployment = await db.deployment.findUnique({
-        where: { id: deploymentId },
-        include: { project: true },
-      })
-      if (!deployment || !deployment.project) {
-        return { status: 'skipped', reason: 'deployment_not_found' }
-      }
-
-      // Terminal deployments don't need further polling.
-      const terminalStatuses = ['live', 'failed', 'rolled_back']
-      if (terminalStatuses.includes(deployment.status)) {
-        return {
-          status: 'already_terminal',
-          deploymentId,
-          deploymentStatus: deployment.status,
-        }
-      }
-
-      const attempts = (payload.attempt as number | undefined) || 0
-      const nowIso = new Date().toISOString()
-      const elapsedSec = Math.max(
-        1,
-        Math.floor((Date.now() - deployment.createdAt.getTime()) / 1000)
-      )
-      const finalUrl = `https://${deployment.project.subdomain}`
-
-      // ── Real-mode: poll the VPS for the container's actual state ──
-      const project = deployment.project
-      const realMode =
-        !isVpsDemoMode() && !!project.serverId && !!project.containerName
-
-      if (realMode) {
-        let containerState: string | null = null
-        try {
-          const status = await getContainerStatus(projectId)
-          containerState = status?.state ?? null
-        } catch (err) {
-          console.warn(
-            `[automation] getContainerStatus failed for ${projectId}:`,
-            err instanceof Error ? err.message : err
-          )
-        }
-
-        const logLine = `[${nowIso}] Container status: ${containerState || 'unknown'}`
-        const existingLog = deployment.buildLog || ''
-        const newBuildLog = existingLog
-          ? `${existingLog}\n${logLine}`
-          : logLine
-
-        if (containerState === 'running') {
-          await db.deployment.update({
-            where: { id: deploymentId },
-            data: {
-              status: 'live',
-              deployUrl: finalUrl,
-              duration: elapsedSec,
-              buildLog: `${newBuildLog}\n✅ Container running — deployment live at ${finalUrl} (after ${elapsedSec}s)`,
-            },
-          })
-          await db.project.update({
-            where: { id: projectId },
-            data: { status: 'running' },
-          })
-          if (userId) {
-            await createNotification({
-              userId,
-              title: 'Deployment Live',
-              message: `Your deployment is now live at ${finalUrl}`,
-              type: 'success',
-              link: `/deployments/${deploymentId}`,
-            })
-          }
-          return { status: 'live', deploymentId, url: finalUrl }
-        }
-
-        if (
-          (containerState === 'exited' || containerState === 'not_found') &&
-          deployment.status === 'building'
-        ) {
-          const failLog =
-            (deployment.buildLog || '') +
-            `\n❌ Container ${containerState} — deployment failed`
-          await db.deployment.update({
-            where: { id: deploymentId },
-            data: {
-              status: 'failed',
-              duration: elapsedSec,
-              buildLog: failLog.trim() || undefined,
-            },
-          })
-          await db.project.update({
-            where: { id: projectId },
-            data: { status: 'error' },
-          })
-          if (userId) {
-            await createNotification({
-              userId,
-              title: 'Deployment Failed',
-              message: `Deployment ${deploymentId.slice(0, 8)} failed — container ${containerState}.`,
-              type: 'error',
-              link: `/deployments/${deploymentId}`,
-            })
-          }
-          return {
-            status: 'failed',
-            deploymentId,
-            containerState: containerState || 'unknown',
-          }
-        }
-
-        // paused / restarting / unknown → keep as 'building' (or upgrade
-        // 'queued' → 'building') and re-queue.
-        const nextStatus = deployment.status === 'queued' ? 'building' : deployment.status
-        await db.deployment.update({
-          where: { id: deploymentId },
-          data: { status: nextStatus, buildLog: newBuildLog },
-        })
-
-        if (attempts < 60) {
-          await db.jobQueue.create({
-            data: {
-              type: 'deployment_status_check',
-              payload: JSON.stringify({
-                deploymentId,
-                projectId,
-                userId,
-                attempt: attempts + 1,
-              }),
-              status: 'queued',
-              attempts: 0,
-              maxAttempts: 3,
-              runAt: new Date(Date.now() + 15_000),
-            },
-          })
-        }
-        return {
-          status: 'in_progress',
-          deploymentId,
-          containerState: containerState || 'unknown',
-          attempt: attempts + 1,
-        }
-      }
-
-      // ── Demo-mode fallback: attempt-count-based transition ─────────
-      // Keeps the build log feeling alive without depending on any real
-      // hosting provider. Used when no Server has an sshHost configured
-      // OR when VPS_DEMO_MODE=1.
-      let mapped: string
-      if (deployment.status === 'queued') {
-        mapped = 'building'
-      } else if (deployment.status === 'building') {
-        // After ~1 poll in 'building' (attempts >= 1), go live.
-        mapped = attempts >= 1 ? 'live' : 'building'
-      } else if (deployment.status === 'deploying') {
-        mapped = 'live'
-      } else {
-        // Unknown - keep the existing status so we don't downgrade.
-        mapped = deployment.status
-      }
-
-      const logLine = `[${nowIso}] Build progress: ${deployment.status} → ${mapped}`
-      const existingLog = deployment.buildLog || ''
-      const newBuildLog = existingLog
-        ? `${existingLog}\n${logLine}`
-        : logLine
-
-      if (mapped === 'live') {
-        await db.deployment.update({
-          where: { id: deploymentId },
-          data: {
-            status: 'live',
-            deployUrl: finalUrl,
-            duration: elapsedSec,
-            buildLog: `${newBuildLog}\n✅ Deployment live at ${finalUrl} (after ${elapsedSec}s)`,
-          },
-        })
-        // Also bump the project status to running.
-        await db.project.update({
-          where: { id: projectId },
-          data: { status: 'running' },
-        })
-        if (userId) {
-          await createNotification({
-            userId,
-            title: 'Deployment Live',
-            message: `Your deployment is now live at ${finalUrl}`,
-            type: 'success',
-            link: `/deployments/${deploymentId}`,
-          })
-        }
-        return {
-          status: 'live',
-          deploymentId,
-          url: finalUrl,
-        }
-      }
-
-      if (mapped === 'failed') {
-        await db.deployment.update({
-          where: { id: deploymentId },
-          data: {
-            status: 'failed',
-            duration: elapsedSec,
-            buildLog: `${newBuildLog}\n❌ Deployment failed`,
-          },
-        })
-        if (userId) {
-          await createNotification({
-            userId,
-            title: 'Deployment Failed',
-            message: `Deployment ${deploymentId.slice(0, 8)} failed during build/deploy.`,
-            type: 'error',
-            link: `/deployments/${deploymentId}`,
-          })
-        }
-        return { status: 'failed', deploymentId }
-      }
-
-      // Still in-flight. Update the row's status + log, then schedule the
-      // next status check ~15s out so the worker picks it up again.
-      await db.deployment.update({
-        where: { id: deploymentId },
-        data: {
-          status: mapped,
-          buildLog: newBuildLog,
-        },
-      })
-
-      if (attempts < 30) {
-        await db.jobQueue.create({
-          data: {
-            type: 'deployment_status_check',
-            payload: JSON.stringify({
-              deploymentId,
-              projectId,
-              userId,
-              attempt: attempts + 1,
-            }),
-            status: 'queued',
-            attempts: 0,
-            maxAttempts: 3,
-            runAt: new Date(Date.now() + 15_000),
-          },
-        })
-      }
-      return {
-        status: 'in_progress',
-        deploymentId,
-        mapped,
-        attempt: attempts + 1,
-      }
+      // Retired. Nothing enqueues this job any more: deployProject() records the
+      // real outcome itself and deploy-guard reaps deployments that die mid-run.
+      // The old poller could mark a fresh redeploy 'live' from the previous
+      // container, or 'failed' on a not_found before the new one existed, so a
+      // leftover queued job now completes as a no-op and touches nothing.
+      return { status: 'skipped', reason: 'deployment_status_check_retired' }
     }
 
     default:
-      return { status: 'unknown_action' }
+      // Was returned as a result and the job marked completed.
+      throw new PermanentJobError(`Unknown job type: ${String(action.type)}`)
   }
 }
 
 // Process a single job from the job queue
-export async function processJob(jobId: string) {
+export async function processJob(
+  jobId: string,
+  opts: {
+    /**
+     * Refuse to claim a job whose attempts are used up. The queue worker sets
+     * this so a job that keeps crashing the process cannot run forever. The
+     * admin "retry" route leaves it off: it re-runs a failed job on purpose.
+     */
+    enforceMaxAttempts?: boolean
+  } = {}
+) {
   // Claim atomically: only a job that is still queued and due can be taken.
   // Reading it and then marking it processing let two overlapping ticks both
   // run the same job (a domain registered twice, a deploy started twice).
   const claimed = await db.jobQueue.updateMany({
-    where: { id: jobId, status: 'queued', runAt: { lte: new Date() } },
+    where: {
+      id: jobId,
+      status: 'queued',
+      runAt: { lte: new Date() },
+      ...(opts.enforceMaxAttempts ? { attempts: { lt: db.jobQueue.fields.maxAttempts } } : {}),
+    },
     data: { status: 'processing', startedAt: new Date(), attempts: { increment: 1 } },
   })
   if (claimed.count === 0) return
@@ -635,11 +414,23 @@ export async function processJob(jobId: string) {
   const job = await db.jobQueue.findUnique({ where: { id: jobId } })
   if (!job) return
 
-  try {
-    const payload = JSON.parse(job.payload) as Record<string, unknown>
+  // Every write below is fenced on this claim (still 'processing', same
+  // attempt number). If stuck-job recovery reset the row and another tick
+  // re-claimed it, this run must not overwrite that run's outcome.
+  const ourClaim = { id: jobId, status: 'processing', attempts: job.attempts }
 
-    // Find matching action type from the event
-    const result = await executeAction(
+  let result: Record<string, unknown>
+  try {
+    let payload: Record<string, unknown>
+    try {
+      const parsed: unknown = JSON.parse(job.payload)
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('not an object')
+      payload = parsed as Record<string, unknown>
+    } catch {
+      throw new PermanentJobError('Job payload is not a valid JSON object')
+    }
+
+    result = await executeAction(
       { type: job.type as ActionType, label: job.type },
       {
         type: (payload.eventType as EventType) || 'payment_success',
@@ -647,23 +438,17 @@ export async function processJob(jobId: string) {
         payload,
       }
     )
-
-    await db.jobQueue.update({
-      where: { id: jobId },
-      data: {
-        status: 'completed',
-        completedAt: new Date(),
-        result: JSON.stringify(result),
-      },
-    })
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
-    const shouldRetry = job.attempts < job.maxAttempts
+    const permanent = error instanceof PermanentJobError
+    const shouldRetry = !permanent && job.attempts < job.maxAttempts
     // Back off 30s, 60s, 120s… instead of retrying on every 10-second tick.
     const backoffMs = 30_000 * 2 ** Math.max(0, job.attempts - 1)
 
-    await db.jobQueue.update({
-      where: { id: jobId },
+    // If this write itself fails (database down) it throws to the caller and
+    // the row stays 'processing'; stuck-job recovery picks it up later.
+    await db.jobQueue.updateMany({
+      where: ourClaim,
       data: {
         status: shouldRetry ? 'queued' : 'failed',
         error: errorMessage,
@@ -672,7 +457,28 @@ export async function processJob(jobId: string) {
           : { completedAt: new Date() }),
       },
     })
+    return
   }
+
+  // Outside the handler's try on purpose: a database error while recording
+  // success used to be caught as a handler failure, re-queueing (and so
+  // re-running) a handler that had already done its work. It now throws to
+  // the caller and the row is left for stuck-job recovery.
+  //
+  // A handler that RETURNS { status: 'failed' } (rather than throwing) is
+  // recorded as failed, not completed. Final, like any returned result.
+  const returnedFailed = result && typeof result === 'object' && result.status === 'failed'
+  await db.jobQueue.updateMany({
+    where: ourClaim,
+    data: {
+      status: returnedFailed ? 'failed' : 'completed',
+      completedAt: new Date(),
+      result: JSON.stringify(result),
+      ...(returnedFailed
+        ? { error: String(result.error || result.message || 'Action returned failed status') }
+        : {}),
+    },
+  })
 }
 
 // Main entry point - processes an automation event
@@ -734,79 +540,5 @@ export async function processEvent(event: AutomationEvent) {
     }
   }
 
-  // Handle payment_success with hosting: create deployment record
-  if (event.type === 'payment_success') {
-    const purchaseType = (event.payload.purchaseType as string) || 'hosting'
-    const projectId = event.payload.projectId as string | undefined
-
-    if ((purchaseType === 'hosting' || purchaseType === 'both') && projectId) {
-      const project = await db.project.findUnique({ where: { id: projectId } })
-      if (project) {
-        // Create an initial Deployment record with status 'live'
-        await db.deployment.create({
-          data: {
-            projectId: project.id,
-            userId: event.userId,
-            commit: `init-${Date.now()}`,
-            branch: 'main',
-            status: 'live',
-            buildLog: [
-              `🚀 Apsamo Panel Auto-Deployment`,
-              `========================`,
-              `Project: ${project.name}`,
-              `Framework: ${project.framework}`,
-              `Subdomain: ${project.subdomain}`,
-              ``,
-              `Step 1: Create workspace.............. ✅`,
-              `Step 2: Assign server................. ✅`,
-              `Step 3: Enable SSL.................... ✅`,
-              `Step 4: Deploy template............... ✅`,
-              ``,
-              `Deployment completed successfully!`,
-              `Live at: https://${project.subdomain}`,
-            ].join('\n'),
-            deployUrl: `https://${project.subdomain}`,
-            duration: 12,
-            triggeredBy: 'auto',
-          },
-        })
-      }
-    }
-
-    // Handle domain: update domain status to active
-    if ((purchaseType === 'domain' || purchaseType === 'both') && event.payload.domainId) {
-      const domainId = event.payload.domainId as string
-      await db.domain.update({
-        where: { id: domainId },
-        data: { status: 'active' },
-      })
-    }
-  }
-
   return { processed: true, actionsCount: actions.length, results }
-}
-
-// Process any queued jobs that haven't been processed yet
-export async function processPendingJobs() {
-  const pendingJobs = await db.jobQueue.findMany({
-    where: {
-      status: { in: ['queued'] },
-      attempts: { lt: 3 },
-    },
-    orderBy: { runAt: 'asc' },
-    take: 10,
-  })
-
-  const results: Array<Record<string, unknown>> = []
-  for (const job of pendingJobs) {
-    await processJob(job.id)
-    const updated = await db.jobQueue.findUnique({ where: { id: job.id } })
-    results.push({
-      jobId: job.id,
-      type: job.type,
-      status: updated?.status || 'unknown',
-    })
-  }
-
-  return { processed: results.length, results }
 }

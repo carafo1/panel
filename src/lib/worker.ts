@@ -39,28 +39,21 @@ export async function processJob(job: JobRecord): Promise<void> {
    
   console.log(`[worker] Processing job ${job.id} (type=${job.type})`)
   try {
-    await automationProcessJob(job.id)
-     
+    // The automation engine records every handler outcome itself (completed,
+    // re-queued or failed). It only throws on an infrastructure error such as
+    // the database being unavailable while recording that outcome.
+    await automationProcessJob(job.id, { enforceMaxAttempts: true })
+
     console.log(`[worker] Job ${job.id} processed via automation engine`)
   } catch (error) {
-     
+    // Do NOT mark the job failed here. This used to overwrite the row by id
+    // unconditionally, which could fail a job whose handler had succeeded or
+    // that another tick had re-claimed. A row left 'processing' is handled by
+    // recoverStuckJobs (re-queued, or failed once its attempts are used up).
     console.error(
-      `[worker] Job ${job.id} failed:`,
+      `[worker] Job ${job.id} hit an infrastructure error; left for stuck-job recovery:`,
       error instanceof Error ? error.message : error
     )
-    // Mark as failed if not already
-    try {
-      await db.jobQueue.update({
-        where: { id: job.id },
-        data: {
-          status: 'failed',
-          error: error instanceof Error ? error.message : 'Unknown worker error',
-          completedAt: new Date(),
-        },
-      })
-    } catch {
-      // swallow - already logged above
-    }
   }
 }
 
@@ -74,12 +67,21 @@ export async function processPendingJobs(limit = 10): Promise<ProcessResult> {
     console.error('[worker] stuck-job recovery failed:', err)
   )
 
+  // Provisioning pipelines run in-process; one interrupted by a restart
+  // stayed 'running' forever and blocked any re-run. Loaded lazily so the
+  // job tick does not pull in the registrar/mail/VPS clients until needed.
+  await import('@/lib/orchestration')
+    .then((m) => m.failStaleProvisioningJobs())
+    .catch((err) => console.error('[worker] stale provisioning sweep failed:', err))
+
   // 'failed' is terminal (attempts exhausted); the claim in processJob
-  // re-checks status, so a row taken by another tick is skipped safely.
+  // re-checks status and attempts, so a row taken by another tick is skipped
+  // safely. Exhausted rows are excluded so they cannot fill the batch.
   const pendingJobs = await db.jobQueue.findMany({
     where: {
       status: 'queued',
       runAt: { lte: new Date() },
+      attempts: { lt: db.jobQueue.fields.maxAttempts },
     },
     orderBy: { runAt: 'asc' },
     take: Math.max(1, Math.min(limit, 100)),
@@ -159,24 +161,46 @@ export async function getQueueStats(): Promise<{
 }
 
 /**
- * Re-queue any jobs stuck in 'processing' for too long (e.g. after a crash).
- * A job is considered stuck if it has been processing for more than 5 minutes.
+ * Recover jobs stuck in 'processing' for too long (e.g. after a crash).
+ *
+ * Each step is ONE conditional update, so a job that completed or was
+ * re-claimed between a read and a write can never be reset (the old
+ * findMany-then-update-by-id could). A stuck job with attempts left goes back
+ * to 'queued' (the stuck window itself is the delay before it runs again);
+ * one whose attempts are used up becomes 'failed', so a job that crashes the
+ * process cannot loop forever.
+ *
+ * Also fails 'queued' rows that already used every attempt and have been due
+ * for longer than the window: the worker never claims those, so they would
+ * otherwise sit in the queue forever.
  */
 export async function recoverStuckJobs(stuckAfterMs = 5 * 60 * 1000): Promise<number> {
-  const cutoff = new Date(Date.now() - stuckAfterMs)
-  const stuck = await db.jobQueue.findMany({
-    where: {
-      status: 'processing',
-      startedAt: { lt: cutoff },
+  const now = new Date()
+  const cutoff = new Date(now.getTime() - stuckAfterMs)
+  const exhausted = { attempts: { gte: db.jobQueue.fields.maxAttempts } }
+
+  const failedStuck = await db.jobQueue.updateMany({
+    where: { status: 'processing', startedAt: { lt: cutoff }, ...exhausted },
+    data: {
+      status: 'failed',
+      error: 'Interrupted while processing (restart or crash) with no attempts left',
+      completedAt: now,
     },
-    select: { id: true },
   })
-  if (stuck.length === 0) return 0
-  await db.jobQueue.updateMany({
-    where: { id: { in: stuck.map((j) => j.id) } },
+  const requeued = await db.jobQueue.updateMany({
+    where: { status: 'processing', startedAt: { lt: cutoff } },
     data: { status: 'queued', startedAt: null },
   })
-   
-  console.log(`[worker] Recovered ${stuck.length} stuck jobs`)
-  return stuck.length
+  const failedQueued = await db.jobQueue.updateMany({
+    where: { status: 'queued', runAt: { lt: cutoff }, ...exhausted },
+    data: { status: 'failed', error: 'No attempts left', completedAt: now },
+  })
+
+  const total = failedStuck.count + requeued.count + failedQueued.count
+  if (total > 0) {
+    console.log(
+      `[worker] Stuck-job recovery: requeued=${requeued.count} failed=${failedStuck.count + failedQueued.count}`
+    )
+  }
+  return total
 }

@@ -23,6 +23,9 @@
 #     apsamo backup --output /tmp/snapshot.tar.gz --no-storage
 # ════════════════════════════════════════════════════════════════════════════
 set -euo pipefail
+# Backups contain .env (JWT secret, encryption key, API keys) and the whole
+# database: everything this script writes is readable by root only.
+umask 077
 
 INSTALL_DIR="/opt/apsamo"
 BACKUP_DIR="$INSTALL_DIR/backups"
@@ -58,6 +61,9 @@ if [[ ! -f "$INSTALL_DIR/.env" ]]; then
 fi
 
 mkdir -p "$BACKUP_DIR"
+chmod 700 "$BACKUP_DIR"
+# Older archives were written world-readable; tighten them too.
+find "$BACKUP_DIR" -maxdepth 1 -type f -name 'apsamo-backup-*' -exec chmod 600 {} + 2>/dev/null || true
 
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 if [[ -z "$OUTPUT" ]]; then

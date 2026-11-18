@@ -237,21 +237,61 @@ export async function markInvoicePaid(
   if (!invoice) return null
   if (invoice.status === 'paid') return invoice
 
+  // What is still owed. `amountPaid` may already hold earlier partial
+  // payments, so the balance is total − credit − already received.
+  const alreadyPaid = round2(invoice.amountPaid || 0)
+  const outstanding = Math.max(
+    0,
+    round2(invoice.total - (invoice.creditApplied || 0) - alreadyPaid)
+  )
+
+  // A payment smaller than the balance is a PARTIAL payment. It used to mark
+  // the invoice fully paid regardless of the amount received; record it as
+  // partial instead (lazy import: refunds.ts imports this module).
+  if (
+    typeof opts.amount === 'number' &&
+    Number.isFinite(opts.amount) &&
+    opts.amount > 0 &&
+    opts.amount < outstanding - 0.009
+  ) {
+    const { recordInvoicePayment } = await import('@/lib/refunds')
+    const partial = await recordInvoicePayment({
+      invoiceId,
+      amount: opts.amount,
+      gateway: opts.gateway,
+      reference: opts.reference || null,
+      userId: opts.userId || invoice.userId,
+    })
+    if (!partial.success) {
+      console.error('[invoices] partial payment not recorded for', invoiceId, partial.error)
+    }
+    return db.invoice.findUnique({ where: { id: invoiceId } })
+  }
+
   // Record the money against the invoice too, not just the status — refunds
   // and partial-payment tracking read `amountPaid`, so leaving it at 0 would
   // make a paid invoice look like nothing was ever received.
-  const settled = Math.round(
-    (invoice.total - (invoice.creditApplied || 0)) * 100
-  ) / 100
+  const settled = outstanding
 
-  const updated = await db.invoice.update({
-    where: { id: invoiceId },
+  // Atomic flip: only the caller whose update still sees the invoice as it was
+  // read settles it. A concurrent webhook + browser return used to both pass
+  // the status check above and write two ledger rows / two notifications.
+  const flipped = await db.invoice.updateMany({
+    where: {
+      id: invoiceId,
+      status: invoice.status,
+      amountPaid: invoice.amountPaid,
+    },
     data: {
       status: 'paid',
       paidAt: new Date(),
-      amountPaid: Math.max(0, settled),
+      amountPaid: round2(alreadyPaid + settled),
     },
   })
+  if (flipped.count !== 1) {
+    return db.invoice.findUnique({ where: { id: invoiceId } })
+  }
+  const updated = (await db.invoice.findUnique({ where: { id: invoiceId } }))!
 
   await db.transaction
     .create({
@@ -259,7 +299,7 @@ export async function markInvoicePaid(
         invoiceId,
         userId: opts.userId || invoice.userId,
         gateway: opts.gateway,
-        amount: opts.amount ?? invoice.total,
+        amount: opts.amount ?? settled,
         currency: invoice.currency,
         status: 'completed',
         reference: opts.reference || null,
@@ -293,23 +333,41 @@ export async function markInvoicePaid(
   return updated
 }
 
+/** Invoice statuses that still expect money. */
+export const OPEN_INVOICE_STATUSES = ['unpaid', 'partially_paid']
+
 /**
- * Find the invoice a payment should settle: the newest unpaid invoice for the
- * payment's subscription, else the newest unpaid one for the user.
+ * Find the invoice a payment should settle.
+ *
+ *   1. the invoice explicitly linked to the payment at checkout
+ *      (`Payment.invoiceId`, or `invoiceId` in its metadata), when it belongs
+ *      to the same user;
+ *   2. otherwise the oldest open invoice of the payment's OWN subscription.
+ *
+ * There is deliberately no user-wide fallback any more: "the newest unpaid
+ * invoice for this user" settled whatever bill happened to be latest — another
+ * subscription's renewal, say — with money paid for something else.
  */
 export async function findInvoiceForPayment(payment: {
   userId: string
   subscriptionId?: string | null
+  invoiceId?: string | null
 }) {
-  if (payment.subscriptionId) {
-    const bySub = await db.invoice.findFirst({
-      where: { subscriptionId: payment.subscriptionId, status: 'unpaid' },
-      orderBy: { createdAt: 'desc' },
-    })
-    if (bySub) return bySub
+  if (payment.invoiceId) {
+    const linked = await db.invoice.findUnique({ where: { id: payment.invoiceId } })
+    if (linked && linked.userId === payment.userId) return linked
+    return null
   }
-  return db.invoice.findFirst({
-    where: { userId: payment.userId, status: 'unpaid', subscriptionId: { not: null } },
-    orderBy: { createdAt: 'desc' },
-  })
+  if (payment.subscriptionId) {
+    return db.invoice.findFirst({
+      where: {
+        subscriptionId: payment.subscriptionId,
+        userId: payment.userId,
+        status: { in: OPEN_INVOICE_STATUSES },
+        type: 'standard',
+      },
+      orderBy: { createdAt: 'asc' },
+    })
+  }
+  return null
 }

@@ -27,6 +27,14 @@
  */
 import { db } from '@/lib/db'
 import { configureProjectProxy } from './proxy'
+import {
+  RedirectValidationError,
+  redirectFromPathError,
+  redirectToUrlError,
+  redirectStatusError,
+} from './redirect-rules'
+
+export { RedirectValidationError }
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -100,13 +108,14 @@ export async function createRedirect(
   projectId: string,
   opts: CreateRedirectInput
 ): Promise<RedirectRow> {
-  const fromPath = (opts.fromPath || '').trim()
-  if (!fromPath) throw new Error('From path is required')
-  if (!fromPath.startsWith('/')) {
-    throw new Error('From path must start with "/"')
-  }
-  const toUrl = (opts.toUrl || '').trim()
-  if (!toUrl) throw new Error('To URL is required')
+  // These values are written into the Caddyfile every tenant shares; see
+  // redirect-rules for why trimming alone was not enough.
+  const fromErr = redirectFromPathError(opts.fromPath)
+  if (fromErr) throw new RedirectValidationError(fromErr)
+  const toErr = redirectToUrlError(opts.toUrl)
+  if (toErr) throw new RedirectValidationError(toErr)
+  const fromPath = opts.fromPath.trim()
+  const toUrl = opts.toUrl.trim()
   const statusCode =
     opts.statusCode === 302 ? 302 : opts.statusCode === 301 ? 301 : 301
   const matchQuery =
@@ -157,20 +166,18 @@ export async function updateRedirect(
 
   const data: Record<string, unknown> = {}
   if (patch.fromPath !== undefined) {
-    const p = patch.fromPath.trim()
-    if (!p) throw new Error('From path cannot be empty')
-    if (!p.startsWith('/')) throw new Error('From path must start with "/"')
-    data.fromPath = p
+    const err = redirectFromPathError(patch.fromPath)
+    if (err) throw new RedirectValidationError(err)
+    data.fromPath = patch.fromPath.trim()
   }
   if (patch.toUrl !== undefined) {
-    const u = patch.toUrl.trim()
-    if (!u) throw new Error('To URL cannot be empty')
-    data.toUrl = u
+    const err = redirectToUrlError(patch.toUrl)
+    if (err) throw new RedirectValidationError(err)
+    data.toUrl = patch.toUrl.trim()
   }
   if (patch.statusCode !== undefined) {
-    if (patch.statusCode !== 301 && patch.statusCode !== 302) {
-      throw new Error('Status code must be 301 or 302')
-    }
+    const err = redirectStatusError(patch.statusCode)
+    if (err) throw new RedirectValidationError(err)
     data.statusCode = patch.statusCode
   }
   if (patch.matchQuery !== undefined) {

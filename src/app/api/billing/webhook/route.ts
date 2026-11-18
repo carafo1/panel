@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { processEvent } from '@/lib/automation'
-import { provisionForPayment } from '@/lib/provision-on-payment'
+import {
+  activatePayment,
+  confirmStripeCheckoutSession,
+} from '@/lib/payment-activation'
+import { recordStripeChargeRefund } from '@/lib/refunds'
 import {
   constructWebhookEvent,
   getSubscriptionPeriod,
@@ -52,109 +56,41 @@ export async function POST(request: Request) {
     const data = event.data?.object as unknown as Record<string, unknown> | undefined
 
     // ── checkout.session.completed ──────────────────────────────
-    if (eventType === 'checkout.session.completed') {
+    // (async_payment_succeeded is the same confirmation for delayed methods.)
+    if (
+      eventType === 'checkout.session.completed' ||
+      eventType === 'checkout.session.async_payment_succeeded'
+    ) {
       const session = data as unknown as Stripe.Checkout.Session
-      const sessionId = session?.id
-      const metadata = (session?.metadata || {}) as Record<string, string>
-      const userId = metadata.userId
-      const planId = metadata.planId
-      const purchaseType =
-        (metadata.purchaseType as string) || (metadata.type as string) || 'hosting'
-      const domainName = metadata.domainName || null
-      const projectName = metadata.projectName || null
-      const framework = metadata.framework || 'nextjs'
 
-      if (!userId) {
-        console.warn('[stripe-webhook] checkout.session.completed missing userId')
+      // A completed session is not necessarily a paid one (delayed payment
+      // methods complete with payment_status 'unpaid'). Only money that has
+      // arrived activates anything.
+      if (session?.payment_status !== 'paid') {
+        console.warn(
+          `[stripe-webhook] ${eventType} for ${session?.id} not paid (${session?.payment_status}); ignored`
+        )
         return NextResponse.json({ received: true })
       }
 
-      // Find the pending Payment we created at checkout (matched by sessionId)
-      let payment = sessionId
-        ? await db.payment.findFirst({
-            where: { stripePaymentId: sessionId },
-          })
-        : null
-
-      // If we couldn't find by session ID, fall back to user's most recent pending
-      if (!payment) {
-        payment = await db.payment.findFirst({
-          where: { userId, status: 'pending' },
-          orderBy: { createdAt: 'desc' },
-        })
-      }
-
-      if (payment) {
-        // Update the payment record to completed
-        await db.payment.update({
-          where: { id: payment.id },
-          data: {
-            status: 'completed',
-            stripePaymentId:
-              (session?.payment_intent as string) || payment.stripePaymentId,
-          },
-        })
-      } else {
-        // No payment record found - create one from the session data
-        const amountTotal =
-          typeof session?.amount_total === 'number'
-            ? session.amount_total / 100
-            : 0
-        payment = await db.payment.create({
-          data: {
-            userId,
-            amount: amountTotal,
-            currency: session?.currency || 'usd',
-            status: 'completed',
-            type: purchaseType,
-            stripePaymentId:
-              (session?.payment_intent as string) || sessionId || null,
-            metadata: JSON.stringify({
-              ...metadata,
-              checkoutSessionId: sessionId,
-            }),
-          },
-        })
-      }
-
-      // Activate the user's pending subscription if one exists
-      const subscription = await db.subscription.findFirst({
-        where: { userId, status: 'pending' },
-        orderBy: { createdAt: 'desc' },
+      // Shared with /api/billing/success: finds the Payment by the checkout
+      // session id, refuses mismatches, and activates through the same path
+      // as every other gateway (completes the payment, activates ITS
+      // subscription, settles ITS invoice, provisions once). No fallback ever
+      // creates a Payment or completes a different one.
+      const result = await confirmStripeCheckoutSession({
+        id: session.id,
+        payment_status: session.payment_status,
+        payment_intent: session.payment_intent as string | { id?: string } | null,
+        amount_total: session.amount_total,
+        currency: session.currency,
+        metadata: (session.metadata || {}) as Record<string, string>,
       })
-      if (subscription) {
-        await db.subscription.update({
-          where: { id: subscription.id },
-          data: { status: 'active' },
-        })
-      }
-
-      // REAL provisioning — creates the container / registers the domain.
-      //
-      // This used to call processEvent('payment_success'), whose actions are
-      // simulated: `create_user_workspace` just sends a "workspace created"
-      // notification and returns a made-up id without building anything. A
-      // customer who paid via Stripe therefore got a success email and no
-      // service. provisionForPayment does the real work and is idempotent, so
-      // a retried webhook cannot double-provision (or double-register a
-      // domain, which costs real registrar balance).
-      const provision = await provisionForPayment(payment.id).catch(
-        (err: unknown) => {
-          console.error('[stripe-webhook] provisioning failed:', err)
-          return { provisioned: false, detail: 'provisioning error' }
-        }
-      )
       console.log(
-        `[stripe-webhook] provisioning for ${payment.id}: ${provision.detail}`
+        `[stripe-webhook] session ${session.id}: ${result.outcome}${
+          result.paymentId ? ` (payment ${result.paymentId})` : ''
+        }${result.detail ? ` — ${result.detail}` : ''}`
       )
-
-      await createNotification({
-        userId,
-        title: 'Payment Successful',
-        message: `Your payment of $${payment.amount.toFixed(2)} has been processed successfully.`,
-        type: 'success',
-        link: '/?tab=billing',
-      })
     }
 
     // ── customer.subscription.updated ───────────────────────────
@@ -290,10 +226,16 @@ export async function POST(request: Request) {
       }
 
       if (userId) {
-        // Record a new payment (renewal)
-        const existing = chargeId
-          ? await db.payment.findFirst({ where: { stripePaymentId: chargeId } })
-          : null
+        // Record a new payment (renewal). Deduplicate on the Stripe invoice
+        // id — one invoice is paid once. The charge id is often null on newer
+        // API versions, which made every redelivery record another payment.
+        const existing = invoice?.id
+          ? await db.payment.findFirst({
+              where: { stripeInvoiceId: invoice.id, status: 'completed' },
+            })
+          : chargeId
+            ? await db.payment.findFirst({ where: { stripePaymentId: chargeId } })
+            : null
         if (!existing) {
           await db.payment.create({
             data: {
@@ -387,6 +329,20 @@ export async function POST(request: Request) {
       }
     }
 
+    // ── charge.refunded ─────────────────────────────────────────
+    // A refund made in the Stripe dashboard. Books it against the payment and
+    // its invoice (recorded as a gateway refund; the money already moved in
+    // Stripe). Services are NOT cancelled automatically — that stays an admin
+    // decision.
+    else if (eventType === 'charge.refunded') {
+      const charge = data as unknown as Stripe.Charge
+      const outcome = await recordStripeChargeRefund(charge).catch((err) => {
+        console.error('[stripe-webhook] charge.refunded handling failed:', err)
+        return 'error'
+      })
+      console.log(`[stripe-webhook] charge.refunded ${charge?.id}: ${outcome}`)
+    }
+
     // Demo-mode webhook payload (legacy event names)
     else if (
       eventType === 'payment_success' ||
@@ -404,28 +360,23 @@ export async function POST(request: Request) {
       const domainName = payload.domainName as string | null
 
       if (userId) {
-        if (paymentId) {
-          const payment = await db.payment.findUnique({ where: { id: paymentId } })
-          if (payment && payment.status === 'pending') {
-            await db.payment.update({
-              where: { id: paymentId },
-              data: { status: 'completed' },
-            })
-          }
-        }
-
         if (eventType === 'payment_success' && paymentId) {
-          // Same switch as the live path above: real provisioning, not the
-          // simulated automation actions.
-          const provision = await provisionForPayment(paymentId).catch(
-            (err: unknown) => {
-              console.error('[stripe-webhook/legacy] provisioning failed:', err)
-              return { provisioned: false, detail: 'provisioning error' }
-            }
-          )
-          console.log(
-            `[stripe-webhook/legacy] provisioning for ${paymentId}: ${provision.detail}`
-          )
+          // Same activation path as every live gateway: only the payer's own
+          // pending payment, settled invoice, provisioned once.
+          const payment = await db.payment.findUnique({ where: { id: paymentId } })
+          if (payment && payment.userId === userId) {
+            const result = await activatePayment({ paymentId, method: 'stripe' }).catch(
+              (err: unknown) => {
+                console.error('[stripe-webhook/legacy] activation failed:', err)
+                return { success: false, error: 'activation error' }
+              }
+            )
+            console.log(
+              `[stripe-webhook/legacy] activation for ${paymentId}: ${
+                result.success ? 'ok' : result.error
+              }`
+            )
+          }
         } else {
           // Cancellation / failure events carry no provisioning work.
           await processEvent({

@@ -1,5 +1,5 @@
 /**
- * GET /api/domains/:id/auth-code
+ * GET|POST /api/domains/:id/auth-code
  * Retrieves the EPP / auth code for a domain (required for transfers).
  *
  * SECURITY:
@@ -17,9 +17,42 @@ import { encrypt, decrypt } from '@/lib/encryption'
 import { isAdmin } from '@/lib/security'
 import bcrypt from 'bcryptjs'
 
+/**
+ * GET  — owner retrieval; an admin may re-confirm with the `x-admin-password`
+ *        header.
+ * POST — same, with the admin password in the JSON body
+ *        ({ "adminPassword": "..." }) or the header.
+ *
+ * SECURITY: the admin password is never read from the query string — URLs end
+ * up in proxy/access logs, browser history and Referer headers.
+ */
 export async function GET(
   request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  ctx: { params: Promise<{ id: string }> }
+) {
+  return retrieveAuthCode(request, ctx, request.headers.get('x-admin-password'))
+}
+
+export async function POST(
+  request: Request,
+  ctx: { params: Promise<{ id: string }> }
+) {
+  const body = (await request.json().catch(() => null)) as Record<string, unknown> | null
+  const fromBody =
+    body && typeof body === 'object'
+      ? typeof body.adminPassword === 'string'
+        ? body.adminPassword
+        : typeof body.admin_password === 'string'
+        ? body.admin_password
+        : null
+      : null
+  return retrieveAuthCode(request, ctx, fromBody || request.headers.get('x-admin-password'))
+}
+
+async function retrieveAuthCode(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> },
+  adminPassword: string | null
 ) {
   const user = await authenticateRequest(request)
   if (!user) return apiError.unauthorized()
@@ -35,12 +68,10 @@ export async function GET(
     // Owner can always retrieve their own auth code
     // Admin/super_admin must re-confirm their password for another user's domain — H8
     if (!isOwner && userIsAdmin) {
-      const { searchParams } = new URL(request.url)
-      const adminPassword = searchParams.get('admin_password') || request.headers.get('x-admin-password')
       if (!adminPassword) {
         return apiError.forbidden(
           'Admin access to customer EPP codes requires password re-confirmation. ' +
-          'Provide ?admin_password= or x-admin-password header.'
+          'Send it as the x-admin-password header or as adminPassword in a POST JSON body.'
         )
       }
       // Verify admin password

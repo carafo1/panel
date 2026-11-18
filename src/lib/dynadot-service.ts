@@ -28,7 +28,14 @@
  *  - Retry with exponential backoff for transient network errors.
  *  - Rate-limit aware (429 → honours Retry-After).
  */
-import { isDynadotDemoMode } from './dynadot'
+import {
+  isDynadotDemoMode,
+  assertDnsWriteAllowed,
+  addDnsRecordsVia,
+  deleteDnsRecordVia,
+  updateDnsRecordVia,
+  type DnsWriteResult,
+} from './dynadot'
 import { NS1_HOSTNAME, NS2_HOSTNAME } from './brand-config'
 
 const API_BASE = 'https://api.dynadot.com/api3.json'
@@ -280,6 +287,8 @@ class DynadotService {
         json.GetNsResponse,
         json.SetNsResponse,
         json.SearchResponse,
+        json.SetDnsResponse,
+        json.GetDnsResponse,
       ]
         .filter(Boolean) as Array<Record<string, unknown>>
       for (const env of envelopes) {
@@ -802,23 +811,39 @@ class DynadotService {
 
   // ─── DNS records ─────────────────────────────────────────────────────────
 
-  async setDnsRecords(domain: string, records: DnsRecordInput[]): Promise<{ success: boolean }> {
+  /**
+   * Add DNS records. APPENDS to the live zone (add_dns_to_current_setting=1)
+   * and never replaces it — see the DNS section of lib/dynadot for the rules.
+   * Throws DnsWriteRefusedError for brand/panel domains and impossible writes.
+   */
+  async setDnsRecords(domain: string, records: DnsRecordInput[]): Promise<DnsWriteResult> {
+    assertDnsWriteAllowed(domain)
     if (this.demoMode) {
-      return { success: true }
+      return { success: true, written: 0 }
     }
-    const params: Record<string, string> = { command: 'set_dns2', domain }
-    records.slice(0, 10).forEach((r, i) => {
-      params[`main_record_type${i}`] = r.type
-      params[`main_record${i}`] = r.value
-      params[`main_record_name${i}`] = r.name
-      params[`main_record_ttl${i}`] = String(r.ttl || 3600)
-      if (r.priority !== undefined) {
-        params[`main_record_priority${i}`] = String(r.priority)
-      }
-    })
-    const json = await this.call(params)
-    const status = String((json.Response as Record<string, unknown>)?.Status || '').toLowerCase()
-    return { success: status === 'success' }
+    return addDnsRecordsVia((p) => this.call(p), domain, records)
+  }
+
+  /** Remove one record, writing back every other record in the live zone. */
+  async deleteDnsRecord(domain: string, target: DnsRecordInput): Promise<DnsWriteResult> {
+    assertDnsWriteAllowed(domain)
+    if (this.demoMode) {
+      return { success: true, written: 0 }
+    }
+    return deleteDnsRecordVia((p) => this.call(p), domain, target)
+  }
+
+  /** Replace one record in place, writing back every other record. */
+  async updateDnsRecord(
+    domain: string,
+    target: DnsRecordInput,
+    replacement: DnsRecordInput
+  ): Promise<DnsWriteResult> {
+    assertDnsWriteAllowed(domain)
+    if (this.demoMode) {
+      return { success: true, written: 0 }
+    }
+    return updateDnsRecordVia((p) => this.call(p), domain, target, replacement)
   }
 
   // ─── Contacts ────────────────────────────────────────────────────────────

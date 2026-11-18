@@ -1,7 +1,10 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { verifyPayment as verifyWaafiPayment } from '@/lib/waafi'
-import { provisionForPayment } from '@/lib/provision-on-payment'
+import {
+  verifyPayment as verifyWaafiPayment,
+  waafiAmountMismatch,
+} from '@/lib/waafi'
+import { activatePayment } from '@/lib/payment-activation'
 import { createNotification } from '@/lib/notifications'
 
 /**
@@ -13,7 +16,7 @@ import { createNotification } from '@/lib/notifications'
  *   2. Verify the payment status with Waafi (defence-in-depth against
  *      forged callbacks).
  *   3. Update the Payment record to 'completed'.
- *   4. Activate the user's pending Subscription.
+ *   4. Activate the subscription linked to THIS payment (never a guess).
  *   5. Drive the automation pipeline (create project / domain / deployment).
  *   6. Notify the user.
  *
@@ -87,9 +90,22 @@ export async function POST(request: Request) {
         message: 'Payment already processed',
       })
     }
+    // Failed / refunded payments are final: a late or replayed callback must
+    // not resurrect them.
+    if (payment.status !== 'pending') {
+      return NextResponse.json({
+        success: true,
+        status: payment.status,
+        message: `Payment is ${payment.status}; nothing to do`,
+      })
+    }
+
+    const expected = { amount: payment.amount, currency: payment.currency }
 
     // ── Re-verify with Waafi (defence-in-depth) ──────────────────
-    const verification = await verifyWaafiPayment(transactionId)
+    // The body of this public endpoint is never trusted: status, amount and
+    // currency all come from Waafi's own TransactionStatus answer.
+    const verification = await verifyWaafiPayment(transactionId, expected)
     if (!verification.success) {
       console.error(
         `[waafi/callback] verification failed for tx ${transactionId}:`,
@@ -109,10 +125,6 @@ export async function POST(request: Request) {
     // If verification says pending, leave the row pending and let Waafi
     // call back again later.
     if (verification.status === 'pending') {
-      await db.payment.update({
-        where: { id: payment.id },
-        data: { status: 'pending' },
-      })
       return NextResponse.json({
         success: true,
         status: 'pending',
@@ -120,19 +132,22 @@ export async function POST(request: Request) {
       })
     }
 
-    // If verification says failed, mark the Payment as failed.
+    // If verification says failed, mark the Payment as failed (only if it is
+    // still pending — never overwrite a completion that raced us).
     if (verification.status === 'failed') {
-      await db.payment.update({
-        where: { id: payment.id },
+      const failed = await db.payment.updateMany({
+        where: { id: payment.id, status: 'pending' },
         data: { status: 'failed' },
       })
-      await createNotification({
-        userId: payment.userId,
-        title: 'Payment Failed',
-        message: `Your Waafi Pay payment of ${payment.currency.toUpperCase()} ${payment.amount.toFixed(2)} could not be confirmed. Please try again or choose another payment method.`,
-        type: 'error',
-        link: '/?tab=billing',
-      })
+      if (failed.count === 1) {
+        await createNotification({
+          userId: payment.userId,
+          title: 'Payment Failed',
+          message: `Your Waafi Pay payment of ${payment.currency.toUpperCase()} ${payment.amount.toFixed(2)} could not be confirmed. Please try again or choose another payment method.`,
+          type: 'error',
+          link: '/?tab=billing',
+        })
+      }
       return NextResponse.json({
         success: true,
         status: 'failed',
@@ -140,93 +155,75 @@ export async function POST(request: Request) {
       })
     }
 
-    // ── Completed: update Payment + drive automation ─────────────
-    let metadata: Record<string, unknown> = {}
-    try {
-      metadata = payment.metadata ? JSON.parse(payment.metadata) : {}
-    } catch {
-      metadata = {}
+    // ── Completed: the verified money must cover what we charged ──
+    // The old code accepted any reported amount and overwrote payment.amount
+    // with it, so a 0.01 payment activated a full plan. The expected amount
+    // is never changed; a shortfall or currency mismatch leaves the payment
+    // pending for an admin to look at.
+    const mismatch = waafiAmountMismatch(expected, verification)
+    if (mismatch) {
+      console.error(`[waafi/callback] tx ${transactionId} NOT activated: ${mismatch}`)
+      let meta: Record<string, unknown> = {}
+      try {
+        meta = payment.metadata ? JSON.parse(payment.metadata) : {}
+      } catch {
+        meta = {}
+      }
+      await db.payment
+        .updateMany({
+          where: { id: payment.id, status: 'pending' },
+          data: {
+            metadata: JSON.stringify({
+              ...meta,
+              waafiVerificationMismatch: mismatch,
+              waafiVerifiedAmount: verification.amount ?? null,
+              waafiVerifiedCurrency: verification.currency ?? null,
+              waafiMismatchAt: new Date().toISOString(),
+            }),
+          },
+        })
+        .catch(() => {})
+      return NextResponse.json(
+        {
+          success: false,
+          status: 'pending',
+          error: 'Paid amount does not match the order - payment held for review',
+        },
+        { status: 409 }
+      )
     }
 
-    const updatedPayment = await db.payment.update({
-      where: { id: payment.id },
-      data: {
-        status: 'completed',
-        amount:
-          typeof verification.amount === 'number' && verification.amount > 0
-            ? verification.amount
-            : payment.amount,
-        currency: verification.currency || payment.currency,
-        metadata: JSON.stringify({
-          ...metadata,
-          waafiCallbackStatus: rawStatus || verification.status,
-          waafiReference: reference || metadata.waafiReference || null,
-          waafiAmount: amount ?? null,
-          waafiCurrency: currency ?? null,
-          completedAt: new Date().toISOString(),
-        }),
+    // Same activation path as every other gateway: atomically completes the
+    // payment, activates ITS subscription (no "latest pending" guess),
+    // settles ITS invoice and provisions once.
+    const result = await activatePayment({
+      paymentId: payment.id,
+      method: 'waafi',
+      extraMetadata: {
+        waafiCallbackStatus: rawStatus || verification.status,
+        waafiReference: reference || null,
+        waafiReportedAmount: amount ?? null,
+        waafiReportedCurrency: currency ?? null,
+        waafiVerifiedAmount: verification.amount ?? null,
+        waafiVerifiedCurrency: verification.currency ?? null,
       },
+      notifyTitle: 'Payment Successful',
+      notifyMessage: `Your Waafi Pay payment of ${payment.currency.toUpperCase()} ${payment.amount.toFixed(2)} has been confirmed. Your resources are being provisioned.`,
     })
 
-    // Activate the user's pending subscription if one exists.
-    let subscriptionId: string | null = null
-    if (payment.subscriptionId) {
-      const subscription = await db.subscription.findUnique({
-        where: { id: payment.subscriptionId },
-      })
-      if (subscription && subscription.status === 'pending') {
-        await db.subscription.update({
-          where: { id: subscription.id },
-          data: { status: 'active' },
-        })
-        subscriptionId = subscription.id
-      } else if (subscription) {
-        subscriptionId = subscription.id
-      }
-    } else {
-      const pendingSub = await db.subscription.findFirst({
-        where: { userId: payment.userId, status: 'pending' },
-        orderBy: { createdAt: 'desc' },
-      })
-      if (pendingSub) {
-        await db.subscription.update({
-          where: { id: pendingSub.id },
-          data: { status: 'active' },
-        })
-        subscriptionId = pendingSub.id
-      }
+    if (!result.success) {
+      return NextResponse.json(
+        { success: false, error: result.error || 'Payment could not be confirmed' },
+        { status: 409 }
+      )
     }
-
-    // REAL provisioning — creates the container / registers the domain.
-    //
-    // Previously this called processEvent('payment_success'), whose actions
-    // are simulated (create_user_workspace only sends a notification and
-    // returns an invented id). A Waafi customer would be told their resources
-    // were provisioned while nothing existed. provisionForPayment is
-    // idempotent, so a replayed callback can't double-provision.
-    const provisionResult = await provisionForPayment(updatedPayment.id).catch(
-      (err: unknown) => {
-        console.error('[waafi-callback] provisioning failed:', err)
-        return { provisioned: false, detail: 'provisioning error' }
-      }
-    )
-    console.log(
-      `[waafi-callback] provisioning for ${updatedPayment.id}: ${provisionResult.detail}`
-    )
-
-    await createNotification({
-      userId: payment.userId,
-      title: 'Payment Successful',
-      message: `Your Waafi Pay payment of ${updatedPayment.currency.toUpperCase()} ${updatedPayment.amount.toFixed(2)} has been confirmed. Your resources are being provisioned.`,
-      type: 'success',
-      link: '/?tab=billing',
-    })
 
     return NextResponse.json({
       success: true,
       status: 'completed',
-      paymentId: updatedPayment.id,
-      provisioning: provisionResult,
+      paymentId: payment.id,
+      alreadyCompleted: Boolean(result.alreadyCompleted),
+      provisioning: result.automation ?? null,
     })
   } catch (error) {
     console.error('Waafi callback error:', error)
@@ -281,7 +278,10 @@ export async function GET(request: Request) {
     }
 
     // Re-verify with Waafi before granting success.
-    const verification = await verifyWaafiPayment(transactionId)
+    const verification = await verifyWaafiPayment(transactionId, {
+      amount: payment.amount,
+      currency: payment.currency,
+    })
     const finalStatus =
       verification.success && verification.status === 'completed'
         ? 'success'

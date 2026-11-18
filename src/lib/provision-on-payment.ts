@@ -56,8 +56,29 @@ export async function provisionForPayment(
     meta = {}
   }
 
-  // Idempotency guard — never provision the same payment twice.
-  if (meta.provisionStarted) {
+  // Only money that has actually been confirmed is provisioned.
+  if (payment.status !== 'completed') {
+    return {
+      provisioned: false,
+      detail: `payment is ${payment.status}, not completed`,
+    }
+  }
+
+  // Idempotency guard — never provision the same payment twice. The metadata
+  // flag still covers rows provisioned before provisionClaimedAt existed.
+  if (meta.provisionStarted || payment.provisionClaimedAt) {
+    return { provisioned: false, detail: 'provisioning already started' }
+  }
+
+  // Atomic claim. Reading the flag and then writing it let two concurrent
+  // callers (webhook + browser return) both pass the check above and build
+  // two containers / register the domain twice. Only the caller whose
+  // conditional update flips provisionClaimedAt from null may continue.
+  const claim = await db.payment.updateMany({
+    where: { id: payment.id, provisionClaimedAt: null },
+    data: { provisionClaimedAt: new Date() },
+  })
+  if (claim.count !== 1) {
     return { provisioned: false, detail: 'provisioning already started' }
   }
 
@@ -67,7 +88,17 @@ export async function provisionForPayment(
       ? meta.domainName.toLowerCase().trim()
       : null
 
-  // Mark started up-front so a concurrent call bails at the guard above.
+  // Keep the legacy metadata flag for the admin views that read it. Re-read
+  // first so a concurrent metadata write (activation) is not clobbered.
+  const fresh = await db.payment.findUnique({
+    where: { id: payment.id },
+    select: { metadata: true },
+  })
+  try {
+    meta = fresh?.metadata ? JSON.parse(fresh.metadata) : meta
+  } catch {
+    /* keep what we had */
+  }
   await db.payment.update({
     where: { id: payment.id },
     data: {
@@ -307,6 +338,7 @@ export async function provisionForPayment(
       await db.payment.update({
         where: { id: payment.id },
         data: {
+          provisionClaimedAt: null,
           metadata: JSON.stringify({
             ...meta,
             provisionStarted: false,

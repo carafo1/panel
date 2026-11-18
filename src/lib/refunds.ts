@@ -15,7 +15,7 @@
  *     keeps the books straight.
  */
 import { db } from '@/lib/db'
-import { adjustCredit } from '@/lib/credit'
+import { moveCredit, CreditError } from '@/lib/credit'
 import {
   notifyPaymentReceived,
   notifyRefundIssued,
@@ -75,14 +75,22 @@ export async function recordInvoicePayment(opts: {
   const remaining = round2(invoice.total - invoice.creditApplied - newPaid)
   const fullySettled = remaining <= 0.009
 
-  await db.invoice.update({
-    where: { id: invoice.id },
+  // Conditional on the amount we read: two payments recorded at the same
+  // moment must not both compute from the same `amountPaid` and lose one.
+  const written = await db.invoice.updateMany({
+    where: { id: invoice.id, amountPaid: invoice.amountPaid, status: invoice.status },
     data: {
       amountPaid: newPaid,
       status: fullySettled ? 'paid' : 'partially_paid',
       ...(fullySettled ? { paidAt: new Date() } : {}),
     },
   })
+  if (written.count !== 1) {
+    return {
+      success: false,
+      error: 'The invoice changed while recording this payment. Please retry.',
+    }
+  }
 
   // Ledger row so the money is traceable.
   await db.transaction
@@ -110,6 +118,13 @@ export async function recordInvoicePayment(opts: {
     balanceDue: Math.max(0, remaining),
     method: opts.gateway,
   }).catch(() => {})
+
+  // The final instalment settles the invoice, which is what brings a past-due
+  // or suspended subscription back (same hook markInvoicePaid runs).
+  if (fullySettled) {
+    const { onInvoiceSettled } = await import('@/lib/billing-enforcement')
+    await onInvoiceSettled(invoice.id)
+  }
 
   return {
     success: true,
@@ -176,22 +191,59 @@ export async function refundInvoice(opts: {
 
   const destination = opts.destination || 'wallet'
 
+  const totalRefunded = round2(alreadyRefunded + amount)
+  const fullyRefunded = totalRefunded >= received - 0.009
+
+  // No interactive transaction: on SQLite two concurrent interactive
+  // transactions that read before writing deadlock on the lock upgrade.
+  // Guarded single-statement writes instead, claim first:
+  //   1. claim the refund with a conditional update on the `amountRefunded`
+  //      we read — two refunds submitted together cannot both pass the
+  //      "refundable" check above; the loser matches nothing and stops here,
+  //      before any money moves;
+  //   2. credit the wallet (relative increment); if that fails, undo step 1;
+  //   3. write the Refund row and, for a full refund, mark the payments.
+  const claimed = await db.invoice.updateMany({
+    where: { id: invoice.id, amountRefunded: invoice.amountRefunded },
+    data: {
+      amountRefunded: totalRefunded,
+      refundedAt: new Date(),
+      ...(fullyRefunded ? { status: 'refunded' } : {}),
+    },
+  })
+  if (claimed.count !== 1) {
+    return {
+      success: false,
+      error: 'This invoice was refunded by another request just now. Reload and try again.',
+    }
+  }
+
   // Money back to the wallet is something we can genuinely do right now.
   let newBalance: number | undefined
   if (destination === 'wallet') {
-    const credited = await adjustCredit({
-      userId: invoice.userId,
-      amount,
-      type: 'refund',
-      description: `Refund for invoice ${invoice.number}${opts.reason ? ` — ${opts.reason}` : ''}`,
-      invoiceId: invoice.id,
-      adminUserId: opts.adminUserId,
-      notify: false,
-    })
-    if (!credited.success) {
-      return { success: false, error: credited.error }
+    try {
+      newBalance = await moveCredit({
+        userId: invoice.userId,
+        amount,
+        type: 'refund',
+        description: `Refund for invoice ${invoice.number}${opts.reason ? ` — ${opts.reason}` : ''}`,
+        invoiceId: invoice.id,
+        adminUserId: opts.adminUserId,
+      })
+    } catch (err) {
+      await db.invoice
+        .updateMany({
+          where: { id: invoice.id, amountRefunded: totalRefunded },
+          data: {
+            amountRefunded: invoice.amountRefunded,
+            refundedAt: invoice.refundedAt,
+            status: invoice.status,
+          },
+        })
+        .catch((e) => console.error('[refunds] could not undo refund claim:', e))
+      if (err instanceof CreditError) return { success: false, error: err.message }
+      throw err
     }
-    newBalance = credited.balance
   }
 
   const refund = await db.refund.create({
@@ -207,17 +259,14 @@ export async function refundInvoice(opts: {
     },
   })
 
-  const totalRefunded = round2(alreadyRefunded + amount)
-  const fullyRefunded = totalRefunded >= received - 0.009
-
-  await db.invoice.update({
-    where: { id: invoice.id },
-    data: {
-      amountRefunded: totalRefunded,
-      refundedAt: new Date(),
-      ...(fullyRefunded ? { status: 'refunded' } : {}),
-    },
-  })
+  // A fully refunded invoice means the payments that settled it are
+  // refunded too. Service cancellation is left to the admin on purpose.
+  if (fullyRefunded) {
+    await db.payment.updateMany({
+      where: { invoiceId: invoice.id, status: 'completed' },
+      data: { status: 'refunded' },
+    })
+  }
 
   // Credit note for the books.
   let creditNoteNumber: string | undefined
@@ -274,4 +323,70 @@ export async function refundInvoice(opts: {
     creditNoteNumber,
     newBalance,
   }
+}
+
+/** The parts of a Stripe Charge that recordStripeChargeRefund reads. */
+export interface StripeChargeLike {
+  id?: string | null
+  payment_intent?: string | { id?: string } | null
+  amount_refunded?: number | null
+  refunded?: boolean | null
+}
+
+/**
+ * Book a refund made in the Stripe dashboard (`charge.refunded`).
+ *
+ *  - the linked invoice gets a gateway refund for whatever Stripe has refunded
+ *    beyond what is already recorded (so a redelivered event adds nothing);
+ *  - a FULL refund marks the Payment 'refunded'.
+ *
+ * Services are deliberately not cancelled or deleted here — that remains an
+ * admin decision.
+ */
+export async function recordStripeChargeRefund(charge: StripeChargeLike): Promise<string> {
+  const paymentIntentId =
+    typeof charge.payment_intent === 'string'
+      ? charge.payment_intent
+      : charge.payment_intent?.id || null
+  const ids = [paymentIntentId, charge.id].filter((v): v is string => Boolean(v))
+  if (!ids.length) return 'charge has no ids'
+
+  const payment = await db.payment.findFirst({
+    where: { method: 'stripe', stripePaymentId: { in: ids } },
+    orderBy: { createdAt: 'asc' },
+  })
+  if (!payment) return 'no matching payment'
+
+  let booked = 0
+  if (payment.invoiceId) {
+    const invoice = await db.invoice.findUnique({ where: { id: payment.invoiceId } })
+    if (invoice) {
+      const refundedInStripe = round2(Number(charge.amount_refunded || 0) / 100)
+      const received = round2((invoice.amountPaid || 0) + (invoice.creditApplied || 0))
+      const recorded = round2(invoice.amountRefunded || 0)
+      const toBook = round2(
+        Math.min(refundedInStripe - recorded, received - recorded)
+      )
+      if (toBook > 0.009) {
+        const r = await refundInvoice({
+          invoiceId: invoice.id,
+          amount: toBook,
+          destination: 'gateway',
+          reason: 'Refunded in Stripe',
+        })
+        if (r.success) booked = toBook
+        else console.error('[refunds] stripe refund not booked:', r.error)
+      }
+    }
+  }
+
+  if (charge.refunded) {
+    await db.payment.updateMany({
+      where: { id: payment.id, status: 'completed' },
+      data: { status: 'refunded' },
+    })
+  }
+  return `payment ${payment.id}${booked ? ` booked ${booked.toFixed(2)}` : ''}${
+    charge.refunded ? ' marked refunded' : ''
+  }`
 }

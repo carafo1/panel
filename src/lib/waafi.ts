@@ -92,7 +92,7 @@ interface CreatePaymentResult {
   error?: string
 }
 
-interface VerifyPaymentResult {
+export interface VerifyPaymentResult {
   success: boolean
   status: 'pending' | 'completed' | 'failed'
   amount?: number
@@ -221,7 +221,13 @@ export async function createPayment(
  * Returns a normalised status of `pending`, `completed`, or `failed`.
  */
 export async function verifyPayment(
-  transactionId: string
+  transactionId: string,
+  /**
+   * What we asked the customer to pay. Only used in DEMO mode, where nothing
+   * was charged and the simulated verification echoes it back; live mode
+   * always reports what Waafi says.
+   */
+  expected?: { amount: number; currency: string }
 ): Promise<VerifyPaymentResult> {
   // ── DEMO MODE ──────────────────────────────────────────────────
   if (isWaafiDemoMode()) {
@@ -239,8 +245,8 @@ export async function verifyPayment(
     return {
       success: true,
       status: 'completed',
-      amount: 0, // unknown in demo - the caller has the original amount
-      currency: 'USD',
+      amount: expected?.amount,
+      currency: expected?.currency,
     }
   }
 
@@ -254,50 +260,8 @@ export async function verifyPayment(
       transactionId,
     }
 
-    const result = await callWaafi<{
-      responseCode?: string
-      responseMsg?: string
-      status?: string
-      transactionStatus?: string
-      amount?: number
-      paymentAmount?: number
-      currency?: string
-      paymentCurrency?: string
-    }>(payload)
-
-    const rawStatus = (
-      result.status ||
-      result.transactionStatus ||
-      result.responseMsg ||
-      ''
-    )
-      .toString()
-      .toLowerCase()
-
-    // Common Waafi status strings -> our internal status enum.
-    let status: VerifyPaymentResult['status'] = 'pending'
-    if (
-      rawStatus.includes('success') ||
-      rawStatus.includes('completed') ||
-      rawStatus.includes('paid') ||
-      result.responseCode === '2001'
-    ) {
-      status = 'completed'
-    } else if (
-      rawStatus.includes('fail') ||
-      rawStatus.includes('cancel') ||
-      rawStatus.includes('declined') ||
-      rawStatus.includes('error')
-    ) {
-      status = 'failed'
-    }
-
-    return {
-      success: true,
-      status,
-      amount: result.amount ?? result.paymentAmount,
-      currency: result.currency || result.paymentCurrency,
-    }
+    const result = await callWaafi<WaafiStatusResponse>(payload)
+    return interpretWaafiStatus(result)
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error'
     console.error('[waafi] verifyPayment failed:', message)
@@ -307,6 +271,96 @@ export async function verifyPayment(
       error: message,
     }
   }
+}
+
+/** Shape of a Waafi TransactionStatus reply (fields seen across API versions). */
+export interface WaafiStatusResponse {
+  responseCode?: string
+  responseMsg?: string
+  status?: string
+  transactionStatus?: string
+  state?: string
+  amount?: number | string
+  paymentAmount?: number | string
+  txAmount?: number | string
+  currency?: string
+  paymentCurrency?: string
+  params?: {
+    state?: string
+    status?: string
+    transactionStatus?: string
+    txAmount?: number | string
+    amount?: number | string
+    currency?: string
+  }
+}
+
+const WAAFI_PAID_STATES = new Set(['approved', 'success', 'successful', 'completed', 'paid', 'settled'])
+const WAAFI_FAILED_STATES =
+  /\b(fail(ed|ure)?|cancel(l?ed)?|declined?|rejected|error|expired|unsuccessful|reversed)\b/
+
+/**
+ * Turn a TransactionStatus reply into our status. Pure, so it can be tested.
+ *
+ * ONLY the transaction's own state counts. `responseCode` '2001' and a
+ * responseMsg like "RCS_SUCCESS" / "Request successfully completed" mean the
+ * STATUS QUERY succeeded, not that the customer paid — treating them as paid
+ * activated orders for transactions that were still pending or had failed.
+ * No recognisable state → pending, so nothing is granted on a guess.
+ */
+export function interpretWaafiStatus(result: WaafiStatusResponse): VerifyPaymentResult {
+  const p = result.params || {}
+  const state = String(
+    p.state || p.transactionStatus || p.status ||
+      result.transactionStatus || result.state || result.status || ''
+  )
+    .trim()
+    .toLowerCase()
+
+  let status: VerifyPaymentResult['status'] = 'pending'
+  if (WAAFI_PAID_STATES.has(state)) status = 'completed'
+  else if (state && WAAFI_FAILED_STATES.test(state)) status = 'failed'
+
+  const rawAmount = p.txAmount ?? p.amount ?? result.amount ?? result.paymentAmount ?? result.txAmount
+  const amountNum = rawAmount === undefined || rawAmount === null || rawAmount === '' ? NaN : Number(rawAmount)
+
+  return {
+    success: true,
+    status,
+    amount: Number.isFinite(amountNum) ? amountNum : undefined,
+    currency: p.currency || result.currency || result.paymentCurrency || undefined,
+  }
+}
+
+/**
+ * Does what Waafi verified cover what we charged? Returns null when it does,
+ * otherwise the reason it does not.
+ *
+ *  - the verified amount must be present and at least the expected amount
+ *    (a callback can no longer shrink the price by reporting less);
+ *  - a reported currency must equal ours. When Waafi omits the currency it is
+ *    accepted only for USD, the currency checkout sends to Waafi.
+ */
+export function waafiAmountMismatch(
+  expected: { amount: number; currency: string },
+  verified: { amount?: number; currency?: string }
+): string | null {
+  if (typeof verified.amount !== 'number' || !Number.isFinite(verified.amount)) {
+    return 'Waafi did not report the paid amount'
+  }
+  const expectedCents = Math.round(expected.amount * 100)
+  if (Math.round(verified.amount * 100) < expectedCents) {
+    return `Waafi reported ${verified.amount} but ${expected.amount} was due`
+  }
+  const want = (expected.currency || '').toUpperCase()
+  if (verified.currency) {
+    if (verified.currency.toUpperCase() !== want) {
+      return `Waafi reported currency ${verified.currency} but ${want} was due`
+    }
+  } else if (want !== 'USD') {
+    return `Waafi did not report a currency for a ${want} payment`
+  }
+  return null
 }
 
 /**

@@ -5,6 +5,7 @@ import { logAudit } from '@/lib/audit'
 import { getProjectAccess, type ProjectPermission } from '@/lib/project-access'
 import { purgeProject } from '@/lib/project-teardown'
 import { deployProject, stopProject, restartProject } from '@/lib/vps'
+import { claimDeploySlot } from '@/lib/deploy-guard'
 
 type BulkAction = 'deploy' | 'stop' | 'restart' | 'delete'
 
@@ -111,6 +112,7 @@ export async function POST(request: Request) {
         framework: true,
         status: true,
         subdomain: true,
+        sourceBranch: true,
       },
     })
 
@@ -132,18 +134,29 @@ export async function POST(request: Request) {
           // immediately flipped it to "live" with a hand-written ✅ build log
           // and a Math.random() duration, and never touched the server — so a
           // bulk deploy reported success while shipping nothing.
-          const deployment = await db.deployment.create({
-            data: {
-              projectId: project.id,
-              // Deployment.userId is the project owner; the actor is audited below.
-              userId: allowed.get(project.id)!,
-              commit: `bulk-${Date.now()}`,
-              branch: 'main',
-              status: 'queued',
-              triggeredBy: 'user',
-              buildLog: '🚀 Queued by bulk deploy…',
-            },
+          //
+          // The slot is claimed the same way as a single deploy (check-and-
+          // insert in one transaction). Creating the row directly let a bulk
+          // deploy start a second concurrent build of a project that was
+          // already deploying.
+          const claim = await claimDeploySlot({
+            projectId: project.id,
+            // Deployment.userId is the project owner; the actor is audited below.
+            userId: allowed.get(project.id)!,
+            branch: project.sourceBranch || 'main',
+            commit: `bulk-${Date.now()}`,
+            triggeredBy: 'user',
+            buildLog: '🚀 Queued by bulk deploy…',
           })
+          if (!claim.ok) {
+            results.push({
+              id: project.id,
+              success: false,
+              error: 'A deployment is already running for this project',
+            })
+            continue
+          }
+          const deployment = { id: claim.deploymentId }
 
           // deployProject takes minutes and streams its own log; don't hold the
           // request open for every selected project. Failures are written back
@@ -174,7 +187,7 @@ export async function POST(request: Request) {
               name: project.name,
               framework: project.framework,
               deploymentId: deployment.id,
-              branch: 'main',
+              branch: project.sourceBranch || 'main',
               bulk: true,
             },
           })

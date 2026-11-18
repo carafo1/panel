@@ -48,7 +48,8 @@ export function isEmailPlanSlug(slug: string | null | undefined): boolean {
  */
 export async function oldestUnpaidInvoice(subscriptionId: string) {
   return db.invoice.findFirst({
-    where: { subscriptionId, status: 'unpaid', dueDate: { not: null } },
+    // partially_paid still owes money: it must not escape overdue/suspension.
+    where: { subscriptionId, status: { in: ['unpaid', 'partially_paid'] }, dueDate: { not: null } },
     orderBy: { dueDate: 'asc' },
     select: { id: true, number: true, total: true, currency: true, dueDate: true },
   })
@@ -163,7 +164,7 @@ export async function reactivateSubscriptionIfSettled(
 
   // Another invoice still overdue: paying one of two does not clear the debt.
   const stillOverdue = await db.invoice.findFirst({
-    where: { subscriptionId, status: 'unpaid', dueDate: { lte: new Date() } },
+    where: { subscriptionId, status: { in: ['unpaid', 'partially_paid'] }, dueDate: { lte: new Date() } },
     select: { id: true },
   })
   if (stillOverdue) return { reactivated: false, websitesRestored: 0 }

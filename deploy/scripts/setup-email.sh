@@ -482,6 +482,15 @@ CADDY
       INSTALL_DIR="$INSTALL_DIR" bash "$THEME" || warn "Mail theme not applied; run: bash $THEME"
     fi
 
+    # Nightly backup of all mail data (mailboxes, mail database, keys), 7 days kept.
+    MCBK="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/backup-mailcow.sh"
+    if [[ -f "$MCBK" ]]; then
+      install -m 700 "$MCBK" /usr/local/sbin/apsamo-backup-mailcow
+      bash /usr/local/sbin/apsamo-backup-mailcow --install >/dev/null 2>&1 \
+        && ok "Mail backup scheduled daily at 03:30 (/var/backups/mailcow, 7 days)" \
+        || warn "Mail backup not scheduled; run: bash $MCBK --install"
+    fi
+
   elif [[ "$INSTALL_MAILCOW" == "skip" ]]; then
     # ── Just reconfigure existing Mailcow ─────────────────────────────
     BRAND_DOMAIN=$(env_get BRAND_DOMAIN)
