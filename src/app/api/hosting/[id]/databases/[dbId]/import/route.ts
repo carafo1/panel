@@ -5,7 +5,7 @@
  * bytes). Audited; refuses oversized files.
  */
 import { NextResponse } from 'next/server'
-import { gunzipSync } from 'zlib'
+import { createGunzip } from 'zlib'
 import { logAudit } from '@/lib/audit'
 import { resolveTenantDatabase, DbAccessError } from '@/lib/db-engine'
 import { driverFor } from '@/lib/db-engine/driver'
@@ -14,6 +14,46 @@ import { driverFor } from '@/lib/db-engine/driver'
 export const maxDuration = 300
 
 const MAX_BYTES = 50 * 1024 * 1024 // 50 MB uploaded (pre-decompress)
+const MAX_SQL_BYTES = 200 * 1024 * 1024 // 200 MB of SQL after decompression
+
+class TooLargeError extends Error {}
+
+/**
+ * Gunzip with a hard cap on the OUTPUT size. A 50 MB .gz can expand to many
+ * gigabytes (a "zip bomb"); gunzipSync without a limit buffered all of it.
+ * Streams and stops as soon as the cap is passed, whatever the runtime's
+ * support for maxOutputLength.
+ */
+function gunzipCapped(input: Buffer, max: number): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const gz = createGunzip()
+    const chunks: Buffer[] = []
+    let total = 0
+    let done = false
+    gz.on('data', (c: Buffer) => {
+      if (done) return
+      total += c.length
+      if (total > max) {
+        done = true
+        gz.destroy()
+        reject(new TooLargeError())
+        return
+      }
+      chunks.push(c)
+    })
+    gz.on('end', () => {
+      if (done) return
+      done = true
+      resolve(Buffer.concat(chunks))
+    })
+    gz.on('error', (err) => {
+      if (done) return
+      done = true
+      reject(err)
+    })
+    gz.end(input)
+  })
+}
 
 export async function POST(
   request: Request,
@@ -22,6 +62,15 @@ export async function POST(
   const { id, dbId } = await params
   try {
     const { conn, auth } = await resolveTenantDatabase(request, id, dbId)
+
+    // Refuse an oversized body before buffering it.
+    const declared = Number(request.headers.get('content-length') || 0)
+    if (declared > MAX_BYTES + 1024 * 1024) {
+      return NextResponse.json(
+        { error: `File too large — max ${Math.round(MAX_BYTES / 1024 / 1024)} MB` },
+        { status: 413 }
+      )
+    }
 
     const form = await request.formData()
     const file = form.get('file')
@@ -39,8 +88,14 @@ export async function POST(
     const isGz = file.name.endsWith('.gz') || (buf[0] === 0x1f && buf[1] === 0x8b)
     let sql: string
     try {
-      sql = isGz ? gunzipSync(buf).toString('utf8') : buf.toString('utf8')
-    } catch {
+      sql = isGz ? (await gunzipCapped(buf, MAX_SQL_BYTES)).toString('utf8') : buf.toString('utf8')
+    } catch (err) {
+      if (err instanceof TooLargeError) {
+        return NextResponse.json(
+          { error: `Decompressed SQL is too large — max ${Math.round(MAX_SQL_BYTES / 1024 / 1024)} MB` },
+          { status: 413 }
+        )
+      }
       return NextResponse.json({ error: 'Failed to decompress the .gz file' }, { status: 400 })
     }
     if (!sql.trim()) {
@@ -73,9 +128,7 @@ export async function POST(
     if (err instanceof DbAccessError) {
       return NextResponse.json({ error: err.message }, { status: err.status })
     }
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Import failed' },
-      { status: 500 }
-    )
+    console.error('Database import error:', err instanceof Error ? err.message : err)
+    return NextResponse.json({ error: 'Import failed' }, { status: 500 })
   }
 }

@@ -41,6 +41,57 @@ export const runtime = 'nodejs'
 // Streaming a large body must not be cut short by a route timeout.
 export const maxDuration = 3600
 
+/**
+ * Bodies that are BUFFERED in memory (the multipart fallback and one chunk)
+ * get their own, much smaller caps than MAX_UPLOAD_BYTES (which bounds what
+ * is streamed to disk). The multipart path used to accept up to the full
+ * upload limit — gigabytes — into the heap, so a few concurrent requests
+ * could exhaust the panel's memory. Larger files use the streaming
+ * (X-Upload-Filename) or chunked paths, as the import wizard already does.
+ */
+const MAX_MULTIPART_BYTES = 256 * 1024 * 1024 // held twice while parsing (raw + File)
+/** The wizard sends 8 MB chunks; leave headroom, refuse anything larger. */
+const MAX_CHUNK_BYTES = 64 * 1024 * 1024
+
+/** Content-Length when present and numeric, else null (e.g. chunked transfer). */
+function declaredLength(request: Request): number | null {
+  const raw = request.headers.get('content-length')
+  if (!raw) return null
+  const n = Number(raw)
+  return Number.isFinite(n) && n >= 0 ? n : null
+}
+
+/**
+ * Read a request body into memory, refusing (null) once it passes `max`
+ * bytes — whether or not the client declared a Content-Length.
+ */
+async function readBodyCapped(request: Request, max: number): Promise<Buffer | null> {
+  if (!request.body) return Buffer.alloc(0)
+  const reader = request.body.getReader()
+  const chunks: Buffer[] = []
+  let total = 0
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (!value) continue
+      total += value.byteLength
+      if (total > max) return null
+      chunks.push(Buffer.from(value))
+    }
+  } finally {
+    reader.cancel().catch(() => {})
+  }
+  return Buffer.concat(chunks)
+}
+
+function tooLarge(max: number, hint = '') {
+  return NextResponse.json(
+    { error: `Request is too large. The maximum is ${formatBytes(max)}.${hint}` },
+    { status: 413 }
+  )
+}
+
 // ─── POST ────────────────────────────────────────────────────────────────
 
 export async function POST(request: Request) {
@@ -103,10 +154,19 @@ async function handleSingleUpload(request: Request, userId: string) {
   }
 
   if (contentType.includes('multipart/form-data')) {
-    // Fallback for clients that cannot set the header. Next buffers this, so
-    // it is only appropriate for smaller archives — the wizard uses the
+    // Fallback for clients that cannot set the header. This is buffered, so
+    // it is capped well below the upload limit — the wizard uses the
     // streaming path above for anything large.
-    const form = await request.formData()
+    const multipartHint = ' Use the chunked or streaming upload for larger files.'
+    const declared = declaredLength(request)
+    if (declared !== null && declared > MAX_MULTIPART_BYTES) {
+      return tooLarge(MAX_MULTIPART_BYTES, multipartHint)
+    }
+    const raw = await readBodyCapped(request, MAX_MULTIPART_BYTES)
+    if (!raw) return tooLarge(MAX_MULTIPART_BYTES, multipartHint)
+    const form = await new Response(new Uint8Array(raw), {
+      headers: { 'content-type': contentType },
+    }).formData()
     const file = form.get('file')
     if (!(file instanceof File)) {
       return NextResponse.json({ error: 'No file field in the request' }, { status: 400 })
@@ -182,7 +242,10 @@ async function handleChunk(request: Request, userId: string) {
       { status: 400 }
     )
   }
-  const buf = Buffer.from(await request.arrayBuffer())
+  const declared = declaredLength(request)
+  if (declared !== null && declared > MAX_CHUNK_BYTES) return tooLarge(MAX_CHUNK_BYTES)
+  const buf = await readBodyCapped(request, MAX_CHUNK_BYTES)
+  if (!buf) return tooLarge(MAX_CHUNK_BYTES)
   if (buf.length === 0) {
     return NextResponse.json({ error: 'Chunk is empty' }, { status: 400 })
   }

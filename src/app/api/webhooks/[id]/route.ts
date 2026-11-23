@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { maskSecret } from '@/lib/security'
+import { checkPublicUrlSyntax } from '@/lib/ssrf'
 
 export async function GET(
   request: Request,
@@ -160,11 +161,11 @@ export async function PATCH(
 
     // Validate URL if provided
     if (url !== undefined) {
-      try {
-        new URL(url)
-      } catch {
+      // http/https and a public host. Delivery re-checks DNS at send time.
+      const urlError = typeof url === 'string' ? checkPublicUrlSyntax(url.trim()) : 'Invalid URL'
+      if (urlError) {
         return NextResponse.json(
-          { error: 'Invalid webhook URL format' },
+          { error: `Invalid webhook URL: ${urlError}` },
           { status: 400 }
         )
       }

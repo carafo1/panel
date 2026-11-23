@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
+import { verifyTokenFresh, extractTokenFromHeader, requireAdminRole } from '@/lib/auth'
 
 export async function GET(request: Request) {
   try {
@@ -22,13 +22,20 @@ export async function GET(request: Request) {
       )
     }
 
+    // The queue is system-wide: payloads and results belong to every tenant
+    // (webhook bodies, user ids, provisioning details). Platform admins only.
+    // No customer UI calls this endpoint.
+    const admin = await requireAdminRole(request)
+    if (!admin) {
+      return NextResponse.json({ error: 'Admin access required' }, { status: 403 })
+    }
+
     const { searchParams } = new URL(request.url)
     const status = searchParams.get('status')
 
     const where: Record<string, unknown> = {}
     if (status) where.status = status
 
-    // Non-admin users see all jobs (they're system-wide)
     // Admins can filter by status
     const [jobs, stats] = await Promise.all([
       db.jobQueue.findMany({

@@ -1,12 +1,15 @@
 import { NextResponse } from 'next/server'
 import { authenticateRequest } from '@/lib/auth'
 import { requireProjectAccess } from '@/lib/project-access'
+import { logAudit } from '@/lib/audit'
 import {
   createTerminalSession,
   runTerminalCommand,
   closeTerminalSession,
   listTerminalSessions,
-} from '@/lib/vps'
+  TerminalError,
+  flagSensitiveCommand,
+} from '@/lib/vps/terminal'
 
 /**
  * Project Terminal Endpoint
@@ -18,7 +21,15 @@ import {
  *               { action: 'run', sessionId, command }       — run a command
  *               { action: 'close', sessionId }              — close a session
  *   DELETE /api/hosting/[id]/terminal?sessionId=<id>        — close a session
+ *
+ * Commands run only inside the project's own running container (see
+ * lib/vps/terminal.ts); without one, create/run answer 409. Every command is
+ * written to the audit log (truncated) before it runs.
  */
+
+/** Longest command accepted, and the part of it kept in the audit log. */
+const MAX_COMMAND_LENGTH = 10_000
+const AUDIT_COMMAND_LENGTH = 500
 
 export async function GET(
   request: Request,
@@ -68,14 +79,21 @@ export async function POST(
     }
 
     if (body.action === 'create') {
-      const session = await createTerminalSession(projectId)
-      return NextResponse.json(
-        {
-          sessionId: session.id,
-          cwd: session.cwd,
-        },
-        { status: 201 }
-      )
+      try {
+        const session = await createTerminalSession(projectId)
+        return NextResponse.json(
+          {
+            sessionId: session.id,
+            cwd: session.cwd,
+          },
+          { status: 201 }
+        )
+      } catch (err) {
+        if (err instanceof TerminalError) {
+          return NextResponse.json({ error: err.message }, { status: err.status })
+        }
+        throw err
+      }
     }
 
     if (body.action === 'run') {
@@ -85,12 +103,39 @@ export async function POST(
           { status: 400 }
         )
       }
+      if (!body.command.trim()) {
+        return NextResponse.json({ error: 'command is required' }, { status: 400 })
+      }
+      if (body.command.length > MAX_COMMAND_LENGTH) {
+        return NextResponse.json(
+          { error: `Command is too long (max ${MAX_COMMAND_LENGTH} characters)` },
+          { status: 400 }
+        )
+      }
+      // Audited before it runs, so a command that hangs is still on record.
+      await logAudit({
+        userId: decoded.userId,
+        action: 'terminal.command',
+        resource: 'project',
+        resourceId: projectId,
+        req: request,
+        metadata: {
+          sessionId: body.sessionId,
+          command: body.command.slice(0, AUDIT_COMMAND_LENGTH),
+          truncated: body.command.length > AUDIT_COMMAND_LENGTH,
+          flag: flagSensitiveCommand(body.command),
+          impersonatedBy: decoded.impersonatedBy,
+        },
+      })
       try {
         const result = await runTerminalCommand(projectId, body.sessionId, body.command)
         return NextResponse.json(result)
       } catch (err) {
-        const msg = 'Invalid request'
-        return NextResponse.json({ error: msg }, { status: 400 })
+        if (err instanceof TerminalError) {
+          return NextResponse.json({ error: err.message }, { status: err.status })
+        }
+        console.error('Terminal command error:', err instanceof Error ? err.message : err)
+        return NextResponse.json({ error: 'Invalid request' }, { status: 400 })
       }
     }
 
@@ -102,10 +147,7 @@ export async function POST(
       return NextResponse.json({ message: 'Session closed' })
     }
 
-    return NextResponse.json(
-      { error: `Unknown action: ${body.action}` },
-      { status: 400 }
-    )
+    return NextResponse.json({ error: 'Unknown action' }, { status: 400 })
   } catch (error) {
     console.error('Terminal action error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

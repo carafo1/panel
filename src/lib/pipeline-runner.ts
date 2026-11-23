@@ -16,6 +16,7 @@
 import { db } from '@/lib/db'
 import { withConnection, exec } from '@/lib/vps/ssh'
 import { getServerCredentials } from '@/lib/vps/provisioner'
+import { COMPOSE_ENV, composeProjectFlag } from '@/lib/vps/deploy-safety'
 
 /**
  * A stage as stored. Two shapes exist: the original `config.command`, and
@@ -88,23 +89,64 @@ export function resolveStage(stage: PipelineStageDef): ResolvedStage {
   }
 }
 
-/** The shell line for a stage, inside the container or in the deploy path. */
-export function buildStageCommand(
-  s: ResolvedStage,
-  target: { containerName: string | null; deployPath: string | null }
-): string {
-  if (target.containerName) {
-    // `docker exec -w` needs an absolute path; resolve relative ones against
-    // the container's WORKDIR via `cd` instead, so `npm test` still works.
-    const envFlags = s.env.map(([k, v]) => `-e ${shellQuote(`${k}=${v}`)}`).join(' ')
-    const inner = s.workingDir ? `cd ${shellQuote(s.workingDir)} && ${s.command}` : s.command
-    return `docker exec ${envFlags} ${shellQuote(target.containerName)} sh -c ${shellQuote(inner)} 2>&1`
+/** Shown when a manual pipeline run has no container to run in. */
+export const NO_CONTAINER_MESSAGE =
+  'This project has no running container, so pipeline commands cannot run. ' +
+  'Deploy the site (or start it), then run the pipeline again.'
+
+/** Thrown by buildStageCommand when there is no container to run in. */
+export class PipelineTargetError extends Error {
+  constructor(message = NO_CONTAINER_MESSAGE) {
+    super(message)
+    this.name = 'PipelineTargetError'
   }
-  const exports = s.env.map(([k, v]) => `export ${k}=${shellQuote(v)};`).join(' ')
-  const dir = s.workingDir
-    ? `${shellQuote(target.deployPath!)}/${shellQuote(s.workingDir)}`
-    : shellQuote(target.deployPath!)
-  return `cd ${dir} && ( ${exports} ${s.command} ) 2>&1`
+}
+
+/**
+ * The shell line for a stage: always `docker exec` into the project's own
+ * container, never the host.
+ *
+ * SECURITY: with no container this used to run the customer's command on the
+ * HOST shell, as root, with the panel's environment (JWT_SECRET,
+ * ENCRYPTION_KEY, DATABASE_URL) in the deploy path — full host takeover from
+ * a pipeline stage. There is no host fallback any more: no container, no run
+ * (PipelineTargetError). The docker CLI itself runs under COMPOSE_ENV, so not
+ * even the CLI process sees the panel's environment; the container gets only
+ * the stage's own `-e` values on top of its image/compose environment.
+ */
+export function buildStageCommand(
+  s: Pick<ResolvedStage, 'command' | 'workingDir' | 'env'>,
+  target: { containerName: string | null }
+): string {
+  const container = (target.containerName || '').trim()
+  if (!container) throw new PipelineTargetError()
+  // `docker exec -w` needs an absolute path; resolve relative ones against
+  // the container's WORKDIR via `cd` instead, so `npm test` still works.
+  const envFlags = s.env.map(([k, v]) => `-e ${shellQuote(`${k}=${v}`)}`).join(' ')
+  const inner = s.workingDir ? `cd ${shellQuote(s.workingDir)} && ${s.command}` : s.command
+  return `${COMPOSE_ENV}docker exec ${envFlags} ${shellQuote(container)} sh -c ${shellQuote(inner)} 2>&1`
+}
+
+/**
+ * The shell line for a pre-deploy check: the stage runs in a throwaway
+ * `docker compose run` container of the image that was just built.
+ *
+ * Uses the deployer's COMPOSE_ENV (so compose cannot interpolate the panel's
+ * own secrets into the customer's compose file) and pins `-p` to the project
+ * name derived from the deploy path (so a compose `name:` cannot point the
+ * run at another tenant's project — and so it uses the image the deployer
+ * just built under that same project name).
+ */
+export function buildPreDeployStageCommand(
+  s: Pick<ResolvedStage, 'command' | 'workingDir' | 'env'>,
+  deployPath: string
+): string {
+  const envFlags = s.env.map(([k, v]) => `-e ${shellQuote(`${k}=${v}`)}`).join(' ')
+  const inner = s.workingDir ? `cd ${shellQuote(s.workingDir)} && ${s.command}` : s.command
+  return (
+    `cd ${shellQuote(deployPath)} && ${COMPOSE_ENV}docker compose ${composeProjectFlag(deployPath)}` +
+    `run --rm --no-deps ${envFlags} --entrypoint sh app -c ${shellQuote(inner)} 2>&1`
+  )
 }
 
 export interface PipelineStageResult {
@@ -161,12 +203,21 @@ export async function executePipelineRun(
     if (!project || !project.serverId) {
       throw new Error('Project has no server assigned — deploy it first.')
     }
-    if (!project.containerName && !project.deployPath) {
-      throw new Error('Project has not been deployed yet — nothing to run against.')
-    }
+    // Customer commands only ever run inside the project's own container
+    // (buildStageCommand). No container → fail clearly, never the host.
+    const containerName = project.containerName
+    if (!containerName) throw new PipelineTargetError()
 
     const creds = await getServerCredentials(project.serverId)
     await withConnection(creds, async (client) => {
+      // Panel-generated, not customer-controlled: is the container running?
+      const state = await exec(
+        client,
+        `${COMPOSE_ENV}docker inspect -f '{{.State.Running}}' ${shellQuote(containerName)} 2>/dev/null || true`,
+        { timeoutMs: 30_000 }
+      )
+      if (state.stdout.trim() !== 'true') throw new PipelineTargetError()
+
       for (let i = 0; i < ordered.length; i++) {
         const stage = ordered[i]
         const resolved = resolveStage(stage)
@@ -185,12 +236,9 @@ export async function executePipelineRun(
           break
         }
 
-        // Prefer running inside the project's container (its runtime + build
-        // tools live there); fall back to the deploy path on the host.
-        const wrapped = buildStageCommand(resolved, {
-          containerName: project.containerName,
-          deployPath: project.deployPath,
-        })
+        // Inside the project's container only (its runtime and build tools
+        // live there) — never on the host.
+        const wrapped = buildStageCommand(resolved, { containerName })
 
         const r = await exec(client, wrapped, { timeoutMs: resolved.timeoutMs })
         const duration = Math.round((Date.now() - t0) / 1000)
@@ -389,13 +437,7 @@ export async function runPreDeployChecks(
 
       // Same env / working-directory handling as a manual run, but against a
       // throwaway container of the image about to be deployed.
-      const envFlags = resolved.env.map(([k, v]) => `-e ${shellQuote(`${k}=${v}`)}`).join(' ')
-      const inner = resolved.workingDir
-        ? `cd ${shellQuote(resolved.workingDir)} && ${resolved.command}`
-        : resolved.command
-      const wrapped =
-        `cd ${shellQuote(deployPath)} && docker compose run --rm --no-deps ${envFlags} ` +
-        `--entrypoint sh app -c ${shellQuote(inner)} 2>&1`
+      const wrapped = buildPreDeployStageCommand(resolved, deployPath)
       const r = await exec(client, wrapped, { timeoutMs: resolved.timeoutMs })
       const duration = Math.round((Date.now() - t0) / 1000)
       const output = (r.stdout || r.stderr || '').slice(-MAX_STAGE_OUTPUT)

@@ -36,11 +36,13 @@ describe('pipeline runner', () => {
       env: { GREETING: "hi'; touch PWNED; '" },
     })
     const dir = mkdtempSync(join(tmpdir(), 'pipeline-'))
-    const line = buildStageCommand(evil, { containerName: null, deployPath: dir.replace(/\\/g, '/') })
-      .replace(/^cd [^&]+&&/, `mkdir -p app && cd app &&`)
+    // Stand-in for `docker exec`: print each argument the shell passes it.
+    const line = buildStageCommand(evil, { containerName: 'deployhub-shop' })
+      .replace('docker exec ', `printf '[%s]\\n' `)
     const out = Bun.spawnSync([bash!, '-c', line], { cwd: dir })
-    expect(out.stdout.toString().trim()).toBe("hi'; touch PWNED; '")
-    expect(existsSync(join(dir, 'PWNED')) || existsSync(join(dir, 'app', 'PWNED'))).toBe(false)
+    const args = out.stdout.toString().trim().split('\n')
+    expect(args).toContain("[GREETING=hi'; touch PWNED; ']")
+    expect(existsSync(join(dir, 'PWNED'))).toBe(false)
   })
 })
 

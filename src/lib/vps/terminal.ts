@@ -2,22 +2,25 @@
  * Terminal Module
  * ===============
  *
- * Provides an HTTP-polling-based "web terminal" that runs commands in a
- * project's execution context.
+ * Provides an HTTP-polling-based "web terminal" that runs commands inside a
+ * project's own container.
  *
- * Two execution modes:
+ * Execution modes:
  *
- *   - LOCAL (server.sshHost === 'localhost' / 127.0.0.1 / ::1):
- *       Commands run directly on the panel host via `bash -lc` (no `docker
- *       exec` wrap). The default working directory is the project's storage
- *       root (`<STORAGE_ROOT>/projects/<projectId>/`). `cd ~` resolves to the
- *       project root. No Docker required — works in the sandbox.
+ *   - REAL (any server with a usable connection, INCLUDING localhost):
+ *       Every command runs inside the project's container via
+ *       `docker exec <container> sh -c '…'`. The docker CLI itself is started
+ *       with a minimal environment (`env -i`, see COMPOSE_ENV) so nothing of
+ *       the panel's own environment is visible. If the project has no
+ *       container, or it is not running, the command is refused — a customer
+ *       command never runs on the host.
  *
- *   - REMOTE (real VPS over SSH):
- *       Commands run inside the project's deploy container via
- *       `docker exec -i <container> sh -c '…'`. Default cwd is `/app`.
+ *       Before this, a localhost server ran the customer's command straight
+ *       on the panel host with `bash -lc` — as root, with the panel's
+ *       JWT_SECRET / ENCRYPTION_KEY / DATABASE_URL in its environment and
+ *       every other tenant's files on disk.
  *
- *   - DEMO (no sshHost + no creds):
+ *   - DEMO (no server, or a remote server in demo mode):
  *       Synthetic responses for common commands so the panel's terminal UI
  *       is functional in pure-demo mode.
  *
@@ -26,22 +29,18 @@
  * receives `{ stdout, stderr, exitCode, cwd, durationMs }` synchronously.
  *
  * Session state (cwd + history) is held in-memory keyed by sessionId. There's
- * no persistence — terminals are ephemeral and tied to the Node.js process.
- * If the dev server restarts, all sessions are lost (the UI just creates a
- * new one).
+ * no persistence — terminals are ephemeral and tied to the process.
  *
  * Security:
  *   - Every command must include a sessionId that belongs to the projectId
  *     in the URL (validated against the in-memory map).
- *   - In REMOTE mode we never let the command escape the container — even
- *     `docker` itself runs inside the container's PID namespace, not the
- *     host's.
- *   - In LOCAL mode commands run as the panel process user. Sensitive
- *     commands (`docker`, `sudo`, etc.) are flagged in the audit log by the
- *     API route.
+ *   - The container name comes from the database (set by the deployer) and
+ *     is validated and shell-quoted; the customer command and the working
+ *     directory reach the container as positional arguments of a fixed
+ *     script, never spliced into the host-side command line unquoted.
+ *   - The API route writes an audit entry for every command.
  */
 import crypto from 'crypto'
-import path from 'path'
 import { db } from '@/lib/db'
 import {
   withConnection,
@@ -50,16 +49,8 @@ import {
   isLocalHost,
   type SshCredentials,
 } from './ssh'
-import { ensureDir } from './local-exec'
 import { getServerCredentials } from './provisioner'
-
-// ─── Per-project storage root (LOCAL mode) ──────────────────────────────
-
-const STORAGE_ROOT = process.env.STORAGE_ROOT || path.join(process.cwd(), 'storage')
-
-function PROJECT_ROOT(projectId: string): string {
-  return path.join(STORAGE_ROOT, 'projects', projectId)
-}
+import { COMPOSE_ENV, shellQuoteArg } from './deploy-safety'
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -69,7 +60,7 @@ export interface TerminalSession {
   createdAt: number
   lastActivity: number
   cwd: string
-  /** In LOCAL mode, the project root used as the "home" directory. */
+  /** The container's starting directory (its WORKDIR); `cd ~` in demo mode. */
   homeDir: string
   history: string[]
 }
@@ -82,10 +73,26 @@ export interface TerminalCommandResult {
   durationMs: number
 }
 
+/** An error whose message is safe to show to the customer, with an HTTP status. */
+export class TerminalError extends Error {
+  readonly status: number
+  constructor(message: string, status = 400) {
+    super(message)
+    this.name = 'TerminalError'
+    this.status = status
+  }
+}
+
+export const TERMINAL_NO_CONTAINER_MESSAGE =
+  'This website has no container yet. Deploy and start the website to use the terminal.'
+export const TERMINAL_NOT_RUNNING_MESSAGE =
+  "The website's container is not running. Start the website to use the terminal."
+
 // ─── In-memory session store ─────────────────────────────────────────────
 
 const MAX_HISTORY = 100
 const SESSION_TTL_MS = 30 * 60 * 1000 // 30 min idle → eligible for GC
+const COMMAND_TIMEOUT_MS = 60000
 
 const sessions = new Map<string, TerminalSession>()
 
@@ -99,20 +106,70 @@ function gcSessions(): void {
   }
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────
+// ─── Container exec (pure, unit-tested) ──────────────────────────────────
 
-function shellQuote(s: string): string {
-  if (s === '') return "''"
-  if (/^[A-Za-z0-9_\-=/.,:@+]+$/.test(s)) return s
-  return "'" + s.replace(/'/g, "'\\''") + "'"
+/** Printed on stderr by the host-side wrapper when the container is not running. */
+export const CONTAINER_NOT_RUNNING_MARKER = '__APSAMO_CONTAINER_NOT_RUNNING__'
+
+/** Docker container names the panel creates (and nothing option-like). */
+export function isSafeContainerName(name: string | null | undefined): name is string {
+  return !!name && /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(name)
 }
 
 /**
- * Commands that touch the host Docker daemon or escalate privileges. We
- * still run them (the container can't actually escape) but log them so
- * audits show what happened. Returns the matched category for logging.
+ * Host-side shell command that runs `script` with `sh -c` INSIDE the
+ * container, passing `args` as $1, $2, … . Refuses (exit 125 + marker on
+ * stderr) unless the container exists and is running. The docker CLI gets a
+ * minimal environment, so the panel's secrets are never in reach.
+ *
+ * Shared by the terminal and by cron jobs.
  */
-function flagSensitiveCommand(cmd: string): string | null {
+export function buildContainerExecCommand(
+  containerName: string,
+  script: string,
+  args: string[] = []
+): string {
+  if (!isSafeContainerName(containerName)) {
+    throw new TerminalError(TERMINAL_NO_CONTAINER_MESSAGE, 409)
+  }
+  const c = shellQuoteArg(containerName)
+  const argv = args.map((a) => ' ' + shellQuoteArg(a)).join('')
+  return (
+    `if [ "$(${COMPOSE_ENV}docker container inspect -f '{{.State.Running}}' ${c} 2>/dev/null)" != "true" ]; then ` +
+    `echo ${CONTAINER_NOT_RUNNING_MARKER} >&2; exit 125; fi; ` +
+    `${COMPOSE_ENV}docker exec ${c} sh -c ${shellQuoteArg(script)} sh${argv}`
+  )
+}
+
+/**
+ * Runs inside the container. $1 = working directory (may be empty → the
+ * container's WORKDIR), $2 = the customer's command. `eval` keeps `cd`
+ * effective, and the trailer reports the exit code and the new directory.
+ */
+export const TERMINAL_SCRIPT =
+  '[ -n "$1" ] && cd "$1" 2>/dev/null; ' +
+  'eval "$2" 2>&1; ' +
+  '__apsamo_rc=$?; ' +
+  'printf \'\\n__APSAMO_EXIT:%s:%s\\n\' "$__apsamo_rc" "$(pwd)"'
+
+/** Split the terminal script's output into the command's output, exit code and cwd. */
+export function parseTerminalOutput(
+  stdout: string
+): { body: string; exitCode: number | null; cwd: string | null } {
+  const m = stdout.match(/\n__APSAMO_EXIT:(-?\d+):([^\n]*)\n?$/)
+  if (!m || m.index === undefined) return { body: stdout, exitCode: null, cwd: null }
+  return {
+    body: stdout.slice(0, m.index).replace(/\n$/, ''),
+    exitCode: parseInt(m[1], 10),
+    cwd: m[2] || null,
+  }
+}
+
+/**
+ * Commands that touch Docker or escalate privileges. They run inside the
+ * container like everything else; the category goes into the audit entry.
+ */
+export function flagSensitiveCommand(cmd: string): string | null {
   const lower = cmd.toLowerCase().trim()
   if (lower.startsWith('docker ')) return 'docker'
   if (lower.startsWith('sudo ')) return 'sudo'
@@ -126,6 +183,7 @@ function flagSensitiveCommand(cmd: string): string | null {
 /**
  * If the command is a `cd <dir>` invocation, return the new working
  * directory (relative to the current cwd). Returns null otherwise.
+ * Used by demo mode only — real sessions read the directory back.
  */
 function applyCd(session: TerminalSession, cmd: string): string | null {
   const trimmed = cmd.trim()
@@ -154,6 +212,46 @@ function applyCd(session: TerminalSession, cmd: string): string | null {
   return '/' + out.join('/')
 }
 
+// ─── Project lookup ──────────────────────────────────────────────────────
+
+type ProjectWithServer = NonNullable<
+  Awaited<ReturnType<typeof loadProject>>
+>
+
+function loadProject(projectId: string) {
+  return db.project.findUnique({
+    where: { id: projectId },
+    include: { server: true },
+  })
+}
+
+/** No server, or a remote server in demo mode → synthetic terminal. */
+function isDemoProject(project: ProjectWithServer): boolean {
+  if (!project.server) return true
+  if (isLocalHost(project.server.sshHost)) return false
+  return isServerInDemoMode(project.server)
+}
+
+/** Run the terminal script in the project's container. Throws TerminalError when it cannot. */
+async function runInContainer(
+  project: ProjectWithServer,
+  cwd: string,
+  command: string
+): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
+  if (!project.serverId || !isSafeContainerName(project.containerName)) {
+    throw new TerminalError(TERMINAL_NO_CONTAINER_MESSAGE, 409)
+  }
+  const fullCmd = buildContainerExecCommand(project.containerName, TERMINAL_SCRIPT, [cwd, command])
+  const creds: SshCredentials = await getServerCredentials(project.serverId)
+  const r = await withConnection(creds, (client) =>
+    exec(client, fullCmd, { timeoutMs: COMMAND_TIMEOUT_MS })
+  )
+  if ((r.stderr || '').includes(CONTAINER_NOT_RUNNING_MARKER)) {
+    throw new TerminalError(TERMINAL_NOT_RUNNING_MESSAGE, 409)
+  }
+  return { stdout: r.stdout || '', stderr: r.stderr || '', exitCode: r.exitCode }
+}
+
 // ─── Public API ──────────────────────────────────────────────────────────
 
 export async function createTerminalSession(
@@ -161,17 +259,16 @@ export async function createTerminalSession(
 ): Promise<TerminalSession> {
   gcSessions()
 
-  // Determine the home directory + default cwd based on the project's server.
-  // LOCAL → project storage root; REMOTE → /app (inside container); DEMO → /app.
-  const project = await db.project.findUnique({
-    where: { id: projectId },
-    include: { server: true },
-  })
-  const localMode = isLocalHost(project?.server?.sshHost)
-  const homeDir = localMode && project ? PROJECT_ROOT(projectId) : '/app'
-  if (localMode && project) {
-    // Best-effort: create the project root so `cd ~` works immediately.
-    await ensureDir(homeDir).catch(() => {})
+  const project = await loadProject(projectId)
+  if (!project) throw new TerminalError('Project not found', 404)
+
+  // Demo → /app. Real → whatever the container's WORKDIR is; the probe also
+  // refuses the session when there is no running container.
+  let cwd = '/app'
+  if (!isDemoProject(project)) {
+    const probe = await runInContainer(project, '', 'pwd')
+    const parsed = parseTerminalOutput(probe.stdout)
+    cwd = parsed.cwd || parsed.body.trim().split('\n').pop() || '/'
   }
 
   const session: TerminalSession = {
@@ -179,8 +276,8 @@ export async function createTerminalSession(
     projectId,
     createdAt: Date.now(),
     lastActivity: Date.now(),
-    cwd: homeDir,
-    homeDir,
+    cwd,
+    homeDir: cwd,
     history: [],
   }
   sessions.set(session.id, session)
@@ -213,9 +310,8 @@ export async function runTerminalCommand(
 ): Promise<TerminalCommandResult> {
   const start = Date.now()
   const session = sessions.get(sessionId)
-  if (!session) throw new Error('Terminal session not found')
-  if (session.projectId !== projectId) {
-    throw new Error('Terminal session does not belong to this project')
+  if (!session || session.projectId !== projectId) {
+    throw new TerminalError('Terminal session not found — start a new session', 404)
   }
   session.lastActivity = Date.now()
   session.history.push(command)
@@ -223,70 +319,38 @@ export async function runTerminalCommand(
     session.history = session.history.slice(-MAX_HISTORY)
   }
 
-  const project = await db.project.findUnique({
-    where: { id: projectId },
-    include: { server: true },
-  })
-  if (!project) throw new Error('Project not found')
-
-  const localMode = isLocalHost(project.server?.sshHost)
-
-  // LOCAL mode: no container required — we run bash directly on the host.
-  // REMOTE mode: container is required for `docker exec` wrapping.
-  if (!localMode && !project.containerName) {
-    throw new Error('Project has no running container')
-  }
-
-  // Flag sensitive commands (we don't block — but the API route can audit).
-  const flag = flagSensitiveCommand(command)
-  if (flag) {
-    console.warn(
-      `[vps-terminal] Project ${projectId} session ${sessionId} running sensitive command (${flag}): ${command}`
-    )
-  }
+  const project = await loadProject(projectId)
+  if (!project) throw new TerminalError('Project not found', 404)
 
   // Demo mode: synthetic responses for common commands.
-  if (!localMode && (project.server ? isServerInDemoMode(project.server) : true)) {
+  if (isDemoProject(project)) {
     const result = demoRun(session, command)
     return { ...result, durationMs: Date.now() - start }
   }
 
-  const creds: SshCredentials = await getServerCredentials(project.serverId!)
-  try {
-    return await withConnection(creds, async (client) => {
-      // Wrap the command so we can extract the exit code from the trailing
-      // EXIT:N marker. We capture combined output (2>&1) for the marker.
-      const wrapped = `cd ${shellQuote(session.cwd)} && (${command}) 2>&1; echo "EXIT:$?"`
-      const fullCmd = localMode
-        ? wrapped
-        : `docker exec -i ${shellQuote(project.containerName!)} sh -c ${shellQuote(wrapped)}`
-      const r = await exec(client, fullCmd, { timeoutMs: 60000 })
-      const combined = r.stdout || ''
-      // Find the trailing EXIT:N marker.
-      const m = combined.match(/EXIT:(-?\d+)\s*$/)
-      let exitCode = r.exitCode ?? 0
-      let body = combined
-      if (m) {
-        exitCode = parseInt(m[1], 10)
-        body = combined.slice(0, m.index).replace(/\n$/, '')
-      }
-      // Update cwd if the command was a cd.
-      const newCwd = applyCd(session, command)
-      if (newCwd) session.cwd = newCwd
+  // Throws TerminalError (409) when there is no running container — never
+  // falls back to the host.
+  if (!project.serverId || !isSafeContainerName(project.containerName)) {
+    throw new TerminalError(TERMINAL_NO_CONTAINER_MESSAGE, 409)
+  }
 
-      return {
-        stdout: body,
-        stderr: '',
-        exitCode,
-        cwd: session.cwd,
-        durationMs: Date.now() - start,
-      }
-    })
+  try {
+    const r = await runInContainer(project, session.cwd, command)
+    const parsed = parseTerminalOutput(r.stdout)
+    if (parsed.cwd) session.cwd = parsed.cwd
+    return {
+      stdout: parsed.body,
+      stderr: r.stderr,
+      exitCode: parsed.exitCode ?? r.exitCode ?? -1,
+      cwd: session.cwd,
+      durationMs: Date.now() - start,
+    }
   } catch (err) {
+    if (err instanceof TerminalError) throw err
     const msg = err instanceof Error ? err.message : String(err)
     return {
       stdout: '',
-      stderr: msg,
+      stderr: /timeout/i.test(msg) ? `Command timed out after ${COMMAND_TIMEOUT_MS / 1000}s` : 'Command failed to run',
       exitCode: -1,
       cwd: session.cwd,
       durationMs: Date.now() - start,

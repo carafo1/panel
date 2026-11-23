@@ -198,6 +198,28 @@ export async function sendEmail(
   }
 }
 
+// ─── Escaping for template values ──────────────────────────────────────
+
+/**
+ * HTML-escape a value before it goes into an email body. Names, team names
+ * and project names are chosen by users: unescaped, a team called
+ * `<a href="https://evil">Reset your password</a>` put a working phishing
+ * link inside a genuine Apsamo email sent to someone else.
+ */
+export function escapeHtml(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+/** A value for a header line (Subject): no CR/LF, bounded length. */
+function headerSafe(value: unknown, max = 120): string {
+  return String(value ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' ').slice(0, max)
+}
+
 /**
  * Send a welcome + email-verification email.
  */
@@ -206,21 +228,23 @@ export async function sendWelcomeEmail(
   name: string,
   verificationUrl: string
 ): Promise<SendEmailResult> {
+  const n = escapeHtml(name)
+  const v = escapeHtml(verificationUrl)
   return sendEmail({
     to: email,
     subject: 'Welcome to Apsamo Technology - please verify your email',
     html: `
       <div style="font-family: -apple-system, sans-serif; max-width: 560px; margin: auto; padding: 32px;">
-        <h1 style="color: #706fd3;">Welcome to Apsamo Technology, ${name}!</h1>
+        <h1 style="color: #706fd3;">Welcome to Apsamo Technology, ${n}!</h1>
         <p>We're excited to have you on board. Before you can start deploying, please verify your email address:</p>
         <p style="text-align: center; margin: 32px 0;">
-          <a href="${verificationUrl}" style="background: #706fd3; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
+          <a href="${v}" style="background: #706fd3; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
             Verify Email
           </a>
         </p>
         <p style="color: #6b7280; font-size: 14px;">
           Or copy this link into your browser:<br/>
-          <a href="${verificationUrl}">${verificationUrl}</a>
+          <a href="${v}">${v}</a>
         </p>
         <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;"/>
         <p style="color: #9ca3af; font-size: 12px;">
@@ -239,6 +263,7 @@ export async function sendPasswordResetEmail(
   email: string,
   resetUrl: string
 ): Promise<SendEmailResult> {
+  const r = escapeHtml(resetUrl)
   return sendEmail({
     to: email,
     subject: 'Reset your Apsamo Technology password',
@@ -247,13 +272,13 @@ export async function sendPasswordResetEmail(
         <h1 style="color: #706fd3;">Password reset request</h1>
         <p>We received a request to reset your Apsamo Technology password. Click the button below to choose a new password:</p>
         <p style="text-align: center; margin: 32px 0;">
-          <a href="${resetUrl}" style="background: #706fd3; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
+          <a href="${r}" style="background: #706fd3; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
             Reset Password
           </a>
         </p>
         <p style="color: #6b7280; font-size: 14px;">
           Or copy this link into your browser:<br/>
-          <a href="${resetUrl}">${resetUrl}</a>
+          <a href="${r}">${r}</a>
         </p>
         <p style="color: #ef4444; font-size: 13px;">
           This link will expire in 1 hour. If you did not request a reset, please ignore this email.
@@ -272,21 +297,23 @@ export async function sendTeamInvitationEmail(
   teamName: string,
   inviteUrl: string
 ): Promise<SendEmailResult> {
+  const t = escapeHtml(teamName)
+  const i = escapeHtml(inviteUrl)
   return sendEmail({
     to: email,
-    subject: `You've been invited to join "${teamName}" on Apsamo Technology`,
+    subject: `You've been invited to join "${headerSafe(teamName)}" on Apsamo Technology`,
     html: `
       <div style="font-family: -apple-system, sans-serif; max-width: 560px; margin: auto; padding: 32px;">
         <h1 style="color: #706fd3;">Team invitation</h1>
-        <p>You've been invited to collaborate on the team <strong>${teamName}</strong> on Apsamo Technology.</p>
+        <p>You've been invited to collaborate on the team <strong>${t}</strong> on Apsamo Technology.</p>
         <p style="text-align: center; margin: 32px 0;">
-          <a href="${inviteUrl}" style="background: #706fd3; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
+          <a href="${i}" style="background: #706fd3; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
             Accept Invitation
           </a>
         </p>
         <p style="color: #6b7280; font-size: 14px;">
           Or copy this link into your browser:<br/>
-          <a href="${inviteUrl}">${inviteUrl}</a>
+          <a href="${i}">${i}</a>
         </p>
       </div>
     `,
@@ -307,16 +334,19 @@ export async function sendDeploymentEmail(
   const color = isSuccess ? '#706fd3' : '#ef4444'
   const icon = isSuccess ? '✅' : '⚠️'
 
+  const pn = escapeHtml(projectName)
+  const st = escapeHtml(status)
+  const u = url ? escapeHtml(url) : ''
   return sendEmail({
     to: email,
-    subject: `${icon} Deployment ${status}: ${projectName}`,
+    subject: `${icon} Deployment ${headerSafe(status, 40)}: ${headerSafe(projectName)}`,
     html: `
       <div style="font-family: -apple-system, sans-serif; max-width: 560px; margin: auto; padding: 32px;">
-        <h1 style="color: ${color};">${icon} Deployment ${status}</h1>
-        <p>Your project <strong>${projectName}</strong> deployment is now <strong>${status}</strong>.</p>
+        <h1 style="color: ${color};">${icon} Deployment ${st}</h1>
+        <p>Your project <strong>${pn}</strong> deployment is now <strong>${st}</strong>.</p>
         ${
-          url
-            ? `<p>Visit your deployment: <a href="${url}">${url}</a></p>`
+          u
+            ? `<p>Visit your deployment: <a href="${u}">${u}</a></p>`
             : ''
         }
         <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;"/>

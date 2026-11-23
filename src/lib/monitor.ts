@@ -17,7 +17,7 @@
  * `checkUptime` itself is a pure HTTP probe and never touches the DB.
  */
 import { db } from '@/lib/db'
-import { assertPublicUrl } from '@/lib/ssrf'
+import { assertPublicUrl, fetchPublicTarget } from '@/lib/ssrf'
 import { createNotification } from '@/lib/notifications'
 import { sendEmail } from '@/lib/email'
 import { emitWebhookEvent } from '@/lib/webhook-delivery'
@@ -44,13 +44,17 @@ export async function checkUptime(
   const start = Date.now()
   try {
     // SSRF guard: refuse to probe private/loopback/metadata addresses.
-    await assertPublicUrl(url)
-    const res = await fetch(url, {
+    // Pinned to the checked address; a redirect is NOT followed (a 3xx already
+    // counts as up), so a monitored site cannot bounce the probe into
+    // 127.0.0.1 or the cloud metadata service.
+    const target = await assertPublicUrl(url)
+    const res = await fetchPublicTarget(target, url, {
       method: 'GET',
       signal: controller.signal,
-      redirect: 'follow',
       headers: { 'User-Agent': 'ApsamoPanel-Uptime-Monitor/1.0' },
     })
+    // The body is never used; release the connection.
+    res.body?.cancel().catch(() => {})
     const responseTime = Date.now() - start
     const isUp = res.status >= 200 && res.status < 400
     return {
