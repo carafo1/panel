@@ -66,6 +66,15 @@ export function verificationRecord(
   }
 }
 
+/**
+ * Domain statuses that prove the user controls the domain: registered through
+ * us, or a custom domain whose DNS verification passed (the verify route only
+ * then moves it to `active`). `pending_verification` is just a claim anyone
+ * can make by typing the name in; `pending` / `transferring` are orders that
+ * have not completed.
+ */
+export const OWNED_DOMAIN_STATUSES = ['active'] as const
+
 /** True when the panel already knows this domain belongs to this user. */
 export async function isDomainOwnedInPanel(
   userId: string,
@@ -73,7 +82,10 @@ export async function isDomainOwnedInPanel(
 ): Promise<boolean> {
   const d = normaliseDomainName(domain)
   const [owned, service] = await Promise.all([
-    db.domain.findFirst({ where: { name: d, userId }, select: { id: true } }),
+    db.domain.findFirst({
+      where: { name: d, userId, status: { in: [...OWNED_DOMAIN_STATUSES] } },
+      select: { id: true },
+    }),
     db.emailService.findFirst({
       where: { domain: d, userId },
       select: { id: true },

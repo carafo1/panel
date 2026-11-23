@@ -43,6 +43,36 @@ export function composeProjectName(deployPath: string): string {
 }
 
 /**
+ * Environment prefix for every `docker compose` the panel runs on a host.
+ *
+ * On a localhost server the shell inherits the panel's own process.env —
+ * JWT_SECRET, ENCRYPTION_KEY, DATABASE_URL — and compose interpolates
+ * `${VAR}` in compose files from it, so a customer compose file (or an env
+ * value) referencing `${ENCRYPTION_KEY}` received the panel's key. `env -i`
+ * keeps only what the docker CLI needs to find its daemon and plugins.
+ *
+ * Shared by the deployer, the pipeline runner and the migration runner so the
+ * three cannot drift. Ends with a space; prepend it to the command.
+ */
+export const COMPOSE_ENV =
+  'env -i PATH="$PATH" HOME="$HOME" ' +
+  '${DOCKER_HOST:+DOCKER_HOST="$DOCKER_HOST"} ' +
+  '${DOCKER_CONFIG:+DOCKER_CONFIG="$DOCKER_CONFIG"} ' +
+  '${DOCKER_CONTEXT:+DOCKER_CONTEXT="$DOCKER_CONTEXT"} '
+
+/**
+ * `-p <name> ` pinning the compose project to the one derived from the
+ * project's directory. Without it a compose file's `name:` (or
+ * COMPOSE_PROJECT_NAME in .env) chose the project — a customer could edit
+ * their file to `name: <another tenant>` and have `down -v` on delete remove
+ * that tenant's containers and volumes. Empty when no deploy path is known.
+ */
+export function composeProjectFlag(deployPath: string | null | undefined): string {
+  const name = deployPath ? composeProjectName(deployPath) : ''
+  return name ? `-p ${shellQuoteArg(name)} ` : ''
+}
+
+/**
  * A `docker ps --filter name=` value that matches exactly one container name.
  *
  * Docker's name filter is an unanchored regular expression, and it is matched

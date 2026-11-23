@@ -52,6 +52,7 @@ import {
   PathConfinementError,
   type ConfineMode,
 } from './path-confine'
+import { archiveListingCommand, findUnsafeArchiveEntries, unsafeArchiveMessage } from './archive-safety'
 
 /**
  * A path the customer asked for that we refuse (absolute, `..`, escapes the
@@ -728,6 +729,19 @@ export async function importArchive(
     const ext = isTarGz ? 'tar.gz' : isTar ? 'tar' : 'zip'
     const tmp = `/tmp/apsamo-import-${Date.now()}-${rand}.${ext}`
     await putFile(client, tmp, content, { mode: 0o644 })
+
+    // Refuse archives carrying symbolic/hard links or out-of-tree paths
+    // before anything is written into the project (see lib/vps/archive-safety).
+    const listing = await exec(
+      client,
+      archiveListingCommand(isTarGz ? 'tar.gz' : isTar ? 'tar' : 'zip', tmp),
+      { timeoutMs: 120000 }
+    ).catch(() => null)
+    const problems = listing && listing.exitCode === 0 ? findUnsafeArchiveEntries(listing.stdout) : null
+    if (problems === null || problems.length > 0) {
+      await exec(client, `rm -f ${shellQuote(tmp)}`, { timeoutMs: 10000 }).catch(() => {})
+      throw new Error(unsafeArchiveMessage(problems))
+    }
 
     const extractCmd = useTar
       ? `tar -x${isTarGz ? 'z' : ''}f ${shellQuote(tmp)} -C ${shellQuote(abs)} && echo __APSAMO_OK__`

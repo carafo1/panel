@@ -28,6 +28,8 @@ import { isServerInDemoMode, withConnection, type SshCredentials } from '@/lib/v
 import { provisionProjectDatabase, dropProjectDatabase } from '@/lib/vps/database'
 import { configureProjectProxy, removeProjectProxy } from '@/lib/vps/proxy'
 import { deployProject } from '@/lib/vps/deployer'
+import { COMPOSE_ENV, composeProjectFlag } from '@/lib/vps/deploy-safety'
+import { resolvePinnedTarget, buildSafeDownloadCommand, parseDownloadStatus } from './fetch-safety'
 import { broadcastMigrationLog, broadcastMigrationStatus } from '@/lib/realtime'
 import {
   exec,
@@ -601,18 +603,32 @@ const stageFetch: StageFn = async (ctx) => {
   }
 
   if (ctx.opts.sourceMode === 'url') {
-    // Remote fetch. The URL was validated by the API layer against SSRF
-    // targets before it ever reached here.
+    // Remote fetch. The API layer checked the URL, but that was minutes ago
+    // and by name: re-check now and pin curl to the checked address, with no
+    // redirects (lib/migration/fetch-safety) — otherwise a redirect or a DNS
+    // rebind reaches cloud metadata or the host's own services as root.
     const dest = `${ctx.workDir}/${sanitizeRemoteName(ctx.opts.sourceRef)}`
+    const target = await resolvePinnedTarget(ctx.opts.sourceRef)
     await withConnection(ctx.creds!, async (client) => {
       ctx.log(`Downloading ${redactUrl(ctx.opts.sourceRef)}…`)
       const r = await exec(
         client,
-        `curl -fsSL --max-time 3600 -o ${shellQuote(dest)} ${shellQuote(ctx.opts.sourceRef)} 2>&1`,
+        buildSafeDownloadCommand(ctx.opts.sourceRef, dest, target),
         { timeoutMs: 3_600_000 }
       )
-      if (r.exitCode !== 0) {
-        throw new Error(`Download failed: ${(r.stdout || r.stderr).slice(-300)}`)
+      const { status, redirect } = parseDownloadStatus(r.stdout || '')
+      if (r.exitCode !== 0 || status < 200 || status >= 300) {
+        await exec(client, `rm -f ${shellQuote(dest)}`, { timeoutMs: 30_000 }).catch(() => {})
+        if (status >= 300 && status < 400) {
+          throw new Error(
+            'Download failed: the link redirects' +
+              (redirect ? ` to ${redactUrl(redirect)}` : '') +
+              '. Redirects are not followed for security — use the final direct download link.'
+          )
+        }
+        throw new Error(
+          `Download failed${status ? ` (HTTP ${status})` : ''}: ${redactUrl(r.stdout || r.stderr || '').slice(-300)}`
+        )
       }
       const size = await remoteSize(client, dest)
       ctx.log(`Downloaded ${formatBytes(size)}.`)
@@ -1284,7 +1300,10 @@ const stageDeploy: StageFn = async (ctx) => {
     ctx.log('Starting the website container…')
     const r = await exec(
       client,
-      `cd ${shellQuote(ctx.deployPath)} && (docker compose up -d 2>&1 || docker-compose up -d 2>&1)`,
+      // Stripped environment and a pinned project name, exactly as the
+      // deployer runs compose (see lib/vps/deploy-safety).
+      `cd ${shellQuote(ctx.deployPath)} && (${COMPOSE_ENV}docker compose ${composeProjectFlag(ctx.deployPath)}up -d 2>&1 || ` +
+        `${COMPOSE_ENV}docker-compose ${composeProjectFlag(ctx.deployPath)}up -d 2>&1)`,
       { timeoutMs: 900_000 }
     )
     if (r.exitCode !== 0) {
@@ -1613,7 +1632,8 @@ async function applyUndoAction(
         if (action.composePath) {
           await exec(
             client,
-            `cd ${shellQuote(action.composePath)} && (docker compose down 2>/dev/null || docker-compose down 2>/dev/null) || true`,
+            `cd ${shellQuote(action.composePath)} && (${COMPOSE_ENV}docker compose ${composeProjectFlag(action.composePath)}down 2>/dev/null || ` +
+              `${COMPOSE_ENV}docker-compose ${composeProjectFlag(action.composePath)}down 2>/dev/null) || true`,
             { timeoutMs: 300_000 }
           )
         }

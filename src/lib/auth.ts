@@ -1,6 +1,8 @@
 import bcryptjs from 'bcryptjs'
+import crypto from 'crypto'
 import jwt from 'jsonwebtoken'
 import { requireSecret } from '@/lib/security'
+import { rateLimit } from '@/lib/rate-limit'
 
 // SECURITY: requireSecret throws at module load time if JWT_SECRET is missing
 // or still set to its placeholder value. This prevents the panel from booting
@@ -453,6 +455,25 @@ export function extractTokenFromHeader(authHeader: string | null): string | null
   return parts[1]
 }
 
+/** Marks an `ApiKey.key` value as a hash rather than a raw key. */
+export const API_KEY_HASH_PREFIX = 'sha256:'
+
+/**
+ * The value stored in `ApiKey.key` for a raw API key: `sha256:<hex digest>`.
+ *
+ * SECURITY: keys used to be stored (and looked up) in plain text, so anyone
+ * who could read the database or a backup of it could act as every customer
+ * with a key. Only this digest is stored now; the raw key is shown once, at
+ * creation. A plain SHA-256 is enough: the key is 256 random bits, so there
+ * is nothing to brute-force, and a deterministic digest keeps the existing
+ * unique index usable for lookup. The `sha256:` prefix can never collide with
+ * a raw key (those start with `dh_`) or be presented as one (verifyApiKey
+ * rejects anything not starting with `dh_`).
+ */
+export function hashApiKey(rawKey: string): string {
+  return API_KEY_HASH_PREFIX + crypto.createHash('sha256').update(rawKey, 'utf8').digest('hex')
+}
+
 /**
  * Lookup an API key in the database and return the owning user's identity
  * payload (same shape as the JWT payload) on success. Returns null when the
@@ -460,6 +481,10 @@ export function extractTokenFromHeader(authHeader: string | null): string | null
  *
  * API keys always start with the `dh_` prefix (see /api/user/api-keys route).
  * Tokens that don't match that prefix are skipped quickly to avoid a DB hit.
+ *
+ * Looks the key up by its hash first. Rows created before keys were hashed
+ * still hold the raw key; on the first successful use such a row is rewritten
+ * to hold the hash instead, so the plain value leaves the database.
  */
 export async function verifyApiKey(
   token: string
@@ -471,14 +496,24 @@ export async function verifyApiKey(
     // breaks the cycle.
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { db } = require('@/lib/db') as typeof import('@/lib/db')
-    const apiKey = await db.apiKey.findUnique({
-      where: { key: token },
-      select: {
-        id: true,
-        userId: true,
-        user: { select: { id: true, email: true, role: true } },
-      },
-    })
+    const select = {
+      id: true,
+      userId: true,
+      user: { select: { id: true, email: true, role: true } },
+    } as const
+    const hashed = hashApiKey(token)
+    let apiKey = await db.apiKey.findUnique({ where: { key: hashed }, select })
+    if (!apiKey) {
+      // Legacy row holding the raw key: accept it once more and migrate it.
+      apiKey = await db.apiKey.findUnique({ where: { key: token }, select })
+      if (apiKey) {
+        await db.apiKey
+          .updateMany({ where: { id: apiKey.id, key: token }, data: { key: hashed } })
+          .catch((err: unknown) => {
+            console.error('[auth] could not migrate a legacy API key to its hash:', err)
+          })
+      }
+    }
     if (!apiKey || !apiKey.user) return null
     // Fire-and-forget update of lastUsed — must not block the request.
     db.apiKey
@@ -529,9 +564,42 @@ export async function authenticateRequest(
  * Expires after 5 minutes.
  */
 export function generateTwoFactorTempToken(userId: string): string {
+  // jti makes every pending login distinct, so its attempt budget
+  // (consumeTwoFactorAttempt) is its own even for two logins in one second.
   return jwt.sign({ userId, kind: '2fa-temp' }, JWT_SECRET, {
     expiresIn: TWO_FACTOR_TEMP_TOKEN_EXPIRY,
+    jwtid: crypto.randomUUID(),
   })
+}
+
+/** Code attempts (TOTP or backup code) allowed per 2FA-pending login. */
+export const TWO_FACTOR_MAX_ATTEMPTS = 5
+// Longer than the token's own 5-minute life, so the budget cannot reset
+// while the token is still valid.
+const TWO_FACTOR_ATTEMPT_WINDOW_MS = 10 * 60 * 1000
+
+/**
+ * Spend one code attempt against a 2FA-pending temp token. Returns false once
+ * the token has used up TWO_FACTOR_MAX_ATTEMPTS: the caller must then reject
+ * it, and the user has to sign in with their password again.
+ *
+ * SECURITY: the 2FA endpoints were only rate limited per IP, so one stolen or
+ * phished password plus a pool of IPs could walk the 10^6 TOTP space within
+ * the token's 5 minutes. The budget is per token and shared by
+ * /2fa/login-verify and /2fa/verify-backup. Call it only AFTER the token's
+ * signature was verified, so garbage tokens cannot fill the store.
+ *
+ * Uses the in-process limiter (lib/rate-limit), like the per-IP limits: the
+ * panel runs as one process. Keyed by a digest of the token, which also covers
+ * tokens issued before they carried a jti.
+ */
+export function consumeTwoFactorAttempt(tempToken: string): boolean {
+  const key = '2fa-pending:' + crypto.createHash('sha256').update(tempToken).digest('hex')
+  return rateLimit({
+    key,
+    limit: TWO_FACTOR_MAX_ATTEMPTS,
+    windowMs: TWO_FACTOR_ATTEMPT_WINDOW_MS,
+  }).success
 }
 
 /**

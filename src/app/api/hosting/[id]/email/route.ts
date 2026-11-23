@@ -9,7 +9,7 @@ import {
   createMailbox as mailcowCreateMailbox,
   generateDkim as mailcowGenerateDkim,
 } from '@/lib/mailcow'
-import { mailDomainNames, decideMailboxDomain } from '@/lib/mailcow-tenant'
+import { mailDomainNames, decideMailboxDomain, isCustomDomainBacked } from '@/lib/mailcow-tenant'
 
 /**
  * Project Email Mailboxes Endpoint (collection)
@@ -61,7 +61,8 @@ function isValidDomain(domain: string): boolean {
 }
 
 /**
- * The project's mail domains: its customDomain plus every VERIFIED
+ * The project's mail domains: its customDomain (only when proven, see
+ * isCustomDomainBacked) plus every VERIFIED
  * WebsiteDomain (the same set lib/mailcow-tenant uses for every other mail
  * route). Unverified WebsiteDomains are only claims and are excluded.
  */
@@ -70,7 +71,7 @@ async function loadProjectMailDomains(
 ): Promise<{ allowed: string[]; verifiedWebsiteDomains: string[] }> {
   const project = await db.project.findUnique({
     where: { id: projectId },
-    select: { customDomain: true },
+    select: { id: true, userId: true, customDomain: true },
   })
   if (!project) return { allowed: [], verifiedWebsiteDomains: [] }
 
@@ -79,7 +80,11 @@ async function loadProjectMailDomains(
     select: { domain: true, verified: true },
   })
   return {
-    allowed: mailDomainNames({ customDomain: project.customDomain, websiteDomains }),
+    allowed: mailDomainNames({
+      customDomain: project.customDomain,
+      customDomainVerified: await isCustomDomainBacked(project, websiteDomains),
+      websiteDomains,
+    }),
     verifiedWebsiteDomains: websiteDomains.map((r) => normaliseDomain(r.domain)).filter(Boolean),
   }
 }

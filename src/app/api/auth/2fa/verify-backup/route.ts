@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { withRateLimit } from '@/lib/rate-limit'
 import { db } from '@/lib/db'
-import { issueSession, verifyTwoFactorTempToken } from '@/lib/auth'
+import { issueSession, verifyTwoFactorTempToken, consumeTwoFactorAttempt } from '@/lib/auth'
 import { consumeBackupCode } from '@/lib/totp'
 import { logAudit } from '@/lib/audit'
 import { attachSession } from '@/lib/session'
@@ -40,6 +40,17 @@ async function postHandler(request: Request) {
     const pending = verifyTwoFactorTempToken(tempToken)
     if (!pending) {
       return NextResponse.json({ error: 'Your session has expired. Please sign in again.' }, { status: 401 })
+    }
+
+    // Per pending-login attempt budget, shared with /2fa/login-verify.
+    if (!consumeTwoFactorAttempt(tempToken)) {
+      return NextResponse.json(
+        {
+          error: 'Too many incorrect codes. Please sign in again.',
+          code: 'two_factor_attempts_exceeded',
+        },
+        { status: 401 }
+      )
     }
 
     const user = await db.user.findUnique({

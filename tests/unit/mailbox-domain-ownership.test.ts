@@ -19,6 +19,7 @@ describe('mailDomainNames', () => {
   it('includes the custom domain and only VERIFIED website domains', () => {
     const names = mailDomainNames({
       customDomain: 'Primary.Example.',
+      customDomainVerified: true,
       websiteDomains: [
         { domain: 'verified.example', verified: true },
         { domain: 'someone-elses.example', verified: false },
@@ -26,6 +27,14 @@ describe('mailDomainNames', () => {
       ],
     })
     expect(names.sort()).toEqual(['primary.example', 'verified.example'])
+  })
+
+  it('ignores an unproven customDomain (the flag is absent or false)', () => {
+    const websiteDomains = [{ domain: 'verified.example', verified: true }]
+    expect(mailDomainNames({ customDomain: 'victim.example', websiteDomains })).toEqual(['verified.example'])
+    expect(
+      mailDomainNames({ customDomain: 'victim.example', customDomainVerified: false, websiteDomains })
+    ).toEqual(['verified.example'])
   })
 
   it('is empty when there is nothing verified', () => {
