@@ -617,7 +617,9 @@ function generatePanelBlock(): string {
     /* ignore malformed APP_URL */
   }
   const brand = process.env.BRAND_DOMAIN || BRAND_DOMAIN
-  const hosts = [...new Set([appHost, brand].filter(Boolean))]
+  // www.<brand> was served by the install-time Caddyfile; dropping it on
+  // regeneration took www.apsamo.com offline (no certificate).
+  const hosts = [...new Set([appHost, brand, brand ? `www.${brand}` : ''].filter(Boolean))]
   if (hosts.length === 0) return ''
   return [
     `# ── Apsamo Panel (control plane) — auto-managed ──`,
@@ -658,13 +660,43 @@ function generateMailBlock(): string {
   const host = (process.env.MAIL_SERVER_HOSTNAME || '').trim()
   if (!host) return ''
   const email = process.env.LE_EMAIL || ADMIN_EMAIL
+  const brand = process.env.BRAND_DOMAIN || BRAND_DOMAIN
+  // Mail apps configure themselves from autodiscover./autoconfig.<brand>;
+  // setup-email.sh adds them, so regeneration must keep them too.
+  const hosts = [...new Set([host, ...(brand ? [`autodiscover.${brand}`, `autoconfig.${brand}`] : [])])]
+  // The Apsamo Mail sign-in page (deploy/mail-login, installed by
+  // setup-email.sh) is served in front of Mailcow for every login address.
+  // Without these lines a regeneration silently replaced it with Mailcow's page.
+  const loginPage = fs.existsSync('/srv/apsamo-mail-login/index.html')
+    ? [
+        `    @apsamo_login {`,
+        `        host ${host}`,
+        `        method GET HEAD`,
+        `        path / /admin /admin/ /domainadmin /domainadmin/`,
+        `        not query classic=*`,
+        `    }`,
+        `    handle @apsamo_login {`,
+        `        root * /srv/apsamo-mail-login`,
+        `        rewrite * /index.html`,
+        `        header Cache-Control "no-store"`,
+        `        file_server`,
+        `    }`,
+        `    handle_path /apsamo-login/* {`,
+        `        root * /srv/apsamo-mail-login`,
+        `        file_server`,
+        `    }`,
+      ]
+    : []
   return [
     `# ── Mail server (Mailcow) — auto-managed ──`,
-    `${host} {`,
+    `${hosts.join(', ')} {`,
     `    encode gzip zstd`,
-    `    reverse_proxy https://localhost:8443 {`,
-    `        transport http {`,
-    `            tls_insecure_skip_verify`,
+    ...loginPage,
+    `    handle {`,
+    `        reverse_proxy https://localhost:8443 {`,
+    `            transport http {`,
+    `                tls_insecure_skip_verify`,
+    `            }`,
     `        }`,
     `    }`,
     `    tls ${email}`,
