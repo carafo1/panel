@@ -66,7 +66,7 @@ export function composeProjectName(deployPath: string): string {
  * cannot create links (internal-sftp -P symlink,hardlink). Ends with " && ".
  */
 export const BIND_SOURCE_GUARD =
-  'for p in ./wp-content ./wp-config-docker.php ./db-data; do ' +
+  'for p in ./site ./wp-content ./wp-config-docker.php ./db-data; do ' +
   'if [ -L "$p" ]; then echo "Refusing to start: $p is a link. Replace it with a real folder or file." >&2; exit 97; fi; ' +
   'done && '
 

@@ -162,15 +162,18 @@ export function copyFilesCommand(mode: 'wordpress' | 'files', from: string, to: 
 /** The copy script itself (pure, so it can be tested in a local shell). */
 export function copyFilesScript(mode: 'wordpress' | 'files', from: string, to: string, opts: { replace: boolean }): string {
   if (mode === 'wordpress') {
-    const src = `${from}/wp-content`
-    const dst = `${to}/wp-content`
-    const old = `${to}/wp-content.staging-old`
-    const [S, D, O] = [shellQuote(src), shellQuote(dst), shellQuote(old)]
+    // WordPress files live in <deployPath>/site (current layout) or directly in
+    // <deployPath> (sites deployed before it); pick per side at run time.
+    const pick = (base: string) =>
+      `$(if [ -d ${shellQuote(base + '/site')} ] && [ ! -L ${shellQuote(base + '/site')} ]; then printf %s ${shellQuote(base + '/site')}; else printf %s ${shellQuote(base)}; fi)`
+    const prelude = `SB="${pick(from)}"; DB="${pick(to)}"`
+    const [S, D, O] = ['"$SB/wp-content"', '"$DB/wp-content"', '"$DB/wp-content.staging-old"']
     // Explicit steps, not an &&/|| chain: in sh `a && b || c` runs c when a
     // fails, which would run the rollback (deleting the destination) when the
     // source folder is simply missing. Swap the old copy aside, copy, and only
     // drop the old copy once the new one is in place; put it back on failure.
     return [
+      prelude,
       `if [ -L ${S} ] || [ -L ${D} ]; then echo 'wp-content must be a folder, not a link.' >&2; exit 1; fi`,
       `test -d ${S} || { echo 'The source site has no wp-content folder.' >&2; exit 1; }`,
       `rm -rf ${O}`,
