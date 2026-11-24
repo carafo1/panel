@@ -17,13 +17,20 @@ import {
   Sparkles,
   ExternalLink,
   Loader2,
+  AlertTriangle,
+  RefreshCw,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { useAuthStore } from '@/store/auth-store'
+import { useAppStore } from '@/store/app-store'
 import { toast } from 'sonner'
+import {
+  availabilityOf, availabilityErrorFromResponse, AvailabilityIcon, AVAILABILITY_COPY,
+  type AvailabilityState,
+} from '@/components/domains/domain-availability'
 
 /* ── Types ── */
 interface FrameworkOption {
@@ -34,13 +41,29 @@ interface FrameworkOption {
   color: string
 }
 
+/**
+ * POST /api/domains/search (single). `price` is set only for an available,
+ * sellable name; premium names come back with available=true but are NOT
+ * purchasable here. 503 means availability could not be confirmed.
+ */
 interface DomainResult {
   domain: string
-  available: boolean
+  available: boolean | null
+  premium?: boolean
+  status?: 'available' | 'unavailable' | 'premium' | 'unknown'
+  sellable?: boolean
   price: number | null
   message: string
-  suggestions?: Array<{ domain: string; available: boolean; price: number }>
+  suggestions?: Array<{
+    domain: string
+    available: boolean | null
+    status?: 'available' | 'unavailable' | 'premium' | 'unknown'
+    price: number | null
+  }>
 }
+
+/** What the hosting checkout answered, for the final step. */
+type DeployOutcome = 'live' | 'awaiting_payment'
 
 interface PlanOption {
   id: string
@@ -92,6 +115,61 @@ function ConfettiEffect() {
   )
 }
 
+/* ── Domain option row ── */
+function DomainOption({
+  domain,
+  state,
+  price,
+  selected,
+  onChoose,
+}: {
+  domain: string
+  state: AvailabilityState
+  price: number | null
+  selected: boolean
+  onChoose: (domain: string, price: number) => void
+}) {
+  const buyable = state === 'available' && typeof price === 'number' && price > 0
+  return (
+    <li>
+      <button
+        type="button"
+        disabled={!buyable}
+        aria-pressed={buyable ? selected : undefined}
+        onClick={() => {
+          if (buyable) onChoose(domain, price)
+        }}
+        className={`w-full flex items-center justify-between gap-3 p-3 rounded-lg border-2 text-start transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+          !buyable
+            ? 'border-border opacity-70 cursor-not-allowed'
+            : selected
+              ? 'border-indigo-500 bg-indigo-500/5'
+              : 'border-border hover:border-indigo-500/30'
+        }`}
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          <AvailabilityIcon
+            state={state}
+            className={`size-4 shrink-0 ${buyable ? 'text-indigo-500' : 'text-muted-foreground'}`}
+          />
+          <span className="font-medium text-sm truncate">{domain}</span>
+          <Badge
+            variant="secondary"
+            className={`text-[10px] ${buyable ? 'bg-indigo-500/10 text-indigo-600' : ''}`}
+          >
+            {AVAILABILITY_COPY[state].label}
+          </Badge>
+        </div>
+        {buyable ? (
+          <span className="font-semibold text-indigo-600 shrink-0">${price.toFixed(2)}/yr</span>
+        ) : state === 'unknown' ? (
+          <span className="text-xs text-muted-foreground shrink-0 hidden sm:inline">Try again later</span>
+        ) : null}
+      </button>
+    </li>
+  )
+}
+
 /* ── Main Component ── */
 interface OnboardingWizardProps {
   onComplete: () => void
@@ -104,7 +182,10 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
   const [framework, setFramework] = useState('nextjs')
   const [domainSearch, setDomainSearch] = useState('')
   const [domainResults, setDomainResults] = useState<DomainResult | null>(null)
+  const [domainError, setDomainError] = useState<string | null>(null)
   const [selectedDomain, setSelectedDomain] = useState<string | null>(null)
+  const [selectedDomainPrice, setSelectedDomainPrice] = useState<number | null>(null)
+  const [deployOutcome, setDeployOutcome] = useState<DeployOutcome>('live')
   const [useFreeSubdomain, setUseFreeSubdomain] = useState(false)
   const [plans, setPlans] = useState<PlanOption[]>([])
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null)
@@ -113,7 +194,8 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
   const [deployUrl, setDeployUrl] = useState('')
   const [searchingDomain, setSearchingDomain] = useState(false)
   const [loadingPlans, setLoadingPlans] = useState(false)
-  const { user, isAuthenticated } = useAuthStore()
+  const { isAuthenticated } = useAuthStore()
+  const { setDashboardTab } = useAppStore()
 
   // Fetch plans on mount
   useEffect(() => {
@@ -157,55 +239,128 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
   const handleDomainSearch = useCallback(async () => {
     if (!domainSearch.trim()) return
     setSearchingDomain(true)
+    setDomainError(null)
+    setDomainResults(null)
+    setSelectedDomain(null)
+    setSelectedDomainPrice(null)
     try {
       const res = await fetch('/api/domains/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ domain: domainSearch.trim() }),
       })
-      const data = await res.json()
-      setDomainResults(data)
-      setUseFreeSubdomain(false)
-      setSelectedDomain(null)
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        // 503 (registrar unreachable), 429 (rate limited), 400 (bad input):
+        // never render these as a result.
+        setDomainError(availabilityErrorFromResponse(res.status, data))
+      } else {
+        setDomainResults(data as DomainResult)
+        setUseFreeSubdomain(false)
+      }
     } catch {
-      toast.error('Failed to search domains')
+      setDomainError(AVAILABILITY_COPY.unknown.detail)
     }
     setSearchingDomain(false)
   }, [domainSearch])
 
+  const chooseDomain = (domain: string, price: number) => {
+    setSelectedDomain(domain)
+    setSelectedDomainPrice(price)
+    setUseFreeSubdomain(false)
+  }
+
+  /** Close the wizard and open the domain search with the chosen name. */
+  const registerChosenDomain = () => {
+    if (selectedDomain) {
+      try {
+        const url = new URL(window.location.href)
+        url.searchParams.set('register', selectedDomain)
+        window.history.replaceState({}, '', `${url.pathname}${url.search}`)
+      } catch {
+        /* no pre-fill; the Domains page still opens */
+      }
+    }
+    onComplete()
+    setDashboardTab('domains')
+  }
+
   // Deploy
+  //
+  // The checkout buys HOSTING only. It no longer accepts type 'both' and will
+  // not register a domain itself (that needs the registrant contact and goes
+  // through the domain-order checkout), so a chosen domain is registered as a
+  // separate order from the Domains page once the site exists.
   const handleDeploy = useCallback(async () => {
     if (!selectedPlan || !isAuthenticated) return
     setDeploying(true)
     try {
       const slug = projectName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
-      const type = selectedDomain && !useFreeSubdomain ? 'both' : 'hosting'
       const res = await fetch('/api/billing/checkout', {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           planId: selectedPlan,
-          type,
+          type: 'hosting',
           projectName,
           framework,
-          domainName: selectedDomain && !useFreeSubdomain ? selectedDomain : undefined,
         }),
       })
-      const data = await res.json()
-      if (res.ok) {
-        const url = data.project?.subdomain || `${slug}.apsamo.com`
-        setDeployUrl(url)
-        setDeploySuccess(true)
-        toast.success('Deployment successful!')
-      } else {
-        toast.error(data.error || 'Deployment failed')
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        // 400 (invalid plan / input), 402, 403 (email not verified), 409…
+        // The server's message says what to fix.
+        toast.error('Could not start your plan', {
+          description:
+            res.status === 429
+              ? 'Too many attempts in a short time. Please wait a minute and try again.'
+              : data.error || data.message || `Request failed (${res.status})`,
+        })
+        return
       }
+
+      const redirect: string | undefined = (!data.demo && data.url) || data.redirectUrl || undefined
+      if (redirect) {
+        toast.success('Redirecting to payment…', {
+          description: selectedDomain && !useFreeSubdomain
+            ? `After payment, register ${selectedDomain} from the Domains page.`
+            : undefined,
+        })
+        window.location.href = redirect
+        return
+      }
+
+      if (data.status === 'pending') {
+        // Manual / bank transfer: nothing is provisioned until an admin
+        // confirms the money. Do not claim the site is live.
+        setDeployOutcome('awaiting_payment')
+        setDeployUrl(`${slug}.apsamo.com`)
+        setDeploySuccess(true)
+        toast.success('Order placed. Awaiting payment confirmation.')
+        return
+      }
+
+      setDeployOutcome('live')
+      setDeployUrl(data.project?.subdomain || `${slug}.apsamo.com`)
+      setDeploySuccess(true)
+      toast.success('Deployment started!')
     } catch {
-      toast.error('Deployment failed. Please try again.')
+      toast.error('Deployment failed. Please check your connection and try again.')
+    } finally {
+      setDeploying(false)
     }
-    setDeploying(false)
   }, [selectedPlan, isAuthenticated, projectName, framework, selectedDomain, useFreeSubdomain])
+
+  const primaryState = domainResults
+    ? availabilityOf({
+        status: domainResults.status,
+        available: domainResults.available,
+        premium: domainResults.premium,
+        sellable: domainResults.sellable,
+        price: domainResults.price,
+      })
+    : null
 
   // Progress
   const progress = (step / 5) * 100
@@ -364,6 +519,10 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                 <div className="text-center mb-8">
                   <h2 className="text-2xl font-bold mb-2">Choose a Domain</h2>
                   <p className="text-muted-foreground">Search for a custom domain or use a free subdomain</p>
+                  <p className="text-xs text-muted-foreground mt-2 max-w-md mx-auto">
+                    A custom domain is ordered separately after your site is set up, so we can
+                    collect the registrant details the registry requires.
+                  </p>
                 </div>
 
                 <div className="mb-6">
@@ -373,6 +532,7 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                       <Input
                         value={domainSearch}
                         onChange={(e) => setDomainSearch(e.target.value)}
+                        aria-label="Domain name to search"
                         placeholder="e.g. myapp.com"
                         className="h-11 ps-10"
                         onKeyDown={(e) => e.key === 'Enter' && handleDomainSearch()}
@@ -381,51 +541,48 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                     <Button
                       className="bg-indigo-500 hover:bg-indigo-600 text-white"
                       onClick={handleDomainSearch}
-                      disabled={searchingDomain}
+                      disabled={searchingDomain || !domainSearch.trim()}
                     >
                       {searchingDomain ? <Loader2 className="size-4 animate-spin" /> : 'Search'}
                     </Button>
                   </div>
                 </div>
 
-                {/* Domain results */}
-                {domainResults && (
-                  <div className="mb-4 space-y-2 max-h-48 overflow-y-auto">
-                    {domainResults.available && (
-                      <button
-                        onClick={() => { setSelectedDomain(domainResults.domain); setUseFreeSubdomain(false) }}
-                        className={`w-full flex items-center justify-between p-3 rounded-lg border-2 transition-all ${
-                          selectedDomain === domainResults.domain && !useFreeSubdomain
-                            ? 'border-indigo-500 bg-indigo-500/5'
-                            : 'border-border hover:border-indigo-500/30'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <Check className="size-4 text-indigo-500" />
-                          <span className="font-medium text-sm">{domainResults.domain}</span>
-                          <Badge variant="secondary" className="text-[10px] bg-indigo-500/10 text-indigo-600">Available</Badge>
-                        </div>
-                        <span className="font-semibold text-indigo-600">${domainResults.price}/yr</span>
-                      </button>
-                    )}
-                    {domainResults.suggestions?.map((s) => (
-                      <button
-                        key={s.domain}
-                        onClick={() => { setSelectedDomain(s.domain); setUseFreeSubdomain(false) }}
-                        className={`w-full flex items-center justify-between p-3 rounded-lg border-2 transition-all ${
-                          selectedDomain === s.domain && !useFreeSubdomain
-                            ? 'border-indigo-500 bg-indigo-500/5'
-                            : 'border-border hover:border-indigo-500/30'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <Globe className="size-4 text-muted-foreground" />
-                          <span className="font-medium text-sm">{s.domain}</span>
-                        </div>
-                        <span className="font-semibold text-indigo-600">${s.price}/yr</span>
-                      </button>
-                    ))}
+                {/* Lookup failed: never shown as available or taken */}
+                {domainError && !searchingDomain && (
+                  <div
+                    role="alert"
+                    className="mb-4 flex items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm"
+                  >
+                    <AlertTriangle className="size-4 text-amber-600 shrink-0" aria-hidden="true" />
+                    <span className="flex-1">{domainError}</span>
+                    <Button variant="outline" size="sm" onClick={handleDomainSearch}>
+                      <RefreshCw className="size-3.5 me-1" /> Try again
+                    </Button>
                   </div>
+                )}
+
+                {/* Domain results */}
+                {domainResults && primaryState && (
+                  <ul className="mb-4 space-y-2 max-h-48 overflow-y-auto" aria-live="polite">
+                    <DomainOption
+                      domain={domainResults.domain}
+                      state={primaryState}
+                      price={domainResults.price}
+                      selected={selectedDomain === domainResults.domain && !useFreeSubdomain}
+                      onChoose={chooseDomain}
+                    />
+                    {domainResults.suggestions?.map((s) => (
+                      <DomainOption
+                        key={s.domain}
+                        domain={s.domain}
+                        state={availabilityOf({ status: s.status, available: s.available, price: s.price })}
+                        price={s.price}
+                        selected={selectedDomain === s.domain && !useFreeSubdomain}
+                        onChoose={chooseDomain}
+                      />
+                    ))}
+                  </ul>
                 )}
 
                 {/* Free subdomain option */}
@@ -571,6 +728,13 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                       {useFreeSubdomain ? `${slug}.apsamo.com` : selectedDomain}
                     </span>
                   </div>
+                  {!useFreeSubdomain && selectedDomain && (
+                    <p className="text-xs text-muted-foreground -mt-1 pb-2 border-b border-border">
+                      Until {selectedDomain} is registered your site runs on{' '}
+                      <span className="font-mono">{slug}.apsamo.com</span>. You&apos;ll register the
+                      domain next{selectedDomainPrice ? ` (${selectedDomainPrice.toFixed(2)}/yr, billed separately)` : ''}.
+                    </p>
+                  )}
                   <div className="flex items-center justify-between py-2 border-b border-border">
                     <span className="text-sm text-muted-foreground">Plan</span>
                     <span className="font-semibold text-sm">{selectedPlanData?.name || 'Starter'}</span>
@@ -624,10 +788,12 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                   </div>
                 </div>
                 <h2 className="text-3xl font-extrabold tracking-tight mb-2">
-                  Your project is live!
+                  {deployOutcome === 'live' ? 'Your project is on its way!' : 'Order placed'}
                 </h2>
-                <p className="text-muted-foreground mb-6">
-                  Congratulations! Your project has been deployed successfully.
+                <p className="text-muted-foreground mb-6 max-w-md">
+                  {deployOutcome === 'live'
+                    ? 'Your hosting is set up and the first deployment has started.'
+                    : 'Your site will be set up as soon as your payment is confirmed. You can follow it under Billing.'}
                 </p>
                 <div className="flex items-center gap-2 bg-indigo-500/10 border border-indigo-500/20 rounded-lg px-4 py-3 mb-8">
                   <Globe className="size-4 text-indigo-500" />
@@ -636,14 +802,29 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                   </span>
                   <ExternalLink className="size-3 text-indigo-500" />
                 </div>
-                <Button
-                  size="lg"
-                  className="bg-indigo-500 hover:bg-indigo-600 text-white px-10 h-12 text-base"
-                  onClick={onComplete}
-                >
-                  Go to Dashboard
-                  <ArrowRight className="size-4 ms-2" />
-                </Button>
+                <div className="flex flex-col sm:flex-row gap-3">
+                  {selectedDomain && !useFreeSubdomain && (
+                    <Button
+                      size="lg"
+                      className="bg-indigo-500 hover:bg-indigo-600 text-white px-8 h-12 text-base"
+                      onClick={registerChosenDomain}
+                    >
+                      <Globe className="size-4 me-2" />
+                      Register {selectedDomain}
+                    </Button>
+                  )}
+                  <Button
+                    size="lg"
+                    variant={selectedDomain && !useFreeSubdomain ? 'outline' : 'default'}
+                    className={selectedDomain && !useFreeSubdomain
+                      ? 'px-8 h-12 text-base'
+                      : 'bg-indigo-500 hover:bg-indigo-600 text-white px-10 h-12 text-base'}
+                    onClick={onComplete}
+                  >
+                    Go to Dashboard
+                    <ArrowRight className="size-4 ms-2" />
+                  </Button>
+                </div>
               </div>
             )}
           </CardContent>

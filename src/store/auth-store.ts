@@ -99,9 +99,45 @@ export async function apiFetch<T = any>(
   })
   if (!res.ok) {
     const data = await res.json().catch(() => ({ error: 'Request failed' }))
-    throw new Error(data.error || `Request failed with status ${res.status}`)
+    throw new ApiRequestError(res.status, data)
   }
   return res.json() as Promise<T>
+}
+
+/**
+ * Thrown by `apiFetch` for any non-2xx response. Still an `Error`, so existing
+ * `(err as Error).message` callers keep working; callers that need to react to
+ * the status (429, 503, 409…) or a machine code can read them here.
+ *
+ * The message prefers `error` (plain route handlers) and falls back to
+ * `message` (the `{ success, message, errors }` envelope), so envelope errors
+ * no longer surface as "Request failed with status 503".
+ */
+export class ApiRequestError extends Error {
+  readonly status: number
+  readonly code?: string
+  readonly retryAfter?: number
+  readonly body: Record<string, unknown>
+
+  constructor(status: number, body: unknown) {
+    const data = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>
+    const text =
+      (typeof data.error === 'string' && data.error) ||
+      (typeof data.message === 'string' && data.message) ||
+      `Request failed with status ${status}`
+    super(text)
+    this.name = 'ApiRequestError'
+    this.status = status
+    this.body = data
+    const firstError = Array.isArray(data.errors) ? (data.errors[0] as { code?: unknown } | undefined) : undefined
+    this.code =
+      typeof data.code === 'string'
+        ? data.code
+        : typeof firstError?.code === 'string'
+        ? firstError.code
+        : undefined
+    this.retryAfter = typeof data.retryAfter === 'number' ? data.retryAfter : undefined
+  }
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({

@@ -87,6 +87,10 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { apiFetch } from '@/store/auth-store'
+import {
+  availabilityOf, isPurchasable, availabilityErrorMessage, AVAILABILITY_COPY,
+  type AvailabilityState,
+} from '@/components/domains/domain-availability'
 import type { ProvisioningResult } from '@/lib/orchestration'
 
 // ─── Types ────────────────────────────────────────────────────────────────
@@ -139,14 +143,20 @@ interface ProvisioningJob {
   steps?: ProvisioningStep[]
 }
 
+/**
+ * GET /api/provisioning/check-domain. `price` is only sent for an available
+ * name on a priced, active TLD; 503 = registrar could not confirm; 429 = rate
+ * limited. `state` is what the UI renders; `available` alone is never enough.
+ */
 interface DomainCheck {
   domain: string
   valid: boolean
   available: boolean
+  state?: AvailabilityState
   price?: number
   demoMode?: boolean
   message?: string
-  suggestions?: Array<{ domain: string; available: boolean; price?: number }>
+  suggestions?: Array<{ domain: string; available: boolean; status?: string; price?: number }>
 }
 
 interface JobStatusResponse {
@@ -407,21 +417,38 @@ function NewProvisioningDialog({
     debounceRef.current = setTimeout(() => {
       apiFetch<unknown>(`/provisioning/check-domain?domain=${encodeURIComponent(domain)}`)
         .then((data) => {
-          const resp = data as { domain?: string; available?: boolean; price?: number; alternatives?: Array<{ domain: string; available: boolean; price: number }> }
+          const resp = data as {
+            domain?: string
+            available?: boolean
+            status?: string
+            price?: number
+            alternatives?: Array<{ domain: string; available: boolean; status?: string; price?: number }>
+          }
+          const state = availabilityOf({
+            status: resp.status,
+            available: resp.available ?? null,
+            price: resp.price ?? null,
+          })
           setDomainCheck({
             domain: resp.domain || domain,
             valid: true,
-            available: resp.available ?? false,
-            price: resp.price,
-            suggestions: resp.alternatives,
+            available: state === 'available',
+            state,
+            price: state === 'available' ? resp.price : undefined,
+            message: state === 'available' ? undefined : AVAILABILITY_COPY[state].detail,
+            // Only priced, available alternatives are worth offering.
+            suggestions: resp.alternatives?.filter((a) =>
+              isPurchasable({ status: a.status, available: a.available, price: a.price ?? null })
+            ),
           })
         })
-        .catch(() => {
+        .catch((err) => {
           setDomainCheck({
             domain,
             valid: true,
             available: false,
-            message: 'Unable to check availability right now.',
+            state: 'unknown',
+            message: availabilityErrorMessage(err),
           })
         })
         .finally(() => setDomainChecking(false))
@@ -435,9 +462,12 @@ function NewProvisioningDialog({
   const totalPrice =
     domainPrice + (includeHosting ? HOSTING_PRICE : 0) + (includeEmail ? EMAIL_PRICE : 0)
 
+  // Only an available name with a real selling price can be provisioned:
+  // premium, unknown and unpriced results are never submittable.
   const canSubmit =
     DOMAIN_REGEX.test(domain) &&
     domainCheck?.available &&
+    !!domainCheck.price &&
     !submitting &&
     (includeHosting || includeEmail)
 
@@ -525,11 +555,11 @@ function NewProvisioningDialog({
                 ) : (
                   <AlertTriangle className="size-3.5 mt-0.5 shrink-0" />
                 )}
-                <span>
+                <span role="status">
                   {domainCheck.valid
                     ? domainCheck.available
-                      ? `Available${domainCheck.price ? ` · $${domainCheck.price.toFixed(2)}/yr` : ''}${domainCheck.demoMode ? ' (demo)' : ''}`
-                      : `Not available${domainCheck.message ? ` · ${domainCheck.message}` : ''}`
+                      ? `Available${domainCheck.price ? ` · ${domainCheck.price.toFixed(2)}/yr` : ''}${domainCheck.demoMode ? ' (demo)' : ''}`
+                      : `${AVAILABILITY_COPY[domainCheck.state ?? 'unknown'].label}${domainCheck.message ? ` · ${domainCheck.message}` : ''}`
                     : domainCheck.message || 'Invalid domain'}
                 </span>
               </div>
