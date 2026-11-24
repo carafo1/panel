@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { db } from '@/lib/db'
 import ZAI from 'z-ai-web-dev-sdk'
+import fs from 'node:fs'
+import path from 'node:path'
 import { semanticSearch, isPgvectorEnabled } from '@/lib/embeddings'
 
 // ── In-memory conversation store ────────────────────────────────────────
@@ -26,6 +28,35 @@ Guidelines:
 - When suggesting commands or code, use markdown code blocks.
 - When referencing a project, mention its status (running/failed/stopped) if relevant.
 - For deployment failures, look at the build log snippet in the context to diagnose the issue.`
+
+/**
+ * The AI SDK reads its credentials from a .z-ai-config file (project folder,
+ * home folder or /etc). Production had none, so every message failed with
+ * "Failed to generate response". Without it the assistant now says so and
+ * still answers from the customer's own account data.
+ */
+function isAiConfigured(): boolean {
+  const home = process.env.HOME || process.env.USERPROFILE || ''
+  return [path.join(process.cwd(), '.z-ai-config'), home && path.join(home, '.z-ai-config'), '/etc/.z-ai-config']
+    .filter(Boolean)
+    .some((p) => {
+      try {
+        return fs.statSync(p as string).isFile()
+      } catch {
+        return false
+      }
+    })
+}
+
+const NOT_CONFIGURED_NOTE =
+  'AI answers are not switched on for this panel yet. ' +
+  'For how-to questions, see the Help Center (Support → Help Center); for anything about your account, open a ticket under Support and our team will reply.'
+
+/** A useful reply without a language model: the customer's own data, plus where to go next. */
+function offlineReply(userContext: string | null): string {
+  if (!userContext) return NOT_CONFIGURED_NOTE
+  return `${NOT_CONFIGURED_NOTE}\n\nHere is what I can see on your account:\n\n${userContext.replace(/^## User Context[^\n]*\n/, '')}`
+}
 
 // Lazy-init ZAI singleton
 let zaiInstance: Awaited<ReturnType<typeof ZAI.create>> | null = null
@@ -235,14 +266,26 @@ export async function POST(request: Request) {
         ]
       : history
 
-    // Call LLM
-    const zai = await getZAI()
-    const completion = await zai.chat.completions.create({
-      messages: augmentedHistory,
-      thinking: { type: 'disabled' },
-    })
-
-    const aiResponse = completion.choices?.[0]?.message?.content || 'Sorry, I could not generate a response. Please try again.'
+    // Call LLM — or, with no AI provider configured (or it failing), answer
+    // honestly from the account data instead of returning an error.
+    let aiResponse: string
+    let aiAvailable = isAiConfigured()
+    if (aiAvailable) {
+      try {
+        const zai = await getZAI()
+        const completion = await zai.chat.completions.create({
+          messages: augmentedHistory,
+          thinking: { type: 'disabled' },
+        })
+        aiResponse = completion.choices?.[0]?.message?.content || 'Sorry, I could not generate a response. Please try again.'
+      } catch (err) {
+        console.error('[assistant] AI provider failed:', err instanceof Error ? err.message : err)
+        aiAvailable = false
+        aiResponse = offlineReply(userContext ?? (await getUserSummary(decoded.userId)))
+      }
+    } else {
+      aiResponse = offlineReply(userContext ?? (await getUserSummary(decoded.userId)))
+    }
 
     // Add AI response to history
     history.push({ role: 'assistant', content: aiResponse })
@@ -259,6 +302,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       response: aiResponse,
       sessionId,
+      aiAvailable,
     })
   } catch (error) {
     console.error('[Assistant API Error]', error)

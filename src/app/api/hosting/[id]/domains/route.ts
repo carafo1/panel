@@ -70,7 +70,11 @@ export async function GET(
       connection?: ReturnType<typeof describeConnection>
     }> = []
 
-    if (project.customDomain) {
+    // Legacy sites keep their primary only in project.customDomain. When a
+    // WebsiteDomain row exists for the same name it is the real record, and
+    // listing both showed the domain twice.
+    const hasRow = (name: string) => rows.some((r) => r.domain.toLowerCase() === name.toLowerCase())
+    if (project.customDomain && !hasRow(project.customDomain)) {
       domains.push({
         id: 'primary',
         domain: project.customDomain,

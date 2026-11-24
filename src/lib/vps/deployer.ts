@@ -1000,6 +1000,38 @@ async function deployMethodProject(
   // Provision database for WordPress/Laravel BEFORE writing the Dockerfile.
   if (method.needsDatabase) {
     await runStage('provision_database', 'Provisioning database…', async () => {
+      // A redeploy keeps the site's database. This used to provision a NEW
+      // database container on every deploy, so a site collected one MariaDB
+      // container per redeploy (RAM, the plan's database limit) and its
+      // content stayed behind in the old one.
+      const current = await db.project.findUnique({
+        where: { id: projectId },
+        select: { databaseHost: true, databaseName: true, databasePassword: true },
+      })
+      if (current?.databaseHost && current.databaseName && current.databasePassword) {
+        const host = current.databaseHost
+        const state = await withConnection(creds, (client) =>
+          exec(client, `docker inspect -f '{{.State.Status}}' ${shellQuote(host)} 2>/dev/null || echo missing`, {
+            timeoutMs: 15000,
+          })
+        )
+        const status = state.stdout.trim()
+        if (status === 'running') {
+          stageLog(`Reusing the site's database (${current.databaseName}).`)
+          return
+        }
+        if (status && status !== 'missing') {
+          const started = await withConnection(creds, (client) =>
+            exec(client, `docker start ${shellQuote(host)} 2>&1`, { timeoutMs: 30000 })
+          )
+          if (started.exitCode === 0) {
+            stageLog(`Started the site's database again (${current.databaseName}).`)
+            return
+          }
+          stageLog(`The site's database container could not be started: ${started.stdout.trim().slice(0, 200)}`)
+        }
+        stageLog('The site\'s database container is gone — provisioning a new one.')
+      }
       const pdb = await provisionProjectDatabase(projectId, {
         type: 'mariadb',
         onLog: stageLog,

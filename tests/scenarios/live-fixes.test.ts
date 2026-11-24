@@ -140,3 +140,26 @@ describe('uploads above the proxy body limit', () => {
     expect(res.status).toBe(413)
   })
 })
+
+describe('site domain list', () => {
+  it('lists a domain once when it is both the primary and a domain record', async () => {
+    const p = await makeProject(owner.id)
+    const domain = `${uid('once')}.com`.toLowerCase()
+    await db.project.update({ where: { id: p.id }, data: { customDomain: domain } })
+    await db.websiteDomain.create({ data: { projectId: p.id, domain, verified: true, isPrimary: true } })
+    const res = await domainsRoute.GET(authed(owner.token, `/api/hosting/${p.id}/domains`), params({ id: p.id }))
+    const body = await res.json()
+    expect(body.domains.filter((d: { domain: string }) => d.domain === domain)).toHaveLength(1)
+  })
+})
+
+describe('AI assistant without an AI provider', () => {
+  it('answers honestly instead of failing', async () => {
+    const chat = await import('@/app/api/assistant/chat/route')
+    const res = await chat.POST(authed(owner.token, '/api/assistant/chat', { method: 'POST', body: JSON.stringify({ message: 'show my projects' }) }))
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.aiAvailable).toBe(false)
+    expect(body.response).toMatch(/not switched on/i)
+  })
+})
