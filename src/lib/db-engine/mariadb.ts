@@ -13,7 +13,7 @@
  *     with `--raw --skip-column-names`, giving faithfully-typed values and
  *     unambiguous NULLs.
  */
-import { execSql, execDump, parseBatchTsv } from './exec'
+import { execSql, execDump, parseBatchTsv, friendlyContainerError, type ExecResult } from './exec'
 import type {
   TenantDbConnection,
   QueryResult,
@@ -62,6 +62,33 @@ export function parseSqlError(stderr: string): ParsedSqlError {
   return { message: line }
 }
 
+/**
+ * Why a client run failed, in words the customer can act on.
+ *
+ * Only the client's stderr used to be read, so a failure that printed
+ * nothing there (docker reporting a missing container or binary on stdout, a
+ * client crash) reached the customer as a bare "Query failed" — even for
+ * SELECT 1 — with nothing in the logs. SQL errors keep their real message;
+ * infrastructure failures get a plain explanation; the raw output is logged.
+ */
+export function execFailure(r: ExecResult): ParsedSqlError {
+  if (/^ERROR\s+\d+/im.test(r.stderr)) return parseSqlError(r.stderr)
+  if (r.timedOut) return { message: 'The database took too long to respond. Please try again.' }
+  const raw = `${r.stderr}\n${r.stdout}`.trim()
+  console.error('[db-engine] database client failed', { code: r.code, output: raw.slice(0, 500) })
+  if (/executable file not found|no such container|is not running|is not up|cannot connect to the docker daemon|permission denied|oci runtime/i.test(raw)) {
+    return { message: friendlyContainerError(raw, 'The database') }
+  }
+  if (/can't connect|connection refused|unknown database|access denied/i.test(raw)) {
+    return { message: `The database could not be opened: ${raw.split('\n')[0].slice(0, 200)}` }
+  }
+  return {
+    message: raw
+      ? raw.split('\n')[0].slice(0, 200)
+      : `The database client stopped without an error message (exit code ${r.code ?? 'unknown'}).`,
+  }
+}
+
 /** Classify the leading verb of a statement (best-effort, comment-stripped). */
 export function classifyCommand(sql: string): SqlCommand {
   const s = sql
@@ -105,7 +132,7 @@ async function queryJson<T>(
     clientArgs: ['--batch', '--raw', '--skip-column-names'],
   })
   if (!r.ok) {
-    const e = parseSqlError(r.stderr)
+    const e = execFailure(r)
     throw Object.assign(new Error(e.message), e)
   }
   const text = r.stdout.trim()
@@ -154,7 +181,7 @@ export async function runStatement(
   })
 
   if (!r.ok) {
-    const e = parseSqlError(r.stderr)
+    const e = execFailure(r)
     throw Object.assign(new Error(e.message), { command, ...e })
   }
 
@@ -580,7 +607,7 @@ export async function dumpDatabase(
     extraArgs,
   })
   if (!r.ok) {
-    const e = parseSqlError(r.stderr)
+    const e = execFailure(r)
     throw Object.assign(new Error(e.message || 'Export failed'), e)
   }
   return { sql: r.stdout, durationMs: r.durationMs }
@@ -609,7 +636,7 @@ export async function importSql(
     clientArgs: ['--batch'],
   })
   if (!r.ok) {
-    const e = parseSqlError(r.stderr)
+    const e = execFailure(r)
     return { ok: false, error: e.message || r.stderr.slice(0, 300), durationMs: r.durationMs }
   }
   return { ok: true, durationMs: r.durationMs }

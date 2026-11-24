@@ -269,6 +269,7 @@ export async function sweepPendingDomains(): Promise<DomainSweepResult> {
         verificationToken: true,
         sslEnabled: true,
         connectionMethod: true,
+        zoneCreated: true,
         createdAt: true,
         project: { select: { userId: true, name: true } },
       },
@@ -335,6 +336,15 @@ export async function sweepPendingDomains(): Promise<DomainSweepResult> {
           where: { id: row.id },
           data: { verificationToken: token },
         })
+      }
+
+      // The zone must exist BEFORE the check: once the registry delegates
+      // to us, nothing resolves until we answer for the domain, so a check
+      // that waits for the delegation to resolve could never succeed (our
+      // nameserver answered REFUSED and the domain stayed "waiting for
+      // nameservers" forever). See publishPendingZone.
+      if (row.connectionMethod !== 'manual' && !row.zoneCreated) {
+        await publishPendingZone(row.id, row.domain)
       }
 
       const result = await checkOwnership({
@@ -596,6 +606,33 @@ export async function probeHttps(
  *
  * Idempotent and safe to call repeatedly.
  */
+/**
+ * Publish the DNS zone for a domain the customer is connecting by
+ * nameservers, before ownership is verified.
+ *
+ * Why before: the registrar change makes our nameservers the only source of
+ * answers for the domain. Until the zone exists they answer REFUSED, the
+ * domain resolves nowhere, and the delegation check (which resolves the
+ * domain's NS records) can never see it — a deadlock. Hosted DNS providers
+ * create the zone when the domain is added for the same reason.
+ *
+ * Safe before verification: resolvers only ask our nameservers about a
+ * domain when its registry delegates it to us, which is itself the proof of
+ * control; nothing is served by the web proxy until the domain is verified;
+ * and the domain name is unique platform-wide. Creating the zone this early
+ * also lets ensureZoneForDomain copy the customer's existing records (MX,
+ * TXT, ...) while their old nameservers still answer.
+ *
+ * Best-effort: a failure is logged and retried by the sweep.
+ */
+export async function publishPendingZone(domainRowId: string, domain: string): Promise<void> {
+  const r = await ensureZoneForDomain({ domainRowId, domain }).catch((err: unknown) => ({
+    ok: false,
+    detail: err instanceof Error ? err.message : String(err),
+  }))
+  if (!r.ok) console.error('[dns-zone] could not publish zone for', domain, '-', r.detail)
+}
+
 export async function ensureZoneForDomain(opts: {
   domainRowId: string
   domain: string

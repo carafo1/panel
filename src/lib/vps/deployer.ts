@@ -498,6 +498,79 @@ const COMPOSE_FILE_NAMES = [
  * generated Dockerfile" into "overwrite any file on the host". A symlink at
  * one of these names is never something we want to keep.
  */
+/**
+ * Write the managed wp-config-docker.php (mounted over wp-config.php) with the
+ * site's real database credentials. Idempotent; safe before or after the
+ * container starts.
+ *
+ * Repairs the state an earlier failed deploy left behind: Docker creates an
+ * empty DIRECTORY for a missing bind-mount source, and writing a file there
+ * failed with EISDIR. An empty directory is removed; a non-empty one is
+ * refused (it is not ours to delete).
+ */
+async function writeWordPressConfig(
+  client: Parameters<typeof exec>[0],
+  projectId: string,
+  deployPath: string,
+  log: (m: string) => void
+): Promise<void> {
+  // Re-fetch the DB credentials from the Project row: the caller's in-memory
+  // project may predate provision_database, and placeholder values break the
+  // site with "Error establishing a database connection".
+  const freshDb = await db.project.findUnique({
+    where: { id: projectId },
+    select: { databaseHost: true, databaseName: true, databaseUser: true, databasePassword: true },
+  })
+  const dbHost = freshDb?.databaseHost || 'db'
+  const dbName = freshDb?.databaseName || 'wp'
+  const dbUser = freshDb?.databaseUser || 'wp'
+  let dbPass = ''
+  if (freshDb?.databasePassword) {
+    try {
+      const { decrypt } = await import('@/lib/encryption')
+      dbPass = decrypt(freshDb.databasePassword)
+    } catch {
+      dbPass = ''
+    }
+  }
+  if (!freshDb?.databaseHost) {
+    log('WARNING: no provisioned database found on the project row — wp-config will contain placeholder DB values.')
+  }
+  const cfg = `<?php
+// Behind the Caddy reverse proxy WordPress must trust X-Forwarded-Proto,
+// otherwise it emits http:// asset URLs on https pages and the browser
+// blocks them (mixed-content / unstyled admin + install pages).
+if (isset(\$_SERVER['HTTP_X_FORWARDED_PROTO']) && \$_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') {
+    \$_SERVER['HTTPS'] = 'on';
+    \$_SERVER['SERVER_PORT'] = 443;
+}
+define('DB_NAME',     ${JSON.stringify(dbName)});
+define('DB_USER',     ${JSON.stringify(dbUser)});
+define('DB_PASSWORD', ${JSON.stringify(dbPass)});
+define('DB_HOST',     ${JSON.stringify(dbHost)});
+define('DB_CHARSET', 'utf8mb4');
+define('DB_COLLATE', '');
+\$table_prefix = 'wp_';
+define('WP_DEBUG', false);
+if (!defined('ABSPATH')) define('ABSPATH', dirname(__FILE__) . '/');
+require_once ABSPATH . 'wp-settings.php';
+`
+  const target = `${deployPath}/wp-config-docker.php`
+  const fix = await exec(
+    client,
+    `if [ -d ${shellQuote(target)} ] && [ ! -L ${shellQuote(target)} ]; then rmdir ${shellQuote(target)} 2>/dev/null && echo REMOVED_EMPTY_DIR || { echo NOT_EMPTY; exit 3; }; fi`,
+    { timeoutMs: 10000 }
+  )
+  if (fix.exitCode === 3) {
+    throw new Error('wp-config-docker.php is a folder with files in it. Remove or rename that folder, then redeploy.')
+  }
+  if (fix.stdout.includes('REMOVED_EMPTY_DIR')) {
+    log('Removed an empty wp-config-docker.php folder left by an earlier failed deploy.')
+  }
+  await unlinkSymlinks(client, deployPath, ['wp-config-docker.php'])
+  await putFile(client, target, cfg, { mode: 0o644 })
+}
+
 async function unlinkSymlinks(
   client: Parameters<typeof exec>[0],
   deployPath: string,
@@ -1161,6 +1234,14 @@ async function deployMethodProject(
   // Start container.
   await runStage('start_container', 'Starting container…', async () => {
     await withConnection(creds, async (client) => {
+      // WordPress bind-mounts ./wp-config-docker.php. If the file does not
+      // exist when the container is created, Docker creates a DIRECTORY at
+      // that path; the install step then failed with EISDIR and the site was
+      // left broken (sites built from uploaded files never had the file).
+      // Write the real config first.
+      if (methodId === 'wordpress') {
+        await writeWordPressConfig(client, projectId, deployPath, stageLog)
+      }
       // From here on the previous container may be stopped or replaced.
       deployState.containerReplaced = true
       const upGen = execStream(
@@ -1266,57 +1347,8 @@ async function deployMethodProject(
           await db.project.update({ where: { id: projectId }, data: { wpAdminPassword: encrypt(adminPass) } })
           stageLog('No admin password was chosen — generated a random one (see the WordPress tab).')
         }
-        // Re-fetch the DB credentials from the Project row. The in-memory
-        // `project` object was loaded BEFORE provision_database ran, so its
-        // database* fields are still null here — reading them directly used to
-        // write placeholder values ('db'/'wp'/empty password) into wp-config,
-        // which breaks the site with "Error establishing a database connection".
-        const freshDb = await db.project.findUnique({
-          where: { id: projectId },
-          select: {
-            databaseHost: true,
-            databaseName: true,
-            databaseUser: true,
-            databasePassword: true,
-          },
-        })
-        const dbHost = freshDb?.databaseHost || 'db'
-        const dbName = freshDb?.databaseName || 'wp'
-        const dbUser = freshDb?.databaseUser || 'wp'
-        let dbPass = ''
-        if (freshDb?.databasePassword) {
-          try {
-            const { decrypt } = await import('@/lib/encryption')
-            dbPass = decrypt(freshDb.databasePassword)
-          } catch {
-            dbPass = ''
-          }
-        }
-        if (!freshDb?.databaseHost) {
-          stageLog('WARNING: no provisioned database found on the project row — wp-config will contain placeholder DB values.')
-        }
-        // Write wp-config.php constants via docker exec sed.
-        const cfg = `<?php
-// Behind the Caddy reverse proxy WordPress must trust X-Forwarded-Proto,
-// otherwise it emits http:// asset URLs on https pages and the browser
-// blocks them (mixed-content / unstyled admin + install pages).
-if (isset(\$_SERVER['HTTP_X_FORWARDED_PROTO']) && \$_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') {
-    \$_SERVER['HTTPS'] = 'on';
-    \$_SERVER['SERVER_PORT'] = 443;
-}
-define('DB_NAME',     ${JSON.stringify(dbName)});
-define('DB_USER',     ${JSON.stringify(dbUser)});
-define('DB_PASSWORD', ${JSON.stringify(dbPass)});
-define('DB_HOST',     ${JSON.stringify(dbHost)});
-define('DB_CHARSET', 'utf8mb4');
-define('DB_COLLATE', '');
-\$table_prefix = 'wp_';
-define('WP_DEBUG', false);
-if (!defined('ABSPATH')) define('ABSPATH', dirname(__FILE__) . '/');
-require_once ABSPATH . 'wp-settings.php';
-`
-        await unlinkSymlinks(client, deployPath, ['wp-config-docker.php'])
-        await putFile(client, `${deployPath}/wp-config-docker.php`, cfg, { mode: 0o644 })
+        // Same managed config as before the container started (idempotent).
+        await writeWordPressConfig(client, projectId, deployPath, stageLog)
         // Run wp core install via the wp-cli container.
         const url = `https://${project.customDomain || project.subdomain}`
         // --user 33:33: the apache image serves files as www-data (uid 33); the

@@ -25,6 +25,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { toast } from 'sonner'
+import { PROXY_BODY_LIMIT_BYTES, formatMegabytes } from '@/lib/request-limits'
 import {
   Database as DatabaseIcon,
   HardDrive,
@@ -1905,6 +1906,14 @@ export function FilesTab({ projectId }: { projectId: string }) {
   }
 
   const handleUpload = async (file: File, targetPath: string) => {
+    // Same limit the server enforces (PROXY_BODY_LIMIT_BYTES): say so before
+    // sending hundreds of MB that would be refused at the end.
+    if (file.size > PROXY_BODY_LIMIT_BYTES) {
+      toast.error(
+        `${file.name} is too large to upload here (max ${formatMegabytes(PROXY_BODY_LIMIT_BYTES)}). Use SFTP access, or Import Site for a full website archive.`
+      )
+      return
+    }
     setUploading(true)
     setUploadProgress(0)
     try {

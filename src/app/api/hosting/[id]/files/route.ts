@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { PROXY_BODY_LIMIT_BYTES, exceedsProxyBodyLimit, formatMegabytes } from '@/lib/request-limits'
 import { authenticateRequest } from '@/lib/auth'
 import { requireProjectAccess } from '@/lib/project-access'
 import { PathError } from '@/lib/vps/files'
@@ -19,7 +20,10 @@ import {
 } from '@/lib/vps'
 
 // Cap import archive size to avoid buffering an unbounded upload into memory.
-const MAX_IMPORT_BYTES = 512 * 1024 * 1024 // 512 MB
+// Upload / import of one file through the panel. Bounded by what the proxy
+// passes through (see request-limits.ts); larger sites use SFTP or the
+// chunked site import.
+const MAX_IMPORT_BYTES = PROXY_BODY_LIMIT_BYTES
 
 /**
  * Project Files Endpoint (collection)
@@ -120,10 +124,22 @@ export async function POST(
 
     const contentType = (request.headers.get('content-type') || '').toLowerCase()
     if (contentType.startsWith('multipart/form-data')) {
-      // File upload.
+      // File upload. Refuse a body the proxy would cut off before reading it:
+      // a truncated body only fails as "Could not parse multipart form".
+      if (exceedsProxyBodyLimit(request)) {
+        return NextResponse.json(
+          {
+            error: `This file is too large to upload here (max ${formatMegabytes(MAX_IMPORT_BYTES)}). Use SFTP access, or Import Site for a full website archive.`,
+          },
+          { status: 413 }
+        )
+      }
       const formData = await request.formData().catch(() => null)
       if (!formData) {
-        return NextResponse.json({ error: 'Could not parse multipart form' }, { status: 400 })
+        return NextResponse.json(
+          { error: 'The upload did not arrive complete. Please try again.' },
+          { status: 400 }
+        )
       }
       const file = formData.get('file')
       const pathField = formData.get('path')

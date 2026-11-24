@@ -16,6 +16,14 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: false,
   },
   reactStrictMode: false,
+  experimental: {
+    // Request bodies passing through src/proxy.ts are buffered and cut off
+    // at this size (default 10 MB, silently), which broke every upload over
+    // 10 MB. Keep in sync with PROXY_BODY_LIMIT_BYTES in
+    // src/lib/request-limits.ts; upload routes refuse anything larger with a
+    // clear 413, and big files use the chunked site import or SFTP.
+    proxyClientMaxBodySize: 100 * 1024 * 1024,
+  },
   // SECURITY: hide Next.js version from HTTP response headers
   poweredByHeader: false,
   // SECURITY: comprehensive security headers applied to every response
