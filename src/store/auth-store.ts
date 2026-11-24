@@ -217,8 +217,23 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const data = await apiFetch<{ user: User }>('/auth/me')
       set({ user: data.user, isAuthenticated: true, isLoading: false })
-    } catch {
-      set({ user: null, isAuthenticated: false, isLoading: false })
+    } catch (err) {
+      // Only the server saying "not signed in" ends the session. A rate limit
+      // (429), a server error or a dropped connection used to sign the
+      // customer out too; now the current state is kept and the check is
+      // retried shortly.
+      const status = err instanceof ApiRequestError ? err.status : 0
+      if (status === 401 || status === 403) {
+        set({ user: null, isAuthenticated: false, isLoading: false })
+        return
+      }
+      set({ isLoading: false })
+      if (typeof window !== 'undefined') {
+        const waitSec = err instanceof ApiRequestError && err.retryAfter ? err.retryAfter : 5
+        setTimeout(() => {
+          void get().loadUser()
+        }, Math.min(Math.max(waitSec, 2), 60) * 1000)
+      }
     }
   },
 

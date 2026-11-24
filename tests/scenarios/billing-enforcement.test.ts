@@ -5,7 +5,12 @@
  * Guards the bug where renewal set an unpaid subscription back to 'active'
  * every period, so a customer who never paid was never suspended.
  */
-import { describe, it, expect, beforeAll } from 'bun:test'
+import { describe, it, expect, beforeAll, setDefaultTimeout } from 'bun:test'
+
+// The billing sweep is global: it processes every subscription in the shared
+// scenario database, including those other test files leave behind, so its
+// run time grows with the suite. 5 s (the default) was hit by legitimate work.
+setDefaultTimeout(30_000)
 import { db } from '@/lib/db'
 import { runAutoRenewals } from '@/lib/renewals'
 import { markInvoicePaid } from '@/lib/invoices'

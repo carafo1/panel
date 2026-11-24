@@ -352,7 +352,9 @@ interface RouteLimit {
  */
 function getRouteLimit(pathname: string): RouteLimit {
   if (pathname === '/api/auth/login') {
-    return { type: 'auth:login', limit: 5 }
+    // Same as the login route's own limiter (10/min); 5 here made the
+    // route's limit unreachable and its error message wrong.
+    return { type: 'auth:login', limit: 10 }
   }
   if (pathname === '/api/auth/register') {
     return { type: 'auth:register', limit: 3 }
@@ -366,7 +368,10 @@ function getRouteLimit(pathname: string): RouteLimit {
   if (pathname === '/api/domains/search') {
     return { type: 'domains:search', limit: 20 }
   }
-  return { type: 'api:default', limit: 100 }
+  // One signed-in person browsing the panel makes a few hundred API calls a
+  // minute (every website section loads its own data). At 100 the limit was
+  // reached by normal use and the 429 on /api/auth/me signed customers out.
+  return { type: 'api:default', limit: 600 }
 }
 
 /** Periodically purge expired entries so the Map doesn't grow unbounded. */

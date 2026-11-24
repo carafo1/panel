@@ -216,6 +216,7 @@ function Dashboard() {
             variant="ghost"
             size="icon"
             className="ms-auto lg:hidden"
+            aria-label={t('closeMenu')}
             onClick={() => setSidebarOpen(false)}
           >
             <X className="size-5" />
@@ -277,6 +278,7 @@ function Dashboard() {
             variant="ghost"
             size="icon"
             className="lg:hidden"
+            aria-label={t('openMenu')}
             onClick={() => setSidebarOpen(true)}
           >
             <Menu className="size-5" />

@@ -168,17 +168,21 @@ function ResponseTimeChart({ data }: { data: Array<{ date: string; avg: number; 
                 <div className="border-b border-border/40" />
               </div>
               {/* SVG line chart */}
-              <svg className="absolute inset-0 w-full h-full" preserveAspectRatio="none">
+              {/* Lines: SVG points cannot use percentages ("0%,160" was rejected and
+                  nothing was drawn), so they use a 0-100 x-axis stretched to the
+                  width; non-scaling strokes keep the line width even. */}
+              <svg className="absolute inset-0 w-full h-full" viewBox={`0 0 100 ${chartHeight}`} preserveAspectRatio="none" aria-hidden="true">
                 {/* P95 line */}
                 <polyline
                   fill="none"
                   stroke="#f59e0b"
                   strokeWidth="2"
                   strokeLinejoin="round"
+                  vectorEffect="non-scaling-stroke"
                   points={data.map((d, i) => {
                     const x = (i / Math.max(data.length - 1, 1)) * 100
                     const y = chartHeight - (d.p95 / maxTime) * chartHeight
-                    return `${x}%,${y}`
+                    return `${x},${y}`
                   }).join(' ')}
                 />
                 {/* Average line */}
@@ -187,12 +191,15 @@ function ResponseTimeChart({ data }: { data: Array<{ date: string; avg: number; 
                   stroke="#10b981"
                   strokeWidth="2"
                   strokeLinejoin="round"
+                  vectorEffect="non-scaling-stroke"
                   points={data.map((d, i) => {
                     const x = (i / Math.max(data.length - 1, 1)) * 100
                     const y = chartHeight - (d.avg / maxTime) * chartHeight
-                    return `${x}%,${y}`
+                    return `${x},${y}`
                   }).join(' ')}
                 />
+              </svg>
+              <svg className="absolute inset-0 w-full h-full" preserveAspectRatio="none" aria-hidden="true">
                 {/* Data points - avg */}
                 {data.map((d, i) => {
                   const x = (i / Math.max(data.length - 1, 1)) * 100

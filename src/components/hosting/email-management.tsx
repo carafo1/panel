@@ -287,7 +287,11 @@ export function EmailManagement({ projectId }: { projectId: string }) {
         </div>
       ) : null}
 
-      {/* ── Management ── */}
+      {/* ── Management ── shown only once email is confirmed available: the
+          panels below load their own data, and mounting them while the
+          status was still loading made each one pop an error toast when
+          email turned out to be unavailable for this website. */}
+      {!loading && stats && (
       <Tabs defaultValue="aliases">
         <TabsList className="flex-wrap h-auto">
           <TabsTrigger value="aliases">
@@ -317,6 +321,7 @@ export function EmailManagement({ projectId }: { projectId: string }) {
           <LogsPanel projectId={projectId} />
         </TabsContent>
       </Tabs>
+      )}
     </div>
   )
 }
