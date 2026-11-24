@@ -312,7 +312,7 @@ export async function buildServerProxyConfigs(
     // proxy — that check is the whole point of the verify step.
     db.websiteDomain.findMany({
       where: { projectId: { in: ids }, verified: true },
-      select: { projectId: true, domain: true },
+      select: { projectId: true, domain: true, zoneCreated: true },
     }),
     db.domain.findMany({
       where: {
@@ -335,7 +335,19 @@ export async function buildServerProxyConfigs(
 
   const configs: ProxyConfig[] = allProjects.map((p) => ({
     hostname: servedHosts.get(p.id)!,
-    extraHostnames: allCustomDomains.filter((d) => d.projectId === p.id).map((d) => d.domain),
+    // A verified domain whose DNS zone we host also gets its www. name: every
+    // zone we publish has www as a CNAME to the domain, so leaving it out of
+    // the proxy made www.<domain> fail (no site, no certificate).
+    extraHostnames: [
+      ...new Set(
+        allCustomDomains
+          .filter((d) => d.projectId === p.id)
+          .flatMap((d) => {
+            const name = d.domain.toLowerCase()
+            return d.zoneCreated && !name.startsWith('www.') ? [name, `www.${name}`] : [name]
+          })
+      ),
+    ],
     // Localhost single-box: the host Caddy isn't on the docker network, so it
     // reaches the container via its published host port. Remote VPS: Caddy
     // shares the deployhub network and resolves the container name.
