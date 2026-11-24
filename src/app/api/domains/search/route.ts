@@ -40,6 +40,18 @@ function availableFlag(status: DomainSearchStatus): boolean | null {
   return status === 'available' || status === 'premium'
 }
 
+/**
+ * A registrable domain name: labels of letters, digits and inner hyphens
+ * (punycode "xn--" allowed), at least one dot, a letter-only (or xn--) TLD.
+ * Anything else used to be sent to the registrar, come back as "unknown", and
+ * be shown as "we couldn't check right now, try again" instead of "invalid".
+ */
+const DOMAIN_RE = /^(?=.{3,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:[a-z]{2,63}|xn--[a-z0-9-]{1,59})$/
+function isSearchableDomain(name: string): boolean {
+  return DOMAIN_RE.test(name)
+}
+const INVALID_DOMAIN_MESSAGE = 'Enter a valid domain name, for example mybrand.com'
+
 function unknownResponse() {
   return fail('We could not confirm whether this domain is available. Please try again.', {
     status: 503,
@@ -65,6 +77,7 @@ async function getHandler(request: Request) {
     }
 
     const domainLower = domain.toLowerCase().trim()
+    if (!isSearchableDomain(domainLower)) return apiError.badRequest(INVALID_DOMAIN_MESSAGE)
     const tld = tldFromDomain(domainLower)
 
     const [primary] = await lookup([domainLower])
@@ -154,6 +167,10 @@ async function postHandler(request: Request) {
       if (cleaned.length > 50) {
         return apiError.badRequest('Maximum 50 domains per bulk search')
       }
+      const invalid = cleaned.filter((d) => !isSearchableDomain(d))
+      if (invalid.length > 0) {
+        return apiError.badRequest(`Not a valid domain name: ${invalid.slice(0, 5).join(', ')}`)
+      }
       const results = await lookup(cleaned)
       const allPrices = await getAllPrices()
       const priced = results.map((r) => {
@@ -180,6 +197,9 @@ async function postHandler(request: Request) {
     }
 
     const domainLower = domain.toLowerCase().trim()
+    if (!isSearchableDomain(domainLower)) {
+      return NextResponse.json({ error: INVALID_DOMAIN_MESSAGE }, { status: 400 })
+    }
     const lastDot = domainLower.lastIndexOf('.')
     const tld = lastDot >= 0 ? domainLower.substring(lastDot) : ''
     const baseName = lastDot >= 0 ? domainLower.substring(0, lastDot) : domainLower
