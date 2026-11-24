@@ -2,6 +2,16 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { verifyTokenFresh, extractTokenFromHeader, requireAdminRole } from '@/lib/auth'
 
+/** A corrupt row must not break the whole admin list: show it raw instead. */
+function parseStored(value: string | null): unknown {
+  if (value == null) return null
+  try {
+    return JSON.parse(value)
+  } catch {
+    return { unparsable: value.slice(0, 2000) }
+  }
+}
+
 export async function GET(request: Request) {
   try {
     const authHeader = request.headers.get('Authorization')
@@ -58,7 +68,7 @@ export async function GET(request: Request) {
       jobs: jobs.map((j) => ({
         id: j.id,
         type: j.type,
-        payload: JSON.parse(j.payload),
+        payload: parseStored(j.payload),
         status: j.status,
         attempts: j.attempts,
         maxAttempts: j.maxAttempts,
@@ -66,7 +76,7 @@ export async function GET(request: Request) {
         startedAt: j.startedAt,
         completedAt: j.completedAt,
         error: j.error,
-        result: j.result ? JSON.parse(j.result) : null,
+        result: parseStored(j.result),
         createdAt: j.createdAt,
         updatedAt: j.updatedAt,
       })),
