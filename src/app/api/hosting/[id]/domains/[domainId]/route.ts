@@ -169,6 +169,22 @@ export async function DELETE(
 
     await db.websiteDomain.delete({ where: { id: domainId } })
 
+    // Remove the DNS zone published for this connection (it used to be left
+    // behind on our nameservers). Never for a domain held with us as a
+    // registered Domain: that zone serves the purchased domain too.
+    if (row.zoneCreated) {
+      const held = await db.domain.findFirst({
+        where: { name: row.domain.toLowerCase(), status: { not: 'deleted' } },
+        select: { id: true },
+      })
+      if (!held) {
+        const { deleteZone } = await import('@/lib/dns-zones')
+        await deleteZone(row.domain).catch((err: unknown) =>
+          console.error('[domains] zone removal failed for', row.domain, err)
+        )
+      }
+    }
+
     // If it was the primary, clear project.customDomain.
     if (row.isPrimary || project.customDomain === row.domain) {
       await db.project.update({

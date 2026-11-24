@@ -58,7 +58,6 @@ import {
   KeyRound,
   Cloud,
   Activity,
-  HardDriveUpload,
   ArrowRightLeft,
   Ban,
   LayoutDashboard,
@@ -86,6 +85,7 @@ import CreateWebsiteWizard from '@/components/hosting/create-website-wizard'
 import ImportWizard from '@/components/hosting/import-wizard'
 import ImportDashboard from '@/components/hosting/import-dashboard'
 import { EmailManagement } from '@/components/hosting/email-management'
+import { LazySection } from '@/components/hosting/lazy-section'
 import {
   Dialog,
   DialogContent,
@@ -143,7 +143,6 @@ import { SftpTab } from '@/components/hosting/sftp-tab'
 import { CdnTab } from '@/components/hosting/cdn-tab'
 import {
   CronTab,
-  FtpTab,
   RedirectsTab,
   SecurityTab,
 } from '@/components/hosting/cpanel-management-tabs'
@@ -165,7 +164,6 @@ const PROJECT_SUBTABS: { id: string; label: string; icon: React.ElementType }[] 
   { id: 'terminal', label: 'Terminal', icon: Terminal },
   { id: 'cron', label: 'Cron Jobs', icon: Clock },
   { id: 'sftp', label: 'SSH / SFTP', icon: KeyRound },
-  { id: 'ftp', label: 'FTP', icon: HardDriveUpload },
   { id: 'backups', label: 'Backups', icon: Archive },
   { id: 'staging', label: 'Staging', icon: FlaskConical },
   { id: 'import', label: 'Import', icon: HardDriveDownload },
@@ -3000,46 +2998,47 @@ function ProjectDetailView({
           Each is a self-contained Card component consuming its own REST endpoint.
           Each is wrapped in a <section> with an id so the sticky sub-tab bar
           can scroll the user straight to it. */}
-      <section id="databases" className="scroll-mt-32"><DatabaseTab projectId={project.id} /></section>
-      <section id="email" className="scroll-mt-32 space-y-4">
+      <LazySection id="databases"><DatabaseTab projectId={project.id} /></LazySection>
+      <LazySection id="email" className="space-y-4">
         <EmailTab projectId={project.id} />
         {/* Native management over Mailcow: aliases, forwarding, catch-all,
             spam policy, quarantine and activity logs. */}
         <EmailManagement projectId={project.id} />
-      </section>
+      </LazySection>
       {siteKind(project) === 'wordpress' && (
-        <section id="wordpress" className="scroll-mt-32"><WordPressTab projectId={project.id} /></section>
+        <LazySection id="wordpress"><WordPressTab projectId={project.id} /></LazySection>
       )}
       {siteKind(project) === 'apptools' && (
-        <section id="apptools" className="scroll-mt-32"><AppToolsTab projectId={project.id} /></section>
+        <LazySection id="apptools"><AppToolsTab projectId={project.id} /></LazySection>
       )}
-      <section id="backups" className="scroll-mt-32"><BackupsTab projectId={project.id} /></section>
+      <LazySection id="backups"><BackupsTab projectId={project.id} /></LazySection>
       {project.environment !== 'staging' && (
-        <section id="staging" className="scroll-mt-32"><StagingTab projectId={project.id} onOpenProject={onOpenProject} /></section>
+        <LazySection id="staging"><StagingTab projectId={project.id} onOpenProject={onOpenProject} /></LazySection>
       )}
       {/* Importing into an existing website replaces its files and database,
           so it lives beside Backups rather than in the creation flow — the
           customer should be one click from taking a backup first. */}
-      <section id="import" className="scroll-mt-32">
+      <LazySection id="import">
         <Card>
           <CardContent className="pt-6">
             <ImportDashboard projectId={project.id} projectName={project.name} />
           </CardContent>
         </Card>
-      </section>
-      <section id="files" className="scroll-mt-32"><FilesTab projectId={project.id} /></section>
-      <section id="terminal" className="scroll-mt-32"><TerminalTab projectId={project.id} /></section>
-      <section id="resources" className="scroll-mt-32"><ResourcesTab projectId={project.id} /></section>
-      <section id="domains" className="scroll-mt-32"><DomainsTab projectId={project.id} onProjectChanged={fetchProject} /></section>
-      <section id="cdn" className="scroll-mt-32"><CdnTab projectId={project.id} /></section>
+      </LazySection>
+      <LazySection id="files"><FilesTab projectId={project.id} /></LazySection>
+      <LazySection id="terminal"><TerminalTab projectId={project.id} /></LazySection>
+      <LazySection id="resources"><ResourcesTab projectId={project.id} /></LazySection>
+      <LazySection id="domains"><DomainsTab projectId={project.id} onProjectChanged={fetchProject} /></LazySection>
+      <LazySection id="cdn"><CdnTab projectId={project.id} /></LazySection>
 
       {/* ─── cPanel-style features (Phase 2-c upgrade) ─────────────────── */}
       {/* Cron + FTP near Files/Terminal; Redirects + Security near Domains. */}
-      <section id="cron" className="scroll-mt-32"><CronTab projectId={project.id} /></section>
-      <section id="sftp" className="scroll-mt-32"><SftpTab projectId={project.id} /></section>
-      <section id="ftp" className="scroll-mt-32"><FtpTab projectId={project.id} /></section>
-      <section id="redirects" className="scroll-mt-32"><RedirectsTab projectId={project.id} /></section>
-      <section id="security" className="scroll-mt-32"><SecurityTab projectId={project.id} /></section>
+      <LazySection id="cron"><CronTab projectId={project.id} /></LazySection>
+      <LazySection id="sftp"><SftpTab projectId={project.id} /></LazySection>
+      {/* FTP: no FTP server exists on the platform (accounts could never log in);
+          SFTP above is the real file-transfer feature. */}
+      <LazySection id="redirects"><RedirectsTab projectId={project.id} /></LazySection>
+      <LazySection id="security"><SecurityTab projectId={project.id} /></LazySection>
 
       {/* Danger Zone */}
       <Card className="border-red-200 dark:border-red-900/50">

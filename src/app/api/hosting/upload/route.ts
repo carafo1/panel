@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { PROXY_BODY_LIMIT_BYTES, exceedsProxyBodyLimit } from '@/lib/request-limits'
 import { authenticateRequest } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import {
@@ -149,6 +150,11 @@ async function handleSingleUpload(request: Request, userId: string) {
     if (!request.body) {
       return NextResponse.json({ error: 'Request has no body' }, { status: 400 })
     }
+    // The proxy keeps only the first PROXY_BODY_LIMIT_BYTES of a body; a
+    // larger stream would be stored cut off. Larger archives use chunks.
+    if (exceedsProxyBodyLimit(request)) {
+      return tooLarge(PROXY_BODY_LIMIT_BYTES, ' Upload it in chunks (the Import Site wizard does this automatically).')
+    }
     const meta = await storeUpload(userId, filename, request.body)
     return uploadResponse(request, userId, meta)
   }
@@ -158,6 +164,7 @@ async function handleSingleUpload(request: Request, userId: string) {
     // it is capped well below the upload limit — the wizard uses the
     // streaming path above for anything large.
     const multipartHint = ' Use the chunked or streaming upload for larger files.'
+    if (exceedsProxyBodyLimit(request)) return tooLarge(PROXY_BODY_LIMIT_BYTES, multipartHint)
     const declared = declaredLength(request)
     if (declared !== null && declared > MAX_MULTIPART_BYTES) {
       return tooLarge(MAX_MULTIPART_BYTES, multipartHint)

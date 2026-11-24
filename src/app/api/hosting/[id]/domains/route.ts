@@ -10,6 +10,7 @@ import {
   generateVerificationToken,
   getServerIps,
   VERIFY_PREFIX,
+  publishPendingZone,
   describeConnection,
 } from '@/lib/custom-domains'
 import { APSAMO_NAMESERVERS } from '@/lib/dns-zones'
@@ -217,6 +218,13 @@ export async function POST(
         verificationToken,
       },
     })
+
+    // Publish the DNS zone now for a nameserver connection (see
+    // publishPendingZone): the customer's next step is to point their
+    // nameservers here, and from that moment the domain must resolve.
+    if (row.connectionMethod !== 'manual') {
+      await publishPendingZone(row.id, row.domain)
+    }
 
     // NOTE: `project.customDomain` is deliberately NOT written here, even for
     // a primary. That column is what the Caddy generator emits, so writing it
