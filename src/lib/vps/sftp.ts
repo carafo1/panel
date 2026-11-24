@@ -34,7 +34,7 @@ Match Group ${SFTP_GROUP}
     PasswordAuthentication no
     KbdInteractiveAuthentication no
     ChrootDirectory ${SFTP_ROOT}/%u
-    ForceCommand internal-sftp -d /site -u 0002
+    ForceCommand internal-sftp -d /site -u 0002 -P symlink,hardlink
     AllowTcpForwarding no
     AllowAgentForwarding no
     AllowStreamLocalForwarding no

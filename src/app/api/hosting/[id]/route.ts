@@ -7,6 +7,7 @@ import { isAdmin } from '@/lib/security'
 import { requireProjectAccess } from '@/lib/project-access'
 import { emitWebhookEvent } from '@/lib/webhook-delivery'
 import { validateGitUrl } from '@/lib/vps/deploy-safety'
+import { toggleSsl } from '@/lib/vps/ssl'
 
 export async function GET(
   request: Request,
@@ -325,7 +326,10 @@ export async function PATCH(
 
     const updateData: Record<string, unknown> = {}
     if (typeof autoDeploy === 'boolean') updateData.autoDeploy = autoDeploy
-    if (typeof sslEnabled === 'boolean') updateData.sslEnabled = sslEnabled
+    // SSL goes through toggleSsl (below), which also rewrites the proxy and
+    // resets the certificate status. Writing only the flag left the database
+    // and the live web server disagreeing.
+    const sslChange = typeof sslEnabled === 'boolean' && sslEnabled !== project.sslEnabled
     if (typeof repoUrl === 'string') {
       const trimmed = repoUrl.trim()
       // Handed to git on the VPS and echoed back to the browser. Same rule as
@@ -343,10 +347,19 @@ export async function PATCH(
       }
     }
 
-    await db.project.update({
-      where: { id },
-      data: updateData,
-    })
+    if (Object.keys(updateData).length > 0) {
+      await db.project.update({
+        where: { id },
+        data: updateData,
+      })
+    }
+    let sslResult: { ok: boolean; message: string } | null = null
+    if (sslChange) {
+      sslResult = await toggleSsl(id, sslEnabled as boolean).catch((err: unknown) => ({
+        ok: false,
+        message: err instanceof Error ? err.message : String(err),
+      }))
+    }
 
     // Audit project update
     await logAudit({
@@ -357,12 +370,19 @@ export async function PATCH(
       req: request,
       metadata: {
         name: project.name,
-        changes: updateData,
+        changes: sslChange ? { ...updateData, sslEnabled } : updateData,
       },
     })
 
+    if (sslResult && !sslResult.ok) {
+      return NextResponse.json({
+        message: 'Settings saved, but the web server could not be updated yet. Try again in a minute.',
+        applied: false,
+      })
+    }
     return NextResponse.json({
       message: 'Settings updated successfully',
+      applied: true,
     })
   } catch (error) {
     console.error('Update project error:', error)

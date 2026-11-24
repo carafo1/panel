@@ -89,6 +89,12 @@ describe('CDN', () => {
       const domain = `shop-${Date.now()}.example.com`
       const site = await makeProject(u.id, { serverId: server.id, customDomain: `www.${domain}` })
 
+      // An unverified customDomain is never offered: it could be someone
+      // else's domain, and enabling the CDN would put it in our Cloudflare.
+      const before = await (await cdn.GET(authed(u.token, `/api/hosting/${site.id}/cdn`), params({ id: site.id }))).json()
+      expect(before.candidates).toEqual([])
+      await db.websiteDomain.create({ data: { projectId: site.id, domain: `www.${domain}`, verified: true, verifiedAt: new Date() } })
+
       // Not this site's domain.
       const wrong = await cdn.POST(authed(u.token, `/api/hosting/${site.id}/cdn`, { method: 'POST', body: JSON.stringify({ domain: 'someone-else.com' }), headers: h() }), params({ id: site.id }))
       expect(wrong.status).toBe(404)

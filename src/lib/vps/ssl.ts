@@ -83,9 +83,10 @@ export async function probeCertificate(
 export async function recordCertificateStatus(
   client: Parameters<typeof exec>[0],
   projectId: string,
-  hostname: string
+  hostname: string,
+  opts: { attempts?: number } = {}
 ): Promise<CertProbe> {
-  const cert = await probeCertificate(client, hostname)
+  const cert = await probeCertificate(client, hostname, opts)
   await db.project
     .update({
       where: { id: projectId },

@@ -54,6 +54,22 @@ export function composeProjectName(deployPath: string): string {
  * Shared by the deployer, the pipeline runner and the migration runner so the
  * three cannot drift. Ends with a space; prepend it to the command.
  */
+/**
+ * Run (from inside the deploy path) before any `docker compose up` / `run`.
+ *
+ * SECURITY: the generated compose files bind-mount ./wp-content,
+ * ./wp-config-docker.php and ./db-data from the customer's own folder, and
+ * Docker resolves a symlinked bind source ON THE HOST when it creates the
+ * container. A customer who replaced one of them with a link (to /, /etc or
+ * another customer's site) got that host path mounted into their container —
+ * and the MariaDB image chowns its data dir. Links are refused here, and SFTP
+ * cannot create links (internal-sftp -P symlink,hardlink). Ends with " && ".
+ */
+export const BIND_SOURCE_GUARD =
+  'for p in ./wp-content ./wp-config-docker.php ./db-data; do ' +
+  'if [ -L "$p" ]; then echo "Refusing to start: $p is a link. Replace it with a real folder or file." >&2; exit 97; fi; ' +
+  'done && '
+
 export const COMPOSE_ENV =
   'env -i PATH="$PATH" HOME="$HOME" ' +
   '${DOCKER_HOST:+DOCKER_HOST="$DOCKER_HOST"} ' +

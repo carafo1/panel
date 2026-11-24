@@ -2010,6 +2010,9 @@ interface ScanOutcome {
   engine?: string | null
   infected: Array<{ path: string; signature: string }>
   filesScanned: number
+  filesFailed?: number
+  filesSkipped?: number
+  partial?: boolean
   durationMs: number
   reason?: string
 }
@@ -2057,6 +2060,7 @@ function MalwareScanCard({ projectId }: { projectId: string }) {
       if (!data.scanned) toast.info(data.reason || 'The scan could not run.')
       else if (data.infected.length > 0)
         toast.error(`${data.infected.length} infected file(s) found`)
+      else if (data.partial) toast.warning(data.reason || 'Some files could not be scanned.')
       else toast.success(`Clean — ${data.filesScanned} files scanned`)
     } catch {
       toast.error('Network error running the scan')
@@ -2177,6 +2181,13 @@ function MalwareScanCard({ projectId }: { projectId: string }) {
           >
             {!result.scanned ? (
               <p className="text-sm text-muted-foreground">{result.reason}</p>
+            ) : result.infected.length === 0 && result.partial ? (
+              <p className="text-sm">
+                <span className="font-medium text-amber-600 dark:text-amber-400">
+                  No threats found in the files that were checked.
+                </span>{' '}
+                <span className="text-muted-foreground">{result.reason}</span>
+              </p>
             ) : result.infected.length === 0 ? (
               <p className="text-sm">
                 <span className="font-medium text-emerald-600 dark:text-emerald-400">

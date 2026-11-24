@@ -14,6 +14,7 @@ import { db } from '@/lib/db'
 import { withConnection, exec, isServerInDemoMode, shellQuote } from './ssh'
 import { getServerCredentials } from './provisioner'
 import { SiteToolError } from './wordpress'
+import { isProduction } from '@/lib/demo-mode'
 import type { ProjectPermission } from '@/lib/project-access'
 
 export type AppStack = 'laravel' | 'django' | 'python' | 'nodejs' | 'php'
@@ -93,6 +94,11 @@ async function loadSite(projectId: string) {
   if (!stack) throw new SiteToolError('App tools are not available for this kind of website.', 409)
   if (project.status === 'suspended') {
     throw new SiteToolError('This website is suspended. Pay the outstanding invoice from Billing to restore it.', 402)
+  }
+  // In production a website without a server is an error, never a simulation
+  // (it used to return "[demo] would run …" output as if the tool had worked).
+  if (isProduction() && (!project.serverId || !project.server)) {
+    throw new SiteToolError('This website is not on a server yet.', 409)
   }
   const demo = !project.serverId || !project.server || isServerInDemoMode(project.server)
   if (!demo && !project.containerName) throw new SiteToolError('This website has no running container yet.', 409)

@@ -82,7 +82,7 @@ export async function DELETE(
       return NextResponse.json({ error: 'Redirect not found' }, { status: 404 })
     }
 
-    await deleteRedirect(redirectId)
+    const removed = await deleteRedirect(redirectId)
 
     await logAudit({
       userId: decoded.userId,
@@ -93,7 +93,11 @@ export async function DELETE(
       metadata: { redirectId },
     })
 
-    return NextResponse.json({ message: 'Redirect deleted' })
+    return NextResponse.json(
+      removed.applied === false
+        ? { message: 'Redirect deleted, but the web server could not be updated yet. Try again in a minute.', applied: false }
+        : { message: 'Redirect deleted', applied: true }
+    )
   } catch (error) {
     console.error('Delete redirect error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

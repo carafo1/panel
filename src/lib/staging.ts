@@ -35,6 +35,7 @@ import { decrypt } from '@/lib/encryption'
 import { createNotification } from '@/lib/notifications'
 import { claimDeploySlot } from '@/lib/deploy-guard'
 import { isAdmin } from '@/lib/security'
+import { isProduction } from '@/lib/demo-mode'
 import { deployProject } from '@/lib/vps/deployer'
 import { createBackup } from '@/lib/vps/backups'
 import { getServerCredentials } from '@/lib/vps/provisioner'
@@ -125,8 +126,41 @@ export async function stagingInfo(liveId: string, actor: { userId: string; role?
 
 // ── Shell building blocks (pure, so they can be tested) ───────────────
 
-/** Files copied for a site, relative to its deploy path. */
+/** Pinned helper image for file copies (busybox tar/find; no network). */
+export const COPY_IMAGE = 'alpine:3.20'
+
+/**
+ * The copy between two sites' files, run INSIDE a throwaway container that
+ * sees only the two deploy paths (live read-only at /src, target at /dst).
+ *
+ * SECURITY: customers control everything inside their deploy paths (SFTP,
+ * file manager). This copy used to run as root on the host, so a customer
+ * who replaced wp-content with a symlink (to / or to another customer's site)
+ * made the panel archive host files into their site, or extract their files
+ * anywhere on the host. Inside the container a symlink resolves within the
+ * container's own filesystem, never the host's. Only the deploy paths
+ * themselves (created and owned by the panel, not replaceable by a customer)
+ * are mounted.
+ */
 export function copyFilesCommand(mode: 'wordpress' | 'files', from: string, to: string, opts: { replace: boolean }): string {
+  for (const p of [from, to]) {
+    if (!p.startsWith('/opt/deployhub/projects/') || p.includes('..') || p.includes('\n') || p.includes('\r')) {
+      throw new Error('Unexpected site path')
+    }
+  }
+  const script = copyFilesScript(mode, '/src', '/dst', opts)
+  return [
+    'docker run --rm --network none --security-opt no-new-privileges',
+    '--cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER',
+    `-v ${shellQuote(from)}:/src:ro -v ${shellQuote(to)}:/dst`,
+    COPY_IMAGE,
+    'sh -c',
+    shellQuote(script),
+  ].join(' ')
+}
+
+/** The copy script itself (pure, so it can be tested in a local shell). */
+export function copyFilesScript(mode: 'wordpress' | 'files', from: string, to: string, opts: { replace: boolean }): string {
   if (mode === 'wordpress') {
     const src = `${from}/wp-content`
     const dst = `${to}/wp-content`
@@ -137,6 +171,7 @@ export function copyFilesCommand(mode: 'wordpress' | 'files', from: string, to: 
     // source folder is simply missing. Swap the old copy aside, copy, and only
     // drop the old copy once the new one is in place; put it back on failure.
     return [
+      `if [ -L ${S} ] || [ -L ${D} ]; then echo 'wp-content must be a folder, not a link.' >&2; exit 1; fi`,
       `test -d ${S} || { echo 'The source site has no wp-content folder.' >&2; exit 1; }`,
       `rm -rf ${O}`,
       opts.replace ? `if [ -d ${D} ]; then mv ${D} ${O} || exit 1; fi` : 'true',
@@ -209,6 +244,9 @@ async function notify(userId: string, title: string, message: string, ok: boolea
 }
 
 function isDemo(p: ProjectRow) {
+  // Production: a site without a server is NOT a simulation; the real path
+  // runs and fails with the actual reason.
+  if (isProduction()) return false
   return !p.server || isServerInDemoMode(p.server)
 }
 

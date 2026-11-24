@@ -16,7 +16,7 @@
 import { db } from '@/lib/db'
 import { withConnection, exec } from '@/lib/vps/ssh'
 import { getServerCredentials } from '@/lib/vps/provisioner'
-import { COMPOSE_ENV, composeProjectFlag } from '@/lib/vps/deploy-safety'
+import { BIND_SOURCE_GUARD, COMPOSE_ENV, composeProjectFlag } from '@/lib/vps/deploy-safety'
 
 /**
  * A stage as stored. Two shapes exist: the original `config.command`, and
@@ -144,7 +144,7 @@ export function buildPreDeployStageCommand(
   const envFlags = s.env.map(([k, v]) => `-e ${shellQuote(`${k}=${v}`)}`).join(' ')
   const inner = s.workingDir ? `cd ${shellQuote(s.workingDir)} && ${s.command}` : s.command
   return (
-    `cd ${shellQuote(deployPath)} && ${COMPOSE_ENV}docker compose ${composeProjectFlag(deployPath)}` +
+    `cd ${shellQuote(deployPath)} && ${BIND_SOURCE_GUARD}${COMPOSE_ENV}docker compose ${composeProjectFlag(deployPath)}` +
     `run --rm --no-deps ${envFlags} --entrypoint sh app -c ${shellQuote(inner)} 2>&1`
   )
 }
