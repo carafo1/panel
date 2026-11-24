@@ -224,7 +224,38 @@ export async function getServerIps(): Promise<string[]> {
     // actually connects to.
     if (s.sshHost && /^\d+\.\d+\.\d+\.\d+$/.test(s.sshHost)) ips.add(s.sshHost)
   }
-  return [...ips]
+  // These addresses go into public DNS. A single-box install registers its
+  // own server as 127.0.0.1 / localhost, and a customer's domain was then
+  // published pointing at 127.0.0.1 (every visitor's own machine). Only
+  // public addresses are usable; otherwise fall back to the configured or
+  // resolved public address of this host.
+  const usable = [...ips].filter(isPublicIpv4)
+  if (usable.length > 0) return usable
+  const configured = (process.env.SERVER_PUBLIC_IP || '').trim()
+  if (isPublicIpv4(configured)) return [configured]
+  try {
+    const { resolve4 } = await import('node:dns/promises')
+    const { BRAND_DOMAIN } = await import('@/lib/brand-config')
+    const resolved = (await resolve4(`panel.${BRAND_DOMAIN}`)).filter(isPublicIpv4)
+    if (resolved.length > 0) return resolved
+  } catch {
+    /* no usable address */
+  }
+  return []
+}
+
+/** A routable IPv4 address (not loopback, private, link-local or reserved). */
+export function isPublicIpv4(ip: string): boolean {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip || '')
+  if (!m) return false
+  const [a, b] = [Number(m[1]), Number(m[2])]
+  if ([a, b, Number(m[3]), Number(m[4])].some((n) => n > 255)) return false
+  if (a === 0 || a === 10 || a === 127 || a >= 224) return false
+  if (a === 169 && b === 254) return false
+  if (a === 172 && b >= 16 && b <= 31) return false
+  if (a === 192 && b === 168) return false
+  if (a === 100 && b >= 64 && b <= 127) return false // carrier-grade NAT
+  return true
 }
 
 /* ────────────────────────────────────────────────────────────────────

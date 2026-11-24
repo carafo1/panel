@@ -1244,9 +1244,14 @@ async function deployMethodProject(
       }
       // From here on the previous container may be stopped or replaced.
       deployState.containerReplaced = true
+      // WordPress: /var/www/html is an anonymous volume holding only core files
+      // (the image restores them; wp-content and wp-config are bind mounts and
+      // the database is a separate container). Renewing it clears a stale
+      // wp-config.php FOLDER left by an earlier failed deploy, which otherwise
+      // blocks the config file mount ("not a directory").
       const upGen = execStream(
         client,
-        `cd ${shellQuote(deployPath)} && ${BIND_SOURCE_GUARD}${COMPOSE_ENV}docker compose ${composeProjectFlag(deployPath)}up -d 2>&1`,
+        `cd ${shellQuote(deployPath)} && ${BIND_SOURCE_GUARD}${COMPOSE_ENV}docker compose ${composeProjectFlag(deployPath)}up -d${methodId === 'wordpress' ? ' --renew-anon-volumes' : ''} 2>&1`,
         { timeoutMs: 180000 }
       )
       let upResult: ExecResult | undefined
@@ -2016,7 +2021,7 @@ export async function applyEnvironment(
       })
       const r = await exec(
         client,
-        `cd ${shellQuote(deployPath)} && ${BIND_SOURCE_GUARD}${COMPOSE_ENV}docker compose ${composeProjectFlag(deployPath)}up -d --no-build 2>&1`,
+        `cd ${shellQuote(deployPath)} && ${BIND_SOURCE_GUARD}${COMPOSE_ENV}docker compose ${composeProjectFlag(deployPath)}up -d --no-build${methodId === 'wordpress' ? ' --renew-anon-volumes' : ''} 2>&1`,
         { timeoutMs: 180000 }
       )
       out = (r.stdout || r.stderr || '').slice(-1200)
