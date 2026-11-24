@@ -1358,7 +1358,11 @@ async function deployMethodProject(
         const url = `https://${project.customDomain || project.subdomain}`
         // --user 33:33: the apache image serves files as www-data (uid 33); the
         // cli image defaults to uid 82, which would leave files Apache can't write.
-        const wpCmd = `docker run --rm --network deployhub --user 33:33 -v ${shellQuote(deployPath)}:/var/www/html wordpress:cli wp core install --path=/var/www/html --url=${shellQuote(url)} --title=${shellQuote(project.name)} --admin_user=${shellQuote(adminUser)} --admin_password=${shellQuote(adminPass)} --admin_email=${shellQuote(adminEmail)} --skip-email`
+        // --volumes-from: WordPress core lives in the site container's own
+        // /var/www/html volume; mounting only deployPath (wp-content + config)
+        // gave WP-CLI no core files ("This does not seem to be a WordPress
+        // installation"), so no site built from files could ever install.
+        const wpCmd = `docker run --rm --network deployhub --user 33:33 --volumes-from ${shellQuote(containerName)} -w /var/www/html wordpress:cli wp core install --path=/var/www/html --url=${shellQuote(url)} --title=${shellQuote(project.name)} --admin_user=${shellQuote(adminUser)} --admin_password=${shellQuote(adminPass)} --admin_email=${shellQuote(adminEmail)} --skip-email`
         const r = await exec(client, `${wpCmd} 2>&1`, { timeoutMs: 120000 })
         stageLog(r.stdout.split(adminPass).join('***').slice(-800))
         // SECURITY: a failed install leaves WordPress at its setup screen, where

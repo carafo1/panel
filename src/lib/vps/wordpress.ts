@@ -147,7 +147,7 @@ async function loadSite(projectId: string) {
     throw new SiteToolError('This website is suspended. Pay the outstanding invoice from Billing to restore it.', 402)
   }
   const demo = !project.serverId || !project.server || isServerInDemoMode(project.server)
-  if (!demo && !project.deployPath) {
+  if (!demo && (!project.deployPath || !project.containerName)) {
     throw new SiteToolError('This website has not been deployed yet.', 409)
   }
   return { project, demo }
@@ -159,7 +159,11 @@ type Site = Awaited<ReturnType<typeof loadSite>>['project']
 async function runWp(site: Site, script: string, timeoutMs = 120_000, secrets: string[] = []) {
   const cmd =
     `docker run --rm --network deployhub --user 33:33 ` +
-    `-v ${shellQuote(site.deployPath!)}:/var/www/html -w /var/www/html ` +
+    // The site container's volumes: WordPress core lives in its own
+    // /var/www/html volume. Mounting only deployPath (wp-content + config)
+    // left WP-CLI without core files, so every plugin, theme and user action
+    // failed with "This does not seem to be a WordPress installation".
+    `--volumes-from ${shellQuote(site.containerName!)} -w /var/www/html ` +
     `wordpress:cli sh -c ${shellQuote(script)}`
   let result: { stdout: string; stderr: string; exitCode: number | null }
   try {
