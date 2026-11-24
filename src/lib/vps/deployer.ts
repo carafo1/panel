@@ -1365,7 +1365,12 @@ async function deployMethodProject(
           await sleep(2000)
         }
         const adminUser = project.wpAdminUser || 'admin'
-        const adminEmail = project.wpAdminEmail || 'admin@example.com'
+        // The site owner's own address when none was chosen: the placeholder
+        // admin@example.com left WordPress password resets going nowhere.
+        const owner = project.wpAdminEmail
+          ? null
+          : await db.user.findUnique({ where: { id: project.userId }, select: { email: true } })
+        const adminEmail = project.wpAdminEmail || owner?.email || 'admin@example.com'
         let adminPass = ''
         if (project.wpAdminPassword) {
           try {

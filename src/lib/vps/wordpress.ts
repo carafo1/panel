@@ -274,15 +274,18 @@ export async function getWordPressOverview(projectId: string): Promise<WpOvervie
   }
 
   // One container run for everything: sections are separated by @@markers.
+  // Each marker is preceded by a bare `echo`: WP-CLI's --format=json output
+  // has no trailing newline, so without it the next marker was glued to the
+  // JSON ("…}]@@themes") and plugins, themes and admins all parsed as empty.
   const script = [
-    "echo '@@core'; wp core version 2>/dev/null",
-    "echo '@@update'; wp core check-update --format=json 2>/dev/null",
-    "echo '@@siteurl'; wp option get siteurl 2>/dev/null",
-    "echo '@@maint'; if wp maintenance-mode is-active >/dev/null 2>&1; then echo on; else echo off; fi",
-    "echo '@@debug'; wp config get WP_DEBUG --type=constant 2>/dev/null",
-    "echo '@@plugins'; wp plugin list --fields=name,title,status,version,update,update_version --format=json 2>/dev/null",
-    "echo '@@themes'; wp theme list --fields=name,title,status,version,update,update_version --format=json 2>/dev/null",
-    "echo '@@admins'; wp user list --role=administrator --fields=user_login,user_email --format=json 2>/dev/null",
+    "echo; echo '@@core'; wp core version 2>/dev/null",
+    "echo; echo '@@update'; wp core check-update --format=json 2>/dev/null",
+    "echo; echo '@@siteurl'; wp option get siteurl 2>/dev/null",
+    "echo; echo '@@maint'; if wp maintenance-mode is-active >/dev/null 2>&1; then echo on; else echo off; fi",
+    "echo; echo '@@debug'; wp config get WP_DEBUG --type=constant 2>/dev/null",
+    "echo; echo '@@plugins'; wp plugin list --fields=name,title,status,version,update,update_version --format=json 2>/dev/null",
+    "echo; echo '@@themes'; wp theme list --fields=name,title,status,version,update,update_version --format=json 2>/dev/null",
+    "echo; echo '@@admins'; wp user list --role=administrator --fields=user_login,user_email --format=json 2>/dev/null",
   ].join('\n')
   const { output } = await runWp(project, script, 90_000)
 
