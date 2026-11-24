@@ -203,3 +203,22 @@ describe.skipIf(process.platform === 'win32' || !existsSync(BASH))('compose bind
     rmSync(root, { recursive: true, force: true })
   })
 })
+
+describe('domain search input', () => {
+  it('rejects an invalid name with 400 before any registrar lookup', async () => {
+    const search = await import('@/app/api/domains/search/route')
+    const get = (d: string) =>
+      search.GET(new Request(`http://localhost/api/domains/search?domain=${encodeURIComponent(d)}`, {
+        headers: { 'x-forwarded-for': `198.51.100.${Math.floor(Math.random() * 200) + 1}` },
+      }))
+    for (const bad of ['not a domain', 'nodot', '-bad.com', 'bad-.com', 'a..com', 'x.c0m', 'evil.com/../x']) {
+      expect((await get(bad)).status).toBe(400)
+    }
+    const bulk = await search.POST(new Request('http://localhost/api/domains/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-forwarded-for': '198.51.100.250' },
+      body: JSON.stringify({ domains: ['good.com', 'not valid'] }),
+    }))
+    expect(bulk.status).toBe(400)
+  })
+})
