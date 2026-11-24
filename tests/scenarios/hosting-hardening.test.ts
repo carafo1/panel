@@ -86,6 +86,21 @@ describe('unverified domains are never served', () => {
   })
 })
 
+describe('www for domains whose DNS we host', () => {
+  it('a verified domain with our zone also serves www; one without our zone does not', async () => {
+    const hosted = await makeProject(owner.id, { serverId, containerName: uid('dh-www'), externalPort: 31888 })
+    const hostedDomain = `${uid('hosted')}.com`.toLowerCase()
+    await db.websiteDomain.create({ data: { projectId: hosted.id, domain: hostedDomain, verified: true, zoneCreated: true } })
+    const manual = await makeProject(owner.id, { serverId, containerName: uid('dh-man'), externalPort: 31889 })
+    const manualDomain = `${uid('manual')}.com`.toLowerCase()
+    await db.websiteDomain.create({ data: { projectId: manual.id, domain: manualDomain, verified: true, zoneCreated: false, connectionMethod: 'manual' } })
+    const { configs } = await buildServerProxyConfigs(serverId, true)
+    const extras = configs.flatMap((c) => c.extraHostnames || [])
+    expect(extras).toEqual(expect.arrayContaining([hostedDomain, `www.${hostedDomain}`, manualDomain]))
+    expect(extras).not.toContain(`www.${manualDomain}`)
+  })
+})
+
 describe('IP rules', () => {
   it('drops expired rules from the config and disables them', async () => {
     const p = await makeProject(owner.id, { serverId, containerName: uid('dh-ip'), externalPort: 31999 })
