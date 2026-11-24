@@ -20,7 +20,11 @@ test('a wrong password is refused with a visible error and no session', async ({
   // Still on the sign-in form, not in the dashboard.
   await expect(page.getByLabel('Password', { exact: true })).toBeVisible()
   await expect(sidebar(page)).toHaveCount(0)
-  expect(health.errorToasts()).toEqual([expect.stringContaining('Invalid email or password')])
+  // The toast recorder (a MutationObserver) can report a moment after the
+  // text is on screen; wait for it instead of reading it once (flaky in CI).
+  await expect
+    .poll(() => health.errorToasts(), { timeout: 5000 })
+    .toEqual([expect.stringContaining('Invalid email or password')])
 
   const me = await page.request.get('/api/auth/me')
   expect(me.status()).toBe(401)
