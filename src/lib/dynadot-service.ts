@@ -17,9 +17,10 @@
  *
  * API docs: https://www.dynadot.com/domain/api3.html
  *
- * When DYNADOT_API_KEY is not set, the service runs in DEMO MODE and returns
- * deterministic simulated data so the full application can be exercised without
- * a real registrar account.
+ * When DYNADOT_API_KEY is not set OUTSIDE production, the service runs in DEMO
+ * MODE and returns deterministic simulated data so the application can be
+ * exercised without a real registrar account. In production a missing key is
+ * an error on every call (RegistrarNotConfiguredError) — never a simulation.
  *
  * Design notes:
  *  - SOLID: single responsibility (Dynadot API communication only)
@@ -30,6 +31,16 @@
  */
 import {
   isDynadotDemoMode,
+  isDynadotSimulated,
+  RegistrarNotConfiguredError,
+  RegistrarUnknownOutcomeError,
+  isRegistrarUnknownOutcome,
+  isPurchaseCommand,
+  dynadotEnvelopes,
+  dynadotEnvelopeError,
+  parsePurchaseResponse,
+  parseRegistrarDate,
+  DYNADOT_REQUEST_TIMEOUT_MS,
   assertDnsWriteAllowed,
   addDnsRecordsVia,
   deleteDnsRecordVia,
@@ -44,10 +55,19 @@ const BASE_DELAY_MS = 500
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+/**
+ * What a lookup actually established. `unknown` means the registrar did not
+ * answer for this domain (error, timeout, missing from the reply): it is
+ * neither available nor taken, and must never be sold or shown as either.
+ */
+export type DomainSearchStatus = 'available' | 'unavailable' | 'premium' | 'unknown'
+
 export interface DomainSearchResult {
   domain: string
+  /** True only when the registrar said "yes". False for unavailable AND unknown: read `status`. */
   available: boolean
   premium: boolean
+  status: DomainSearchStatus
   registrationPrice?: number
   renewalPrice?: number
   transferPrice?: number
@@ -94,6 +114,8 @@ export interface RegisterResult {
   orderId?: string
   registrationPrice?: number
   domain?: string
+  /** Registrar's refusal message when success is false. */
+  error?: string
 }
 
 /**
@@ -111,7 +133,9 @@ export interface RenewResult {
   success: boolean
   orderId?: string
   renewalPrice?: number
+  /** ISO date, only when the registrar reported a parsable expiry. */
   newExpiry?: string
+  error?: string
 }
 
 export interface TransferResult {
@@ -228,98 +252,143 @@ class DynadotService {
     return process.env.DYNADOT_API_KEY || null
   }
 
+  /**
+   * Simulated data is served ONLY when no key is configured AND this is not
+   * production. In production a missing key makes every call throw
+   * RegistrarNotConfiguredError: no invented availability, no fake orders.
+   */
   get demoMode(): boolean {
-    return !this.apiKey
+    return isDynadotSimulated()
+  }
+
+  /** True when a real registrar key is configured. */
+  get configured(): boolean {
+    return !!this.apiKey
   }
 
   /**
-   * Low-level call to Dynadot with retry + backoff + rate-limit handling.
+   * Low-level call to Dynadot.
+   *
+   * Read-only and idempotent commands are retried with backoff on 429, 5xx,
+   * network errors, unparsable bodies and transient body errors. PURCHASE
+   * commands (register, renew, transfer, ...) are NEVER retried: a retry after
+   * an ambiguous failure can buy twice. For them, any failure after the request
+   * may have reached Dynadot (network/timeout, 5xx, unparsable body) throws
+   * RegistrarUnknownOutcomeError so the caller parks the order for
+   * reconciliation instead of trying again.
    */
-  private async call(
-    params: Record<string, string>,
-    attempt = 0
-  ): Promise<Record<string, unknown>> {
-    if (!this.apiKey) {
-      throw new Error('DYNADOT_API_KEY not configured')
-    }
+  private async call(params: Record<string, string>): Promise<Record<string, unknown>> {
+    const key = this.apiKey
+    if (!key) throw new RegistrarNotConfiguredError()
+    const command = params.command
+    const purchase = isPurchaseCommand(command)
     const url = new URL(API_BASE)
-    url.searchParams.set('key', this.apiKey)
+    url.searchParams.set('key', key)
     for (const [k, v] of Object.entries(params)) {
       url.searchParams.set(k, v)
     }
 
-    try {
-      const res = await fetch(url.toString(), {
-        method: 'GET',
-        headers: { Accept: 'application/json' },
-      })
+    for (let attempt = 0; ; attempt++) {
+      const canRetry = !purchase && attempt < MAX_RETRIES
+      const backoff = () => this.sleep(BASE_DELAY_MS * Math.pow(2, attempt))
 
-      // Rate limited
+      let res: Response
+      try {
+        res = await fetch(url.toString(), {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+          signal: AbortSignal.timeout(DYNADOT_REQUEST_TIMEOUT_MS),
+        })
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        if (purchase) throw new RegistrarUnknownOutcomeError(command, `network/timeout: ${msg}`)
+        if (canRetry) {
+          await backoff()
+          continue
+        }
+        throw err
+      }
+
+      // Rate limited: the request was refused, not executed.
       if (res.status === 429) {
-        const retryAfter = parseInt(res.headers.get('retry-after') || '2', 10)
-        if (attempt < MAX_RETRIES) {
-          await this.sleep(retryAfter * 1000)
-          return this.call(params, attempt + 1)
+        if (canRetry) {
+          const retryAfter = parseInt(res.headers.get('retry-after') || '2', 10)
+          await this.sleep((Number.isFinite(retryAfter) ? retryAfter : 2) * 1000)
+          continue
         }
         throw new Error('Dynadot rate limit exceeded')
       }
 
-      // 5xx → retry
-      if (res.status >= 500 && attempt < MAX_RETRIES) {
-        await this.sleep(BASE_DELAY_MS * Math.pow(2, attempt))
-        return this.call(params, attempt + 1)
-      }
-
-      if (!res.ok) {
-        throw new Error(`Dynadot API HTTP ${res.status}: ${await res.text()}`)
-      }
-
-      const json = (await res.json()) as Record<string, unknown>
-
-      // Dynadot returns HTTP 200 but embeds errors in the body.
-      // Errors can appear in ANY top-level *Response envelope, not just "Response"
-      // (e.g. domain_info → DomainInfoResponse, get_ns → GetNsResponse).
-      // Detect IP-authorization errors specifically — these are not
-      // retryable (retrying just hits another unauthorized IP).
-      const envelopes = [
-        json.Response,
-        json.DomainInfoResponse,
-        json.GetNsResponse,
-        json.SetNsResponse,
-        json.SearchResponse,
-        json.SetDnsResponse,
-        json.GetDnsResponse,
-      ]
-        .filter(Boolean) as Array<Record<string, unknown>>
-      for (const env of envelopes) {
-        if (env.ResponseCode === '-1' || env.ResponseCode === -1 || env.Status === 'error') {
-          const errMsg = String(env.Error || 'Unknown Dynadot error')
-          if (errMsg.includes('unauthorized ip address')) {
-            // Non-retryable — throw immediately, bypass the catch retry
-            const ipErr = new Error(`Dynadot IP not authorized: ${errMsg}`)
-            ;(ipErr as Error & { noRetry?: boolean }).noRetry = true
-            throw ipErr
-          }
-          // Search errors with "invalid characters" are also non-retryable
-          if (errMsg.includes('invalid characters')) {
-            const charErr = new Error(`Dynadot API error: ${errMsg}`)
-            ;(charErr as Error & { noRetry?: boolean }).noRetry = true
-            throw charErr
-          }
-          throw new Error(`Dynadot API error: ${errMsg}`)
+      if (res.status >= 500) {
+        if (purchase) throw new RegistrarUnknownOutcomeError(command, `HTTP ${res.status}`)
+        if (canRetry) {
+          await backoff()
+          continue
         }
       }
 
-      return json
-    } catch (err) {
-      // Network failure → retry (but never retry IP-auth or non-retryable errors)
-      const noRetry = err instanceof Error && (err as Error & { noRetry?: boolean }).noRetry
-      if (noRetry) throw err
-      if (attempt < MAX_RETRIES && !(err instanceof Error && err.message.includes('rate limit'))) {
-        await this.sleep(BASE_DELAY_MS * Math.pow(2, attempt))
-        return this.call(params, attempt + 1)
+      if (!res.ok) {
+        const text = await res.text().catch(() => '')
+        throw new Error(`Dynadot API HTTP ${res.status}: ${text.slice(0, 300)}`)
       }
-      throw err
+
+      let json: Record<string, unknown>
+      try {
+        json = (await res.json()) as Record<string, unknown>
+        if (!json || typeof json !== 'object') throw new Error('empty body')
+      } catch {
+        if (purchase) throw new RegistrarUnknownOutcomeError(command, 'unparsable response body')
+        if (canRetry) {
+          await backoff()
+          continue
+        }
+        throw new Error('Dynadot API returned an unparsable response')
+      }
+
+      // Dynadot answers HTTP 200 with errors embedded in ANY top-level
+      // *Response envelope. A body error is a definite answer.
+      const bodyErr = dynadotEnvelopes(json)
+        .map((env) => dynadotEnvelopeError(env))
+        .find((e): e is string => !!e)
+      if (bodyErr) {
+        // Not retryable: retrying just hits the same refusal.
+        if (bodyErr.includes('unauthorized ip address')) {
+          throw new Error(`Dynadot IP not authorized: ${bodyErr}`)
+        }
+        if (canRetry && !bodyErr.includes('invalid characters')) {
+          await backoff()
+          continue
+        }
+        throw new Error(`Dynadot API error: ${bodyErr}`)
+      }
+      return json
+    }
+  }
+
+  /**
+   * Send a purchase command. A definite refusal thrown by call() (body error,
+   * 4xx, 429, IP not authorised) is returned as an error envelope so the
+   * parser classifies it as 'failed'. Unknown-outcome and not-configured
+   * errors propagate unchanged; anything else is treated as ambiguous.
+   */
+  private async purchaseCall(
+    kind: 'register' | 'renew' | 'transfer',
+    params: Record<string, string>
+  ): Promise<Record<string, unknown>> {
+    try {
+      return await this.call(params)
+    } catch (err) {
+      if (isRegistrarUnknownOutcome(err) || err instanceof RegistrarNotConfiguredError) throw err
+      const msg = err instanceof Error ? err.message : String(err)
+      if (
+        msg.startsWith('Dynadot API error:') ||
+        msg.startsWith('Dynadot API HTTP 4') ||
+        msg.startsWith('Dynadot IP not authorized') ||
+        msg.includes('rate limit')
+      ) {
+        return { Response: { ResponseCode: '-1', Status: 'error', Error: msg } }
+      }
+      throw new RegistrarUnknownOutcomeError(kind, msg)
     }
   }
 
@@ -364,6 +433,7 @@ class DynadotService {
           domain,
           available,
           premium,
+          status: (available ? (premium ? 'premium' : 'available') : 'unavailable') as DomainSearchStatus,
           registrationPrice: available ? prices?.reg : undefined,
           renewalPrice: available ? prices?.renew : undefined,
           transferPrice: available ? prices?.transfer : undefined,
@@ -398,14 +468,17 @@ class DynadotService {
       for (const item of searchResp.SearchResults) {
         const name = String(item.DomainName || '')
         // Dynadot returns Available as "yes"/"no" (string)
-        const available = String(item.Available || '').toLowerCase() === 'yes'
+        const availRaw = String(item.Available ?? '').trim().toLowerCase()
+        const available = availRaw === 'yes'
         const priceRaw = item.Price ? String(item.Price) : ''
         const parsed = this.parsePriceString(priceRaw)
         const premium = parsed?.premium ?? (String(item.Premium || '').toLowerCase() === 'yes')
+        const status = this.searchStatus(availRaw, premium, item)
         out.push({
           domain: name,
-          available,
+          available: status === 'available' || status === 'premium',
           premium,
+          status,
           registrationPrice: parsed?.registration,
           renewalPrice: parsed?.renewal,
           transferPrice: parsed?.renewal, // Dynadot transfer = renewal
@@ -420,10 +493,14 @@ class DynadotService {
           const dv = value as { Name?: string; Available?: string; Price?: string; Premium?: string }
           const name = dv.Name || ''
           const parsed = this.parsePriceString(dv.Price)
+          const availRaw = String(dv.Available ?? '').trim().toLowerCase()
+          const premium = parsed?.premium ?? (String(dv.Premium || '').toLowerCase() === 'yes')
+          const status = this.searchStatus(availRaw, premium, dv as Record<string, unknown>)
           out.push({
             domain: name,
-            available: String(dv.Available).toLowerCase() === 'yes',
-            premium: parsed?.premium ?? (String(dv.Premium || '').toLowerCase() === 'yes'),
+            available: status === 'available' || status === 'premium',
+            premium,
+            status,
             registrationPrice: parsed?.registration,
             renewalPrice: parsed?.renewal,
             transferPrice: parsed?.renewal,
@@ -433,7 +510,8 @@ class DynadotService {
       }
     }
 
-    // Ensure all requested domains have an entry
+    // Every requested domain gets an entry. One the registrar did not report
+    // on is UNKNOWN: not "unavailable", and certainly not "available".
     return cleaned.map((d) => {
       const found = out.find((r) => r.domain.toLowerCase() === d)
       return (
@@ -441,9 +519,25 @@ class DynadotService {
           domain: d,
           available: false,
           premium: false,
+          status: 'unknown' as DomainSearchStatus,
         }
       )
     })
+  }
+
+  /** Map one search item to a status. Anything but an explicit yes/no is unknown. */
+  private searchStatus(
+    availRaw: string,
+    premium: boolean,
+    item: Record<string, unknown>
+  ): DomainSearchStatus {
+    const itemStatus = String(item.Status ?? '').trim().toLowerCase()
+    if (itemStatus === 'error' || (item.Error !== undefined && item.Error !== null && String(item.Error).trim() !== '')) {
+      return 'unknown'
+    }
+    if (availRaw === 'yes') return premium ? 'premium' : 'available'
+    if (availRaw === 'no') return 'unavailable'
+    return 'unknown'
   }
 
   /**
@@ -582,13 +676,18 @@ class DynadotService {
       if (ids.billing) params.billing_contact = ids.billing
     }
 
-    const json = await this.call(params)
-    const response = (json.Response as Record<string, unknown>) || {}
-    const status = String(response.Status || '').toLowerCase()
+    const json = await this.purchaseCall('register', params)
+    const parsed = parsePurchaseResponse('register', json)
+    if (parsed.outcome === 'unknown') {
+      throw new RegistrarUnknownOutcomeError('register', parsed.reason)
+    }
+    if (parsed.outcome === 'failed') {
+      return { success: false, error: parsed.error, domain }
+    }
     return {
-      success: status === 'success' || status === 'register success',
-      orderId: (response.RegisterOrderId as string) || (response.OrderId as string),
-      registrationPrice: response.Price ? parseFloat(String(response.Price)) : undefined,
+      success: true,
+      orderId: parsed.orderId,
+      registrationPrice: parsed.price,
       domain,
     }
   }
@@ -609,18 +708,21 @@ class DynadotService {
       }
     }
 
-    const json = await this.call({
+    const json = await this.purchaseCall('renew', {
       command: 'renew',
       domain,
       duration: String(duration),
     })
-    const response = (json.Response as Record<string, unknown>) || {}
-    const status = String(response.Status || '').toLowerCase()
+    const parsed = parsePurchaseResponse('renew', json)
+    if (parsed.outcome === 'unknown') {
+      throw new RegistrarUnknownOutcomeError('renew', parsed.reason)
+    }
+    if (parsed.outcome === 'failed') return { success: false, error: parsed.error }
     return {
-      success: status === 'success' || status === 'renew success',
-      orderId: (response.OrderId as string) || undefined,
-      renewalPrice: response.Price ? parseFloat(String(response.Price)) : undefined,
-      newExpiry: response.Expiration ? String(response.Expiration) : undefined,
+      success: true,
+      orderId: parsed.orderId,
+      renewalPrice: parsed.price,
+      newExpiry: parsed.expiration,
     }
   }
 
@@ -635,17 +737,20 @@ class DynadotService {
       }
     }
 
-    const json = await this.call({
+    const json = await this.purchaseCall('transfer', {
       command: 'transfer',
       domain,
       auth: authCode,
     })
-    const response = (json.Response as Record<string, unknown>) || {}
-    const status = String(response.Status || '').toLowerCase()
+    const parsed = parsePurchaseResponse('transfer', json)
+    if (parsed.outcome === 'unknown') {
+      throw new RegistrarUnknownOutcomeError('transfer', parsed.reason)
+    }
+    if (parsed.outcome === 'failed') return { success: false, message: parsed.error }
     return {
-      success: status === 'success' || status === 'transfer success',
-      orderId: (response.OrderId as string) || undefined,
-      message: response.Error ? String(response.Error) : 'Transfer initiated',
+      success: true,
+      orderId: parsed.orderId,
+      message: 'Transfer initiated',
     }
   }
 
@@ -673,14 +778,9 @@ class DynadotService {
     const info = (resp.DomainInfo || {}) as Record<string, unknown>
 
     // Expiration / Registration are Unix timestamps in MILLISECONDS
-    const expiryRaw = info.Expiration ? String(info.Expiration) : undefined
-    const expiry = expiryRaw && !isNaN(Number(expiryRaw))
-      ? new Date(Number(expiryRaw)).toISOString()
-      : undefined
-    const regRaw = info.Registration ? String(info.Registration) : undefined
-    const registeredAt = regRaw && !isNaN(Number(regRaw))
-      ? new Date(Number(regRaw)).toISOString()
-      : undefined
+    // Expiration / Registration are epoch milliseconds (number or numeric string).
+    const expiry = parseRegistrarDate(info.Expiration)?.toISOString()
+    const registeredAt = parseRegistrarDate(info.Registration)?.toISOString()
 
     // domain_info returns NameServerSettings (a mode object), NOT hostnames.
     // Fetch the real hostnames via the separate get_ns command.
@@ -898,4 +998,10 @@ class DynadotService {
 
 // Export a singleton instance (Service Locator pattern)
 export const dynadotService = new DynadotService()
-export { isDynadotDemoMode }
+export {
+  isDynadotDemoMode,
+  isDynadotSimulated,
+  RegistrarNotConfiguredError,
+  RegistrarUnknownOutcomeError,
+  isRegistrarUnknownOutcome,
+}

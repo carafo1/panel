@@ -367,27 +367,12 @@ export async function getAllPrices(): Promise<PricedTld[]> {
 export async function getPriceForTld(tld: string): Promise<PricedTld | null> {
   const normalized = tld.startsWith('.') ? tld : '.' + tld
   const row = await db.domainPrice.findUnique({ where: { tld: normalized } })
-  if (!row) {
-    // No synced row for this TLD. Rather than return null (which forced callers
-    // like domain search onto a hardcoded, INCONSISTENT price table), derive a
-    // price from the curated wholesale catalog + the live global markup. This
-    // guarantees search and checkout always quote the same number.
-    const wholesale =
-      TLD_WHOLESALE_PRICES[normalized]?.registration ?? CATALOG_DEFAULT_WHOLESALE
-    const s = await getDomainPricingSettings()
-    const p = sellingPrices(wholesale, s)
-    return {
-      tld: normalized,
-      wholesale,
-      markup: s.registerMarkup,
-      registration: p.registration,
-      renewal: p.renewal,
-      transfer: p.transfer,
-      currency: 'USD',
-      active: true,
-      lastSyncedAt: null,
-    }
-  }
+  // No price row = we do not sell this TLD. This used to invent a price from
+  // a default wholesale guess (CATALOG_DEFAULT_WHOLESALE) and mark it active,
+  // so any extension was sellable at a made-up price the registrar might
+  // charge far more for. Search and checkout both read this, so null here
+  // keeps them consistent: no row, no price, not sellable.
+  if (!row) return null
   const s = await getDomainPricingSettings()
   const p = sellingPrices(row.wholesale, s)
   return {
@@ -407,8 +392,35 @@ export async function getPriceForTld(tld: string): Promise<PricedTld | null> {
  * Get the price for a domain (by extracting its TLD).
  */
 export async function getPriceForDomain(domain: string): Promise<PricedTld | null> {
-  const tld = tldFromDomain(domain)
-  return getPriceForTld(tld)
+  return getSellablePriceForDomain(domain)
+}
+
+/**
+ * The SELLING price for a domain, or null when it is not for sale here: no
+ * price row, an inactive TLD, or a non-positive registration price. Every
+ * customer-facing quote (search, checkout, billing) goes through this.
+ */
+export async function getSellablePriceForDomain(domain: string): Promise<PricedTld | null> {
+  const row = await getPriceForTld(tldFromDomain(domain))
+  if (!row || !row.active) return null
+  if (!(row.registration > 0)) return null
+  return row
+}
+
+/** Customer-safe view of a price: never includes wholesale or markup. */
+export function publicPrice(row: PricedTld | null): {
+  registration: number
+  renewal: number
+  transfer: number
+  currency: string
+} | null {
+  if (!row) return null
+  return {
+    registration: row.registration,
+    renewal: row.renewal,
+    transfer: row.transfer,
+    currency: row.currency,
+  }
 }
 
 /**

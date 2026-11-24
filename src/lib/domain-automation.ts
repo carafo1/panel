@@ -20,6 +20,7 @@
  */
 import { db } from './db'
 import { dynadotService } from './dynadot-service'
+import { isRegistrarUnknownOutcome, parseRegistrarDate } from './dynadot'
 import {
   getPriceForDomain,
   applyMarkup,
@@ -95,6 +96,136 @@ export interface PipelineResult {
   invoiceNumber?: string
   steps: PipelineStep[]
   error?: string
+  /**
+   * The registrar may hold (or does hold) the purchase but our records are
+   * incomplete or the outcome is unknown. NEVER retry: reconcile by hand.
+   */
+  manualReview?: boolean
+  /** The registrar expiry could not be read back; expiresAt was left null. */
+  expiryUnknown?: boolean
+}
+
+// ─── Registrar call bookkeeping (exactly-once purchases) ─────────────────────
+
+/** The order already reached the registrar once; calling again could buy twice. */
+export class RegistrarReplayRefusedError extends Error {
+  readonly code = 'registrar_replay_refused'
+  constructor(orderId: string) {
+    super(`Order ${orderId} already called the registrar; refusing a second purchase call`)
+    this.name = 'RegistrarReplayRefusedError'
+  }
+}
+
+/**
+ * Record — immediately BEFORE the purchase call — that this order is about to
+ * reach the registrar. Conditional on registrarCalledAt being unset, so a
+ * second attempt for the same order throws instead of buying again. If this
+ * write fails the registrar is not called.
+ */
+export async function markRegistrarCalled(orderId: string | undefined): Promise<void> {
+  if (!orderId) return
+  const r = await db.domainOrder.updateMany({
+    where: { id: orderId, registrarCalledAt: null },
+    data: { registrarCalledAt: new Date() },
+  })
+  if (r.count !== 1) throw new RegistrarReplayRefusedError(orderId)
+}
+
+/** Record a confirmed purchase. First write after the registrar said yes. */
+export async function markRegistrarConfirmed(
+  orderId: string | undefined,
+  providerOrderId: string | undefined
+): Promise<void> {
+  if (!orderId) return
+  await db.domainOrder.update({
+    where: { id: orderId },
+    data: {
+      registrarConfirmedAt: new Date(),
+      ...(providerOrderId ? { providerOrderId } : {}),
+    },
+  })
+}
+
+/**
+ * The registrar DEFINITELY refused (or was never reached): nothing was bought,
+ * so the order may be attempted again later.
+ */
+export async function releaseRegistrarCall(orderId: string | undefined): Promise<void> {
+  if (!orderId) return
+  await db.domainOrder
+    .updateMany({
+      where: { id: orderId, registrarConfirmedAt: null },
+      data: { registrarCalledAt: null },
+    })
+    .catch((err) => console.error('[domain-automation] could not release registrar call:', err))
+}
+
+/**
+ * The registrar's own expiry for a domain, or null when it cannot be read.
+ * Never computed locally: "now + N years" is wrong for renewals (they extend
+ * the current expiry), for transfers, and whenever the registrar rounds.
+ */
+export async function fetchRegistrarExpiry(domain: string): Promise<Date | null> {
+  try {
+    const info = await dynadotService.getDomainInfo(domain)
+    return parseRegistrarDate(info.expiry)
+  } catch (err) {
+    console.error(`[domain-automation] expiry lookup failed for ${domain}:`, err)
+    return null
+  }
+}
+
+/** Selling price for an order: the one quoted at checkout, else the catalogue. */
+async function orderPricing(
+  existingOrderId: string | undefined,
+  domain: string,
+  kind: 'registration' | 'renewal' | 'transfer',
+  years: number
+): Promise<{ unitPrice: number; totalAmount: number } | null> {
+  if (existingOrderId) {
+    const o = await db.domainOrder.findUnique({
+      where: { id: existingOrderId },
+      select: { unitPrice: true, totalAmount: true },
+    })
+    return o ? { unitPrice: o.unitPrice, totalAmount: o.totalAmount } : null
+  }
+  const price = await getPriceForDomain(domain)
+  const unit = price?.[kind]
+  if (!unit || unit <= 0) return null
+  return { unitPrice: unit, totalAmount: Math.round(unit * years * 100) / 100 }
+}
+
+/**
+ * Hand a previously DELETED Domain row to its new buyer: new owner, no
+ * project, and none of the old owner's DNS, contacts, verification or
+ * nameserver rows. Projects of other users still pointing at the name are
+ * unlinked so the old owner's site cannot serve the new owner's domain.
+ */
+async function reassignDeletedDomain(domainId: string, name: string, buyerId: string): Promise<void> {
+  await db.$transaction([
+    db.dnsRecord.deleteMany({ where: { domainId } }),
+    db.domainContact.deleteMany({ where: { domainId } }),
+    db.nameserverEntry.deleteMany({ where: { domainId } }),
+    db.domainVerification.deleteMany({ where: { domainId } }),
+    db.project.updateMany({
+      where: { customDomain: name, userId: { not: buyerId } },
+      data: { customDomain: null },
+    }),
+    db.domain.update({
+      where: { id: domainId },
+      data: {
+        userId: buyerId,
+        projectId: null,
+        authCode: null,
+        transferStatus: null,
+        nameservers: null,
+        emailHosted: false,
+        mailcowDomainId: null,
+        externalId: null,
+        premium: false,
+      },
+    }),
+  ])
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -207,50 +338,109 @@ export async function runRegistrationPipeline(
   const skip = (name: string, msg?: string) => markStep(name, 'skipped', msg)
   const fail = (name: string, msg: string) => markStep(name, 'failed', msg)
 
+  // Once the registrar has confirmed, any later failure leaves a domain we
+  // paid for: it must go to manual review, never back into a retry.
+  let registrarConfirmed = false
+
   try {
+    // ── Step 0: Ownership + price, before anything is spent ────────────────
+    const existing = await db.domain.findUnique({ where: { name: domainLower } })
+    if (existing && existing.status !== 'deleted' && existing.userId !== input.userId) {
+      await logDomainEvent(null, input.userId, 'register', 'failed', 'Domain already belongs to another account', {
+        domain: domainLower,
+      })
+      return { success: false, steps, error: 'Domain already belongs to another account' }
+    }
+    const pricing = await orderPricing(input.existingOrderId, domainLower, 'registration', input.duration)
+    if (!pricing) {
+      return { success: false, steps, error: 'This extension is not sold here (no active price)' }
+    }
+    const { unitPrice, totalAmount } = pricing
+
     // ── Step 1: Search (verify availability) ───────────────────────────────
     begin('search')
     const searchResult = await dynadotService.search(domainLower)
-    if (!searchResult.available) {
-      fail('search', `Domain ${domainLower} is not available`)
-      await logDomainEvent(null, input.userId, 'register', 'failed', 'Domain not available', {
+    if (searchResult.status !== 'available') {
+      const why =
+        searchResult.status === 'premium'
+          ? 'Premium domains cannot be registered here'
+          : searchResult.status === 'unknown'
+          ? 'Could not confirm availability with the registrar'
+          : 'Domain not available'
+      fail('search', `${domainLower}: ${why}`)
+      await logDomainEvent(null, input.userId, 'register', 'failed', why, {
         domain: domainLower,
       })
-      return { success: false, steps, error: 'Domain not available' }
+      return { success: false, steps, error: why }
     }
     ok('search', `Domain ${domainLower} is available`)
 
     // ── Step 2: Register ───────────────────────────────────────────────────
     begin('register')
-    const registerResult = await dynadotService.register(
-      domainLower,
-      input.duration,
-      input.contacts
-    )
+    // Recorded BEFORE the call; refuses (throws) if this order already called.
+    await markRegistrarCalled(input.existingOrderId)
+    let registerResult: Awaited<ReturnType<typeof dynadotService.register>>
+    try {
+      registerResult = await dynadotService.register(
+        domainLower,
+        input.duration,
+        input.contacts
+      )
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      if (isRegistrarUnknownOutcome(err)) {
+        fail('register', 'Registrar outcome unknown — held for manual review')
+        await logDomainEvent(null, input.userId, 'register', 'manual_review', message, {
+          domain: domainLower,
+          orderId: input.existingOrderId,
+        })
+        return { success: false, steps, error: message, manualReview: true }
+      }
+      // Thrown before the purchase was sent (contacts, configuration): nothing bought.
+      await releaseRegistrarCall(input.existingOrderId)
+      fail('register', message)
+      await logDomainEvent(null, input.userId, 'register', 'failed', message, { domain: domainLower })
+      return { success: false, steps, error: message }
+    }
     if (!registerResult.success) {
-      fail('register', 'Dynadot registration failed')
+      await releaseRegistrarCall(input.existingOrderId)
+      fail('register', 'Registrar refused the registration')
       await logDomainEvent(null, input.userId, 'register', 'failed', 'Registration failed', {
         domain: domainLower,
+        registrarError: registerResult.error,
       })
       return { success: false, steps, error: 'Registration failed' }
     }
+    registrarConfirmed = true
+    await markRegistrarConfirmed(input.existingOrderId, registerResult.orderId)
     ok('register', `Registered via Dynadot (order: ${registerResult.orderId || 'n/a'})`)
 
     // ── Step 3: Save to database ───────────────────────────────────────────
     begin('save_database')
-    const price = await getPriceForDomain(domainLower)
-    const expiry = new Date()
-    expiry.setFullYear(expiry.getFullYear() + input.duration)
+    // The registrar's expiry, read back — never computed here.
+    const expiry = await fetchRegistrarExpiry(domainLower)
+    if (!expiry) {
+      await logDomainEvent(null, input.userId, 'reconcile_expiry', 'pending',
+        'Registrar expiry could not be read after registration; expiresAt left empty', {
+          domain: domainLower,
+          orderId: input.existingOrderId,
+        })
+    }
 
-    // Prevent duplicate registrations
-    const existing = await db.domain.findUnique({ where: { name: domainLower } })
     let domainId: string
     if (existing) {
       domainId = existing.id
+      // A deleted row may have belonged to someone else: hand it to the buyer
+      // with none of the previous owner's project, DNS or contacts.
+      if (existing.status === 'deleted' || existing.userId !== input.userId) {
+        await reassignDeletedDomain(existing.id, domainLower, input.userId)
+      }
       await db.domain.update({
         where: { id: existing.id },
         data: {
+          userId: input.userId,
           status: 'active',
+          registrar: 'dynadot',
           registeredAt: new Date(),
           expiresAt: expiry,
           autoRenew: true,
@@ -258,6 +448,8 @@ export async function runRegistrationPipeline(
           locked: true,
           provider: 'dynadot',
           externalId: registerResult.orderId,
+          premium: false,
+          nameservers: input.nameservers ? JSON.stringify(input.nameservers) : undefined,
         },
       })
     } else {
@@ -274,7 +466,7 @@ export async function runRegistrationPipeline(
           locked: true,
           provider: 'dynadot',
           externalId: registerResult.orderId,
-          premium: searchResult.premium,
+          premium: false,
           nameservers: input.nameservers ? JSON.stringify(input.nameservers) : null,
         },
       })
@@ -283,7 +475,7 @@ export async function runRegistrationPipeline(
     ok('save_database', `Domain record created (id: ${domainId})`)
     void emitWebhookEvent(input.userId, 'domain.registered', {
       domain: domainLower,
-      expiresAt: expiry.toISOString(),
+      expiresAt: expiry ? expiry.toISOString() : null,
       years: input.duration,
     })
 
@@ -394,13 +586,11 @@ export async function runRegistrationPipeline(
     // The order normally already exists: domain-checkout raised it before
     // taking payment, and this pipeline only runs once the money is confirmed.
     begin('create_order')
-    const unitPrice = price?.registration ?? applyMarkup(19.99)
-    const totalAmount = Math.round(unitPrice * input.duration * 100) / 100
     let order: { id: string }
     if (input.existingOrderId) {
       order = await db.domainOrder.update({
         where: { id: input.existingOrderId },
-        data: { domainId, providerOrderId: registerResult.orderId },
+        data: { domainId },
       })
       ok('create_order', `Order ${order.id} fulfilled ($${totalAmount})`)
     } else {
@@ -417,6 +607,8 @@ export async function runRegistrationPipeline(
           currency: 'USD',
           provider: 'dynadot',
           providerOrderId: registerResult.orderId,
+          registrarCalledAt: new Date(),
+          registrarConfirmedAt: new Date(),
         },
       })
       ok('create_order', `Order ${order.id} created ($${totalAmount})`)
@@ -494,7 +686,7 @@ export async function runRegistrationPipeline(
               <li>Duration: ${input.duration} year(s)</li>
               <li>Amount: $${totalAmount} USD</li>
               <li>Invoice: ${invoiceNumber}</li>
-              <li>Expires: ${expiry.toDateString()}</li>
+              <li>Expires: ${expiry ? expiry.toDateString() : 'being confirmed with the registry'}</li>
             </ul>
             <p>You can manage your domain from the Apsamo Panel dashboard.</p>
           `,
@@ -514,9 +706,20 @@ export async function runRegistrationPipeline(
       orderId: order.id,
       invoiceNumber,
       steps,
+      expiryUnknown: !expiry,
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
+    // Registrar already charged (or this order already called it once):
+    // a retry could buy again, so this needs a human, not the sweeper.
+    if (registrarConfirmed || err instanceof RegistrarReplayRefusedError) {
+      await logDomainEvent(null, input.userId, 'register', 'manual_review', message, {
+        domain: domainLower,
+        orderId: input.existingOrderId,
+        registrarConfirmed,
+      })
+      return { success: false, steps, error: message, manualReview: true }
+    }
     return { success: false, steps, error: message }
   }
 }
@@ -529,24 +732,57 @@ export async function runRenewalPipeline(
   domainId: string,
   duration: number,
   billing: ExistingBilling = {}
-): Promise<{ success: boolean; invoiceNumber?: string; error?: string }> {
+): Promise<{
+  success: boolean
+  invoiceNumber?: string
+  error?: string
+  manualReview?: boolean
+  expiryUnknown?: boolean
+}> {
   const domain = await db.domain.findUnique({ where: { id: domainId } })
   if (!domain) return { success: false, error: 'Domain not found' }
   if (domain.userId !== userId) return { success: false, error: 'Not authorized' }
 
+  let registrarConfirmed = false
   try {
-    // 1. Renew via Dynadot
-    const result = await dynadotService.renew(domain.name, duration)
-    if (!result.success) return { success: false, error: 'Renewal failed at provider' }
+    const pricing = await orderPricing(billing.existingOrderId, domain.name, 'renewal', duration)
+    if (!pricing) return { success: false, error: 'This extension is not sold here (no active price)' }
+    const pricePerYear = pricing.unitPrice
+    const total = pricing.totalAmount
 
-    // 2. Update domain expiry
-    const newExpiry = result.newExpiry
-      ? new Date(result.newExpiry)
-      : domain.expiresAt
-      ? new Date(domain.expiresAt)
-      : new Date()
-    if (!result.newExpiry) {
-      newExpiry.setFullYear(newExpiry.getFullYear() + duration)
+    // 1. Renew via Dynadot — recorded before the call, never repeated.
+    await markRegistrarCalled(billing.existingOrderId)
+    let result: Awaited<ReturnType<typeof dynadotService.renew>>
+    try {
+      result = await dynadotService.renew(domain.name, duration)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      if (isRegistrarUnknownOutcome(err)) {
+        await logDomainEvent(domainId, userId, 'renew', 'manual_review', message, {
+          orderId: billing.existingOrderId,
+        })
+        return { success: false, error: message, manualReview: true }
+      }
+      await releaseRegistrarCall(billing.existingOrderId)
+      throw err
+    }
+    if (!result.success) {
+      await releaseRegistrarCall(billing.existingOrderId)
+      return { success: false, error: 'Renewal failed at provider' }
+    }
+    registrarConfirmed = true
+    await markRegistrarConfirmed(billing.existingOrderId, result.orderId)
+
+    // 2. Update domain expiry from the REGISTRAR (domain_info), falling back
+    //    to a parsable expiry in the renew answer. Never computed locally; if
+    //    neither is available it is left empty and flagged for reconciliation.
+    const newExpiry =
+      (await fetchRegistrarExpiry(domain.name)) ?? parseRegistrarDate(result.newExpiry)
+    if (!newExpiry) {
+      await logDomainEvent(domainId, userId, 'reconcile_expiry', 'pending',
+        'Registrar expiry could not be read after renewal; expiresAt left empty', {
+          orderId: billing.existingOrderId,
+        })
     }
     await db.domain.update({
       where: { id: domainId },
@@ -554,10 +790,6 @@ export async function runRenewalPipeline(
     })
 
     // 3. Create renewal record
-    const price = await getPriceForDomain(domain.name)
-    const pricePerYear = price?.renewal ?? applyMarkup(19.99)
-    const total = Math.round(pricePerYear * duration * 100) / 100
-
     const renewal = await db.renewal.create({
       data: {
         domainId,
@@ -575,7 +807,7 @@ export async function runRenewalPipeline(
     if (billing.existingOrderId) {
       order = await db.domainOrder.update({
         where: { id: billing.existingOrderId },
-        data: { domainId, providerOrderId: result.orderId },
+        data: { domainId },
       })
     } else {
       order = await db.domainOrder.create({
@@ -589,6 +821,8 @@ export async function runRenewalPipeline(
           unitPrice: pricePerYear,
           totalAmount: total,
           providerOrderId: result.orderId,
+          registrarCalledAt: new Date(),
+          registrarConfirmedAt: new Date(),
         },
       })
     }
@@ -632,11 +866,12 @@ export async function runRenewalPipeline(
       total,
     })
 
-    return { success: true, invoiceNumber }
+    return { success: true, invoiceNumber, expiryUnknown: !newExpiry }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    await logDomainEvent(domainId, userId, 'renew', 'failed', message)
-    return { success: false, error: message }
+    const manualReview = registrarConfirmed || err instanceof RegistrarReplayRefusedError
+    await logDomainEvent(domainId, userId, 'renew', manualReview ? 'manual_review' : 'failed', message)
+    return { success: false, error: message, ...(manualReview ? { manualReview: true } : {}) }
   }
 }
 
@@ -648,23 +883,67 @@ export async function runTransferPipeline(
   domain: string,
   authCode: string,
   billing: ExistingBilling & { contacts?: RegisterPipelineInput['contacts'] } = {}
-): Promise<{ success: boolean; domainId?: string; invoiceNumber?: string; error?: string }> {
+): Promise<{
+  success: boolean
+  domainId?: string
+  invoiceNumber?: string
+  error?: string
+  manualReview?: boolean
+  /** Accepted by the registrar; completes later (reconciliation polls it). */
+  transferPending?: boolean
+}> {
   const domainLower = domain.toLowerCase().trim()
 
+  let registrarConfirmed = false
   try {
-    // 1. Transfer via Dynadot
-    const result = await dynadotService.transfer(domainLower, authCode)
-    if (!result.success) return { success: false, error: result.message || 'Transfer failed' }
-
-    // 2. Create / update domain record
-    const expiry = new Date()
-    expiry.setFullYear(expiry.getFullYear() + 1)
+    // 0. Ownership + price, before anything is spent. A domain already in
+    //    ANOTHER customer's account here cannot be transferred into this one.
     const existing = await db.domain.findUnique({ where: { name: domainLower } })
+    if (existing && existing.status !== 'deleted' && existing.userId !== userId) {
+      await logDomainEvent(null, userId, 'transfer', 'failed', 'Domain belongs to another account', {
+        domain: domainLower,
+      })
+      return { success: false, error: 'Domain belongs to another account' }
+    }
+    const pricing = await orderPricing(billing.existingOrderId, domainLower, 'transfer', 1)
+    if (!pricing) return { success: false, error: 'This extension is not sold here (no active price)' }
+    const total = pricing.totalAmount
+
+    // 1. Transfer via Dynadot — recorded before the call, never repeated.
+    await markRegistrarCalled(billing.existingOrderId)
+    let result: Awaited<ReturnType<typeof dynadotService.transfer>>
+    try {
+      result = await dynadotService.transfer(domainLower, authCode)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      if (isRegistrarUnknownOutcome(err)) {
+        await logDomainEvent(null, userId, 'transfer', 'manual_review', message, {
+          domain: domainLower,
+          orderId: billing.existingOrderId,
+        })
+        return { success: false, error: message, manualReview: true }
+      }
+      await releaseRegistrarCall(billing.existingOrderId)
+      throw err
+    }
+    if (!result.success) {
+      await releaseRegistrarCall(billing.existingOrderId)
+      return { success: false, error: result.message || 'Transfer failed' }
+    }
+    registrarConfirmed = true
+    await markRegistrarConfirmed(billing.existingOrderId, result.orderId)
+
+    // 2. Create / update domain record. The transfer is only REQUESTED: no
+    //    expiry is known until it completes, so none is invented.
     let domainId: string
     if (existing) {
+      if (existing.status === 'deleted' || existing.userId !== userId) {
+        await reassignDeletedDomain(existing.id, domainLower, userId)
+      }
       await db.domain.update({
         where: { id: existing.id },
         data: {
+          userId,
           status: 'transferring',
           transferStatus: 'pending',
           registrar: 'dynadot',
@@ -681,7 +960,7 @@ export async function runTransferPipeline(
           transferStatus: 'pending',
           registrar: 'dynadot',
           provider: 'dynadot',
-          expiresAt: expiry,
+          expiresAt: null,
         },
       })
       domainId = created.id
@@ -698,13 +977,11 @@ export async function runTransferPipeline(
     }
 
     // 4. Order + Invoice — reuse the ones raised at checkout when present.
-    const price = await getPriceForDomain(domainLower)
-    const total = price?.transfer ?? applyMarkup(19.99)
     let order: { id: string }
     if (billing.existingOrderId) {
       order = await db.domainOrder.update({
         where: { id: billing.existingOrderId },
-        data: { domainId, providerOrderId: result.orderId },
+        data: { domainId },
       })
     } else {
       order = await db.domainOrder.create({
@@ -714,10 +991,13 @@ export async function runTransferPipeline(
           domainName: domainLower,
           type: 'transfer',
           duration: 1,
-          status: 'completed',
+          // Accepted, not finished: reconciliation completes it.
+          status: 'transfer_pending',
           unitPrice: total,
           totalAmount: total,
           providerOrderId: result.orderId,
+          registrarCalledAt: new Date(),
+          registrarConfirmedAt: new Date(),
         },
       })
     }
@@ -760,11 +1040,14 @@ export async function runTransferPipeline(
       orderId: result.orderId,
     })
 
-    return { success: true, domainId, invoiceNumber }
+    return { success: true, domainId, invoiceNumber, transferPending: true }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    await logDomainEvent(null, userId, 'transfer', 'failed', message, { domain: domainLower })
-    return { success: false, error: message }
+    const manualReview = registrarConfirmed || err instanceof RegistrarReplayRefusedError
+    await logDomainEvent(null, userId, 'transfer', manualReview ? 'manual_review' : 'failed', message, {
+      domain: domainLower,
+    })
+    return { success: false, error: message, ...(manualReview ? { manualReview: true } : {}) }
   }
 }
 

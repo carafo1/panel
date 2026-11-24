@@ -15,10 +15,192 @@
  * DYNADOT_API_KEY is not configured.
  */
 
+import { isProduction } from './demo-mode'
+
 const API_BASE = 'https://api.dynadot.com/api3.json'
+
+/** Abort a registrar request that has not answered in this long. */
+export const DYNADOT_REQUEST_TIMEOUT_MS = 30_000
 
 function getApiKey(): string | null {
   return process.env.DYNADOT_API_KEY || null
+}
+
+// ─── Registrar safety primitives (shared with lib/dynadot-service) ───────────
+
+/**
+ * No registrar key is configured. In production this is a hard error for every
+ * call — nothing is simulated, no availability is guessed, nothing "succeeds".
+ */
+export class RegistrarNotConfiguredError extends Error {
+  readonly code = 'registrar_not_configured'
+  constructor() {
+    super('Domain registrar is not configured (DYNADOT_API_KEY is not set)')
+    this.name = 'RegistrarNotConfiguredError'
+  }
+}
+
+/**
+ * A money-spending registrar command was sent but we cannot tell whether the
+ * registrar executed it (timeout, dropped connection, 5xx, unparsable body or
+ * an answer shape we do not recognise). The purchase may have happened.
+ * Callers must NOT retry: park the order for manual review / reconciliation.
+ */
+export class RegistrarUnknownOutcomeError extends Error {
+  readonly code = 'registrar_unknown_outcome'
+  constructor(readonly command: string, detail: string) {
+    super(`Registrar outcome unknown for "${command}": ${detail}`)
+    this.name = 'RegistrarUnknownOutcomeError'
+  }
+}
+
+export function isRegistrarUnknownOutcome(err: unknown): err is RegistrarUnknownOutcomeError {
+  return (
+    err instanceof RegistrarUnknownOutcomeError ||
+    (!!err && typeof err === 'object' && (err as { code?: unknown }).code === 'registrar_unknown_outcome')
+  )
+}
+
+/**
+ * Commands that spend registrar balance. They are never retried automatically:
+ * a retry after an ambiguous failure can buy the same domain (or year) twice.
+ */
+export const PURCHASE_COMMANDS: ReadonlySet<string> = new Set([
+  'register',
+  'bulk_register',
+  'renew',
+  'transfer',
+  'restore',
+  'buy_expired_closeout_domain',
+  'place_auction_bid',
+  'place_backorder_auction_bid',
+])
+
+export function isPurchaseCommand(command: string | undefined): boolean {
+  return !!command && PURCHASE_COMMANDS.has(command)
+}
+
+/**
+ * True only when simulated registrar data may be served: no key configured AND
+ * not production. In production a missing key is an error, never a demo.
+ */
+export function isDynadotSimulated(): boolean {
+  return !getApiKey() && !isProduction()
+}
+
+/** Throw RegistrarNotConfiguredError when no key is set and simulation is not allowed. */
+export function assertRegistrarConfigured(): void {
+  if (!getApiKey() && isProduction()) throw new RegistrarNotConfiguredError()
+}
+
+/** Every top-level Dynadot envelope (`Response`, `RegisterResponse`, `SearchResponse`…). */
+export function dynadotEnvelopes(json: Record<string, unknown>): Array<Record<string, unknown>> {
+  return Object.entries(json)
+    .filter(([k, v]) => (k === 'Response' || k.endsWith('Response')) && v && typeof v === 'object')
+    .map(([, v]) => v as Record<string, unknown>)
+}
+
+/**
+ * The error message an envelope reports (ResponseCode -1 or Status "error"),
+ * or null. `strict` also treats Status "failed"/"failure" and any non-empty
+ * Error field as an error — used for purchase answers.
+ */
+export function dynadotEnvelopeError(
+  env: Record<string, unknown>,
+  strict = false
+): string | null {
+  const code = env.ResponseCode
+  const status = String(env.Status ?? '').trim().toLowerCase()
+  const err = env.Error ?? env.ErrorMessage
+  if (code === '-1' || code === -1 || status === 'error') {
+    return String(err || 'Unknown Dynadot error')
+  }
+  if (strict) {
+    if (status === 'failed' || status === 'failure') return String(err || `Dynadot status "${status}"`)
+    if (err !== undefined && err !== null && String(err).trim() !== '') return String(err)
+  }
+  return null
+}
+
+export type PurchaseKind = 'register' | 'renew' | 'transfer'
+
+export type PurchaseOutcome =
+  | { outcome: 'success'; orderId?: string; price?: number; expiration?: string }
+  | { outcome: 'failed'; error: string }
+  | { outcome: 'unknown'; reason: string }
+
+const PURCHASE_WRAPPERS: Record<PurchaseKind, string[]> = {
+  register: ['RegisterResponse', 'Response'],
+  renew: ['RenewResponse', 'Response'],
+  transfer: ['TransferResponse', 'Response'],
+}
+
+const PURCHASE_SUCCESS: Record<PurchaseKind, string[]> = {
+  register: ['success', 'register success'],
+  renew: ['success', 'renew success'],
+  // Dynadot answers an accepted transfer with "order created".
+  transfer: ['success', 'transfer success', 'order created'],
+}
+
+/**
+ * Interpret the answer to a purchase command. Accepts the command-specific
+ * wrapper (RegisterResponse / RenewResponse / TransferResponse) or the generic
+ * `Response`. An error in either is a definite failure; a body we cannot read
+ * as success OR failure is `unknown` — never treated as success, and never as
+ * a failure that would invite a retry.
+ */
+export function parsePurchaseResponse(
+  kind: PurchaseKind,
+  json: unknown
+): PurchaseOutcome {
+  if (!json || typeof json !== 'object' || Array.isArray(json)) {
+    return { outcome: 'unknown', reason: 'registrar answered with no JSON object' }
+  }
+  const body = json as Record<string, unknown>
+  // Any envelope reporting an error is a definite refusal.
+  for (const env of dynadotEnvelopes(body)) {
+    const err = dynadotEnvelopeError(env, true)
+    if (err) return { outcome: 'failed', error: err }
+  }
+  const env = PURCHASE_WRAPPERS[kind]
+    .map((k) => body[k])
+    .find((v): v is Record<string, unknown> => !!v && typeof v === 'object')
+  if (!env) {
+    return { outcome: 'unknown', reason: `no ${PURCHASE_WRAPPERS[kind].join('/')} envelope in the answer` }
+  }
+  const status = String(env.Status ?? '').trim().toLowerCase()
+  if (!PURCHASE_SUCCESS[kind].includes(status)) {
+    return { outcome: 'unknown', reason: `unrecognised status "${status || '(none)'}"` }
+  }
+  const orderIdRaw = env.RegisterOrderId ?? env.OrderId ?? env.OrderID
+  const priceRaw = env.Price
+  const price = priceRaw !== undefined && priceRaw !== null ? parseFloat(String(priceRaw)) : NaN
+  const exp = parseRegistrarDate(env.Expiration ?? env.ExpirationDate)
+  return {
+    outcome: 'success',
+    orderId: orderIdRaw !== undefined && orderIdRaw !== null && orderIdRaw !== '' ? String(orderIdRaw) : undefined,
+    price: Number.isFinite(price) ? price : undefined,
+    expiration: exp ? exp.toISOString() : undefined,
+  }
+}
+
+/**
+ * Parse a registrar date. Dynadot sends epoch MILLISECONDS (as a number or a
+ * numeric string); `new Date("1767225600000")` is an Invalid Date, which is
+ * how renewals used to store garbage. Returns null for anything unparsable.
+ */
+export function parseRegistrarDate(raw: unknown): Date | null {
+  if (raw === undefined || raw === null || raw === '') return null
+  const s = String(raw).trim()
+  let d: Date
+  if (/^\d+$/.test(s)) {
+    const n = Number(s)
+    // 10-digit values are epoch seconds; 13-digit are milliseconds.
+    d = new Date(s.length <= 10 ? n * 1000 : n)
+  } else {
+    d = new Date(s)
+  }
+  return Number.isNaN(d.getTime()) ? null : d
 }
 
 /**
@@ -107,38 +289,52 @@ interface DynadotListedDomain {
 async function callDynadot(params: Record<string, string>): Promise<DynadotResponse> {
   const key = getApiKey()
   if (!key) {
-    throw new Error('DYNADOT_API_KEY not configured')
+    throw new RegistrarNotConfiguredError()
   }
+  const command = params.command
+  const purchase = isPurchaseCommand(command)
   const url = new URL(API_BASE)
   url.searchParams.set('key', key)
   for (const [k, v] of Object.entries(params)) {
     url.searchParams.set(k, v)
   }
-  const res = await fetch(url.toString(), {
-    method: 'GET',
-    headers: { Accept: 'application/json' },
-  })
-  if (!res.ok) {
-    throw new Error(`Dynadot API HTTP ${res.status}: ${await res.text()}`)
+  // No retries here, for any command. For purchases, a failure after the
+  // request may have reached the registrar is reported as an UNKNOWN outcome.
+  let res: Response
+  try {
+    res = await fetch(url.toString(), {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(DYNADOT_REQUEST_TIMEOUT_MS),
+    })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    if (purchase) throw new RegistrarUnknownOutcomeError(command, `network/timeout: ${msg}`)
+    throw err
   }
-  const json = (await res.json()) as DynadotResponse
-  // Detect embedded Dynadot body errors (HTTP 200 + ResponseCode -1).
-  // Errors can appear in ANY top-level *Response envelope, not just "Response".
-  const envelopes = [
-    json.Response,
-    json.DomainInfoResponse,
-    json.GetNsResponse,
-    json.ListDomainInfoResponse,
-    json.CreateContactResponse,
-    // DNS commands: set_dns2 answers under SetDnsResponse, get_dns under
-    // GetDnsResponse. Without these a failed DNS write looked like a non-error.
-    json.SetDnsResponse,
-    json.GetDnsResponse,
-  ].filter(Boolean) as Array<Record<string, unknown>>
-  for (const env of envelopes) {
-    if (env.Status === 'error' || env.ResponseCode === '-1' || env.ResponseCode === -1) {
-      throw new Error(`Dynadot API error: ${env.Error || 'Unknown error'}`)
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    if (purchase && res.status >= 500) {
+      throw new RegistrarUnknownOutcomeError(command, `HTTP ${res.status}`)
     }
+    throw new Error(`Dynadot API HTTP ${res.status}: ${text.slice(0, 300)}`)
+  }
+  let json: DynadotResponse
+  try {
+    json = (await res.json()) as DynadotResponse
+  } catch {
+    if (purchase) throw new RegistrarUnknownOutcomeError(command, 'unparsable response body')
+    throw new Error('Dynadot API returned an unparsable response')
+  }
+  if (!json || typeof json !== 'object') {
+    if (purchase) throw new RegistrarUnknownOutcomeError(command, 'empty response body')
+    throw new Error('Dynadot API returned an empty response')
+  }
+  // Detect embedded Dynadot body errors (HTTP 200 + ResponseCode -1) in ANY
+  // top-level *Response envelope (RegisterResponse, SetDnsResponse, …).
+  for (const env of dynadotEnvelopes(json as Record<string, unknown>)) {
+    const err = dynadotEnvelopeError(env)
+    if (err) throw new Error(`Dynadot API error: ${err}`)
   }
   return json
 }
@@ -465,6 +661,7 @@ interface RegisterDomainResult {
   success: boolean
   orderId?: string
   registrationPrice?: number
+  error?: string
 }
 
 export interface RegistrantContact {
@@ -563,13 +760,13 @@ export async function registerDomain(
   }
 
   const json = await callDynadot(params)
-  const response = json.Response
-  const status = response?.Status?.toLowerCase()
-  const success = status === 'success' || status === 'register success'
+  const parsed = parsePurchaseResponse('register', json)
+  if (parsed.outcome === 'unknown') throw new RegistrarUnknownOutcomeError('register', parsed.reason)
+  if (parsed.outcome === 'failed') return { success: false, error: parsed.error }
   return {
-    success,
-    orderId: (response?.RegisterOrderId as string) || (response?.OrderId as string),
-    registrationPrice: response?.Price ? parseFloat(String(response.Price)) : undefined,
+    success: true,
+    orderId: parsed.orderId,
+    registrationPrice: parsed.price,
   }
 }
 
@@ -1176,8 +1373,9 @@ export async function renewDomain(
     domain,
     duration: String(duration),
   })
-  const status = json.Response?.Status?.toLowerCase()
-  return { success: status === 'success' || status === 'renew success' }
+  const parsed = parsePurchaseResponse('renew', json)
+  if (parsed.outcome === 'unknown') throw new RegistrarUnknownOutcomeError('renew', parsed.reason)
+  return { success: parsed.outcome === 'success' }
 }
 
 // ─── Transfer ──────────────────────────────────────────────────────────────────
@@ -1194,6 +1392,7 @@ export async function transferDomain(
     domain,
     auth: authCode,
   })
-  const status = json.Response?.Status?.toLowerCase()
-  return { success: status === 'success' || status === 'transfer success' }
+  const parsed = parsePurchaseResponse('transfer', json)
+  if (parsed.outcome === 'unknown') throw new RegistrarUnknownOutcomeError('transfer', parsed.reason)
+  return { success: parsed.outcome === 'success' }
 }

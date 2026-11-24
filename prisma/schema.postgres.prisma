@@ -349,12 +349,20 @@ model Payment {
   /// whose update flips it from null may provision, so two concurrent
   /// confirmations cannot both build a container or register a domain.
   provisionClaimedAt DateTime?
+  /// Recoverable provisioning state, separate from the payment status:
+  /// none | claimed | provisioning | provisioned | failed | retry_pending | manual_review
+  provisionStatus     String    @default("none")
+  /// A claim past this time was abandoned (crash) and may be re-claimed.
+  provisionLeaseUntil DateTime?
+  provisionAttempts   Int       @default(0)
+  provisionError      String?
 
   user          User          @relation(fields: [userId], references: [id])
   subscription  Subscription? @relation(fields: [subscriptionId], references: [id])
 
   @@index([transactionId])
   @@index([invoiceId])
+  @@index([provisionStatus])
 }
 
 /// Server-side lease for scheduled jobs (e.g. the billing sweep). A run claims
@@ -1534,6 +1542,12 @@ model DomainOrder {
   currency        String   @default("USD")
   provider        String   @default("dynadot")
   providerOrderId String?  // Dynadot order ID
+  /// Set immediately BEFORE the registrar purchase call. If set without
+  /// registrarConfirmedAt, the call may have succeeded: reconcile with the
+  /// registrar before any retry, never call it again blindly.
+  registrarCalledAt    DateTime?
+  /// Set immediately after the registrar confirmed the purchase.
+  registrarConfirmedAt DateTime?
   metadata        String?  // JSON string of extra data
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt

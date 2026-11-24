@@ -15,8 +15,9 @@ import { db } from '@/lib/db'
 import { ok, apiError } from '@/lib/api-response'
 import { runTransferPipeline } from '@/lib/domain-automation'
 import { createDomainOrder } from '@/lib/domain-checkout'
+import { withRateLimit } from '@/lib/rate-limit'
 
-export async function POST(request: Request) {
+async function postHandler(request: Request) {
   const user = await authenticateRequest(request)
   if (!user) return apiError.unauthorized()
 
@@ -103,3 +104,6 @@ export async function POST(request: Request) {
     return apiError.serverError()
   }
 }
+
+// Each call can start a payment and, for admins, a registrar purchase.
+export const POST = withRateLimit(postHandler, { limit: 10, windowMs: 60_000 })
