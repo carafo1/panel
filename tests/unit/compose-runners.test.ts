@@ -33,7 +33,9 @@ describe('every compose call in the runners uses them', () => {
       const invocations = calls.flatMap((c) => [...c.matchAll(/(\S*)docker[ -]compose (\S+)/g)])
       expect(invocations.length).toBeGreaterThan(0)
       for (const m of invocations) {
-        expect(m[1].replace(/^[(`]+/, '')).toBe('${COMPOSE_ENV}')
+        // The bind-source guard may run first; the compose call itself must
+        // still get the clean environment.
+        expect(m[1].replace(/^[(`]+/, '').replace(/^\$\{BIND_SOURCE_GUARD\}/, '')).toBe('${COMPOSE_ENV}')
         expect(m[2].startsWith('${composeProjectFlag(')).toBe(true)
       }
     })

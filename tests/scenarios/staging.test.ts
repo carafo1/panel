@@ -1,12 +1,12 @@
 /** Staging sites: plan gating, lifecycle, isolation from live, and the copy commands. */
 import { describe, it, expect } from 'bun:test'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { db } from '@/lib/db'
 import * as staging from '@/app/api/hosting/[id]/staging/route'
 import * as hosting from '@/app/api/hosting/route'
-import { copyFilesCommand, copyDatabaseCommand, stagingMode } from '@/lib/staging'
+import { copyFilesCommand, copyFilesScript, copyDatabaseCommand, stagingMode } from '@/lib/staging'
 import { checkLimit } from '@/lib/plan-limits'
 import { makeUser, makeProject, makePlan, authed, params } from './helpers'
 
@@ -55,7 +55,7 @@ describe('staging copy commands', () => {
     writeFileSync(join(stg, 'wp-content', 'old.txt'), 'stale')
     writeFileSync(join(stg, 'wp-config-docker.php'), 'staging db')
 
-    expect(sh(copyFilesCommand('wordpress', posix(live), posix(stg), { replace: true })).code).toBe(0)
+    expect(sh(copyFilesScript('wordpress', posix(live), posix(stg), { replace: true })).code).toBe(0)
     expect(readFileSync(join(stg, 'wp-content', 'plugins', 'shop.php'), 'utf8')).toBe('live plugin')
     expect(existsSync(join(stg, 'wp-content', 'old.txt'))).toBe(false)
     expect(existsSync(join(stg, 'wp-content.staging-old'))).toBe(false)
@@ -64,7 +64,7 @@ describe('staging copy commands', () => {
     // Source without wp-content: fail, destination intact.
     const empty = join(root, 'empty')
     mkdirSync(empty)
-    const r = sh(copyFilesCommand('wordpress', posix(empty), posix(stg), { replace: true }))
+    const r = sh(copyFilesScript('wordpress', posix(empty), posix(stg), { replace: true }))
     expect(r.code).not.toBe(0)
     expect(readFileSync(join(stg, 'wp-content', 'plugins', 'shop.php'), 'utf8')).toBe('live plugin')
     rmSync(root, { recursive: true, force: true })
@@ -82,13 +82,39 @@ describe('staging copy commands', () => {
     writeFileSync(join(b, 'docker-compose.yml'), 'staging compose')
     writeFileSync(join(b, 'removed.html'), 'gone')
 
-    expect(sh(copyFilesCommand('files', posix(a), posix(b), { replace: true })).code).toBe(0)
+    expect(sh(copyFilesScript('files', posix(a), posix(b), { replace: true })).code).toBe(0)
     expect(readFileSync(join(b, 'public', 'index.html'), 'utf8')).toBe('new')
     expect(readFileSync(join(b, '.env'), 'utf8')).toBe('SECRET=staging')
     expect(readFileSync(join(b, 'docker-compose.yml'), 'utf8')).toBe('staging compose')
     expect(existsSync(join(b, '.git'))).toBe(true)
     expect(existsSync(join(b, 'removed.html'))).toBe(false)
     rmSync(root, { recursive: true, force: true })
+  })
+
+  it.skipIf(!haveBash || process.platform === 'win32')('WordPress: a wp-content symlink is refused, never followed', () => {
+    const root = mkdtempSync(join(tmpdir(), 'stg-link-'))
+    const live = join(root, 'live'), stg = join(root, 'stg'), secret = join(root, 'host-secret')
+    mkdirSync(live, { recursive: true })
+    mkdirSync(join(stg, 'wp-content'), { recursive: true })
+    mkdirSync(secret)
+    writeFileSync(join(secret, 'shadow'), 'root:hash')
+    symlinkSync(secret, join(live, 'wp-content'))
+    const r = sh(copyFilesScript('wordpress', posix(live), posix(stg), { replace: true }))
+    expect(r.code).not.toBe(0)
+    expect(r.err).toContain('not a link')
+    expect(existsSync(join(stg, 'wp-content', 'shadow'))).toBe(false)
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('the copy runs in a sandbox container that sees only the two sites', () => {
+    const cmd = copyFilesCommand('wordpress', '/opt/deployhub/projects/live', '/opt/deployhub/projects/stg', { replace: true })
+    expect(cmd.startsWith('docker run --rm --network none')).toBe(true)
+    expect(cmd).toContain('-v /opt/deployhub/projects/live:/src:ro -v /opt/deployhub/projects/stg:/dst')
+    expect(cmd).toContain('--cap-drop ALL')
+    expect(cmd).toContain('/src/wp-content')
+    expect(cmd).not.toContain('/opt/deployhub/projects/live/wp-content')
+    expect(() => copyFilesCommand('files', '/etc', '/opt/deployhub/projects/stg', { replace: false })).toThrow()
+    expect(() => copyFilesCommand('files', '/opt/deployhub/projects/a/../../../etc', '/opt/deployhub/projects/stg', { replace: false })).toThrow()
   })
 
   it('database copy passes credentials as quoted env values and always removes the dump', () => {

@@ -3,6 +3,11 @@ import { authenticateRequest } from '@/lib/auth'
 import { requireProjectAccess } from '@/lib/project-access'
 import { logAudit } from '@/lib/audit'
 import { createBackup, listBackups } from '@/lib/vps'
+import { db } from '@/lib/db'
+
+/** At most this many backups per website in BACKUP_WINDOW_MS. */
+const BACKUPS_PER_WINDOW = 2
+const BACKUP_WINDOW_MS = 10 * 60 * 1000
 
 /**
  * Project Backups Endpoint (collection)
@@ -46,9 +51,22 @@ export async function POST(
     const access = await requireProjectAccess(decoded, projectId, 'data')
     if (!access.ok) return access.response
 
+    // Each backup is a full archive of the site (up to 5 minutes of work on
+    // the server, and disk space). Without a limit a script could fill the
+    // disk or keep the server busy for every other customer.
+    const recentBackups = await db.websiteBackup.count({
+      where: { projectId, createdAt: { gt: new Date(Date.now() - BACKUP_WINDOW_MS) } },
+    })
+    if (recentBackups >= BACKUPS_PER_WINDOW) {
+      return NextResponse.json(
+        { error: 'A backup was just made for this website. Please wait a few minutes before creating another.' },
+        { status: 429, headers: { 'Retry-After': String(BACKUP_WINDOW_MS / 1000) } }
+      )
+    }
+
     const body = await request.json().catch(() => ({}))
     const type = body?.type === 'pre-deploy' ? 'pre-deploy' : 'manual'
-    const note = typeof body?.note === 'string' ? body.note : null
+    const note = typeof body?.note === 'string' ? body.note.slice(0, 500) : null
 
     const result = await createBackup(projectId, { type, note })
 

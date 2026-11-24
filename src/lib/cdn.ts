@@ -18,6 +18,7 @@ import crypto from 'crypto'
 import { db } from '@/lib/db'
 import { isAdmin } from '@/lib/security'
 import { tldFromDomain } from '@/lib/pricing'
+import { isCustomDomainBacked } from '@/lib/mailcow-tenant'
 import { cf, cloudflareConfig, cloudflareMode, accountIdFor, CloudflareError } from '@/lib/cloudflare'
 
 export class CdnError extends Error {
@@ -54,7 +55,12 @@ async function siteHosts(projectId: string) {
   })
   if (!p) throw new CdnError('Website not found.', 404)
   const hosts = new Set<string>()
-  if (p.customDomain) hosts.add(p.customDomain.toLowerCase())
+  // Only a proven customDomain (verified WebsiteDomain, or a domain the owner
+  // holds with us). An unverified one would put someone else's domain into
+  // the platform's Cloudflare account.
+  if (p.customDomain && (await isCustomDomainBacked(p, p.websiteDomains))) {
+    hosts.add(p.customDomain.toLowerCase())
+  }
   for (const d of p.websiteDomains) if (d.verified) hosts.add(d.domain.toLowerCase())
   return { project: p, hosts: [...hosts] }
 }

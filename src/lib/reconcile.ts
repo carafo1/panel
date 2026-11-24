@@ -9,10 +9,13 @@
  *     or was abandoned by a crashed run. Everything goes through the same
  *     atomic claim in provisionForPayment, so racing a live run is harmless.
  *
- *   - runReconcile ('reconcile', hourly): the sweep above, plus a REPORT of
- *     what needs a human. It never calls the registrar; the only state it
- *     changes besides the sweep is marking projects whose builds all ended
- *     but which still say 'creating' as 'error'.
+ *   - runReconcile ('reconcile', hourly): the sweep above, read-only registrar
+ *     checks (transfers, expiry), the infrastructure checks in
+ *     infra-reconcile.ts (containers, certificates, registrar drift), plus a
+ *     REPORT of what needs a human. It never sends a registrar purchase
+ *     command; besides the sweep it only marks projects whose builds all
+ *     ended but which still say 'creating' as 'error', records verified
+ *     certificate status, and corrects expiry dates from the registrar.
  *
  * Both are idempotent and safe to run by hand (admin route).
  */
@@ -25,6 +28,7 @@ import {
 import { acquireCronLease } from '@/lib/renewals'
 import { ACTIVE_DEPLOY_STATUSES, reapStaleDeployments } from '@/lib/deploy-guard'
 import { getDomainInfo, isDynadotDemoMode } from '@/lib/dynadot'
+import { runInfraReconcile, type InfraDeps, type InfraReconcileSummary } from '@/lib/infra-reconcile'
 
 // ── Domain orders and registrar state ─────────────────────────────────────
 
@@ -351,6 +355,8 @@ export interface ReconcileSummary {
   requeuedDomainOrders: number
   transfers: TransferPollSummary
   expiry: ExpiryReconcileSummary
+  /** Containers, certificates and registrar state compared with the database. */
+  infra: InfraReconcileSummary
 }
 
 /** The read-only part: everything that needs attention. Changes nothing. */
@@ -464,7 +470,7 @@ async function settleStuckProjects(now: Date) {
 /** Hourly reconcile: sweep, reap, then report. */
 export async function runReconcile(
   now = new Date(),
-  deps: DomainReconcileDeps = {}
+  deps: DomainReconcileDeps & { infra?: InfraDeps } = {}
 ): Promise<ReconcileSummary> {
   const requeuedDomainOrders = await requeueFailedDomainOrders()
   const sweep = await sweepProvisioning(now)
@@ -482,6 +488,7 @@ export async function runReconcile(
   }))
   const reapedDeployments = await reapStaleDeployments().catch(() => 0)
   const stuckProjects = await settleStuckProjects(now)
+  const infra = await runInfraReconcile({ ...deps.infra, now })
   const report = await reconcileReport(now)
   const summary: ReconcileSummary = {
     ranAt: now.toISOString(),
@@ -491,12 +498,16 @@ export async function runReconcile(
     transfers,
     expiry,
     stuckProjects,
+    infra,
     ...report,
   }
   console.log(
     `[reconcile] sweep=${sweep.examined} payments_needing_attention=${report.payments.length} ` +
       `domain_orders=${report.domainOrders.length} stuck_projects=${stuckProjects.length} ` +
-      `pending_email=${report.pendingEmail.length} reaped=${reapedDeployments}`
+      `pending_email=${report.pendingEmail.length} reaped=${reapedDeployments} ` +
+      `containers_missing=${infra.containers.missing.length} containers_stopped=${infra.containers.notRunning.length} ` +
+      `certs_not_served=${infra.certificates.notServed.length} certs_expiring=${infra.certificates.expiringSoon.length} ` +
+      `registrar_expiry_fixed=${infra.registrar.expiryCorrected.length} registrar_lookup_failed=${infra.registrar.lookupFailed.length}`
   )
   return summary
 }
@@ -514,6 +525,14 @@ export async function runScheduledReconcile(): Promise<void> {
     if (s.examined > 0) {
       console.log(`[reconcile] provisioning sweep re-drove ${s.examined} payment(s)`, s.outcomes)
     }
+    // Temporary IP bans end on time: disable expired rules and rewrite the
+    // proxy for those sites (the Caddyfile is static between regenerations).
+    const { expireIpRules } = await import('@/lib/vps/proxy')
+    const expired = await expireIpRules().catch((err) => {
+      console.error('[reconcile] IP rule expiry failed:', err instanceof Error ? err.message : err)
+      return 0
+    })
+    if (expired > 0) console.log(`[reconcile] disabled ${expired} expired IP rule(s)`)
   }
   if (await acquireCronLease('reconcile', RECONCILE_INTERVAL_MS)) {
     await runReconcile()

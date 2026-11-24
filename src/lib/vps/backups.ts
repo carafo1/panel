@@ -58,11 +58,23 @@ function BACKUP_DIR(projectId: string): string {
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
+/**
+ * A backup whose database dump failed still holds the site's files, but it
+ * must not look like a full backup: it is saved as 'partial' with the
+ * databases that are missing. (Dump failures used to be logged as a WARNING
+ * while the row said 'completed'.)
+ */
+function backupOutcome(dbFailures: string[], note: string | null | undefined) {
+  if (dbFailures.length === 0) return { status: 'completed' as const, note: note || null }
+  const missing = `Database not included: ${dbFailures.join(', ')}`
+  return { status: 'partial' as const, note: note ? `${note} — ${missing}` : missing }
+}
+
 export interface BackupResult {
   id: string
   filename: string
   sizeBytes: number
-  status: 'completed' | 'failed'
+  status: 'completed' | 'partial' | 'failed'
   message: string
 }
 
@@ -158,6 +170,7 @@ export async function createBackup(
   }
 
   // Real remote mode (SSH + Docker).
+  const dbFailures: string[] = []
   const creds: SshCredentials = await getServerCredentials(project.serverId!)
   try {
     await withConnection(creds, async (client) => {
@@ -181,6 +194,7 @@ export async function createBackup(
           dbPass = decrypt(dbRow.password)
         } catch {
           log(`WARNING: could not decrypt DB password for ${dbRow.name}; skipping DB dump.`)
+          dbFailures.push(dbRow.name)
           continue
         }
         log(`Dumping database ${dbRow.name} from container ${container}…`)
@@ -196,6 +210,19 @@ export async function createBackup(
         const dump = await exec(client, dumpCmd, { timeoutMs: 120000 })
         if (dump.exitCode !== 0) {
           log(`WARNING: dump for ${dbRow.name} failed: ${(dump.stderr || dump.stdout).slice(0, 200)}`)
+          dbFailures.push(dbRow.name)
+          continue
+        }
+        // "dump | gzip" exits with gzip's status, so a failed dump still
+        // "succeeds" with an empty archive. An empty gzip is ~20 bytes.
+        const dumpSize = await exec(
+          client,
+          `stat -c %s ${shellQuote(remotePath + '.db-' + dbRow.name + '.sql.gz')} 2>/dev/null || echo 0`,
+          { timeoutMs: 10000 }
+        )
+        if ((parseInt(dumpSize.stdout.trim(), 10) || 0) < 100) {
+          log(`WARNING: dump for ${dbRow.name} is empty; the database is not in this backup.`)
+          dbFailures.push(dbRow.name)
           continue
         }
         // Append the dump file into the existing tar (gzip concatenation
@@ -217,9 +244,8 @@ export async function createBackup(
           projectId,
           filename,
           sizeBytes,
-          status: 'completed',
+          ...backupOutcome(dbFailures, opts.note),
           type: backupType,
-          note: opts.note || null,
         },
       })
     })
@@ -231,12 +257,16 @@ export async function createBackup(
       log(`Retention: removed ${pruned.deleted} expired backup(s).`)
     }
 
+    const remoteOutcome = backupOutcome(dbFailures, null)
     return {
       id: '',
       filename,
       sizeBytes: 0,
-      status: 'completed',
-      message: `Backup created at ${remotePath}`,
+      status: remoteOutcome.status,
+      message:
+        remoteOutcome.status === 'partial'
+          ? `Backup created at ${remotePath}, but without: ${dbFailures.join(', ')}`
+          : `Backup created at ${remotePath}`,
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
@@ -324,6 +354,7 @@ async function createLocalBackup(
       }
     })
 
+    const dbFailures: string[] = []
     // Step 2: copy SQLite .db files (externalRef) alongside the tar.
     // Non-SQLite DBs require Docker for a real dump — skip with a warning
     // (in practice the database.ts module auto-converts to SQLite for
@@ -344,6 +375,7 @@ async function createLocalBackup(
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err)
           log(`WARNING: copy SQLite ${dbRow.name} failed: ${msg}`)
+        dbFailures.push(dbRow.name)
         }
         continue
       }
@@ -355,6 +387,7 @@ async function createLocalBackup(
       const container = dbRow.externalRef
       if (!container) {
         log(`WARNING: no container recorded for ${dbRow.name}; cannot dump it.`)
+        dbFailures.push(dbRow.name)
         continue
       }
       const destPath = `${backupPath}.db-${dbRow.name}.sql.gz`
@@ -388,6 +421,7 @@ async function createLocalBackup(
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         log(`WARNING: dump of ${dbRow.name} failed: ${msg}`)
+        dbFailures.push(dbRow.name)
       }
     }
 
@@ -408,18 +442,22 @@ async function createLocalBackup(
       )
     }
 
+    const outcome = backupOutcome(dbFailures, opts.note)
     const row = await db.websiteBackup.create({
       data: {
         projectId,
         filename,
         sizeBytes,
-        status: 'completed',
+        ...outcome,
         type: backupType,
-        note: opts.note || null,
       },
     })
 
-    log(`Backup complete: ${backupPath} (${sizeBytes} bytes).`)
+    log(
+      outcome.status === 'partial'
+        ? `Backup saved WITHOUT ${dbFailures.join(', ')}: ${backupPath} (${sizeBytes} bytes).`
+        : `Backup complete: ${backupPath} (${sizeBytes} bytes).`
+    )
 
     // Apply the plan's retention now that a new backup exists. The remote path
     // has always done this; the local path did not, so on a single-box install
@@ -442,8 +480,11 @@ async function createLocalBackup(
       id: row.id,
       filename,
       sizeBytes,
-      status: 'completed',
-      message: `Backup created at ${backupPath}`,
+      status: outcome.status,
+      message:
+        outcome.status === 'partial'
+          ? `Backup created, but these databases could not be included: ${dbFailures.join(', ')}`
+          : `Backup created at ${backupPath}`,
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
@@ -529,7 +570,7 @@ export async function restoreBackup(
     where: { id: backupId, projectId },
   })
   if (!row) return { ok: false, message: 'Backup not found' }
-  if (row.status !== 'completed') {
+  if (row.status !== 'completed' && row.status !== 'partial') {
     return { ok: false, message: 'Cannot restore a failed backup' }
   }
 

@@ -33,6 +33,7 @@ import {
   isServerInDemoMode,
 } from './ssh'
 import { getServerCredentials } from './provisioner'
+import { isProduction } from '@/lib/demo-mode'
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -106,7 +107,7 @@ function shellQuoteLocal(s: string): string {
 export class FtpError extends Error {
   constructor(
     message: string,
-    readonly status: 400 | 404 | 409 | 502 = 400
+    readonly status: 400 | 404 | 409 | 501 | 502 = 400
   ) {
     super(message)
     this.name = 'FtpError'
@@ -249,10 +250,21 @@ export async function getFtpAccount(
 
 // ─── Create ──────────────────────────────────────────────────────────────
 
+/**
+ * No FTP server (vsftpd, pure-ftpd, ...) is installed or managed anywhere on
+ * the platform: an "FTP account" was only a user inside the site container
+ * with no way to log in, and its directory / read-only / quota settings were
+ * never enforced. Production therefore refuses to create one and points to
+ * SFTP access, which is real. Existing rows can still be listed and deleted.
+ */
+export const FTP_UNAVAILABLE_MESSAGE =
+  'FTP is not available on this server. Use SFTP access (Files → SFTP) to upload files securely.'
+
 export async function createFtpAccount(
   projectId: string,
   opts: CreateFtpAccountInput
 ): Promise<FtpAccountRow> {
+  if (isProduction()) throw new FtpError(FTP_UNAVAILABLE_MESSAGE, 501)
   const usernameInput = (opts.username || '').trim()
   if (!usernameInput) throw new FtpError('Username is required')
   if (!/^[a-zA-Z][a-zA-Z0-9_\-]{2,31}$/.test(usernameInput)) {

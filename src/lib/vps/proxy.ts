@@ -112,7 +112,7 @@ export async function configureProjectProxy(
     throw new Error('Project has no container — deploy first')
   }
 
-  const hostname = project.customDomain || project.subdomain
+  let hostname = project.customDomain || project.subdomain
   const upstream = `${project.containerName}:${project.containerPort || 3000}`
   const ssl = project.sslEnabled
 
@@ -127,7 +127,7 @@ export async function configureProjectProxy(
         select: { fromPath: true, toUrl: true, statusCode: true },
       }),
       db.ipBlock.findMany({
-        where: { projectId, enabled: true },
+        where: { projectId, ...activeIpRuleWhere() },
         select: { ipAddress: true, action: true },
       }),
     ])
@@ -164,64 +164,10 @@ export async function configureProjectProxy(
   const creds = await getServerCredentials(project.serverId)
   try {
     await withConnection(creds, async (client) => {
-      const allProjects = await db.project.findMany({
-        where: {
-          serverId: project.serverId,
-          status: 'running',
-          containerName: { not: null },
-        },
-        select: {
-          id: true,
-          customDomain: true,
-          subdomain: true,
-          containerName: true,
-          containerPort: true,
-          externalPort: true,
-          sslEnabled: true,
-        },
-      })
-
-      // Load redirects + ipBlocks for every project on this server in parallel.
-      const [allRedirects, allIpBlocks, allCustomDomains] = await Promise.all([
-        db.redirect.findMany({
-          where: { projectId: { in: allProjects.map((p) => p.id) }, enabled: true },
-          select: { projectId: true, fromPath: true, toUrl: true, statusCode: true },
-        }),
-        db.ipBlock.findMany({
-          where: { projectId: { in: allProjects.map((p) => p.id) }, enabled: true },
-          select: { projectId: true, ipAddress: true, action: true },
-        }),
-        // VERIFIED custom domains only. An unverified row must never reach
-        // the proxy — that check is the whole point of the verify step.
-        db.websiteDomain.findMany({
-          where: { projectId: { in: allProjects.map((p) => p.id) }, verified: true },
-          select: { projectId: true, domain: true },
-        }),
-      ])
-
-      const configs: ProxyConfig[] = allProjects.map((p) => ({
-        hostname: p.customDomain || p.subdomain,
-        extraHostnames: allCustomDomains
-          .filter((d) => d.projectId === p.id)
-          .map((d) => d.domain),
-        // Localhost single-box: the host Caddy isn't on the docker network, so
-        // it reaches the container via its published host port. Remote VPS:
-        // Caddy shares the deployhub network and resolves the container name.
-        upstream: isLocal
-          ? `localhost:${p.externalPort || p.containerPort || 3000}`
-          : `${p.containerName}:${p.containerPort || 3000}`,
-        ssl: p.sslEnabled,
-        redirects: safeRedirectRows(allRedirects)
-          .filter((r) => r.projectId === p.id)
-          .map((r) => ({
-            fromPath: r.fromPath,
-            toUrl: r.toUrl,
-            statusCode: r.statusCode,
-          })),
-        ipBlocks: allIpBlocks
-          .filter((b) => b.projectId === p.id)
-          .map((b) => ({ ipAddress: b.ipAddress, action: b.action })),
-      }))
+      const { configs, servedHosts } = await buildServerProxyConfigs(project.serverId!, isLocal)
+      // The hostname actually served (an unproven customDomain falls back to
+      // the subdomain), so the certificate probe checks the right name.
+      hostname = servedHosts.get(projectId) ?? project.subdomain
 
       // On single-box installs, include the panel's own block so regenerating
       // the Caddyfile for a project never knocks the control panel offline.
@@ -281,7 +227,7 @@ export async function configureProjectProxy(
         select: { fromPath: true, toUrl: true, statusCode: true },
       }),
       db.ipBlock.findMany({
-        where: { projectId, enabled: true },
+        where: { projectId, ...activeIpRuleWhere() },
         select: { ipAddress: true, action: true },
       }),
     ])
@@ -314,6 +260,122 @@ export async function configureProjectProxy(
   }
 }
 
+/** IP rules still in force: enabled and not past their expiry. */
+export function activeIpRuleWhere(now = new Date()) {
+  return { enabled: true, OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] }
+}
+
+/**
+ * Site configs for every running project on a server — the single source for
+ * the generated Caddyfile (configure and remove both use it).
+ *
+ *   - customDomain is served only when backed by a VERIFIED WebsiteDomain or
+ *     an active Domain the owner holds with us; otherwise the subdomain. An
+ *     unproven hostname must never reach Caddy (dangling-DNS takeover, ACME
+ *     abuse) — setting a domain as primary used to skip verification.
+ *   - IP rules past their expiresAt are left out (they used to stay forever).
+ */
+export async function buildServerProxyConfigs(
+  serverId: string,
+  isLocal: boolean,
+  opts: { excludeProjectId?: string; now?: Date } = {}
+): Promise<{ configs: ProxyConfig[]; servedHosts: Map<string, string> }> {
+  const allProjects = await db.project.findMany({
+    where: {
+      serverId,
+      status: 'running',
+      containerName: { not: null },
+      ...(opts.excludeProjectId ? { id: { not: opts.excludeProjectId } } : {}),
+    },
+    select: {
+      id: true,
+      userId: true,
+      customDomain: true,
+      subdomain: true,
+      containerName: true,
+      containerPort: true,
+      externalPort: true,
+      sslEnabled: true,
+    },
+  })
+  const ids = allProjects.map((p) => p.id)
+  const [allRedirects, allIpBlocks, allCustomDomains, ownedDomains] = await Promise.all([
+    db.redirect.findMany({
+      where: { projectId: { in: ids }, enabled: true },
+      select: { projectId: true, fromPath: true, toUrl: true, statusCode: true },
+    }),
+    db.ipBlock.findMany({
+      where: { projectId: { in: ids }, ...activeIpRuleWhere(opts.now) },
+      select: { projectId: true, ipAddress: true, action: true },
+    }),
+    // VERIFIED custom domains only. An unverified row must never reach the
+    // proxy — that check is the whole point of the verify step.
+    db.websiteDomain.findMany({
+      where: { projectId: { in: ids }, verified: true },
+      select: { projectId: true, domain: true },
+    }),
+    db.domain.findMany({
+      where: {
+        name: { in: allProjects.map((p) => (p.customDomain || '').toLowerCase()).filter(Boolean) },
+        status: 'active',
+      },
+      select: { name: true, userId: true },
+    }),
+  ])
+
+  const servedHosts = new Map<string, string>()
+  for (const p of allProjects) {
+    const cd = (p.customDomain || '').toLowerCase()
+    const backed =
+      !!cd &&
+      (allCustomDomains.some((d) => d.projectId === p.id && d.domain.toLowerCase() === cd) ||
+        ownedDomains.some((d) => d.name.toLowerCase() === cd && d.userId === p.userId))
+    servedHosts.set(p.id, backed ? p.customDomain! : p.subdomain)
+  }
+
+  const configs: ProxyConfig[] = allProjects.map((p) => ({
+    hostname: servedHosts.get(p.id)!,
+    extraHostnames: allCustomDomains.filter((d) => d.projectId === p.id).map((d) => d.domain),
+    // Localhost single-box: the host Caddy isn't on the docker network, so it
+    // reaches the container via its published host port. Remote VPS: Caddy
+    // shares the deployhub network and resolves the container name.
+    upstream: isLocal
+      ? `localhost:${p.externalPort || p.containerPort || 3000}`
+      : `${p.containerName}:${p.containerPort || 3000}`,
+    ssl: p.sslEnabled,
+    redirects: safeRedirectRows(allRedirects)
+      .filter((r) => r.projectId === p.id)
+      .map((r) => ({ fromPath: r.fromPath, toUrl: r.toUrl, statusCode: r.statusCode })),
+    ipBlocks: allIpBlocks
+      .filter((b) => b.projectId === p.id)
+      .map((b) => ({ ipAddress: b.ipAddress, action: b.action })),
+  }))
+  return { configs, servedHosts }
+}
+
+/**
+ * Disable IP rules whose expiry has passed and regenerate the proxy for the
+ * affected sites, so temporary bans really end. Idempotent; run every few
+ * minutes from the worker. Rows are kept (disabled) for the record.
+ */
+export async function expireIpRules(now = new Date()): Promise<number> {
+  const expired = await db.ipBlock.findMany({
+    where: { enabled: true, expiresAt: { lte: now } },
+    select: { id: true, projectId: true },
+    take: 500,
+  })
+  if (expired.length === 0) return 0
+  await db.ipBlock.updateMany({ where: { id: { in: expired.map((e) => e.id) } }, data: { enabled: false } })
+  for (const projectId of new Set(expired.map((e) => e.projectId))) {
+    const p = await db.project.findUnique({ where: { id: projectId }, select: { status: true, containerName: true } })
+    if (p?.status !== 'running' || !p.containerName) continue
+    await configureProjectProxy(projectId).catch((err) =>
+      console.error('[proxy] regenerate after IP rule expiry failed:', err instanceof Error ? err.message : err)
+    )
+  }
+  return expired.length
+}
+
 // ─── Remove a project's proxy entry ──────────────────────────────────────
 
 export async function removeProjectProxy(projectId: string): Promise<ProjectProxyResult> {
@@ -336,68 +398,20 @@ export async function removeProjectProxy(projectId: string): Promise<ProjectProx
     // Mark the project's container as null first so regenerate skips it
     const creds = await getServerCredentials(project.serverId)
     await withConnection(creds, async (client) => {
-      const allProjects = await db.project.findMany({
-        where: {
-          serverId: project.serverId,
-          id: { not: projectId },
-          status: 'running',
-          containerName: { not: null },
-        },
-        select: {
-          id: true,
-          customDomain: true,
-          subdomain: true,
-          containerName: true,
-          containerPort: true,
-          externalPort: true,
-          sslEnabled: true,
-        },
-      })
       const isLocal = isLocalHost(project.server?.sshHost)
-      // Load redirects + ipBlocks for the remaining projects so the regenerated
-      // Caddyfile still has their `redir` + `@blocked` directives.
-      const [allRedirects, allIpBlocks, allCustomDomains] = await Promise.all([
-        db.redirect.findMany({
-          where: { projectId: { in: allProjects.map((p) => p.id) }, enabled: true },
-          select: { projectId: true, fromPath: true, toUrl: true, statusCode: true },
-        }),
-        db.ipBlock.findMany({
-          where: { projectId: { in: allProjects.map((p) => p.id) }, enabled: true },
-          select: { projectId: true, ipAddress: true, action: true },
-        }),
-        // VERIFIED custom domains only. An unverified row must never reach
-        // the proxy — that check is the whole point of the verify step.
-        db.websiteDomain.findMany({
-          where: { projectId: { in: allProjects.map((p) => p.id) }, verified: true },
-          select: { projectId: true, domain: true },
-        }),
-      ])
-      const configs: ProxyConfig[] = allProjects.map((p) => ({
-        hostname: p.customDomain || p.subdomain,
-        extraHostnames: allCustomDomains
-          .filter((d) => d.projectId === p.id)
-          .map((d) => d.domain),
-        upstream: isLocal
-          ? `localhost:${p.externalPort || p.containerPort || 3000}`
-          : `${p.containerName}:${p.containerPort || 3000}`,
-        ssl: p.sslEnabled,
-        redirects: safeRedirectRows(allRedirects)
-          .filter((r) => r.projectId === p.id)
-          .map((r) => ({
-            fromPath: r.fromPath,
-            toUrl: r.toUrl,
-            statusCode: r.statusCode,
-          })),
-        ipBlocks: allIpBlocks
-          .filter((b) => b.projectId === p.id)
-          .map((b) => ({ ipAddress: b.ipAddress, action: b.action })),
-      }))
+      const { configs } = await buildServerProxyConfigs(project.serverId!, isLocal, { excludeProjectId: projectId })
       const caddyfile = generateFullCaddyfile(configs, { includePanelBlock: isLocal })
       await exec(client, 'cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak 2>/dev/null || true', { timeoutMs: 5000 })
       await putFile(client, '/etc/caddy/Caddyfile.new', caddyfile, { mode: 0o644 })
-      await exec(client, 'mv /etc/caddy/Caddyfile.new /etc/caddy/Caddyfile && caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy', {
+      const applied = await exec(client, 'mv /etc/caddy/Caddyfile.new /etc/caddy/Caddyfile && caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy', {
         timeoutMs: 30000,
       })
+      // exec resolves on a non-zero exit: an invalid config or failed reload
+      // used to be reported as removed. Restore the previous file and fail.
+      if (applied.exitCode !== 0) {
+        await exec(client, 'mv /etc/caddy/Caddyfile.bak /etc/caddy/Caddyfile 2>/dev/null || true', { timeoutMs: 5000 })
+        throw new Error(`Caddy update failed: ${(applied.stderr || applied.stdout).trim().slice(-300)}`)
+      }
       if (isLocal) {
         try {
           await ensureDir(LOCAL_CADDY_DIR)
@@ -478,10 +492,21 @@ export function generateCaddyBlock(cfg: ProxyConfig): string {
   lines.push(`    }`)
   lines.push(`    respond @apsamo_blocked 404`)
 
-  // ── IP blocks (deny rules) — injected BEFORE reverse_proxy so they take ──
-  // precedence. Allow rules are enforced at the middleware layer (Caddy's
-  // `client_ip` matcher is deny-oriented; whitelist semantics are easier in
-  // the panel middleware).
+  // ── IP rules — injected BEFORE reverse_proxy so they take precedence. ──
+  // Allow-list mode (any 'allow' rule): every other address gets 403. This
+  // used to be left to the panel's own middleware, which never sees customer
+  // site traffic (Caddy proxies straight to the container), so "allow only
+  // my IP" left the site public. Deny rules apply as well, as before.
+  const allowIps = (cfg.ipBlocks || [])
+    .filter((b) => b.action === 'allow')
+    .map((b) => b.ipAddress)
+    .filter(Boolean)
+  if (allowIps.length > 0) {
+    lines.push(`    @notallowed {`)
+    lines.push(`      not client_ip ${allowIps.join(' ')}`)
+    lines.push(`    }`)
+    lines.push(`    respond @notallowed 403`)
+  }
   const denyIps = (cfg.ipBlocks || [])
     .filter((b) => b.action === 'deny')
     .map((b) => b.ipAddress)
@@ -838,42 +863,7 @@ export async function getServerCaddyfile(serverId: string): Promise<string> {
   if (!server) throw new Error('Server not found')
 
   if (isServerInDemoMode(server)) {
-    const projects = await db.project.findMany({
-      where: { serverId, status: 'running', containerName: { not: null } },
-      select: {
-        id: true,
-        customDomain: true,
-        subdomain: true,
-        containerName: true,
-        containerPort: true,
-        sslEnabled: true,
-      },
-    })
-    const [allRedirects, allIpBlocks] = await Promise.all([
-      db.redirect.findMany({
-        where: { projectId: { in: projects.map((p) => p.id) }, enabled: true },
-        select: { projectId: true, fromPath: true, toUrl: true, statusCode: true },
-      }),
-      db.ipBlock.findMany({
-        where: { projectId: { in: projects.map((p) => p.id) }, enabled: true },
-        select: { projectId: true, ipAddress: true, action: true },
-      }),
-    ])
-    const configs: ProxyConfig[] = projects.map((p) => ({
-      hostname: p.customDomain || p.subdomain,
-      upstream: `${p.containerName}:${p.containerPort || 3000}`,
-      ssl: p.sslEnabled,
-      redirects: safeRedirectRows(allRedirects)
-        .filter((r) => r.projectId === p.id)
-        .map((r) => ({
-          fromPath: r.fromPath,
-          toUrl: r.toUrl,
-          statusCode: r.statusCode,
-        })),
-      ipBlocks: allIpBlocks
-        .filter((b) => b.projectId === p.id)
-        .map((b) => ({ ipAddress: b.ipAddress, action: b.action })),
-    }))
+    const { configs } = await buildServerProxyConfigs(serverId, false)
     return generateFullCaddyfile(configs)
   }
 

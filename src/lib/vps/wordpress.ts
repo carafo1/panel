@@ -388,6 +388,11 @@ export async function runWordPressAction(projectId: string, input: WpActionInput
       const from = needText(input.from, 'Text to find')
       const to = needText(input.to, 'Replacement')
       if (from === to) throw new SiteToolError('The text to find and its replacement are the same.')
+      // A value starting with "-" would be read by WP-CLI as an option
+      // (e.g. --require=/path/to/file.php runs that PHP file).
+      if (from.startsWith('-') || to.startsWith('-')) {
+        throw new SiteToolError('The text to find and its replacement cannot start with "-".')
+      }
       script =
         `wp search-replace ${shellQuote(from)} ${shellQuote(to)} --all-tables-with-prefix --skip-columns=guid ` +
         `--format=count${input.dryRun ? ' --dry-run' : ''}`

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { toast } from 'sonner'
-import { apiFetch, useAuthStore } from '@/store/auth-store'
+import { apiFetch, useAuthStore, ApiRequestError } from '@/store/auth-store'
 import {
   Search, Globe, Plus, Trash2, RefreshCw, Shield, Clock, CheckCircle2,
   XCircle, Tag, Lock, Unlock, Copy, Loader2, AlertTriangle, ArrowLeft,
@@ -40,6 +40,11 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import {
+  availabilityOf, isPurchasable, AvailabilityBadge, AvailabilityIcon, AVAILABILITY_COPY,
+  availabilityErrorMessage, domainStatusLabel, domainStatusColor, domainStatusHint,
+  type AvailabilityState,
+} from '@/components/domains/domain-availability'
 
 // ─── Checkout shared pieces ───────────────────────────────────────────────────
 
@@ -99,12 +104,14 @@ function validateRegistrant(r: Registrant): string | null {
 function useDomainQuote(domain: string | null, kind: string, years: number) {
   const [methods, setMethods] = useState<PaymentMethodOption[]>([])
   const [quote, setQuote] = useState<{ unitPrice: number; total: number } | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(Boolean(domain))
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!domain) return
     let cancelled = false
     setLoading(true)
+    setError(null)
     apiFetch(
       `/domains/checkout?domain=${encodeURIComponent(domain)}&kind=${kind}&years=${years}`
     )
@@ -113,8 +120,13 @@ function useDomainQuote(domain: string | null, kind: string, years: number) {
         setMethods(data.paymentMethods || [])
         setQuote(data.quote ? { unitPrice: data.quote.unitPrice, total: data.quote.total } : null)
       })
-      .catch(() => {
-        if (!cancelled) setMethods([])
+      .catch((err) => {
+        if (cancelled) return
+        setMethods([])
+        setQuote(null)
+        // 404 = extension not sold; 429 = slow down. Either way the customer
+        // must not be able to continue to payment on a guessed price.
+        setError(availabilityErrorMessage(err, 'We could not price this domain right now. Please try again.'))
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -124,7 +136,20 @@ function useDomainQuote(domain: string | null, kind: string, years: number) {
     }
   }, [domain, kind, years])
 
-  return { methods, quote, loading }
+  return { methods, quote, loading, error }
+}
+
+/** Toast for a failed checkout call, keeping the server's reason visible. */
+function checkoutErrorToast(err: unknown) {
+  const status = err instanceof ApiRequestError ? err.status : undefined
+  const description =
+    status === 429
+      ? 'Too many attempts in a short time. Please wait a minute and try again.'
+      : (err as Error)?.message || 'Please try again.'
+  toast.error(
+    status === 409 ? 'This domain is already taken or ordered' : 'Could not start checkout',
+    { description }
+  )
 }
 
 function RegistrantFields({
@@ -269,16 +294,49 @@ function handleCheckoutResult(
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+/**
+ * GET /api/domains/search (envelope `data`) and each row of the bulk POST.
+ * `available` is null when the registrar could not answer; prices are null
+ * unless the result is available AND sellable.
+ */
 interface SearchResult {
   domain: string
-  available: boolean
+  available: boolean | null
   premium: boolean
+  status?: 'available' | 'unavailable' | 'premium' | 'unknown'
+  sellable?: boolean
   registrationPrice: number | null
   renewalPrice: number | null
   transferPrice: number | null
   currency: string
-  suggestions?: Array<{ domain: string; available: boolean; premium: boolean; registrationPrice: number }>
+  suggestions?: Array<{
+    domain: string
+    available: boolean | null
+    premium: boolean
+    status?: 'available' | 'unavailable' | 'premium' | 'unknown'
+    sellable?: boolean
+    registrationPrice: number | null
+  }>
 }
+
+function stateOf(r: {
+  status?: string
+  available: boolean | null
+  premium?: boolean
+  sellable?: boolean
+  registrationPrice: number | null
+}): AvailabilityState {
+  return availabilityOf({
+    status: r.status,
+    available: r.available,
+    premium: r.premium,
+    sellable: r.sellable,
+    price: r.registrationPrice,
+  })
+}
+
+const money = (n: number | null | undefined) =>
+  typeof n === 'number' && n > 0 ? `$${n.toFixed(2)}` : '—'
 
 interface Domain {
   id: string
@@ -379,28 +437,10 @@ type Tab = 'search' | 'domains' | 'invoices' | 'pricing' | 'admin'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function statusColor(status: string): string {
-  switch (status) {
-    case 'active': case 'connected': return 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border-indigo-500/30'
-    case 'pending': case 'pending_verification': case 'pending_dns':
-      return 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30'
-    case 'transferring': return 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border-indigo-500/30'
-    case 'not_connected': return 'bg-gray-500/15 text-gray-600 dark:text-gray-400 border-gray-500/30'
-    case 'expired': case 'suspended': case 'deleted': return 'bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/30'
-    default: return 'bg-gray-500/15 text-gray-600 dark:text-gray-400 border-gray-500/30'
-  }
-}
-
-/** Human wording for the machine status values, including the connection ones. */
-function statusLabel(status: string): string {
-  switch (status) {
-    case 'connected': return 'connected'
-    case 'pending_dns': return 'awaiting DNS'
-    case 'not_connected': return 'not connected'
-    case 'pending_verification': return 'pending verification'
-    default: return status
-  }
-}
+// Domain lifecycle wording lives in domain-availability so every view agrees:
+// nothing reads as registered/active until the domain actually is.
+const statusColor = domainStatusColor
+const statusLabel = domainStatusLabel
 
 /**
  * One line describing how far an external domain has got toward serving from
@@ -514,7 +554,7 @@ export default function DomainsPanel() {
         </TabsList>
 
         <TabsContent value="search" className="mt-6">
-          <SearchTab onRegistered={() => setTab('domains')} />
+          <SearchTab onRegistered={() => setTab('invoices')} />
         </TabsContent>
         <TabsContent value="domains" className="mt-6">
           <DomainsListTab onSelect={setSelectedDomainId} />
@@ -545,30 +585,59 @@ function SearchTab({ onRegistered }: { onRegistered: () => void }) {
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<SearchResult | null>(null)
+  const [searchError, setSearchError] = useState<string | null>(null)
   const [bulkMode, setBulkMode] = useState(false)
   const [bulkQuery, setBulkQuery] = useState('')
   const [bulkResults, setBulkResults] = useState<SearchResult[]>([])
+  const [bulkError, setBulkError] = useState<string | null>(null)
   const [registering, setRegistering] = useState<string | null>(null)
   const [registerDialog, setRegisterDialog] = useState<{ domain: string; price: number } | null>(null)
 
-  const handleSearch = useCallback(async () => {
-    if (!query.trim()) return
+  const runSearch = useCallback(async (term: string) => {
+    const domain = term.trim().toLowerCase()
+    if (!domain) return
     setLoading(true)
     setResult(null)
+    setSearchError(null)
     try {
-      const data = await apiFetch(`/domains/search?domain=${encodeURIComponent(query.trim())}`)
+      const data = await apiFetch(`/domains/search?domain=${encodeURIComponent(domain)}`)
       setResult(data.data)
     } catch (err) {
-      toast.error('Search failed', { description: (err as Error).message })
+      // 503 = the registrar could not confirm availability; 429 = rate limited.
+      // Neither may ever read as "available" or "taken".
+      setSearchError(availabilityErrorMessage(err))
     } finally {
       setLoading(false)
     }
-  }, [query])
+  }, [])
+
+  const handleSearch = useCallback(() => runSearch(query), [query, runSearch])
+
+  // Deep link from other flows (hosting checkout, email checkout):
+  // /?tab=domains&register=example.com pre-fills and runs the search.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    const wanted = params.get('register')
+    if (!wanted) return
+    // Deferred so the search starts after mount rather than as a cascading
+    // render inside this effect, and so a StrictMode re-run still finds the
+    // param (it is only removed once the search actually starts).
+    const timer = setTimeout(() => {
+      params.delete('register')
+      const rest = params.toString()
+      window.history.replaceState({}, '', rest ? `/?${rest}` : '/')
+      setQuery(wanted)
+      void runSearch(wanted)
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [runSearch])
 
   const handleBulkSearch = useCallback(async () => {
     const domains = bulkQuery.split('\n').map((d) => d.trim()).filter(Boolean)
     if (domains.length === 0) return
     setLoading(true)
+    setBulkError(null)
     try {
       const data = await apiFetch('/domains/search', {
         method: 'POST',
@@ -576,7 +645,8 @@ function SearchTab({ onRegistered }: { onRegistered: () => void }) {
       })
       setBulkResults(data.data || [])
     } catch (err) {
-      toast.error('Bulk search failed', { description: (err as Error).message })
+      setBulkResults([])
+      setBulkError(availabilityErrorMessage(err))
     } finally {
       setLoading(false)
     }
@@ -604,22 +674,24 @@ function SearchTab({ onRegistered }: { onRegistered: () => void }) {
       })
       handleCheckoutResult(
         data,
-        'Your domain is registered as soon as payment is confirmed.'
+        'It appears under My Domains once payment is confirmed and the registration completes.'
       )
       setRegisterDialog(null)
-      onRegistered()
+      if (!data.redirectUrl) onRegistered()
     } catch (err) {
-      toast.error('Could not start checkout', { description: (err as Error).message })
+      checkoutErrorToast(err)
     } finally {
       setRegistering(null)
     }
   }
 
+  const bulkUnknown = bulkResults.filter((r) => stateOf(r) === 'unknown').length
+
   return (
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-3">
             <div>
               <CardTitle className="flex items-center gap-2">
                 <Search className="h-5 w-5 text-indigo-500" />
@@ -630,7 +702,13 @@ function SearchTab({ onRegistered }: { onRegistered: () => void }) {
             <Button
               variant={bulkMode ? 'default' : 'outline'}
               size="sm"
-              onClick={() => { setBulkMode(!bulkMode); setResult(null); setBulkResults([]) }}
+              onClick={() => {
+                setBulkMode(!bulkMode)
+                setResult(null)
+                setBulkResults([])
+                setSearchError(null)
+                setBulkError(null)
+              }}
             >
               {bulkMode ? 'Single Search' : 'Bulk Search'}
             </Button>
@@ -639,26 +717,40 @@ function SearchTab({ onRegistered }: { onRegistered: () => void }) {
         <CardContent className="space-y-4">
           {!bulkMode ? (
             <>
-              <div className="flex gap-2">
+              <form
+                className="flex gap-2"
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  void handleSearch()
+                }}
+              >
                 <Input
                   placeholder="example.com"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
                   className="text-base"
+                  aria-label="Domain name to search"
+                  autoCapitalize="off"
+                  autoComplete="off"
+                  spellCheck={false}
                 />
-                <Button onClick={handleSearch} disabled={loading || !query.trim()}>
+                <Button type="submit" disabled={loading || !query.trim()}>
                   {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
                   Search
                 </Button>
-              </div>
+              </form>
 
               {loading && <SearchSkeleton />}
 
-              {result && (
+              {searchError && !loading && (
+                <SearchErrorNotice message={searchError} onRetry={() => void handleSearch()} />
+              )}
+
+              {result && !loading && (
                 <SearchResultCard
                   result={result}
                   onRegister={(domain, price) => setRegisterDialog({ domain, price })}
+                  onRetry={() => void runSearch(result.domain)}
                   registering={registering}
                 />
               )}
@@ -666,8 +758,9 @@ function SearchTab({ onRegistered }: { onRegistered: () => void }) {
           ) : (
             <>
               <div className="space-y-2">
-                <Label>Enter one domain per line (max 50)</Label>
+                <Label htmlFor="bulk-domains">Enter one domain per line (max 50)</Label>
                 <Textarea
+                  id="bulk-domains"
                   placeholder={'example.com\nmybrand.net\nawesome.io'}
                   value={bulkQuery}
                   onChange={(e) => setBulkQuery(e.target.value)}
@@ -676,12 +769,23 @@ function SearchTab({ onRegistered }: { onRegistered: () => void }) {
                 />
                 <Button onClick={handleBulkSearch} disabled={loading || !bulkQuery.trim()}>
                   {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-                  Search {bulkQuery.split('\n').filter(Boolean).length} Domains
+                  Search {bulkQuery.split('\n').filter((l) => l.trim()).length} Domains
                 </Button>
               </div>
 
+              {bulkError && !loading && (
+                <SearchErrorNotice message={bulkError} onRetry={() => void handleBulkSearch()} />
+              )}
+
+              {bulkUnknown > 0 && !loading && (
+                <p className="text-xs text-amber-700 dark:text-amber-400" role="status">
+                  {bulkUnknown === 1 ? 'One name' : `${bulkUnknown} names`} couldn&rsquo;t be checked right now.
+                  Search again in a moment to see whether {bulkUnknown === 1 ? 'it is' : 'they are'} available.
+                </p>
+              )}
+
               {bulkResults.length > 0 && (
-                <div className="rounded-md border">
+                <div className="rounded-md border overflow-x-auto">
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -690,45 +794,43 @@ function SearchTab({ onRegistered }: { onRegistered: () => void }) {
                         <TableHead className="text-end">Register</TableHead>
                         <TableHead className="text-end">Renew</TableHead>
                         <TableHead className="text-end">Transfer</TableHead>
-                        <TableHead></TableHead>
+                        <TableHead><span className="sr-only">Actions</span></TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {bulkResults.map((r) => (
-                        <TableRow key={r.domain}>
-                          <TableCell className="font-medium flex items-center gap-2">
-                            {r.premium && <Sparkles className="h-3 w-3 text-amber-500" />}
-                            {r.domain}
-                          </TableCell>
-                          <TableCell>
-                            {r.available ? (
-                              <Badge className="bg-indigo-500/15 text-indigo-600 border-indigo-500/30">Available</Badge>
-                            ) : (
-                              <Badge variant="secondary">Taken</Badge>
-                            )}
-                          </TableCell>
-                          <TableCell className="text-end font-mono">
-                            {r.registrationPrice ? `$${r.registrationPrice}` : '—'}
-                          </TableCell>
-                          <TableCell className="text-end font-mono">
-                            {r.renewalPrice ? `$${r.renewalPrice}` : '—'}
-                          </TableCell>
-                          <TableCell className="text-end font-mono">
-                            {r.transferPrice ? `$${r.transferPrice}` : '—'}
-                          </TableCell>
-                          <TableCell>
-                            {r.available && r.registrationPrice && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => setRegisterDialog({ domain: r.domain, price: r.registrationPrice! })}
-                              >
-                                <ShoppingBag className="h-3 w-3 me-1" /> Buy
-                              </Button>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      ))}
+                      {bulkResults.map((r) => {
+                        const state = stateOf(r)
+                        const buyable = state === 'available'
+                        return (
+                          <TableRow key={r.domain}>
+                            <TableCell className="font-medium">{r.domain}</TableCell>
+                            <TableCell>
+                              <AvailabilityBadge state={state} />
+                            </TableCell>
+                            <TableCell className="text-end font-mono">
+                              {buyable ? money(r.registrationPrice) : '—'}
+                            </TableCell>
+                            <TableCell className="text-end font-mono">
+                              {buyable ? money(r.renewalPrice) : '—'}
+                            </TableCell>
+                            <TableCell className="text-end font-mono">
+                              {buyable ? money(r.transferPrice) : '—'}
+                            </TableCell>
+                            <TableCell className="text-end">
+                              {buyable && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => setRegisterDialog({ domain: r.domain, price: r.registrationPrice! })}
+                                  aria-label={`Buy ${r.domain}`}
+                                >
+                                  <ShoppingBag className="h-3 w-3 me-1" /> Buy
+                                </Button>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        )
+                      })}
                     </TableBody>
                   </Table>
                 </div>
@@ -755,98 +857,137 @@ function SearchTab({ onRegistered }: { onRegistered: () => void }) {
 
 function SearchSkeleton() {
   return (
-    <div className="space-y-3">
+    <div className="space-y-3" role="status" aria-busy="true" aria-label="Checking availability">
       <Skeleton className="h-24 w-full" />
       <Skeleton className="h-32 w-full" />
     </div>
   )
 }
 
+/** Lookup failed (registrar unreachable, rate limited, bad input). */
+function SearchErrorNotice({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div
+      role="alert"
+      className="flex flex-col sm:flex-row sm:items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-4"
+    >
+      <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-400 shrink-0" aria-hidden="true" />
+      <div className="flex-1 text-sm">
+        <p className="font-medium">Couldn&rsquo;t check availability</p>
+        <p className="text-muted-foreground">{message}</p>
+      </div>
+      <Button variant="outline" size="sm" onClick={onRetry}>
+        <RefreshCw className="h-3.5 w-3.5 me-1.5" /> Try again
+      </Button>
+    </div>
+  )
+}
+
+const RESULT_FRAME: Record<AvailabilityState, string> = {
+  available: 'border-indigo-500/30 bg-indigo-500/5',
+  not_sold: 'border-border bg-muted/30',
+  unavailable: 'border-red-500/30 bg-red-500/5',
+  premium: 'border-amber-500/30 bg-amber-500/5',
+  unknown: 'border-amber-500/30 bg-amber-500/5',
+}
+
+const RESULT_TEXT: Record<AvailabilityState, string> = {
+  available: 'text-indigo-600 dark:text-indigo-400',
+  not_sold: 'text-muted-foreground',
+  unavailable: 'text-red-600 dark:text-red-400',
+  premium: 'text-amber-700 dark:text-amber-400',
+  unknown: 'text-amber-700 dark:text-amber-400',
+}
+
 function SearchResultCard({
-  result, onRegister, registering,
+  result, onRegister, onRetry, registering,
 }: {
   result: SearchResult
   onRegister: (domain: string, price: number) => void
+  onRetry: () => void
   registering: string | null
 }) {
-  const copy = (text: string) => {
-    navigator.clipboard.writeText(text)
-    toast.success('Copied to clipboard')
+  const state = stateOf(result)
+  const buyable = state === 'available'
+  const copy = AVAILABILITY_COPY[state]
+
+  const copyName = (text: string) => {
+    navigator.clipboard.writeText(text).then(
+      () => toast.success('Copied to clipboard'),
+      () => toast.error('Could not copy to clipboard')
+    )
   }
 
   return (
     <div className="space-y-4">
-      <div className={`rounded-lg border p-4 ${result.available ? 'border-indigo-500/30 bg-indigo-500/5' : 'border-red-500/30 bg-red-500/5'}`}>
-        <div className="flex items-start justify-between">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <h3 className="text-xl font-bold">{result.domain}</h3>
-              {result.premium && (
-                <Badge className="bg-amber-500/15 text-amber-600 border-amber-500/30">
-                  <Sparkles className="h-3 w-3 me-1" /> Premium
-                </Badge>
-              )}
+      <div className={`rounded-lg border p-4 ${RESULT_FRAME[state]}`} aria-live="polite">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="space-y-1 min-w-0">
+            <h3 className="text-xl font-bold break-all">{result.domain}</h3>
+            <div className={`flex items-center gap-2 ${RESULT_TEXT[state]}`}>
+              <AvailabilityIcon state={state} className="h-4 w-4 shrink-0" />
+              <span className="text-sm font-medium">{copy.label}</span>
             </div>
-            {result.available ? (
-              <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400">
-                <CheckCircle2 className="h-4 w-4" />
-                <span className="text-sm font-medium">Available</span>
-                {/* Upstream registrar / internal provider name removed — it
-                    exposed either "apsamo-demo" or the wholesale registrar
-                    to customers, and told them nothing useful. */}
-              </div>
-            ) : (
-              <div className="flex items-center gap-2 text-red-600 dark:text-red-400">
-                <XCircle className="h-4 w-4" />
-                <span className="text-sm font-medium">Not Available</span>
-              </div>
+            {state !== 'available' && (
+              <p className="text-sm text-muted-foreground">{copy.detail}</p>
             )}
           </div>
-          {result.available && result.registrationPrice && (
+          {buyable && (
             <div className="text-end">
               <div className="text-2xl font-bold text-indigo-600 dark:text-indigo-400">
-                ${result.registrationPrice}
+                {money(result.registrationPrice)}
               </div>
               <div className="text-xs text-muted-foreground">/year</div>
             </div>
           )}
         </div>
 
-        {result.available && (
-          <div className="grid grid-cols-3 gap-3 mt-4">
-            <div className="rounded-md bg-background/60 p-2 text-center">
-              <div className="text-xs text-muted-foreground">Register</div>
-              <div className="font-semibold">${result.registrationPrice}</div>
+        {buyable && (
+          <>
+            <div className="grid grid-cols-3 gap-3 mt-4">
+              <div className="rounded-md bg-background/60 p-2 text-center">
+                <div className="text-xs text-muted-foreground">Register</div>
+                <div className="font-semibold">{money(result.registrationPrice)}</div>
+              </div>
+              <div className="rounded-md bg-background/60 p-2 text-center">
+                <div className="text-xs text-muted-foreground">Renew</div>
+                <div className="font-semibold">{money(result.renewalPrice)}</div>
+              </div>
+              <div className="rounded-md bg-background/60 p-2 text-center">
+                <div className="text-xs text-muted-foreground">Transfer</div>
+                <div className="font-semibold">{money(result.transferPrice)}</div>
+              </div>
             </div>
-            <div className="rounded-md bg-background/60 p-2 text-center">
-              <div className="text-xs text-muted-foreground">Renew</div>
-              <div className="font-semibold">${result.renewalPrice}</div>
+
+            <div className="flex gap-2 mt-4">
+              <Button
+                onClick={() => onRegister(result.domain, result.registrationPrice!)}
+                disabled={registering === result.domain}
+                className="flex-1"
+              >
+                {registering === result.domain ? (
+                  <Loader2 className="h-4 w-4 animate-spin me-2" />
+                ) : (
+                  <ShoppingBag className="h-4 w-4 me-2" />
+                )}
+                Register Now
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => copyName(result.domain)}
+                aria-label={`Copy ${result.domain}`}
+              >
+                <Copy className="h-4 w-4" />
+              </Button>
             </div>
-            <div className="rounded-md bg-background/60 p-2 text-center">
-              <div className="text-xs text-muted-foreground">Transfer</div>
-              <div className="font-semibold">${result.transferPrice}</div>
-            </div>
-          </div>
+          </>
         )}
 
-        {result.available && result.registrationPrice && (
-          <div className="flex gap-2 mt-4">
-            <Button
-              onClick={() => onRegister(result.domain, result.registrationPrice!)}
-              disabled={registering === result.domain}
-              className="flex-1"
-            >
-              {registering === result.domain ? (
-                <Loader2 className="h-4 w-4 animate-spin me-2" />
-              ) : (
-                <ShoppingBag className="h-4 w-4 me-2" />
-              )}
-              Register Now
-            </Button>
-            <Button variant="outline" size="icon" onClick={() => copy(result.domain)}>
-              <Copy className="h-4 w-4" />
-            </Button>
-          </div>
+        {state === 'unknown' && (
+          <Button variant="outline" size="sm" className="mt-4" onClick={onRetry}>
+            <RefreshCw className="h-3.5 w-3.5 me-1.5" /> Try again
+          </Button>
         )}
       </div>
 
@@ -859,38 +1000,53 @@ function SearchResultCard({
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {result.suggestions.map((s) => (
-                <div
-                  key={s.domain}
-                  className="flex items-center justify-between rounded-md border p-2 hover:bg-accent/50 transition-colors"
-                >
-                  <div className="flex items-center gap-2">
-                    {s.available ? (
-                      <CheckCircle2 className="h-4 w-4 text-indigo-500" />
-                    ) : (
-                      <XCircle className="h-4 w-4 text-muted-foreground" />
-                    )}
-                    <span className="font-medium text-sm">{s.domain}</span>
-                    {s.premium && <Sparkles className="h-3 w-3 text-amber-500" />}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {s.available && (
-                      <span className="text-sm font-mono text-indigo-600">${s.registrationPrice}</span>
-                    )}
-                    {s.available && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => onRegister(s.domain, s.registrationPrice)}
-                      >
-                        Buy
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
+            <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {result.suggestions.map((s) => {
+                const sState = stateOf(s)
+                const sBuyable = isPurchasable({
+                  status: s.status,
+                  available: s.available,
+                  premium: s.premium,
+                  sellable: s.sellable,
+                  price: s.registrationPrice,
+                })
+                return (
+                  <li
+                    key={s.domain}
+                    className="flex items-center justify-between gap-2 rounded-md border p-2"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <AvailabilityIcon
+                        state={sState}
+                        className={`h-4 w-4 shrink-0 ${sBuyable ? 'text-indigo-500' : 'text-muted-foreground'}`}
+                      />
+                      <span className="font-medium text-sm truncate">{s.domain}</span>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {sBuyable ? (
+                        <>
+                          <span className="text-sm font-mono text-indigo-600 dark:text-indigo-400">
+                            {money(s.registrationPrice)}
+                          </span>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => onRegister(s.domain, s.registrationPrice!)}
+                            aria-label={`Buy ${s.domain}`}
+                          >
+                            Buy
+                          </Button>
+                        </>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">
+                          {AVAILABILITY_COPY[sState].label}
+                        </span>
+                      )}
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
           </CardContent>
         </Card>
       )}
@@ -919,7 +1075,7 @@ function RegisterDialog({
   const [registrant, setRegistrant] = useState<Registrant>(EMPTY_REGISTRANT)
   const [method, setMethod] = useState('')
   const { user } = useAuthStore()
-  const { methods, quote } = useDomainQuote(domain, 'register', duration)
+  const { methods, quote, loading: quoting, error: quoteError } = useDomainQuote(domain, 'register', duration)
 
   // Prefill from the signed-in account — most customers are registering in
   // their own name, and retyping an email they already gave us is friction.
@@ -1012,12 +1168,27 @@ function RegisterDialog({
             />
           </div>
 
-          <PaymentMethodPicker
-            methods={methods}
-            value={method}
-            onChange={setMethod}
-            disabled={loading}
-          />
+          {quoteError ? (
+            <div
+              role="alert"
+              className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs"
+            >
+              <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" aria-hidden="true" />
+              <span>{quoteError}</span>
+            </div>
+          ) : quoting && methods.length === 0 ? (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground" role="status">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+              Loading price and payment options…
+            </div>
+          ) : (
+            <PaymentMethodPicker
+              methods={methods}
+              value={method}
+              onChange={setMethod}
+              disabled={loading || quoting}
+            />
+          )}
 
           <div className="rounded-md border border-indigo-500/30 bg-indigo-500/5 p-3 text-xs text-muted-foreground">
             Once payment clears we register the domain, point it at your nameservers,
@@ -1027,7 +1198,7 @@ function RegisterDialog({
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={loading}>Cancel</Button>
-          <Button onClick={submit} disabled={loading || methods.length === 0}>
+          <Button onClick={submit} disabled={loading || quoting || !!quoteError || methods.length === 0}>
             {loading ? <Loader2 className="h-4 w-4 animate-spin me-2" /> : <Zap className="h-4 w-4 me-2" />}
             Continue to payment (${total})
           </Button>
@@ -1220,16 +1391,18 @@ function TransferDomainDialog({
 function DomainsListTab({ onSelect }: { onSelect: (id: string) => void }) {
   const [domains, setDomains] = useState<Domain[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
+    setLoadError(null)
     try {
       const data = await apiFetch('/domains')
       // Handle both array and envelope responses
       const list = Array.isArray(data) ? data : data.data || data.domains || []
       setDomains(list)
     } catch (err) {
-      toast.error('Failed to load domains', { description: (err as Error).message })
+      setLoadError((err as Error).message || 'Please try again.')
     } finally {
       setLoading(false)
     }
@@ -1245,6 +1418,22 @@ function DomainsListTab({ onSelect }: { onSelect: (id: string) => void }) {
     )
   }
 
+  if (loadError) {
+    // Never fall through to "No domains yet" when we simply failed to load.
+    return (
+      <Card>
+        <CardContent className="flex flex-col items-center justify-center py-16 text-center" role="alert">
+          <AlertTriangle className="h-12 w-12 text-amber-500 mb-3" aria-hidden="true" />
+          <h3 className="font-semibold text-lg">Couldn&rsquo;t load your domains</h3>
+          <p className="text-sm text-muted-foreground mt-1 max-w-sm">{loadError}</p>
+          <Button variant="outline" size="sm" className="mt-4" onClick={() => void load()}>
+            <RefreshCw className="h-3.5 w-3.5 me-1.5" /> Try again
+          </Button>
+        </CardContent>
+      </Card>
+    )
+  }
+
   if (domains.length === 0) {
     return (
       <Card>
@@ -1252,7 +1441,8 @@ function DomainsListTab({ onSelect }: { onSelect: (id: string) => void }) {
           <Globe className="h-12 w-12 text-muted-foreground mb-3" />
           <h3 className="font-semibold text-lg">No domains yet</h3>
           <p className="text-sm text-muted-foreground mt-1 max-w-sm">
-            Search for a domain and register it to get started. All your domains will appear here.
+            Search for a domain and register it to get started. A new domain appears here once
+            its payment is confirmed; until then you can follow it under Invoices.
           </p>
         </CardContent>
       </Card>
@@ -1267,8 +1457,17 @@ function DomainsListTab({ onSelect }: { onSelect: (id: string) => void }) {
         return (
           <Card
             key={d.id}
-            className="cursor-pointer hover:border-indigo-500/40 hover:shadow-md transition-all"
+            role="button"
+            tabIndex={0}
+            aria-label={`${d.name}, ${statusLabel(d.status)}. Open details`}
+            className="cursor-pointer hover:border-indigo-500/40 hover:shadow-md transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             onClick={() => onSelect(d.id)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                onSelect(d.id)
+              }
+            }}
           >
             <CardHeader className="pb-3">
               <div className="flex items-start justify-between">
@@ -1288,6 +1487,9 @@ function DomainsListTab({ onSelect }: { onSelect: (id: string) => void }) {
                       </Badge>
                     )}
                   </div>
+                  {domainStatusHint(d.status) && (
+                    <p className="text-xs text-muted-foreground mt-2">{domainStatusHint(d.status)}</p>
+                  )}
                 </div>
                 <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
               </div>
@@ -1534,6 +1736,9 @@ function DomainDetail({
                   </Badge>
                 )}
               </div>
+              {domainStatusHint(domain.status) && (
+                <p className="text-sm text-muted-foreground mt-2">{domainStatusHint(domain.status)}</p>
+              )}
             </div>
             <div className="grid grid-cols-2 gap-2 text-sm">
               {/*

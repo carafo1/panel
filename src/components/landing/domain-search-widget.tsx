@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useCallback } from 'react'
-import { toast } from 'sonner'
 import { apiFetch } from '@/store/auth-store'
 import {
   Search, Loader2, CheckCircle2, XCircle, Sparkles, Globe,
@@ -11,18 +10,36 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
+import {
+  availabilityOf, availabilityErrorMessage, AvailabilityIcon, AVAILABILITY_COPY,
+  type AvailabilityState,
+} from '@/components/domains/domain-availability'
 
+const stateOf = (r: Suggestion | SearchResult): AvailabilityState =>
+  availabilityOf({
+    status: r.status,
+    available: r.available,
+    premium: r.premium,
+    sellable: r.sellable,
+    price: r.registrationPrice,
+  })
+
+/** GET /api/domains/search. Prices are null unless available AND sellable. */
 interface Suggestion {
   domain: string
-  available: boolean
+  available: boolean | null
   premium: boolean
-  registrationPrice: number
+  status?: 'available' | 'unavailable' | 'premium' | 'unknown'
+  sellable?: boolean
+  registrationPrice: number | null
 }
 
 interface SearchResult {
   domain: string
-  available: boolean
+  available: boolean | null
   premium: boolean
+  status?: 'available' | 'unavailable' | 'premium' | 'unknown'
+  sellable?: boolean
   registrationPrice: number | null
   renewalPrice: number | null
   transferPrice: number | null
@@ -68,9 +85,9 @@ export function DomainSearchWidget({
       const data = await apiFetch(`/domains/search?domain=${encodeURIComponent(normalized)}`)
       setResult(data.data)
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Search failed'
-      setError(msg)
-      toast.error('Domain search failed', { description: msg })
+      // 503 = availability could not be confirmed, 429 = rate limited.
+      // Shown inline with a retry; never as "taken" or "available".
+      setError(availabilityErrorMessage(err))
     } finally {
       setLoading(false)
     }
@@ -217,17 +234,24 @@ export function DomainSearchWidget({
       )}
 
       {/* Result */}
-      {result && !loading && (
-        <div className="mt-5 space-y-4 animate-fade-in-up">
+      {result && !loading && (() => {
+        const state = stateOf(result)
+        const buyable = state === 'available'
+        return (
+        <div className="mt-5 space-y-4 animate-fade-in-up" aria-live="polite">
           <div className={cn(
             'rounded-2xl border p-5 sm:p-6 transition-all',
-            result.available
+            buyable
               ? isHero
                 ? 'bg-white/10 backdrop-blur-xl border-indigo-300/40 shadow-glow-indigo'
                 : 'bg-indigo-500/5 border-indigo-500/30 shadow-glow-indigo'
-              : isHero
-                ? 'bg-red-500/10 backdrop-blur-xl border-red-400/30'
-                : 'border-red-500/30 bg-red-500/5'
+              : state === 'unavailable'
+                ? isHero
+                  ? 'bg-red-500/10 backdrop-blur-xl border-red-400/30'
+                  : 'border-red-500/30 bg-red-500/5'
+                : isHero
+                  ? 'bg-amber-500/10 backdrop-blur-xl border-amber-300/30'
+                  : 'border-amber-500/30 bg-amber-500/5'
           )}>
             <div className="flex items-start justify-between gap-4 flex-wrap">
               <div className="space-y-2 min-w-0">
@@ -244,20 +268,33 @@ export function DomainSearchWidget({
                     </Badge>
                   )}
                 </div>
-                {result.available ? (
-                  <div className="flex items-center gap-2 text-indigo-300">
-                    <CheckCircle2 className="size-4" />
+                {buyable ? (
+                  <div className={cn('flex items-center gap-2', isHero ? 'text-indigo-300' : 'text-indigo-600 dark:text-indigo-400')}>
+                    <CheckCircle2 className="size-4" aria-hidden="true" />
                     <span className="text-sm font-semibold">Available</span>
-                    <Badge variant="outline" className={cn('ms-1 text-[10px]', isHero ? 'border-indigo-300/40 text-indigo-200' : 'border-indigo-500/30 text-indigo-600 dark:text-indigo-400')}>{result.provider}</Badge>
                   </div>
                 ) : (
-                  <div className="flex items-center gap-2 text-red-300">
-                    <XCircle className="size-4" />
-                    <span className="text-sm font-semibold">Already taken</span>
+                  <div className="space-y-1">
+                    <div className={cn(
+                      'flex items-center gap-2',
+                      state === 'unavailable'
+                        ? isHero ? 'text-red-300' : 'text-red-600 dark:text-red-400'
+                        : isHero ? 'text-amber-300' : 'text-amber-700 dark:text-amber-400'
+                    )}>
+                      <AvailabilityIcon state={state} className="size-4" />
+                      <span className="text-sm font-semibold">
+                        {state === 'unavailable' ? 'Already taken' : AVAILABILITY_COPY[state].label}
+                      </span>
+                    </div>
+                    {state !== 'unavailable' && (
+                      <p className={cn('text-xs', isHero ? 'text-indigo-100/80' : 'text-muted-foreground')}>
+                        {AVAILABILITY_COPY[state].detail}
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
-              {result.available && result.registrationPrice != null && (
+              {buyable && (
                 <div className="text-end shrink-0">
                   <div className={cn(
                     'text-3xl sm:text-4xl font-extrabold leading-none',
@@ -270,7 +307,7 @@ export function DomainSearchWidget({
               )}
             </div>
 
-            {result.available && result.registrationPrice != null && (
+            {buyable && (
               <>
                 <div className="grid grid-cols-3 gap-2.5 mt-5">
                   {[
@@ -299,7 +336,7 @@ export function DomainSearchWidget({
                           ? (isHero ? 'text-white' : 'text-indigo-600 dark:text-indigo-400')
                           : (isHero ? 'text-indigo-100' : 'text-foreground')
                       )}>
-                        ${item.value}
+                        {typeof item.value === 'number' && item.value > 0 ? `${item.value}` : '—'}
                       </div>
                     </div>
                   ))}
@@ -329,8 +366,17 @@ export function DomainSearchWidget({
               </>
             )}
 
-            {!result.available && (
-              <div className="mt-5">
+            {!buyable && (
+              <div className="mt-5 flex flex-col sm:flex-row gap-2.5">
+                {state === 'unknown' && (
+                  <Button
+                    onClick={() => handleSearch(result.domain)}
+                    className="h-12 bg-indigo-500 hover:bg-indigo-600 text-white border-0"
+                  >
+                    <RefreshCw className="size-4 me-2" />
+                    Try again
+                  </Button>
+                )}
                 <Button
                   variant="outline"
                   onClick={reset}
@@ -354,17 +400,20 @@ export function DomainSearchWidget({
               <div className="flex items-center gap-2 mb-4">
                 <Sparkles className="size-4 text-indigo-400" />
                 <h4 className={cn('font-semibold text-sm', isHero ? 'text-white' : 'text-foreground')}>
-                  {result.available ? 'More TLD options' : 'Try these alternatives'}
+                  {buyable ? 'More TLD options' : 'Try these alternatives'}
                 </h4>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                {result.suggestions.map((s) => (
+                {result.suggestions.map((s) => {
+                  const sState = stateOf(s)
+                  const sBuyable = sState === 'available'
+                  return (
                   <button
                     key={s.domain}
                     onClick={() => handleSearch(s.domain)}
                     className={cn(
                       'flex items-center justify-between rounded-xl border p-3 text-start transition-all duration-200 hover:shadow-md hover:scale-[1.01] active:scale-95',
-                      s.available
+                      sBuyable
                         ? isHero
                           ? 'border-indigo-300/30 bg-white/5 hover:border-indigo-300/60 hover:bg-indigo-500/20 hover:shadow-glow-indigo'
                           : 'border-indigo-500/20 hover:border-indigo-500/50 hover:bg-indigo-500/10 hover:shadow-glow-indigo'
@@ -374,31 +423,36 @@ export function DomainSearchWidget({
                     )}
                   >
                     <div className="flex items-center gap-2 min-w-0">
-                      {s.available ? (
-                        <CheckCircle2 className="size-4 text-indigo-300 shrink-0" />
+                      {sBuyable ? (
+                        <CheckCircle2 className={cn('size-4 shrink-0', isHero ? 'text-indigo-300' : 'text-indigo-500')} aria-hidden="true" />
                       ) : (
-                        <XCircle className={cn('size-4 shrink-0', isHero ? 'text-red-300/60' : 'text-muted-foreground')} />
+                        <AvailabilityIcon state={sState} className={cn('size-4 shrink-0', isHero ? 'text-red-300/60' : 'text-muted-foreground')} />
                       )}
                       <span className={cn('font-medium text-sm truncate', isHero ? 'text-indigo-50' : 'text-foreground')}>
                         {s.domain}
                       </span>
-                      {s.premium && <Sparkles className="size-3 text-amber-400 shrink-0" />}
                     </div>
-                    {s.available && (
+                    {sBuyable ? (
                       <span className={cn(
                         'text-sm font-mono font-semibold shrink-0 ms-2',
                         isHero ? 'text-indigo-200' : 'text-indigo-600 dark:text-indigo-400'
                       )}>
                         ${s.registrationPrice}
                       </span>
+                    ) : (
+                      <span className={cn('text-xs shrink-0 ms-2', isHero ? 'text-indigo-200/70' : 'text-muted-foreground')}>
+                        {sState === 'unavailable' ? 'Taken' : AVAILABILITY_COPY[sState].label}
+                      </span>
                     )}
                   </button>
-                ))}
+                  )
+                })}
               </div>
             </div>
           )}
         </div>
-      )}
+        )
+      })()}
     </div>
   )
 }

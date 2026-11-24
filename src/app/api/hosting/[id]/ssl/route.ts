@@ -14,7 +14,17 @@ import { getProjectCertInfo, forceRenew, toggleSsl } from '@/lib/vps/ssl'
  *          - action='toggle' → toggleSsl(projectId, !!enabled) — enable/disable
  *
  * Auth: GET needs 'view', POST needs 'configure' project access.
+ *
+ * Limits (POST): at most SSL_ACTIONS_PER_HOUR renew/toggle actions per website
+ * per hour, counted from the audit log (so it holds across processes and
+ * restarts), and no forced renewal while the certificate still has more than
+ * RENEW_MIN_DAYS_LEFT days. Every renewal deletes the certificate and asks
+ * Let's Encrypt for a new one; without limits one script could use up the
+ * platform's weekly certificate quota for every customer.
  */
+export const SSL_ACTIONS_PER_HOUR = 5
+export const RENEW_MIN_DAYS_LEFT = 30
+const DAY = 24 * 60 * 60 * 1000
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -110,7 +120,15 @@ export async function POST(
 
     const project = await db.project.findUnique({
       where: { id },
-      select: { id: true, userId: true, name: true, subdomain: true, customDomain: true },
+      select: {
+        id: true,
+        userId: true,
+        name: true,
+        subdomain: true,
+        customDomain: true,
+        sslCertStatus: true,
+        sslCertExpiry: true,
+      },
     })
     if (!project) {
       return NextResponse.json(
@@ -126,6 +144,33 @@ export async function POST(
       return NextResponse.json(
         { error: "action must be 'renew' or 'toggle'" },
         { status: 400 }
+      )
+    }
+
+    const recent = await db.auditLog.count({
+      where: {
+        resourceId: id,
+        action: { in: ['project.ssl.renew', 'project.ssl.toggle'] },
+        createdAt: { gt: new Date(Date.now() - 60 * 60 * 1000) },
+      },
+    })
+    if (recent >= SSL_ACTIONS_PER_HOUR) {
+      return NextResponse.json(
+        { error: 'Too many certificate changes for this website. Please try again in an hour.' },
+        { status: 429, headers: { 'Retry-After': '3600' } }
+      )
+    }
+    if (
+      action === 'renew' &&
+      project.sslCertStatus === 'issued' &&
+      project.sslCertExpiry &&
+      project.sslCertExpiry.getTime() - Date.now() > RENEW_MIN_DAYS_LEFT * DAY
+    ) {
+      return NextResponse.json(
+        {
+          error: `The certificate is valid until ${project.sslCertExpiry.toISOString().slice(0, 10)} and renews automatically about 30 days before it expires. No renewal is needed now.`,
+        },
+        { status: 409 }
       )
     }
 

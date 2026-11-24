@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { ReferralCard } from '@/components/billing/referral-card'
+import { useAppStore } from '@/store/app-store'
 import {
   Card,
   CardHeader,
@@ -122,7 +123,13 @@ interface Payment {
   plan: { name: string; price: number } | null
 }
 
-type PurchaseType = 'hosting' | 'domain' | 'both'
+/**
+ * This dialog buys hosting only. The legacy checkout refuses type 'both'
+ * (400 DOMAIN_CHECKOUT_REQUIRED) and will not register a domain without the
+ * ICANN registrant contact, so domains are bought through the domain-order
+ * checkout on the Domains page (POST /api/domains/checkout).
+ */
+type PurchaseType = 'hosting'
 
 interface CheckoutResult {
   // Stripe Checkout fields (real mode)
@@ -289,8 +296,9 @@ function CheckoutDialog({
   planIndex: number
   onSuccess: (result: CheckoutResult) => void
 }) {
-  const [purchaseType, setPurchaseType] = useState<PurchaseType>('hosting')
+  const purchaseType: PurchaseType = 'hosting'
   const [domainName, setDomainName] = useState('')
+  const { setDashboardTab } = useAppStore()
   const [projectName, setProjectName] = useState('')
   const [framework, setFramework] = useState('nextjs')
   const [loading, setLoading] = useState(false)
@@ -336,66 +344,30 @@ function CheckoutDialog({
     }
   }, [open])
 
-  const showDomain = purchaseType === 'domain' || purchaseType === 'both'
-  const showProject = purchaseType === 'hosting' || purchaseType === 'both'
+  const calculateTotal = (): number => plan.price
 
   /**
-   * Real registration price for the typed domain.
-   *
-   * This dialog used to display a flat $12.99 for every domain while checkout
-   * charged the per-TLD price from the catalogue — so a customer buying a .ai
-   * was shown $12.99 and billed $95.60. Quote the same source checkout bills
-   * from, and show nothing rather than a guess until we have it.
+   * Hand the customer to the Domains page with the name pre-filled. The search
+   * there shows real availability and price, and its checkout collects the
+   * registrant details the registry requires.
    */
-  const [domainQuote, setDomainQuote] = useState<number | null>(null)
-  const [quoting, setQuoting] = useState(false)
-
-  useEffect(() => {
-    const candidate = domainName.trim().toLowerCase()
-    if (!showDomain || !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(candidate)) {
-      setDomainQuote(null)
-      return
+  const goToDomainSearch = () => {
+    const wanted = domainName.trim().toLowerCase()
+    handleClose()
+    if (wanted) {
+      try {
+        const url = new URL(window.location.href)
+        url.searchParams.set('register', wanted)
+        window.history.replaceState({}, '', `${url.pathname}${url.search}`)
+      } catch {
+        /* URL API unavailable: the Domains page simply opens without a pre-fill */
+      }
     }
-    let cancelled = false
-    setQuoting(true)
-    // Debounced: the customer is still typing, and each call prices a TLD.
-    const timer = setTimeout(() => {
-      apiFetch<{ quote?: { total: number } }>(
-        `/domains/checkout?domain=${encodeURIComponent(candidate)}&kind=register&years=1`
-      )
-        .then((data) => {
-          if (!cancelled) setDomainQuote(data.quote?.total ?? null)
-        })
-        .catch(() => {
-          if (!cancelled) setDomainQuote(null)
-        })
-        .finally(() => {
-          if (!cancelled) setQuoting(false)
-        })
-    }, 500)
-    return () => {
-      cancelled = true
-      clearTimeout(timer)
-    }
-  }, [domainName, showDomain])
-
-  /**
-   * Total for the current selection, or null while the domain price is unknown.
-   * Callers must render "—" for null rather than substituting a placeholder
-   * number — that substitution is what produced the mismatch above.
-   */
-  const calculateTotal = (): number | null => {
-    if (purchaseType === 'hosting') return plan.price
-    if (domainQuote === null) return null
-    return purchaseType === 'domain' ? domainQuote : plan.price + domainQuote
+    setDashboardTab('domains')
   }
 
   const handlePurchase = async () => {
-    if (showDomain && !domainName.trim()) {
-      toast.error('Please enter a domain name')
-      return
-    }
-    if (showProject && !projectName.trim()) {
+    if (!projectName.trim()) {
       toast.error('Please enter a project name')
       return
     }
@@ -412,9 +384,8 @@ function CheckoutDialog({
           planId: plan.id,
           type: purchaseType,
           method: selectedMethod,
-          domainName: showDomain ? domainName.trim() : undefined,
-          projectName: showProject ? projectName.trim() : undefined,
-          framework: showProject ? framework : undefined,
+          projectName: projectName.trim(),
+          framework,
         }),
       })
 
@@ -462,7 +433,6 @@ function CheckoutDialog({
       onSuccess(success)
     }
     setSuccess(null)
-    setPurchaseType('hosting')
     setDomainName('')
     setProjectName('')
     setFramework('nextjs')
@@ -512,11 +482,7 @@ function CheckoutDialog({
                     <div>
                       <p className="font-medium text-sm">Amount Due</p>
                       <p className="text-sm text-amber-700 mt-0.5">
-                        {calculateTotal() === null
-                          ? '—'
-                          : `$${calculateTotal()!.toFixed(2)}`}{' '}
-                        {calculateTotal() !== null &&
-                          (purchaseType !== 'domain' ? '/mo' : '/yr')}
+                        {`${calculateTotal().toFixed(2)}/mo`}
                       </p>
                     </div>
                   </div>
@@ -705,104 +671,76 @@ function CheckoutDialog({
               </div>
             </div>
 
-            {/* Purchase type selection */}
-            <div className="space-y-2">
-              <Label>What would you like to purchase?</Label>
-              <RadioGroup
-                value={purchaseType}
-                onValueChange={(v) => setPurchaseType(v as PurchaseType)}
-                className="grid grid-cols-3 gap-2"
-              >
-                <Label
-                  htmlFor="type-hosting"
-                  className={`flex flex-col items-center gap-1.5 rounded-lg border p-3 cursor-pointer transition-colors hover:bg-indigo-50 ${
-                    purchaseType === 'hosting' ? 'border-indigo-500 bg-indigo-50' : ''
-                  }`}
-                >
-                  <RadioGroupItem value="hosting" id="type-hosting" className="sr-only" />
-                  <Server className="size-5 text-indigo-600" />
-                  <span className="text-xs font-medium text-center">Hosting Only</span>
-                  <span className="text-xs text-muted-foreground">${plan.price}/mo</span>
-                </Label>
-                <Label
-                  htmlFor="type-domain"
-                  className={`flex flex-col items-center gap-1.5 rounded-lg border p-3 cursor-pointer transition-colors hover:bg-indigo-50 ${
-                    purchaseType === 'domain' ? 'border-indigo-500 bg-indigo-50' : ''
-                  }`}
-                >
-                  <RadioGroupItem value="domain" id="type-domain" className="sr-only" />
-                  <Globe className="size-5 text-indigo-600" />
-                  <span className="text-xs font-medium text-center">Domain Only</span>
-                  <span className="text-xs text-muted-foreground">price by extension</span>
-                </Label>
-                <Label
-                  htmlFor="type-both"
-                  className={`flex flex-col items-center gap-1.5 rounded-lg border p-3 cursor-pointer transition-colors hover:bg-indigo-50 ${
-                    purchaseType === 'both' ? 'border-indigo-500 bg-indigo-50' : ''
-                  }`}
-                >
-                  <RadioGroupItem value="both" id="type-both" className="sr-only" />
-                  <Package className="size-5 text-indigo-600" />
-                  <span className="text-xs font-medium text-center">Hosting + Domain</span>
-                  <span className="text-xs text-muted-foreground">
-                    ${plan.price.toFixed(2)} + domain
-                  </span>
-                </Label>
-              </RadioGroup>
+            {/* Project input */}
+            <div className="space-y-3">
+              <div className="space-y-2">
+                <Label htmlFor="project-name">Project Name</Label>
+                <Input
+                  id="project-name"
+                  placeholder="My Awesome Project"
+                  value={projectName}
+                  onChange={(e) => setProjectName(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  A subdomain will be auto-generated (e.g., my-awesome-project.apsamo.com)
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label>Framework</Label>
+                <Select value={framework} onValueChange={setFramework}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select framework" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {FRAMEWORKS.map((fw) => (
+                      <SelectItem key={fw.value} value={fw.value}>
+                        {fw.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
-            {/* Domain input */}
-            {showDomain && (
-              <div className="space-y-2">
-                <Label htmlFor="domain-name">Domain Name</Label>
-                <div className="relative">
-                  <Search className="absolute start-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+            {/* Domains are a separate order (see PurchaseType). */}
+            <div className="rounded-lg border p-3 space-y-2">
+              <div className="flex items-start gap-2">
+                <Globe className="size-4 text-indigo-600 mt-0.5 shrink-0" aria-hidden="true" />
+                <div className="text-sm">
+                  <p className="font-medium">Need a domain as well?</p>
+                  <p className="text-xs text-muted-foreground">
+                    Domains are ordered separately on the Domains page, where we check
+                    availability and collect the registrant details the registry requires.
+                    Your site also gets a free subdomain.
+                  </p>
+                </div>
+              </div>
+              <form
+                className="flex gap-2"
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  goToDomainSearch()
+                }}
+              >
+                <div className="relative flex-1">
+                  <Search className="absolute start-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" aria-hidden="true" />
                   <Input
                     id="domain-name"
+                    aria-label="Domain to look up"
                     placeholder="example.com"
                     value={domainName}
                     onChange={(e) => setDomainName(e.target.value)}
                     className="ps-9"
+                    autoCapitalize="off"
+                    autoComplete="off"
+                    spellCheck={false}
                   />
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  Enter the domain you want to register (e.g., myapp.com)
-                </p>
-              </div>
-            )}
-
-            {/* Project input */}
-            {showProject && (
-              <div className="space-y-3">
-                <div className="space-y-2">
-                  <Label htmlFor="project-name">Project Name</Label>
-                  <Input
-                    id="project-name"
-                    placeholder="My Awesome Project"
-                    value={projectName}
-                    onChange={(e) => setProjectName(e.target.value)}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    A subdomain will be auto-generated (e.g., my-awesome-project.apsamo.com)
-                  </p>
-                </div>
-                <div className="space-y-2">
-                  <Label>Framework</Label>
-                  <Select value={framework} onValueChange={setFramework}>
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Select framework" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {FRAMEWORKS.map((fw) => (
-                        <SelectItem key={fw.value} value={fw.value}>
-                          {fw.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            )}
+                <Button type="submit" variant="outline" disabled={loading}>
+                  Find a domain
+                </Button>
+              </form>
+            </div>
 
             {/* Payment method picker */}
             <div className="space-y-2">
@@ -876,13 +814,7 @@ function CheckoutDialog({
             <div className="flex items-center justify-between rounded-lg border border-indigo-200 bg-indigo-50/50 p-3">
               <span className="text-sm font-medium">Total</span>
               <span className="text-lg font-bold text-indigo-700">
-                {quoting
-                  ? 'pricing…'
-                  : calculateTotal() === null
-                  ? 'enter a domain'
-                  : `$${calculateTotal()!.toFixed(2)}${
-                      purchaseType !== 'domain' ? '/mo' : '/yr'
-                    }`}
+                {`${calculateTotal().toFixed(2)}/mo`}
               </span>
             </div>
 

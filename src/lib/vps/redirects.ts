@@ -27,6 +27,30 @@
  */
 import { db } from '@/lib/db'
 import { configureProjectProxy } from './proxy'
+
+export interface ProxyApplyResult {
+  /** False when the change is saved but the live web server was not updated. */
+  applied: boolean
+  applyMessage?: string
+}
+
+/**
+ * Regenerate the proxy and say honestly whether it worked. configureProjectProxy
+ * reports most failures as { ok: false } rather than throwing; that used to be
+ * ignored, so the customer saw success while Caddy never got the change.
+ */
+async function applyProxy(projectId: string, what: string): Promise<ProxyApplyResult> {
+  const r = await configureProjectProxy(projectId).catch((err: unknown) => ({
+    ok: false,
+    message: err instanceof Error ? err.message : String(err),
+  }))
+  if (r.ok) return { applied: true }
+  console.error(`[vps-redirects] failed to regenerate Caddyfile on ${what}:`, r.message)
+  return {
+    applied: false,
+    applyMessage: 'Saved, but the web server could not be updated yet. Try again in a minute.',
+  }
+}
 import {
   RedirectValidationError,
   redirectFromPathError,
@@ -107,7 +131,7 @@ export async function listRedirects(projectId: string): Promise<RedirectRow[]> {
 export async function createRedirect(
   projectId: string,
   opts: CreateRedirectInput
-): Promise<RedirectRow> {
+): Promise<RedirectRow & ProxyApplyResult> {
   // These values are written into the Caddyfile every tenant shares; see
   // redirect-rules for why trimming alone was not enough.
   const fromErr = redirectFromPathError(opts.fromPath)
@@ -144,15 +168,8 @@ export async function createRedirect(
   // Regenerate the project's Caddy site block so the new `redir` directive is
   // injected. Best-effort: failures don't roll back the DB row. The Next.js
   // middleware (Layer 1) enforces the redirect in real-time regardless.
-  if (project.serverId) {
-    try {
-      await configureProjectProxy(projectId)
-    } catch (err) {
-      console.error('[vps-redirects] failed to regenerate Caddyfile on create:', err)
-    }
-  }
-
-  return toRow(row)
+  const apply = project.serverId ? await applyProxy(projectId, 'create') : { applied: true }
+  return { ...toRow(row), ...apply }
 }
 
 // ─── Update ──────────────────────────────────────────────────────────────
@@ -160,7 +177,7 @@ export async function createRedirect(
 export async function updateRedirect(
   redirectId: string,
   patch: UpdateRedirectPatch
-): Promise<RedirectRow> {
+): Promise<RedirectRow & ProxyApplyResult> {
   const existing = await db.redirect.findUnique({ where: { id: redirectId } })
   if (!existing) throw new Error('Redirect not found')
 
@@ -201,20 +218,13 @@ export async function updateRedirect(
     where: { id: existing.projectId },
     select: { serverId: true },
   })
-  if (project?.serverId) {
-    try {
-      await configureProjectProxy(existing.projectId)
-    } catch (err) {
-      console.error('[vps-redirects] failed to regenerate Caddyfile on update:', err)
-    }
-  }
-
-  return toRow(updated)
+  const apply = project?.serverId ? await applyProxy(existing.projectId, 'update') : { applied: true }
+  return { ...toRow(updated), ...apply }
 }
 
 // ─── Delete ──────────────────────────────────────────────────────────────
 
-export async function deleteRedirect(redirectId: string): Promise<{ ok: boolean }> {
+export async function deleteRedirect(redirectId: string): Promise<{ ok: boolean } & Partial<ProxyApplyResult>> {
   const existing = await db.redirect.findUnique({ where: { id: redirectId } })
   if (!existing) return { ok: false }
 
@@ -228,13 +238,6 @@ export async function deleteRedirect(redirectId: string): Promise<{ ok: boolean 
 
   // Regenerate the Caddy site block so the deleted `redir` directive is removed.
   // Best-effort.
-  if (project?.serverId) {
-    try {
-      await configureProjectProxy(projectId)
-    } catch (err) {
-      console.error('[vps-redirects] failed to regenerate Caddyfile on delete:', err)
-    }
-  }
-
-  return { ok: true }
+  const apply = project?.serverId ? await applyProxy(projectId, 'delete') : { applied: true }
+  return { ok: true, ...apply }
 }
