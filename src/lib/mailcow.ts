@@ -47,6 +47,20 @@ export function isMailcowConfigured(): boolean {
   return getConfig() !== null
 }
 
+export const MAIL_SERVER_NOT_CONFIGURED = 'Mail server not configured'
+
+/**
+ * Demo mode (simulated success when Mailcow is not configured) is for
+ * development only. In production it used to report mail domains, DKIM keys
+ * and mailboxes as created when nothing existed, so a paying customer was told
+ * their email worked. There every call now fails with MAIL_SERVER_NOT_CONFIGURED
+ * instead (returned as an error result, so callers that do not catch — the
+ * billing sweep's suspend/resume — are not crashed by it).
+ */
+export function mailcowDemoForbidden(): boolean {
+  return !isMailcowConfigured() && process.env.NODE_ENV === 'production'
+}
+
 /** Resolve the full API base path (always ends with /api/v1, no trailing slash). */
 function apiBase(cfg: MailcowConfig): string {
   if (/\/api\/v\d+$/.test(cfg.url)) return cfg.url
@@ -225,6 +239,7 @@ export async function addDomain(
   opts: AddDomainOptions
 ): Promise<AddDomainResult> {
   if (!isMailcowConfigured()) {
+    if (mailcowDemoForbidden()) return { success: false, error: MAIL_SERVER_NOT_CONFIGURED }
     // DEMO MODE - simulated success
     console.log('[mailcow] DEMO MODE: addDomain', opts.domain)
     return {
@@ -300,6 +315,7 @@ export async function editDomain(
   opts: EditDomainOptions
 ): Promise<{ success: boolean; error?: string }> {
   if (!isMailcowConfigured()) {
+    if (mailcowDemoForbidden()) return { success: false, error: MAIL_SERVER_NOT_CONFIGURED }
     console.log('[mailcow] DEMO MODE: editDomain', opts.domain, opts)
     return { success: true }
   }
@@ -367,6 +383,7 @@ interface GetDomainResult {
  */
 export async function getDomain(domain: string): Promise<GetDomainResult> {
   if (!isMailcowConfigured()) {
+    if (mailcowDemoForbidden()) return { success: false, error: MAIL_SERVER_NOT_CONFIGURED }
     // DEMO MODE
     console.log('[mailcow] DEMO MODE: getDomain', domain)
     return {
@@ -449,6 +466,7 @@ export async function generateDkim(
   selector = 'mail'
 ): Promise<GenerateDkimResult> {
   if (!isMailcowConfigured()) {
+    if (mailcowDemoForbidden()) return { success: false, error: MAIL_SERVER_NOT_CONFIGURED }
     // DEMO MODE - return a realistic-looking 2048-bit RSA DKIM public key
     console.log('[mailcow] DEMO MODE: generateDkim', domain, selector)
     return {
@@ -540,6 +558,7 @@ export async function createMailbox(
   opts: CreateMailboxOptions
 ): Promise<CreateMailboxResult> {
   if (!isMailcowConfigured()) {
+    if (mailcowDemoForbidden()) return { success: false, error: MAIL_SERVER_NOT_CONFIGURED }
     // DEMO MODE
     console.log(
       '[mailcow] DEMO MODE: createMailbox',
@@ -606,6 +625,7 @@ export async function listMailboxes(
   domain: string
 ): Promise<ListMailboxesResult> {
   if (!isMailcowConfigured()) {
+    if (mailcowDemoForbidden()) return { success: false, error: MAIL_SERVER_NOT_CONFIGURED }
     // DEMO MODE
     console.log('[mailcow] DEMO MODE: listMailboxes', domain)
     return {
@@ -771,6 +791,7 @@ export async function updateMailbox(
   opts: UpdateMailboxOptions
 ): Promise<{ success: boolean; error?: string }> {
   if (!isMailcowConfigured()) {
+    if (mailcowDemoForbidden()) return { success: false, error: MAIL_SERVER_NOT_CONFIGURED }
     console.log('[mailcow] DEMO MODE: updateMailbox', opts.address)
     return { success: true }
   }
@@ -820,6 +841,7 @@ export async function deleteMailbox(
   address: string
 ): Promise<DeleteMailboxResult> {
   if (!isMailcowConfigured()) {
+    if (mailcowDemoForbidden()) return { success: false, error: MAIL_SERVER_NOT_CONFIGURED }
     // DEMO MODE
     console.log('[mailcow] DEMO MODE: deleteMailbox', address)
     return { success: true }
@@ -855,6 +877,7 @@ export async function removeDomain(
   domain: string
 ): Promise<{ success: boolean; error?: string }> {
   if (!isMailcowConfigured()) {
+    if (mailcowDemoForbidden()) return { success: false, error: MAIL_SERVER_NOT_CONFIGURED }
     // DEMO MODE
     console.log('[mailcow] DEMO MODE: removeDomain', domain)
     return { success: true }
@@ -902,6 +925,18 @@ export async function verifyEmailSetup(
   const host = process.env.MAIL_SERVER_HOSTNAME || ''
 
   if (!isMailcowConfigured()) {
+    if (mailcowDemoForbidden()) {
+      details.push(MAIL_SERVER_NOT_CONFIGURED)
+      return {
+        success: false,
+        domainActive: false,
+        dkimConfigured: false,
+        mailboxCount: 0,
+        smtpAccessible: false,
+        imapAccessible: false,
+        details,
+      }
+    }
     // DEMO MODE — pretend everything is green
     console.log('[mailcow] DEMO MODE: verifyEmailSetup', domain)
     details.push('DEMO MODE: simulated successful verification')

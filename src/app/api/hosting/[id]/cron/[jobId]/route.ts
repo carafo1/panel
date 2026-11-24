@@ -138,6 +138,13 @@ export async function POST(
 
     return NextResponse.json(result)
   } catch (error) {
+    // Jobs run only inside the website's container; say so instead of a 500.
+    if (error instanceof Error && /has no container yet/.test(error.message)) {
+      return NextResponse.json(
+        { error: 'The website has no container yet. Deploy and start the website; cron jobs run inside its container.' },
+        { status: 409 }
+      )
+    }
     const msg = 'Internal server error'
     console.error('Run cron job error:', error)
     return NextResponse.json({ error: msg }, { status: 500 })

@@ -1,6 +1,6 @@
 import crypto from 'crypto'
 import { db } from '@/lib/db'
-import { assertPublicUrl } from '@/lib/ssrf'
+import { assertPublicUrl, fetchPublicTarget, readTextCapped } from '@/lib/ssrf'
 
 const WEBHOOK_TIMEOUT_MS = 5000
 const MAX_RESPONSE_LENGTH = 2000
@@ -121,15 +121,20 @@ export async function deliverWebhook(
 
   try {
     // SSRF guard: refuse to POST to private/loopback/metadata addresses.
+    let target: Awaited<ReturnType<typeof assertPublicUrl>> | void
     try {
-      await assertPublicUrl(webhook.url)
+      target = await assertPublicUrl(webhook.url)
     } catch (guardErr) {
       // A refused URL stays refused; a DNS lookup failure may be temporary.
       const m = guardErr instanceof Error ? guardErr.message : ''
       blockedUrl = !/^(Cannot resolve host|Host did not resolve)/.test(m)
       throw guardErr
     }
-    const response = await fetch(webhook.url, {
+    // Pinned to the address that passed the check, and redirects are not
+    // followed: a 3xx is recorded as the receiver's answer. Following it let
+    // a public URL bounce the signed POST (and its stored, displayed response)
+    // to 127.0.0.1 or the cloud metadata service.
+    const response = await fetchPublicTarget(target, webhook.url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -154,9 +159,10 @@ export async function deliverWebhook(
     success = response.status >= 200 && response.status < 300
 
     try {
-      const text = await response.text()
+      // Read only what is stored; never buffer an unbounded receiver body.
+      const { text, truncated } = await readTextCapped(response, MAX_RESPONSE_LENGTH * 4)
       responseBody =
-        text.length > MAX_RESPONSE_LENGTH
+        truncated || text.length > MAX_RESPONSE_LENGTH
           ? text.substring(0, MAX_RESPONSE_LENGTH) + '...[truncated]'
           : text
     } catch {

@@ -15,7 +15,7 @@
  */
 import { authenticateRequest } from '@/lib/auth'
 import { ok, apiError } from '@/lib/api-response'
-import { isDynadotDemoMode } from '@/lib/dynadot'
+import { isDynadotSimulated } from '@/lib/dynadot'
 import { dynadotService } from '@/lib/dynadot-service'
 import { db } from '@/lib/db'
 
@@ -36,7 +36,8 @@ export async function GET(request: Request) {
 
   const now = new Date().toISOString()
   const features: FeatureStatus[] = []
-  const demoMode = isDynadotDemoMode()
+  // Simulated only outside production; in production a missing key shows as an error.
+  const demoMode = isDynadotSimulated()
 
   // ── Feature 1: Domain search ─────────────────────────────────────────
   // Live-test by searching for google.com (must return available=false).

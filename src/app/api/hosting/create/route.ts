@@ -7,6 +7,7 @@ import { encrypt } from '@/lib/encryption'
 import { logAudit } from '@/lib/audit'
 import { deployProject } from '@/lib/vps'
 import { validateGitUrl } from '@/lib/vps/deploy-safety'
+import { isAdmin } from '@/lib/security'
 import { getDeploymentMethod, type DeploymentMethodId } from '@/lib/deployment-methods'
 import { BRAND_DOMAIN } from '@/lib/brand-config'
 import { emitWebhookEvent } from '@/lib/webhook-delivery'
@@ -215,6 +216,16 @@ async function handleWizardCreate(
     where: { userId: decoded.userId, status: 'active' },
     include: { plan: true },
   })
+  // SECURITY/BILLING: without an active plan the limit check below was skipped
+  // entirely, so any newly registered account could create unlimited websites
+  // for free (and every website is a foothold on the shared host). Staff can
+  // still create sites (e.g. for customers or testing).
+  if (!subscription && !isAdmin(decoded.role)) {
+    return NextResponse.json(
+      { error: 'An active hosting plan is required to create a website.' },
+      { status: 402 }
+    )
+  }
   if (subscription && subscription.plan) {
     const projectCount = await db.project.count({
       where: { userId: decoded.userId },

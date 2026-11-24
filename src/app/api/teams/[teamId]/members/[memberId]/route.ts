@@ -43,7 +43,9 @@ export async function PATCH(
     }
 
     // Don't allow changing the owner's role
-    const member = await db.teamMember.findUnique({ where: { id: memberId } })
+    // Scoped to THIS team: a member id from another team must not be
+    // reachable through a team the caller owns or administers.
+    const member = await db.teamMember.findFirst({ where: { id: memberId, teamId } })
     if (!member) {
       return NextResponse.json({ error: 'Member not found' }, { status: 404 })
     }
@@ -82,7 +84,9 @@ export async function DELETE(
     }
 
     // Get the member to remove
-    const member = await db.teamMember.findUnique({ where: { id: memberId } })
+    // Scoped to THIS team: a member id from another team must not be
+    // reachable through a team the caller owns or administers.
+    const member = await db.teamMember.findFirst({ where: { id: memberId, teamId } })
     if (!member) {
       return NextResponse.json({ error: 'Member not found' }, { status: 404 })
     }

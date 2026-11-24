@@ -1,14 +1,14 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
-import { processEvent } from '@/lib/automation'
 import { logAudit } from '@/lib/audit'
 import { isAdmin } from '@/lib/security'
 import { requireProjectAccess } from '@/lib/project-access'
 import {
   registerDomain as dynadotRegister,
-  isDynadotDemoMode,
+  isRegistrarUnknownOutcome,
 } from '@/lib/dynadot'
+import { fetchRegistrarExpiry } from '@/lib/domain-automation'
 import { getPriceForDomain } from '@/lib/pricing'
 import { NS1_HOSTNAME, NS2_HOSTNAME } from '@/lib/brand-config'
 import crypto from 'crypto'
@@ -213,6 +213,18 @@ export async function POST(request: Request) {
     } catch (err) {
       dynadotError = err instanceof Error ? err.message : String(err)
       console.error('[domains/register] Dynadot registration failed:', dynadotError)
+      // The request may have been executed. Do not let the operator retry
+      // blindly: check the registrar account first.
+      if (isRegistrarUnknownOutcome(err)) {
+        return NextResponse.json(
+          {
+            error:
+              'The registrar did not confirm the outcome. The domain MAY have been registered: check the registrar account before trying again.',
+            code: 'registrar_unknown_outcome',
+          },
+          { status: 502 }
+        )
+      }
     }
 
     if (!dynadotResult || !dynadotResult.success) {
@@ -226,9 +238,9 @@ export async function POST(request: Request) {
       )
     }
 
-    const expiryDate = new Date(
-      Date.now() + durationYears * 365 * 24 * 60 * 60 * 1000
-    )
+    // The registrar's own expiry, read back — never computed locally. Null
+    // (and reconciled later) when the registrar cannot be read right now.
+    const expiryDate = await fetchRegistrarExpiry(domainLower)
 
     // Create the domain with status 'active' immediately (registered through us)
     const domain = await db.domain.create({
@@ -298,18 +310,10 @@ export async function POST(request: Request) {
       })
     }
 
-    // Trigger automation for domain_requested event
-    const automationResult = await processEvent({
-      type: 'domain_requested',
-      userId: decoded.userId,
-      payload: {
-        domainId: domain.id,
-        domainName: domainLower,
-        projectId: projectId || null,
-        provider: 'dynadot',
-        orderId: dynadotResult.orderId,
-      },
-    })
+    // No 'domain_requested' automation event: it ran the legacy simulated
+    // register_domain/setup_dns actions, which overwrote the real expiry with
+    // "now + 365 days" and sent notices for work that never happened.
+    const automationResult = null
 
     // Audit domain registration
     await logAudit({

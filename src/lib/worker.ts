@@ -74,6 +74,14 @@ export async function processPendingJobs(limit = 10): Promise<ProcessResult> {
     .then((m) => m.failStaleProvisioningJobs())
     .catch((err) => console.error('[worker] stale provisioning sweep failed:', err))
 
+  // Paid orders whose provisioning never started, failed before any side
+  // effect, or was abandoned by a crash. Throttled by CronLock leases
+  // ('provision-reconcile' every 5 min, 'reconcile' hourly), so calling it on
+  // every 10-second tick costs one conditional update when not due.
+  await import('@/lib/reconcile')
+    .then((m) => m.runScheduledReconcile())
+    .catch((err) => console.error('[worker] provisioning reconcile failed:', err))
+
   // 'failed' is terminal (attempts exhausted); the claim in processJob
   // re-checks status and attempts, so a row taken by another tick is skipped
   // safely. Exhausted rows are excluded so they cannot fill the batch.

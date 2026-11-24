@@ -9,11 +9,12 @@
  *
  * Execution model
  * ---------------
- *   - LOCALHOST servers (sshHost === 'localhost' / 127.0.0.1 / ::1):
- *       The scheduler callback runs the command directly on the panel host
- *       via `execLocal()` (child_process). This is the primary mode in the
- *       sandbox / single-node panel — the DB servers are configured with
- *       sshHost='localhost'.
+ *   - EVERY server type, localhost included: the command runs INSIDE the
+ *       project's container via `docker exec` (lib/vps/terminal.ts
+ *       buildContainerExecCommand: minimal environment for the docker CLI,
+ *       refuses when the container is not running). A customer command never
+ *       runs on the host. Localhost jobs are fired by the in-process
+ *       scheduler; no host crontab is written.
  *
  *   - REMOTE servers WITH a real Docker container:
  *       The container's own crontab is the source of truth (synced via
@@ -34,7 +35,7 @@
  *                      (remote+container only) re-sync container crontab
  *   - deleteCronJob  → unregister scheduler + (remote+container only) re-sync
  *                      crontab + DB delete
- *   - runCronJobNow  → localhost: execLocal; remote+container: docker exec
+ *   - runCronJobNow  → docker exec into the project container (all servers)
  *
  * `startCronScheduler()` is called lazily on first use (create / update /
  * run / list) so SSR cold-starts stay fast and we don't schedule twice during
@@ -56,8 +57,16 @@ import {
   isServerInDemoMode,
   isLocalHost,
 } from './ssh'
-import { execLocal, type LocalClient } from './local-exec'
+import { type LocalClient } from './local-exec'
 import { getServerCredentials } from './provisioner'
+import {
+  buildContainerExecCommand,
+  isSafeContainerName,
+  CONTAINER_NOT_RUNNING_MARKER,
+} from './terminal'
+
+/** Runs inside the container: $1 is the job's command (stderr folded into stdout). */
+const CRON_SCRIPT = 'eval "$1" 2>&1'
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -350,7 +359,7 @@ function unregisterScheduledTask(jobId: string): void {
 /**
  * Execute a cron job ONCE and record the result in the DB.
  *
- *   - LOCALHOST server  → run the command via `execLocal` (child_process).
+ *   - Any server with a container → `docker exec` into it (never the host).
  *   - REMOTE server + container → run via `docker exec` over SSH.
  *   - Neither path available → throw a clear, actionable error.
  *
@@ -369,22 +378,21 @@ async function executeJobOnce(jobId: string): Promise<RunCronJobResult> {
 
   const project = job.project
   const server = project.server
-  const localhost = isLocalHost(server?.sshHost)
 
-  const remoteContainerPath =
+  // Customer commands run ONLY inside the project's own container, on every
+  // server type including localhost. (Localhost used to run them straight on
+  // the panel host as root, with the panel's secrets in the environment.)
+  const containerPath =
     !!project.serverId &&
-    !!project.containerName &&
+    isSafeContainerName(project.containerName) &&
     !!server &&
-    !isServerInDemoMode(server)
+    (isLocalHost(server.sshHost) || !isServerInDemoMode(server))
 
   // No usable execution path → clear, actionable error.
-  if (!localhost && !remoteContainerPath) {
+  if (!containerPath) {
     throw new Error(
-      `Cron job ${jobId} has no usable execution path. ` +
-        `Server sshHost=${server?.sshHost || 'none'}, ` +
-        `containerName=${project.containerName || 'none'}, ` +
-        `demoMode=${server ? isServerInDemoMode(server) : 'no-server'}. ` +
-        `Configure the project's server (localhost or a real remote VPS with a container) before running cron jobs.`
+      `Cron job ${jobId} cannot run: the website has no container yet. ` +
+        `Deploy and start the website; cron jobs run inside its container.`
     )
   }
 
@@ -398,41 +406,34 @@ async function executeJobOnce(jobId: string): Promise<RunCronJobResult> {
   let exitCode: number | null = null
   let status: 'success' | 'failed' = 'failed'
 
-  if (localhost) {
-    // ── Localhost: run directly on the panel host via child_process ──
-    try {
-      const result = await execLocal(job.command, { timeoutMs: 60000 })
+  // ── docker exec into the project's container (localhost or remote) ──
+  // The command reaches the container as an argument of a fixed script; the
+  // docker CLI runs with a minimal environment; a stopped container fails the
+  // run instead of falling back to the host.
+  try {
+    const creds = await getServerCredentials(project.serverId!)
+    const result = await withConnection(creds, async (client) => {
+      return await exec(
+        client,
+        buildContainerExecCommand(project.containerName!, CRON_SCRIPT, [job.command]),
+        { timeoutMs: 60000 }
+      )
+    })
+    if ((result.stderr || '').includes(CONTAINER_NOT_RUNNING_MARKER)) {
+      output = "The website's container is not running — the job was not run."
+      exitCode = -1
+      status = 'failed'
+    } else {
       output =
         (result.stdout || '') +
         (result.stderr ? `\n[stderr]\n${result.stderr}` : '')
       exitCode = result.exitCode
       status = result.exitCode === 0 ? 'success' : 'failed'
-    } catch (err) {
-      output = err instanceof Error ? err.message : String(err)
-      exitCode = -1
-      status = 'failed'
     }
-  } else {
-    // ── Remote VPS with a real Docker container ──
-    try {
-      const creds = await getServerCredentials(project.serverId!)
-      const result = await withConnection(creds, async (client) => {
-        return await exec(
-          client,
-          `docker exec ${shellQuoteLocal(project.containerName!)} sh -c ${shellQuoteLocal(job.command)} 2>&1`,
-          { timeoutMs: 60000 }
-        )
-      })
-      output =
-        (result.stdout || '') +
-        (result.stderr ? `\n[stderr]\n${result.stderr}` : '')
-      exitCode = result.exitCode
-      status = result.exitCode === 0 ? 'success' : 'failed'
-    } catch (err) {
-      output = err instanceof Error ? err.message : String(err)
-      exitCode = -1
-      status = 'failed'
-    }
+  } catch (err) {
+    output = err instanceof Error ? err.message : String(err)
+    exitCode = -1
+    status = 'failed'
   }
 
   const durationMs = Date.now() - start
@@ -637,7 +638,7 @@ export async function deleteCronJob(jobId: string): Promise<{ ok: boolean }> {
  * Run a cron job immediately (ignoring its schedule). Boots the scheduler
  * opportunistically so existing DB jobs get registered, then delegates to
  * `executeJobOnce` which picks the right execution path:
- *   - localhost  → `execLocal` (child_process on the panel host)
+ *   - any server → `docker exec` into the project container (never the host)
  *   - remote+container → `docker exec` over SSH
  * Throws a clear error if no execution path is available.
  */

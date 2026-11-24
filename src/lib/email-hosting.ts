@@ -444,15 +444,15 @@ export async function provisionEmailService(opts: {
   }
 
   /**
-   * `domain` is globally unique, so a row left behind by a FAILED attempt would
-   * block the rightful owner from ever buying email for that domain. Anything
-   * this call created must therefore be removed if provisioning does not
-   * complete. A pre-existing row (`clash`) is kept — it is a real service.
+   * A failed attempt is KEPT, not deleted: the customer has paid, and a row
+   * with its lastError is what the payment retry (same user, same domain —
+   * this function is idempotent by domain) and the reconcile report work from.
+   * Deleting it hid the failure entirely. A new row stays 'pending', so it is
+   * never shown as working; an admin can cancel it if the order is abandoned
+   * (the reconcile report lists services pending for over 15 minutes).
    */
   const discardOnFailure = async () => {
-    if (!clash) {
-      await db.emailService.deleteMany({ where: { domain, userId: opts.userId } })
-    }
+    /* intentionally keeps the record — see above */
   }
 
   const service = clash
@@ -516,12 +516,37 @@ export async function provisionEmailService(opts: {
     // landed in our database while Mailcow kept refusing at the old ceiling.
     // (On first creation this also corrects addDomain, which derives the
     // domain total as per-mailbox × mailboxes rather than the plan's total.)
-    await syncMailcowLimits(service)
+    //
+    // Its result now counts: the service is only marked active once Mailcow
+    // has accepted the limits AND confirms the domain exists. Both used to be
+    // ignored, so a service could read 'active' with no domain on the server.
+    const sync = await syncMailcowLimits(service)
+    if (!sync.success) {
+      const message = `Mail server rejected the domain limits: ${sync.error || 'unknown error'}`
+      await db.emailService.update({
+        where: { id: service.id },
+        data: { lastError: message },
+      })
+      await discardOnFailure()
+      return { success: false, error: message }
+    }
+    const confirmed = await getDomain(domain)
+    if (!confirmed.success || !confirmed.domain) {
+      const message = `Mail server did not confirm the domain: ${confirmed.error || 'not found'}`
+      await db.emailService.update({
+        where: { id: service.id },
+        data: { lastError: message },
+      })
+      await discardOnFailure()
+      return { success: false, error: message }
+    }
 
     let dkimOk = service.dkimGenerated
+    let dkimError: string | null = null
     if (!dkimOk) {
       const dk = await generateDkim(domain)
       dkimOk = dk.success
+      if (!dk.success) dkimError = dk.error || 'unknown error'
     }
 
     // Capture this BEFORE the update below sets it — an upgrade comes back
@@ -535,7 +560,9 @@ export async function provisionEmailService(opts: {
         dkimGenerated: dkimOk,
         status: 'active',
         provisionedAt: service.provisionedAt ?? new Date(),
-        lastError: null,
+        // Mail works without DKIM but lands in spam: a visible warning rather
+        // than a silent 'active' (dkimGenerated stays false for a re-run).
+        lastError: dkimOk ? null : `DKIM not generated: ${dkimError || 'unknown error'}`,
       },
     })
 

@@ -26,13 +26,9 @@ import type { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
 import { logAudit } from '@/lib/audit'
 import { createNotification } from '@/lib/notifications'
-import {
-  searchDomains,
-  registerDomain,
-  getDomainInfo,
-  setDnsRecords,
-  isDynadotDemoMode,
-} from '@/lib/dynadot'
+// Registration (registerDomain) is deliberately NOT imported: domains are
+// bought only through a paid DomainOrder. See provisionDomain.
+import { setDnsRecords } from '@/lib/dynadot'
 import { verifyTxtRecord } from '@/lib/dns'
 import {
   addDomain,
@@ -45,6 +41,8 @@ import {
   isMailcowConfigured,
 } from '@/lib/mailcow'
 import { encrypt } from '@/lib/encryption'
+import { selectHostingServer, NO_SERVER_MESSAGE } from '@/lib/server-selection'
+import { ACTIVE_DEPLOY_STATUSES } from '@/lib/deploy-guard'
 import { deployProject, removeProjectContainer } from '@/lib/vps'
 import {
   MAIL_SERVER_HOSTNAME,
@@ -186,18 +184,22 @@ function stackToFramework(stack: string): string {
   }
 }
 
-/** Resolve the hosting server IP — from Server table, or default for demo. */
+/**
+ * Resolve the hosting server IP written into the domain's A records.
+ *
+ * There is no fallback address any more: this used to return 10.0.0.1 when no
+ * server existed, which then went into LIVE DNS for a customer's domain. No
+ * usable server is now a clear failure before anything is changed.
+ */
 async function resolveHostingServerIp(serverId?: string): Promise<string> {
   if (serverId) {
     const server = await db.server.findUnique({ where: { id: serverId } })
-    if (server?.ip) return server.ip
+    if (server?.ip && server.status === 'active') return server.ip
+    throw new Error(`Requested server ${serverId} is not an active server with an address`)
   }
-  const anyServer = await db.server.findFirst({
-    where: { status: 'active' },
-    orderBy: { createdAt: 'asc' },
-  })
-  if (anyServer?.ip) return anyServer.ip
-  return '10.0.0.1' // demo default
+  const best = await selectHostingServer()
+  if (best?.ip) return best.ip
+  throw new Error(NO_SERVER_MESSAGE)
 }
 
 /** Resolve the mail server hostname from brand-config (env-var overridable; APSAMO default). */
@@ -380,6 +382,24 @@ export async function runProvisioningPipeline(
     }
   }
 
+  const req = JSON.parse(job.steps[0]?.input || '{}') as ProvisioningRequest
+
+  // Resolved BEFORE the claim: with no usable server there is nothing to point
+  // DNS at, and failing here leaves the job 'failed' rather than 'running'.
+  let hostingServerIp: string
+  try {
+    hostingServerIp = await resolveHostingServerIp(req.serverId)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    await db.provisioningJob
+      .updateMany({
+        where: { id: jobId, status: { not: 'running' } },
+        data: { status: 'failed', error: msg, errorCode: 'NO_SERVER' },
+      })
+      .catch(() => {})
+    throw err
+  }
+
   const startedAt = new Date()
   // Conditional claim: two callers racing to (re-)run the same job cannot
   // both get here; the loser sees count 0.
@@ -391,12 +411,11 @@ export async function runProvisioningPipeline(
     throw new Error(`Pipeline already running for job ${jobId}`)
   }
 
-  const req = JSON.parse(job.steps[0]?.input || '{}') as ProvisioningRequest
   const ctx: PipelineContext = {
     domainName: job.domainName,
     provider: 'dynadot',
     mailServerHostname: resolveMailServerHostname(),
-    hostingServerIp: await resolveHostingServerIp(req.serverId),
+    hostingServerIp,
     mailboxes: [],
     dnsRecords: [],
     errors: [],
@@ -1003,82 +1022,41 @@ function buildResult(
 
 // ─── Step 1: provisionDomain ─────────────────────────────────────────────
 
+/** Message used when the pipeline is asked to buy a domain itself. */
+export const ORCHESTRATION_REGISTRATION_DISABLED =
+  'Domain registration through the provisioning pipeline is disabled. Register the domain through a domain order (domain checkout, which collects the registrant contacts and takes payment first), then run provisioning for the registered domain.'
+
 /**
- * Step 1: Register the domain via Dynadot.
+ * Step 1: resolve the domain this job provisions.
  *
- *  1. Search availability via Dynadot searchDomains().
- *  2. If available (or in demo mode), registerDomain() via Dynadot.
- *  3. Create a Domain record in DB with provider='dynadot', externalId,
- *     status='active'.
+ * This step used to REGISTER the domain itself — registerDomain(name, 1) with
+ * no registrant contacts, a fixed one-year term, no DomainOrder and no check
+ * that the name was not already in an account here. Registration now happens
+ * only through a paid DomainOrder (domain-checkout → fulfilDomainOrder). The
+ * pipeline accepts a domain the job's user already holds and refuses anything
+ * else; it never calls the registrar's purchase API.
  */
 async function provisionDomain(
   job: { id: string; userId: string; domainName: string },
-  step: { id: string }
+  _step: { id: string }
 ): Promise<{ domainId: string; externalId?: string; provider: string }> {
-  const domainName = job.domainName
+  const domainName = job.domainName.toLowerCase().trim()
 
-  // 1. Search availability.
-  const searchResults = await searchDomains([domainName])
-  const result = searchResults[0]
-  const available = result?.available === true
-
-  if (!available) {
-    // In demo mode, the search heuristic may falsely mark short domains as
-    // taken. Be forgiving: log a warning + proceed with registration anyway
-    // (Dynadot's registerDomain() will be the source of truth).
-    if (isDynadotDemoMode()) {
-      console.log(
-        `[orchestration] DEMO: domain ${domainName} reported unavailable by demo search, attempting registration anyway`
-      )
-    } else {
-      throw new Error(`Domain ${domainName} is not available for registration`)
+  const existing = await db.domain.findUnique({ where: { name: domainName } })
+  if (existing && existing.userId === job.userId && existing.status !== 'deleted') {
+    console.log(
+      `[orchestration] step=domain_register using existing domain ${existing.id} (${domainName}); no registrar call`
+    )
+    return {
+      domainId: existing.id,
+      externalId: existing.externalId || undefined,
+      provider: existing.provider || existing.registrar || 'dynadot',
     }
   }
-
-  // 2. Register the domain (1 year).
-  const registration = await registerDomain(domainName, 1)
-  if (!registration.success) {
-    throw new Error(
-      `Domain registration failed: ${registration.orderId ? 'order ' + registration.orderId : 'unknown error'}`
-    )
+  if (existing && existing.status !== 'deleted') {
+    throw new Error(`Domain ${domainName} belongs to another account`)
   }
-
-  // 3. Fetch domain info for nameservers + expiry.
-  let info
-  try {
-    info = await getDomainInfo(domainName)
-  } catch (err) {
-    console.warn(
-      `[orchestration] getDomainInfo failed for ${domainName}:`,
-      err instanceof Error ? err.message : err
-    )
-    info = { nameservers: [NS1_HOSTNAME, NS2_HOSTNAME], expiry: undefined }
-  }
-
-  // 4. Create the Domain record in DB.
-  const domain = await db.domain.create({
-    data: {
-      userId: job.userId,
-      name: domainName,
-      status: 'active',
-      registrar: 'dynadot',
-      provider: 'dynadot',
-      externalId: registration.orderId,
-      registeredAt: new Date(),
-      expiresAt: info.expiry ? new Date(info.expiry) : undefined,
-      nameservers: JSON.stringify(info.nameservers || []),
-    },
-  })
-
-  console.log(
-    `[orchestration] step=domain_register domainId=${domain.id} externalId=${registration.orderId}`
-  )
-
-  return {
-    domainId: domain.id,
-    externalId: registration.orderId,
-    provider: 'dynadot',
-  }
+  throw new Error(ORCHESTRATION_REGISTRATION_DISABLED)
 }
 
 // ─── Step 2: configureDns ────────────────────────────────────────────────
@@ -1208,48 +1186,75 @@ async function provisionHosting(
     .toLowerCase()
     .replace(/[^a-z0-9.-]+/g, '-')
     .replace(/^-|-$/g, '')
-  const subdomain = APP_SUBDOMAIN_PATTERN.replace('{slug}', slug.split('.')[0])
-  const url = `https://${subdomain}`
-
-  // 1. Auto-assign a server: prefer active + dockerInstalled=true with the
-  //    fewest projects; fall back to any active server.
-  const serverCandidates = await db.server.findMany({
-    where: { status: 'active' },
-    include: { _count: { select: { projects: true } } },
+  // 1. Reuse the project an earlier attempt of this step created. withRetry
+  //    re-runs this whole function, and each attempt used to create another
+  //    Project + Deployment — up to three sites for one order.
+  const domainRow = await db.domain.findUnique({
+    where: { id: domainId },
+    select: { projectId: true },
   })
-  // Sort: dockerInstalled first, then fewest projects, then oldest.
-  serverCandidates.sort((a, b) => {
-    if (a.dockerInstalled !== b.dockerInstalled) {
-      return a.dockerInstalled ? -1 : 1
+  let project =
+    (domainRow?.projectId
+      ? await db.project.findFirst({ where: { id: domainRow.projectId, userId: job.userId } })
+      : null) ||
+    // Created but not yet linked (the attempt died between the two writes).
+    (await db.project.findFirst({
+      where: { userId: job.userId, customDomain: domainName },
+      orderBy: { createdAt: 'desc' },
+    }))
+
+  if (!project) {
+    // 2. Server: active, Docker installed, not down, with capacity. None is a
+    //    clear failure, not a project that can never deploy.
+    const assignedServer = await selectHostingServer()
+    if (!assignedServer) throw new Error(NO_SERVER_MESSAGE)
+
+    // 3. Subdomain from the WHOLE domain (example.com → example-com), so
+    //    example.com and example.net no longer collide on "example"; a
+    //    remaining clash gets a random suffix.
+    const base = slug.replace(/\./g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'site'
+    let subdomain = APP_SUBDOMAIN_PATTERN.replace('{slug}', base)
+    for (let i = 0; i < 5; i++) {
+      const clash = await db.project.findFirst({ where: { subdomain }, select: { id: true } })
+      if (!clash) break
+      subdomain = APP_SUBDOMAIN_PATTERN.replace(
+        '{slug}',
+        `${base}-${crypto.randomBytes(3).toString('hex')}`
+      )
     }
-    const pa = a._count?.projects ?? 0
-    const pb = b._count?.projects ?? 0
-    if (pa !== pb) return pa - pb
-    return a.createdAt.getTime() - b.createdAt.getTime()
-  })
-  const assignedServer = serverCandidates[0] || null
 
-  // 2. Create the Project record.
-  const project = await db.project.create({
-    data: {
-      userId: job.userId,
-      name: domainName,
-      slug,
-      framework,
-      stack: job.stack,
-      status: 'creating',
-      subdomain,
-      customDomain: domainName,
-      sslEnabled: true,
-      serverId: assignedServer?.id || null,
-    },
-  })
+    project = await db.project.create({
+      data: {
+        userId: job.userId,
+        name: domainName,
+        slug,
+        framework,
+        stack: job.stack,
+        status: 'creating',
+        subdomain,
+        customDomain: domainName,
+        sslEnabled: true,
+        serverId: assignedServer.id,
+      },
+    })
+  }
+  const url = `https://${project.subdomain}`
 
-  // 3. Link the Domain to the Project.
+  // Link the Domain to the Project (idempotent).
   await db.domain.update({
     where: { id: domainId },
     data: { projectId: project.id },
   })
+
+  // A build of this project already running (an earlier attempt still going)
+  // must not be joined by a second one.
+  const inFlight = await db.deployment.findFirst({
+    where: { projectId: project.id, status: { in: ACTIVE_DEPLOY_STATUSES } },
+    select: { id: true },
+  })
+  if (inFlight) {
+    throw new Error(`Deployment ${inFlight.id} for project ${project.id} is still in progress`)
+  }
 
   // 4. Create an initial Deployment row in 'queued' status.
   const deployment = await db.deployment.create({
@@ -1266,7 +1271,7 @@ async function provisionHosting(
   // 5. Run the real VPS deploy (await — the orchestrator is synchronous
   //    per-step). In demo mode this returns a simulated success.
   console.log(
-    `[orchestration] step=hosting_provision projectId=${project.id} server=${assignedServer?.name || 'none'} url=${url}`
+    `[orchestration] step=hosting_provision projectId=${project.id} server=${project.serverId || 'none'} url=${url}`
   )
   const deployResult = await deployProject({
     projectId: project.id,
@@ -1579,25 +1584,27 @@ export async function rollbackProvisioning(
           break
         }
         case 'dns_configure': {
-          const domain = await db.domain.findFirst({
-            where: { name: job.domainName },
-          })
-          if (domain) {
-            await db.dnsRecord.deleteMany({ where: { domainId: domain.id } })
+          // Only the records THIS job created (their ids are in the step
+          // output). The domain now always pre-exists the job, so deleting
+          // every record on it would wipe the customer's own DNS.
+          let ids: string[] = []
+          try {
+            const out = step.output ? JSON.parse(step.output) : null
+            ids = Array.isArray(out?.records)
+              ? out.records.map((r: { recordId?: string }) => r.recordId).filter(Boolean)
+              : []
+          } catch {
+            ids = []
+          }
+          if (ids.length) {
+            await db.dnsRecord.deleteMany({ where: { id: { in: ids } } })
           }
           break
         }
         case 'domain_register': {
-          // Can't actually unregister a domain, but mark it cancelled in our DB.
-          const domain = await db.domain.findFirst({
-            where: { name: job.domainName },
-          })
-          if (domain) {
-            await db.domain.update({
-              where: { id: domain.id },
-              data: { status: 'cancelled' },
-            })
-          }
+          // Nothing to undo: this step no longer registers anything — it only
+          // resolves a domain the customer already holds (bought through a
+          // DomainOrder), which must not be cancelled by a failed pipeline.
           break
         }
         case 'verify': {

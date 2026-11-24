@@ -25,6 +25,7 @@ import { processPayment } from './payment-methods'
 import { nextInvoiceNumber, markInvoicePaid } from './invoices'
 import { isRegistrarManaged, registrarUnavailableReason } from './domain-ownership'
 import { checkLimit } from './plan-limits'
+import { encrypt, decrypt } from './encryption'
 import {
   runRegistrationPipeline,
   runRenewalPipeline,
@@ -35,13 +36,50 @@ import {
 
 export type DomainOrderKind = 'register' | 'renew' | 'transfer'
 
-/** Order lifecycle. `pending_payment` is the only state that spends nothing. */
+/**
+ * Order lifecycle. `pending_payment` is the only state that spends nothing.
+ *
+ *   pending_payment → processing → completed
+ *                                → transfer_pending   (transfer accepted; completes later)
+ *                                → failed             (registrar definitely did NOT buy)
+ *                                → manual_review      (registrar MAY have bought: never retry)
+ *   failed → retry_pending (set by the retry sweeper) → processing …
+ *
+ * fulfilDomainOrder claims only `pending_payment` and `retry_pending`, and never
+ * calls the registrar for an order whose registrarCalledAt is already set.
+ */
 export type DomainOrderStatus =
   | 'pending_payment'
   | 'processing'
   | 'completed'
+  | 'transfer_pending'
   | 'failed'
+  | 'retry_pending'
+  | 'manual_review'
   | 'cancelled'
+
+/** States fulfilDomainOrder may claim. */
+export const CLAIMABLE_ORDER_STATUSES: readonly DomainOrderStatus[] = ['pending_payment', 'retry_pending']
+
+/** Read the transfer EPP code from order metadata (encrypted; legacy plaintext accepted). */
+export function readOrderAuthCode(meta: Record<string, unknown>): string {
+  if (typeof meta.authCodeEnc === 'string' && meta.authCodeEnc) {
+    try {
+      return decrypt(meta.authCodeEnc)
+    } catch {
+      return ''
+    }
+  }
+  return typeof meta.authCode === 'string' ? meta.authCode : ''
+}
+
+/** Metadata with every trace of the EPP code removed. */
+export function withoutAuthCode(meta: Record<string, unknown>): Record<string, unknown> {
+  const rest = { ...meta }
+  delete rest.authCode
+  delete rest.authCodeEnc
+  return rest
+}
 
 export interface RegistrantInput {
   firstName: string
@@ -250,7 +288,21 @@ export async function createDomainOrder(
     // early check just stops the customer paying for something already taken.
     try {
       const search = await dynadotService.search(domain)
-      if (!search.available) {
+      if (search.status === 'premium' || search.premium) {
+        // Premium names cost far more than the catalogue price; we do not
+        // sell them rather than charge a price the registrar will exceed.
+        return {
+          success: false,
+          error: 'That is a premium domain and cannot be purchased here. Please contact support.',
+        }
+      }
+      if (search.status === 'unknown') {
+        return {
+          success: false,
+          error: 'Could not confirm availability right now. Please try again.',
+        }
+      }
+      if (search.status !== 'available') {
         return { success: false, error: 'That domain is no longer available.' }
       }
     } catch (err) {
@@ -272,6 +324,12 @@ export async function createDomainOrder(
       }
       const contactError = validateRegistrant(input.registrant)
       if (contactError) return { success: false, error: contactError }
+      // A domain already in ANOTHER customer's account here cannot be
+      // transferred into this one (refused before taking money).
+      const held = await db.domain.findUnique({ where: { name: domain } })
+      if (held && held.status !== 'deleted' && held.userId !== input.userId) {
+        return { success: false, error: 'That domain is already in an account here.' }
+      }
     }
 
     if (input.kind === 'renew') {
@@ -340,7 +398,8 @@ export async function createDomainOrder(
       provider: 'dynadot',
       metadata: JSON.stringify({
         registrant: input.registrant || null,
-        authCode: input.authCode || null,
+        // EPP code encrypted at rest; cleared once the transfer is accepted.
+        authCodeEnc: input.authCode ? encrypt(input.authCode.trim()) : null,
         projectId: input.projectId || null,
         requestedYears: years,
       }),
@@ -466,7 +525,7 @@ export async function fulfilDomainOrder(
   if (!order) return { success: false, error: 'Order not found' }
 
   // Idempotency guard — never deliver the same order twice.
-  if (order.status === 'completed') {
+  if (order.status === 'completed' || order.status === 'transfer_pending') {
     return {
       success: true,
       alreadyFulfilled: true,
@@ -479,28 +538,13 @@ export async function fulfilDomainOrder(
   if (order.status === 'cancelled') {
     return { success: false, error: 'Order was cancelled' }
   }
-
-  // Claim the order before touching the registrar. The claim is a conditional
-  // update on the status we just read: two concurrent confirmations used to
-  // both pass the checks above and both register (and pay for) the domain.
-  // Only the caller whose update matched may continue.
-  const claim = await db.domainOrder.updateMany({
-    where: { id: orderId, status: order.status },
-    data: { status: 'processing' },
-  })
-  if (claim.count !== 1) {
-    const now = await db.domainOrder.findUnique({
-      where: { id: orderId },
-      select: { status: true, domainId: true },
-    })
-    if (now?.status === 'completed') {
-      return {
-        success: true,
-        alreadyFulfilled: true,
-        domainId: now.domainId || undefined,
-      }
-    }
-    return { success: false, error: 'Order is already being processed' }
+  if (order.status === 'manual_review') {
+    return { success: false, error: 'Order is held for manual review' }
+  }
+  // 'failed' is NOT re-claimed here: the retry sweeper moves it to
+  // 'retry_pending' once it has checked that a retry is safe.
+  if (!(CLAIMABLE_ORDER_STATUSES as readonly string[]).includes(order.status)) {
+    return { success: false, error: `Order cannot be fulfilled from status "${order.status}"` }
   }
 
   let meta: Record<string, unknown> = {}
@@ -508,6 +552,35 @@ export async function fulfilDomainOrder(
     meta = order.metadata ? JSON.parse(order.metadata) : {}
   } catch {
     meta = {}
+  }
+
+  // The registrar was already called for this order and never confirmed: the
+  // purchase may have gone through. Calling again could buy twice.
+  if (order.registrarCalledAt) {
+    await holdForManualReview(orderId, order.status, meta, 'registrar was called before without a confirmed result')
+    return { success: false, error: 'Order is held for manual review' }
+  }
+
+  // Claim the order before touching the registrar. Conditional on the status
+  // we read AND on the registrar not having been called, so two concurrent
+  // confirmations cannot both register (and pay for) the domain.
+  const claim = await db.domainOrder.updateMany({
+    where: { id: orderId, status: order.status, registrarCalledAt: null },
+    data: { status: 'processing' },
+  })
+  if (claim.count !== 1) {
+    const now = await db.domainOrder.findUnique({
+      where: { id: orderId },
+      select: { status: true, domainId: true },
+    })
+    if (now?.status === 'completed' || now?.status === 'transfer_pending') {
+      return {
+        success: true,
+        alreadyFulfilled: true,
+        domainId: now.domainId || undefined,
+      }
+    }
+    return { success: false, error: 'Order is already being processed' }
   }
 
   const registrant = (meta.registrant as RegistrantInput | null) || null
@@ -533,6 +606,9 @@ export async function fulfilDomainOrder(
     let domainId: string | undefined
     let ok = false
     let error: string | undefined
+    let manualReview = false
+    let transferPending = false
+    let expiryUnknown = false
 
     if (order.type === 'register') {
       const server = await db.server.findFirst({
@@ -552,6 +628,8 @@ export async function fulfilDomainOrder(
       ok = result.success
       error = result.error
       domainId = result.domainId
+      manualReview = !!result.manualReview
+      expiryUnknown = !!result.expiryUnknown
     } else if (order.type === 'renew') {
       const result = await runRenewalPipeline(
         order.userId,
@@ -562,31 +640,48 @@ export async function fulfilDomainOrder(
       ok = result.success
       error = result.error
       domainId = order.domainId || undefined
+      manualReview = !!result.manualReview
+      expiryUnknown = !!result.expiryUnknown
     } else if (order.type === 'transfer') {
-      const result = await runTransferPipeline(
-        order.userId,
-        order.domainName,
-        String(meta.authCode || ''),
-        { existingOrderId: order.id, existingInvoiceId: invoiceId, contacts }
-      )
-      ok = result.success
-      error = result.error
-      domainId = result.domainId
+      const authCode = readOrderAuthCode(meta)
+      if (!authCode) {
+        ok = false
+        error = 'No transfer authorization code on the order'
+      } else {
+        const result = await runTransferPipeline(
+          order.userId,
+          order.domainName,
+          authCode,
+          { existingOrderId: order.id, existingInvoiceId: invoiceId, contacts }
+        )
+        ok = result.success
+        error = result.error
+        domainId = result.domainId
+        manualReview = !!result.manualReview
+        transferPending = !!result.transferPending
+      }
     } else {
       ok = false
       error = `Unknown order type "${order.type}"`
     }
 
+    // Once the registrar accepted a transfer the EPP code has done its job.
+    const metaAfter = order.type === 'transfer' && (ok || manualReview) ? withoutAuthCode(meta) : meta
+
     if (!ok) {
-      // The money is already taken. Park the order as failed and leave the
-      // invoice unpaid so it shows up for admin reconciliation/refund rather
-      // than disappearing silently.
+      if (manualReview) {
+        await holdForManualReview(orderId, 'processing', metaAfter, error || 'unknown')
+        return { success: false, error: error || 'Order is held for manual review' }
+      }
+      // The registrar definitely did not buy anything. The money is already
+      // taken: park the order as failed and leave the invoice unpaid so it
+      // shows up for retry/refund rather than disappearing silently.
       await db.domainOrder.update({
         where: { id: orderId },
         data: {
           status: 'failed',
           metadata: JSON.stringify({
-            ...meta,
+            ...metaAfter,
             fulfilmentError: error || 'unknown',
             failedAt: new Date().toISOString(),
           }),
@@ -600,10 +695,20 @@ export async function fulfilDomainOrder(
 
     await db.domainOrder.update({
       where: { id: orderId },
-      data: { status: 'completed', domainId: domainId || order.domainId },
+      data: {
+        // A transfer is only accepted at this point; reconciliation marks it
+        // completed when the registry finishes it.
+        status: transferPending ? 'transfer_pending' : 'completed',
+        domainId: domainId || order.domainId,
+        metadata: JSON.stringify({
+          ...metaAfter,
+          ...(expiryUnknown ? { needsReconciliation: 'expiry' } : {}),
+        }),
+      },
     })
 
-    // Settle the invoice — the service is delivered and the money confirmed.
+    // Settle the invoice — the money is confirmed and the registrar accepted
+    // the order (for a transfer: accepted, completion is tracked separately).
     if (invoiceId) {
       await markInvoicePaid(invoiceId, {
         gateway: opts.gateway || 'stripe',
@@ -618,20 +723,56 @@ export async function fulfilDomainOrder(
     return { success: true, domainId }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    await db.domainOrder
-      .update({
-        where: { id: orderId },
-        data: {
-          status: 'failed',
-          metadata: JSON.stringify({
-            ...meta,
-            fulfilmentError: message,
-            failedAt: new Date().toISOString(),
-          }),
-        },
-      })
-      .catch(() => {})
+    // If the registrar was reached for this order we cannot know what it
+    // did: hold for review. Otherwise nothing was bought: 'failed'.
+    const now = await db.domainOrder
+      .findUnique({ where: { id: orderId }, select: { registrarCalledAt: true } })
+      .catch(() => null)
+    if (!now || now.registrarCalledAt) {
+      await holdForManualReview(orderId, 'processing', meta, message)
+    } else {
+      await db.domainOrder
+        .update({
+          where: { id: orderId },
+          data: {
+            status: 'failed',
+            metadata: JSON.stringify({
+              ...meta,
+              fulfilmentError: message,
+              failedAt: new Date().toISOString(),
+            }),
+          },
+        })
+        .catch(() => {})
+    }
     console.error('[domain-checkout] fulfilment threw:', message)
     return { success: false, error: message }
   }
+}
+
+/**
+ * Park an order whose registrar outcome is unknown, or whose purchase went
+ * through but whose records are incomplete. Nothing retries a manual_review
+ * order; an operator reconciles it against the registrar.
+ */
+async function holdForManualReview(
+  orderId: string,
+  fromStatus: string,
+  meta: Record<string, unknown>,
+  reason: string
+): Promise<void> {
+  await db.domainOrder
+    .updateMany({
+      where: { id: orderId, status: fromStatus },
+      data: {
+        status: 'manual_review',
+        metadata: JSON.stringify({
+          ...meta,
+          manualReviewReason: reason,
+          manualReviewAt: new Date().toISOString(),
+        }),
+      },
+    })
+    .catch((err) => console.error('[domain-checkout] could not hold order for review:', err))
+  console.error(`[domain-checkout] order ${orderId} held for manual review: ${reason}`)
 }

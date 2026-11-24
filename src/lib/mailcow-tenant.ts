@@ -34,7 +34,8 @@ const normalise = (d: string) => (d || '').trim().toLowerCase().replace(/\.$/, '
 
 /**
  * Authenticate, prove the caller owns the project, and resolve the domains it
- * may manage: the project's custom domain plus every VERIFIED WebsiteDomain.
+ * may manage: the project's custom domain (when proven, see
+ * isCustomDomainBacked) plus every VERIFIED WebsiteDomain.
  *
  * The platform subdomain is deliberately excluded — mail is only ever hosted on
  * a real domain the customer controls.
@@ -75,7 +76,11 @@ export async function resolveMailTenant(
     select: { domain: true, verified: true },
   })
 
-  const domains = mailDomainNames({ customDomain: project.customDomain, websiteDomains })
+  const domains = mailDomainNames({
+    customDomain: project.customDomain,
+    customDomainVerified: await isCustomDomainBacked(project, websiteDomains),
+    websiteDomains,
+  })
 
   if (domains.length === 0) {
     throw new MailAccessError(
@@ -92,16 +97,48 @@ export async function resolveMailTenant(
 }
 
 /**
- * The domains a project may manage mail for: its customDomain plus every
- * WebsiteDomain that has been VERIFIED. Unverified rows are ignored even if
- * the caller forgot to filter them in the query. Lowercased, deduplicated.
+ * Is the project's customDomain backed by proof of ownership?
+ *
+ * SECURITY: `Project.customDomain` is only a column. Rows written before the
+ * PATCH endpoint stopped accepting it (or by any other path that skipped
+ * verification) can hold a domain nobody proved, and trusting it let a tenant
+ * manage another domain's catch-all, aliases and quarantine. It counts only
+ * when the same name is a VERIFIED WebsiteDomain of this project, or an
+ * `active` Domain row (registered through us, or a custom domain whose DNS
+ * verification passed) owned by the project owner.
+ */
+export async function isCustomDomainBacked(
+  project: { id: string; userId: string; customDomain: string | null },
+  verifiedWebsiteDomains: Array<{ domain: string | null; verified: boolean }>
+): Promise<boolean> {
+  const name = normalise(project.customDomain || '')
+  if (!name) return false
+  if (verifiedWebsiteDomains.some((r) => r.verified === true && normalise(r.domain || '') === name)) {
+    return true
+  }
+  const row = await db.domain.findFirst({
+    where: { name, userId: project.userId, status: 'active' },
+    select: { id: true },
+  })
+  return !!row
+}
+
+/**
+ * The domains a project may manage mail for: its customDomain (only when
+ * `customDomainVerified` — see isCustomDomainBacked) plus every WebsiteDomain
+ * that has been VERIFIED. Unverified rows are ignored even if the caller
+ * forgot to filter them in the query. Lowercased, deduplicated.
  */
 export function mailDomainNames(input: {
   customDomain?: string | null
+  /** Result of isCustomDomainBacked. Absent means unproven: not included. */
+  customDomainVerified?: boolean
   websiteDomains: Array<{ domain: string | null; verified: boolean }>
 }): string[] {
   const names = new Set<string>()
-  if (input.customDomain) names.add(normalise(input.customDomain))
+  if (input.customDomain && input.customDomainVerified === true) {
+    names.add(normalise(input.customDomain))
+  }
   for (const r of input.websiteDomains) {
     if (r.verified === true && r.domain) names.add(normalise(r.domain))
   }

@@ -6,6 +6,7 @@ import { purgeProject } from '@/lib/project-teardown'
 import { isAdmin } from '@/lib/security'
 import { requireProjectAccess } from '@/lib/project-access'
 import { emitWebhookEvent } from '@/lib/webhook-delivery'
+import { validateGitUrl } from '@/lib/vps/deploy-safety'
 
 export async function GET(
   request: Request,
@@ -327,19 +328,19 @@ export async function PATCH(
     if (typeof sslEnabled === 'boolean') updateData.sslEnabled = sslEnabled
     if (typeof repoUrl === 'string') {
       const trimmed = repoUrl.trim()
-      // Handed to git and echoed back to the browser. Anything that is not an
-      // http(s) or scp-style git remote has no business being stored.
-      if (
-        trimmed &&
-        !/^https?:\/\/[^\s]+$/i.test(trimmed) &&
-        !/^git@[^\s:]+:[^\s]+$/i.test(trimmed)
-      ) {
-        return NextResponse.json(
-          { error: 'repoUrl must be an https:// or git@host:path repository URL' },
-          { status: 400 }
-        )
+      // Handed to git on the VPS and echoed back to the browser. Same rule as
+      // project creation (validateGitUrl): https:// or git@host:owner/repo
+      // only, to a public host. Plain http:// used to be accepted here, which
+      // let a project be pointed at a remote the create flow refuses.
+      if (trimmed) {
+        const git = validateGitUrl(trimmed)
+        if (!git.ok) {
+          return NextResponse.json({ error: git.error }, { status: 400 })
+        }
+        updateData.repoUrl = git.url
+      } else {
+        updateData.repoUrl = null
       }
-      updateData.repoUrl = trimmed || null
     }
 
     await db.project.update({

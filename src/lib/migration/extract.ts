@@ -40,6 +40,7 @@ import {
   type RemoteToolset,
 } from './remote'
 import type { MigrationSourceType } from './types'
+import { resolvePinnedTarget, safeGitCloneConfig } from './fetch-safety'
 
 export interface ExtractOptions {
   /** Absolute path of the uploaded archive on the target server. */
@@ -249,6 +250,34 @@ function tarCommand(kind: ArchiveKind, archive: string, dest: string): string {
 // ─── Generic archive extraction ───────────────────────────────────────────
 
 /**
+ * Delete every symbolic link under `dest` (as extracted from an archive).
+ *
+ * unzip and tar both restore links. A link in the staging tree points
+ * anywhere on the host: it is copied into the site, and a nested archive
+ * extracted "into" it (UpdraftPlus components are) writes through it as
+ * root. Nothing a site needs depends on a link inside its backup, so links
+ * are dropped before anything reads the extracted files. `find` does not
+ * follow links. The Python and .wpress extractors never create links.
+ */
+async function dropSymlinks(
+  client: AnyClient,
+  dest: string,
+  log: (l: string) => void,
+  warnings: string[]
+): Promise<void> {
+  const r = await exec(
+    client,
+    `find ${shellQuote(dest)} -type l -print -delete 2>/dev/null | wc -l`,
+    { timeoutMs: 600_000 }
+  )
+  const removed = parseInt(r.stdout.trim(), 10) || 0
+  if (removed > 0) {
+    log(`Removed ${removed} symbolic link(s) from the extracted archive.`)
+    warnings.push(`${removed} symbolic link(s) in the archive were not imported, for security.`)
+  }
+}
+
+/**
  * Unpack any supported archive into `dest`. Chooses a strategy from the real
  * (sniffed) format and the tools present, installing `unzip` on demand and
  * falling back to Python when that is not possible.
@@ -304,6 +333,7 @@ async function extractArchive(
         if (r.exitCode === 1) {
           warnings.push('Some archive entries were skipped during extraction.')
         }
+        await dropSymlinks(client, dest, log, warnings)
       } else if (tools.python3) {
         log('Falling back to the built-in Python ZIP extractor…')
         const script = `${dest}/../unzip.py`
@@ -335,6 +365,7 @@ async function extractArchive(
       if (r.exitCode !== 0) {
         throw new Error(`tar failed: ${(r.stdout || r.stderr).slice(-400)}`)
       }
+      await dropSymlinks(client, dest, log, warnings)
       break
     }
 
@@ -763,11 +794,16 @@ export async function cloneRepository(
   const branchFlag = branch ? `--branch ${shellQuote(branch)}` : ''
   log(`Cloning ${redactUrl(opts.repoUrl)}${branch ? ` (branch ${branch})` : ''}…`)
 
+  // Re-check the host now and pin git to the checked address, with no HTTP
+  // redirects (lib/migration/fetch-safety): the API-layer check was by name,
+  // minutes ago, and git runs as root on the server.
+  const target = await resolvePinnedTarget(opts.repoUrl.trim())
+
   // --depth 1: migrations want the working tree, not the history, and a
   // shallow clone turns a 400 MB repo into a 20 MB transfer.
   const r = await exec(
     client,
-    `GIT_TERMINAL_PROMPT=0 git clone --depth 1 ${branchFlag} ${shellQuote(url)} ${shellQuote(dest)} 2>&1`,
+    `GIT_TERMINAL_PROMPT=0 git ${safeGitCloneConfig(target)} clone --depth 1 ${branchFlag} -- ${shellQuote(url)} ${shellQuote(dest)} 2>&1`,
     { timeoutMs: 1800_000 }
   )
   if (r.exitCode !== 0) {

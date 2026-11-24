@@ -20,6 +20,11 @@ import { db } from '../src/lib/db'
 import { previewEnforcement, type PreviewRow } from '../src/lib/billing-enforcement'
 
 const JSON_OUT = process.argv.includes('--json')
+// --out <file>: write the JSON to a file instead of stdout. update.sh uses it so
+// unrelated log lines (e.g. the DB layer's startup PRAGMA messages) can never
+// corrupt the JSON it parses — that used to hold the worker after every update.
+const OUT_INDEX = process.argv.indexOf('--out')
+const OUT_FILE = OUT_INDEX > -1 ? process.argv[OUT_INDEX + 1] : undefined
 
 const LABEL: Record<PreviewRow['action'], string> = {
   suspend: 'SUSPEND — websites stopped, mail paused',
@@ -32,8 +37,14 @@ const ORDER: PreviewRow['action'][] = ['suspend', 'end_cancelled', 'past_due', '
 async function main() {
   const rows = await previewEnforcement()
 
-  if (JSON_OUT) {
-    console.log(JSON.stringify({ at: new Date().toISOString(), rows }, null, 2))
+  if (JSON_OUT || OUT_FILE) {
+    const json = JSON.stringify({ at: new Date().toISOString(), rows }, null, 2)
+    if (OUT_FILE) {
+      const { writeFileSync } = await import('node:fs')
+      writeFileSync(OUT_FILE, json)
+    } else {
+      console.log(json)
+    }
     return
   }
 

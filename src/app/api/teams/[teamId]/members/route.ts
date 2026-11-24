@@ -54,48 +54,52 @@ export async function POST(
 
     const invitedEmail = email.trim().toLowerCase()
 
-    // Look up user by email
-    const targetUser = await db.user.findUnique({
-      where: { email: invitedEmail },
-    })
-
-    if (!targetUser) {
-      return NextResponse.json({ error: 'User not found with this email' }, { status: 404 })
-    }
-
-    // Check if already a member
-    const existingMember = team.members.find((m) => m.userId === targetUser.id)
-    if (existingMember) {
-      return NextResponse.json({ error: 'User is already a member of this team' }, { status: 409 })
+    if (invitedEmail.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(invitedEmail)) {
+      return NextResponse.json({ error: 'A valid email address is required' }, { status: 400 })
     }
 
     // viewer: read-only access to the team's projects (see lib/project-access).
     const memberRole = role === 'admin' || role === 'viewer' ? role : 'developer'
 
+    // The answer is the same whether or not an account exists for this
+    // email, so the endpoint cannot be used to discover who is registered.
+    // (It used to answer 404 "User not found with this email".)
+    const uniform = NextResponse.json(
+      {
+        message:
+          'If an account exists for this email address, it has been added to the team and notified by email.',
+      },
+      { status: 202 }
+    )
+
+    const targetUser = await db.user.findUnique({
+      where: { email: invitedEmail },
+      select: { id: true, email: true },
+    })
+    if (!targetUser) return uniform
+
+    // Already a member: the inviter can see the member list anyway, so this
+    // reveals nothing new — but keep the same answer to stay uniform.
+    if (team.members.some((m) => m.userId === targetUser.id)) return uniform
+
+    // NOTE: membership is still granted immediately (there is no pending
+    // invitation model in the schema). A consent step with a single-use,
+    // expiring token needs a schema change.
     const newMember = await db.teamMember.create({
       data: {
         teamId,
         userId: targetUser.id,
         role: memberRole,
       },
-      include: {
-        user: {
-          select: { id: true, name: true, email: true, avatar: true },
-        },
-      },
     })
 
-    // Create notification for the invited user
     await createNotification({
       userId: targetUser.id,
       title: 'Team Invitation',
-      message: `You've been invited to join ${team.name}`,
+      message: `You've been added to the team ${team.name}`,
       type: 'info',
     })
 
-    // Send the real team-invitation email.
-    // We use the new member's id as the invite token (unique + traceable).
-    // In demo mode (no SMTP env vars) this simply logs to console.
     const inviteToken = crypto
       .createHash('sha256')
       .update(`${newMember.id}:${team.id}:${Date.now()}`)
@@ -103,20 +107,13 @@ export async function POST(
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
     const inviteUrl = `${appUrl}?team_invite=${inviteToken}`
 
-    console.log(`[email] Team invitation for ${targetUser.email}`)
-    console.log(`[email] Invite link: ${inviteUrl}`)
+    // Not awaited: the response time must not depend on whether a mail was
+    // sent (another way to tell registered addresses apart).
+    void sendTeamInvitationEmail(targetUser.email, team.name, inviteUrl).catch((err) =>
+      console.error('[teams] invitation email failed:', err instanceof Error ? err.message : err)
+    )
 
-    await sendTeamInvitationEmail(targetUser.email, team.name, inviteUrl)
-
-    return NextResponse.json({
-      member: {
-        id: newMember.id,
-        userId: newMember.userId,
-        role: newMember.role,
-        joinedAt: newMember.joinedAt.toISOString(),
-        user: newMember.user,
-      },
-    }, { status: 201 })
+    return uniform
   } catch (error) {
     console.error('Invite member error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

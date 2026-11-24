@@ -52,17 +52,28 @@ export async function POST(
       )
     }
 
-    // Reset job for retry
-    await db.jobQueue.update({
-      where: { id },
+    // Reset job for retry. `attempts` goes back to 0 so the retried job gets
+    // the normal maxAttempts budget (with backoff) again: left at its old
+    // value, the next run already exceeded maxAttempts and a single transient
+    // failure marked it failed for good. Conditional on still being 'failed',
+    // so two concurrent retries cannot both re-queue it.
+    const reset = await db.jobQueue.updateMany({
+      where: { id, status: 'failed' },
       data: {
         status: 'queued',
+        attempts: 0,
         startedAt: null,
         completedAt: null,
         error: null,
         runAt: new Date(),
       },
     })
+    if (reset.count === 0) {
+      return NextResponse.json(
+        { error: 'Only failed jobs can be retried' },
+        { status: 409 }
+      )
+    }
 
     // Process the job again
     await processJob(id)

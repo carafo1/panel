@@ -122,7 +122,10 @@ HOLD_WORKER=0
 if [[ -f scripts/billing-preview.ts ]]; then
   step "Billing preview — what the next sweep would do"
   PREVIEW_JSON="$(mktemp)"
-  if bun run scripts/billing-preview.ts --json > "$PREVIEW_JSON" 2>/dev/null; then
+  # --out writes the JSON to the file directly, so log lines printed by the
+  # app while it starts or stops can never corrupt it (that used to hold the
+  # worker after every update).
+  if bun run scripts/billing-preview.ts --json --out "$PREVIEW_JSON" >/dev/null 2>&1; then
     bun run scripts/billing-preview.ts || true
     # Hold only for actions that take websites offline.
     IMPACT=$(bun -e "const r=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).rows||[];console.log(r.filter(x=>x.action==='suspend'||x.action==='end_cancelled').length)" "$PREVIEW_JSON" 2>/dev/null || echo "?")

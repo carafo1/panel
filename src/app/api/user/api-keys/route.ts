@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
+import { verifyTokenFresh, extractTokenFromHeader, hashApiKey } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import crypto from 'crypto'
 
@@ -81,9 +81,9 @@ export async function POST(request: Request) {
     }
     const { name } = body
 
-    if (!name || name.trim().length === 0) {
+    if (typeof name !== 'string' || name.trim().length === 0 || name.trim().length > 100) {
       return NextResponse.json(
-        { error: 'API key name is required' },
+        { error: 'API key name is required (up to 100 characters)' },
         { status: 400 }
       )
     }
@@ -92,13 +92,16 @@ export async function POST(request: Request) {
     const rawKey = `dh_${crypto.randomBytes(32).toString('hex')}`
     const prefix = rawKey.substring(0, 8)
 
+    // Only the SHA-256 digest is stored (lib/auth hashApiKey); the raw key is
+    // returned in this response and can never be retrieved again.
     const apiKey = await db.apiKey.create({
       data: {
         userId: decoded.userId,
         name: name.trim(),
-        key: rawKey,
+        key: hashApiKey(rawKey),
         prefix,
       },
+      select: { id: true, name: true, prefix: true, createdAt: true },
     })
 
     // Audit API key creation

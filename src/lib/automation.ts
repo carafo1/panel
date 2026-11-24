@@ -1,7 +1,4 @@
 import { db } from '@/lib/db'
-import { createNotification } from '@/lib/notifications'
-import { slugify } from '@/lib/utils'
-import { BRAND_DOMAIN } from '@/lib/brand-config'
 
 /**
  * A job failure that retrying cannot fix (unknown job type, a record that no
@@ -13,6 +10,21 @@ export class PermanentJobError extends Error {
     super(message)
     this.name = 'PermanentJobError'
   }
+}
+
+/** Legacy simulated actions that may still sit in the queue but must never run. */
+export const RETIRED_ACTIONS = [
+  'create_user_workspace',
+  'enable_ssl',
+  'deploy_template',
+  'register_domain',
+  'setup_dns',
+  'link_domain',
+  'rollback_deployment',
+] as const
+
+function retiredActionMessage(type: string): string {
+  return `Retired simulated action "${type}" refused: it produced fabricated results and no longer runs`
 }
 
 export type EventType =
@@ -153,14 +165,33 @@ async function executeAction(
       return { delivered: r.success, skipped: r.skipped ?? false, statusCode: r.statusCode }
     }
 
-    case 'create_user_workspace': {
-      await createNotification({
-        userId: event.userId,
-        title: 'Project Created',
-        message: 'Your project workspace has been created successfully.',
-        type: 'success',
-      })
-      return { workspaceId: `ws-${Date.now()}`, status: 'created' }
+    // ── Retired simulated actions ────────────────────────────────────────
+    // These used to FABRICATE results: workspace/cert/deployment/domain ids
+    // made from Date.now(), projects marked running and domains marked active
+    // with an invented one-year expiry, DNS rows written only to our database,
+    // domains linked to projects without verification, and success
+    // notifications for all of it. Real work goes through provision-on-payment,
+    // orchestration and domain-checkout. A leftover queued job now fails
+    // permanently: no retry, no notification, nothing written.
+    case 'create_user_workspace':
+    case 'enable_ssl':
+    case 'deploy_template':
+    case 'setup_dns':
+    case 'link_domain':
+    case 'rollback_deployment':
+      throw new PermanentJobError(retiredActionMessage(action.type))
+
+    case 'register_domain': {
+      // A customer-owned ('custom') domain is not registered by us at all; it
+      // stays pending until DNS verification, so there is nothing to refuse.
+      const domainId = payload.domainId as string | undefined
+      const existing = domainId
+        ? await db.domain.findUnique({ where: { id: domainId }, select: { provider: true } })
+        : null
+      if (payload.provider === 'custom' || existing?.provider === 'custom') {
+        return { domainId: domainId ?? null, status: 'skipped', reason: 'custom_domain_awaits_verification' }
+      }
+      throw new PermanentJobError(retiredActionMessage(action.type))
     }
 
     case 'create_coolify_project': {
@@ -190,182 +221,6 @@ async function executeAction(
       // Used to be logged as a completed job, hiding that the customer got
       // no server. An operator has to add capacity, so retrying is pointless.
       throw new PermanentJobError('No active server available to assign')
-    }
-
-    case 'enable_ssl': {
-      const projectId = payload.projectId as string | undefined
-      if (projectId) {
-        await db.project.update({
-          where: { id: projectId },
-          data: { sslEnabled: true },
-        })
-      }
-      await createNotification({
-        userId: event.userId,
-        title: 'SSL Enabled',
-        message: 'SSL certificate has been enabled for your project.',
-        type: 'success',
-      })
-      return { sslEnabled: true, certificateArn: `cert-${Date.now()}`, status: 'enabled' }
-    }
-
-    case 'deploy_template': {
-      const projectId = payload.projectId as string | undefined
-      let deployed = true
-      if (projectId) {
-        const project = await db.project.findUnique({ where: { id: projectId } })
-        if (project) {
-          await db.project.update({
-            where: { id: projectId },
-            data: { status: 'running' },
-          })
-        } else {
-          deployed = false
-        }
-      }
-      if (deployed) {
-        await createNotification({
-          userId: event.userId,
-          title: 'Deployment Successful',
-          message: `Your project has been deployed successfully.`,
-          type: 'success',
-          link: projectId ? `/hosting/${projectId}` : undefined,
-        })
-      } else {
-        await createNotification({
-          userId: event.userId,
-          title: 'Deployment Failed',
-          message: 'Your project deployment failed. Please try again.',
-          type: 'error',
-        })
-        // Recorded as a failure, not a completed job with status 'failed'.
-        throw new PermanentJobError(`Project ${projectId} not found`)
-      }
-      return { deploymentId: `dep-${Date.now()}`, status: 'deployed', url: `https://${slugify((payload.projectName as string) || 'app')}.${BRAND_DOMAIN}` }
-    }
-
-    case 'register_domain': {
-      const domainId = payload.domainId as string | undefined
-      // A customer-owned ('custom') domain is not registered by us: it stays
-      // pending until DNS verification. This used to flip it to active with an
-      // invented one-year expiry the moment it was added.
-      const existing = domainId
-        ? await db.domain.findUnique({ where: { id: domainId }, select: { provider: true } })
-        : null
-      if (payload.provider === 'custom' || existing?.provider === 'custom') {
-        return { domainId: domainId ?? null, status: 'skipped', reason: 'custom_domain_awaits_verification' }
-      }
-      if (domainId) {
-        await db.domain.update({
-          where: { id: domainId },
-          data: {
-            status: 'active',
-            registeredAt: new Date(),
-            expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
-          },
-        })
-      }
-      await createNotification({
-        userId: event.userId,
-        title: 'Domain Registered',
-        message: domainId
-          ? 'Your domain has been registered successfully.'
-          : 'Domain registration processed.',
-        type: 'success',
-      })
-      return { domainId: domainId || `dom-${Date.now()}`, status: 'registered', registrar: 'dynadot' }
-    }
-
-    case 'setup_dns': {
-      const domainId = payload.domainId as string | undefined
-      let recordsCreated = 0
-      if (domainId) {
-        const domain = await db.domain.findUnique({
-          where: { id: domainId },
-        })
-        if (domain) {
-          // Find a server for DNS records
-          const server = await db.server.findFirst({
-            where: { status: 'active' },
-            orderBy: { usedRamGB: 'asc' },
-          })
-
-          // Check if DNS records already exist for this domain
-          const existingRecords = await db.dnsRecord.findMany({
-            where: { domainId: domain.id },
-          })
-
-          if (existingRecords.length === 0) {
-            // A record pointing to server IP
-            if (server) {
-              await db.dnsRecord.create({
-                data: {
-                  domainId: domain.id,
-                  type: 'A',
-                  name: '@',
-                  value: server.ip,
-                  ttl: 3600,
-                  proxied: true,
-                },
-              })
-              recordsCreated++
-            }
-
-            // CNAME for www
-            await db.dnsRecord.create({
-              data: {
-                domainId: domain.id,
-                type: 'CNAME',
-                name: 'www',
-                value: domain.name,
-                ttl: 3600,
-                proxied: true,
-              },
-            })
-            recordsCreated++
-          } else {
-            recordsCreated = existingRecords.length
-          }
-        }
-      }
-      await createNotification({
-        userId: event.userId,
-        title: 'DNS Configured',
-        message: `${recordsCreated} DNS record(s) have been configured for your domain.`,
-        type: 'info',
-      })
-      return { dnsConfigured: true, recordsCreated, status: 'configured' }
-    }
-
-    case 'link_domain': {
-      const domainId = payload.domainId as string | undefined
-      const projectId = payload.projectId as string | undefined
-      if (domainId && projectId) {
-        const domain = await db.domain.findUnique({ where: { id: domainId } })
-        if (domain) {
-          // Link domain to project
-          await db.domain.update({
-            where: { id: domainId },
-            data: { projectId },
-          })
-          // Set project custom domain
-          await db.project.update({
-            where: { id: projectId },
-            data: { customDomain: domain.name },
-          })
-        }
-      }
-      await createNotification({
-        userId: event.userId,
-        title: 'Domain Linked',
-        message: 'Your domain has been linked to your project successfully.',
-        type: 'success',
-      })
-      return { domainLinked: true, status: 'linked' }
-    }
-
-    case 'rollback_deployment': {
-      return { rolledBack: true, previousVersion: `v-${Date.now() - 1000}`, status: 'rolled_back' }
     }
 
     case 'deployment_status_check': {

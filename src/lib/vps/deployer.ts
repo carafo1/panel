@@ -68,6 +68,8 @@ import {
 } from '@/lib/deploy-guard'
 import {
   checkComposeModel,
+  COMPOSE_ENV,
+  composeProjectFlag,
   composeProjectName,
   DANGEROUS_COMPOSE_ENV_RE,
   exactContainerNameFilter,
@@ -77,6 +79,7 @@ import {
   scanComposeText,
   siblingContainerCleanupCommand,
 } from './deploy-safety'
+import { archiveListingCommand, findUnsafeArchiveEntries, unsafeArchiveMessage } from './archive-safety'
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -471,32 +474,9 @@ interface DeployState {
 
 // ─── Hardening helpers (shared by both pipelines) ────────────────────────
 
-/**
- * Environment for every `docker compose` the deployer runs.
- *
- * On a localhost server the shell inherits the panel's own process.env —
- * JWT_SECRET, ENCRYPTION_KEY, DATABASE_URL — and compose interpolates
- * `${VAR}` in compose files from it, so a customer compose file (or an env
- * value) referencing `${ENCRYPTION_KEY}` received the panel's key. `env -i`
- * keeps only what the docker CLI needs to find its daemon and plugins.
- */
-const COMPOSE_ENV =
-  'env -i PATH="$PATH" HOME="$HOME" ' +
-  '${DOCKER_HOST:+DOCKER_HOST="$DOCKER_HOST"} ' +
-  '${DOCKER_CONFIG:+DOCKER_CONFIG="$DOCKER_CONFIG"} ' +
-  '${DOCKER_CONTEXT:+DOCKER_CONTEXT="$DOCKER_CONTEXT"} '
-
-/**
- * `-p <name> ` pinning the compose project to the one derived from the
- * project's directory. Without it a compose file's `name:` (or
- * COMPOSE_PROJECT_NAME in .env) chose the project — a customer could edit
- * their file to `name: <another tenant>` and have `down -v` on delete remove
- * that tenant's containers and volumes. Empty when no deploy path is known.
- */
-function composeProjectFlag(deployPath: string | null | undefined): string {
-  const name = deployPath ? composeProjectName(deployPath) : ''
-  return name ? `-p ${shellQuote(name)} ` : ''
-}
+// COMPOSE_ENV (stripped environment) and composeProjectFlag (`-p <name>`)
+// live in ./deploy-safety so the pipeline and migration runners use exactly
+// the same rules as the deployer.
 
 const COMPOSE_FILE_NAMES = [
   'docker-compose.yml',
@@ -911,6 +891,14 @@ async function deployMethodProject(
         const remoteZip = `${deployPath}.upload.zip`
         stageLog(`Uploading ZIP (${zipData.length} bytes) to VPS…`)
         await putFile(client, remoteZip, zipData, { mode: 0o644 })
+        // Refuse links and out-of-tree paths BEFORE extracting into the
+        // project directory (see lib/vps/archive-safety).
+        const listing = await exec(client, archiveListingCommand('zip', remoteZip), { timeoutMs: 120000 })
+        const problems = listing.exitCode === 0 ? findUnsafeArchiveEntries(listing.stdout) : null
+        if (problems === null || problems.length > 0) {
+          await exec(client, `rm -f ${shellQuote(remoteZip)}`, { timeoutMs: 10000 }).catch(() => {})
+          throw new Error(unsafeArchiveMessage(problems))
+        }
         stageLog('Extracting ZIP…')
         const r = await exec(
           client,
