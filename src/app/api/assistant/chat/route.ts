@@ -3,6 +3,8 @@ import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { db } from '@/lib/db'
 import ZAI from 'z-ai-web-dev-sdk'
 import fs from 'node:fs'
+import Anthropic from '@anthropic-ai/sdk'
+import { claudeReply, isClaudeConfigured } from '@/lib/ai-claude'
 import path from 'node:path'
 import { semanticSearch, isPgvectorEnabled } from '@/lib/embeddings'
 
@@ -269,8 +271,26 @@ export async function POST(request: Request) {
     // Call LLM — or, with no AI provider configured (or it failing), answer
     // honestly from the account data instead of returning an error.
     let aiResponse: string
-    let aiAvailable = isAiConfigured()
-    if (aiAvailable) {
+    let aiAvailable = isClaudeConfigured() || isAiConfigured()
+    if (isClaudeConfigured()) {
+      try {
+        // history[0] holds the system prompt (as an assistant turn for the
+        // legacy SDK); Claude takes it as `system` and the turns after it.
+        const turns = augmentedHistory.slice(1).map((m) => ({
+          role: m.role === 'user' ? ('user' as const) : ('assistant' as const),
+          content: m.content,
+        }))
+        aiResponse =
+          (await claudeReply(SYSTEM_PROMPT, turns)) ||
+          offlineReply(userContext ?? (await getUserSummary(decoded.userId)))
+      } catch (err) {
+        // Log the status only: never the request, which holds account data.
+        const status = err instanceof Anthropic.APIError ? err.status : undefined
+        console.error('[assistant] Claude request failed:', status ?? (err instanceof Error ? err.name : 'error'))
+        aiAvailable = false
+        aiResponse = offlineReply(userContext ?? (await getUserSummary(decoded.userId)))
+      }
+    } else if (aiAvailable) {
       try {
         const zai = await getZAI()
         const completion = await zai.chat.completions.create({

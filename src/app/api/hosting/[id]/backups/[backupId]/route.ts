@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { authenticateRequest } from '@/lib/auth'
 import { requireProjectAccess } from '@/lib/project-access'
 import { logAudit } from '@/lib/audit'
-import { downloadBackup, deleteBackup, restoreBackup } from '@/lib/vps'
+import { openBackupDownload, BackupDownloadError, deleteBackup, restoreBackup } from '@/lib/vps'
 
 /**
  * Project Backup Endpoint (single)
@@ -27,19 +27,26 @@ export async function GET(
     const access = await requireProjectAccess(decoded, projectId, 'data')
     if (!access.ok) return access.response
 
-    const { content, filename, size } = await downloadBackup(projectId, backupId)
-    return new NextResponse(new Uint8Array(content), {
+    // Streamed: archives can be far larger than the memory this host can
+    // spare. The file name comes from the backup row, never from the request.
+    const { stream, filename, size } = await openBackupDownload(projectId, backupId)
+    const safeName = filename.replace(/[^A-Za-z0-9._-]/g, '_') || 'backup.tar.gz'
+    return new NextResponse(stream, {
       status: 200,
       headers: {
         'Content-Type': 'application/gzip',
-        'Content-Disposition': `attachment; filename="${filename.replace(/"/g, '_')}"`,
+        'Content-Disposition': `attachment; filename="${safeName}"`,
         'Content-Length': size.toString(),
+        'Cache-Control': 'private, no-store',
+        'X-Content-Type-Options': 'nosniff',
       },
     })
   } catch (error) {
-    const msg = 'Internal server error'
+    if (error instanceof BackupDownloadError) {
+      return NextResponse.json({ error: error.message }, { status: error.status })
+    }
     console.error('Download backup error:', error)
-    return NextResponse.json({ error: msg }, { status: 500 })
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
 

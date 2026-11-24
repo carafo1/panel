@@ -52,6 +52,17 @@ export async function POST(
 
     const result = await applyEnvironment(projectId)
     if (!result.ok) {
+      // A failed apply is recorded too: it is an attempt to change what the
+      // running site sees. Counts only — no keys' values.
+      await logAudit({
+        userId: decoded.userId,
+        action: 'project.env.apply',
+        resource: 'project',
+        resourceId: projectId,
+        req: request,
+        status: 'failure',
+        metadata: { needsRebuild: changedPublic.length },
+      }).catch(() => {})
       return NextResponse.json({ error: result.message }, { status: 400 })
     }
 

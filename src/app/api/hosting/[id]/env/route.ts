@@ -4,11 +4,17 @@ import { authenticateRequest } from '@/lib/auth'
 import { requireProjectAccess } from '@/lib/project-access'
 import { isValidEnvKey, ENV_KEY_ERROR } from '@/lib/safe-values'
 import { parseDotenv } from '@/lib/dotenv-parse'
-
-/** Enough for any real application; stops an import filling the table. */
-const MAX_ENV_VARS = 500
 import { encrypt, decrypt } from '@/lib/encryption'
 import { logAudit } from '@/lib/audit'
+
+/**
+ * Most variables one project may hold IN TOTAL (not per import). Enough for
+ * any real application; stops repeated imports or creates filling the table.
+ */
+const MAX_ENV_VARS = 500
+
+/** Audit metadata lists at most this many key names; the counts are exact. */
+const AUDIT_MAX_KEYS = 100
 
 /**
  * Mask a sensitive value for display.
@@ -192,41 +198,75 @@ export async function POST(
       const updated: string[] = []
       const skipped: Array<{ key: string; reason: string }> = []
 
-      for (const entry of parsed.entries) {
-        const existing = await db.environmentVariable.findFirst({
-          where: { projectId, key: entry.key },
-          select: { id: true },
+      // One transaction: the total-count check and the writes see the same
+      // table, and a failure half-way leaves nothing half-imported.
+      const outcome = await db.$transaction(async (tx) => {
+        const existingRows = await tx.environmentVariable.findMany({
+          where: { projectId },
+          select: { id: true, key: true },
         })
-        if (existing) {
-          if (!overwrite) {
-            skipped.push({ key: entry.key, reason: 'already set' })
-            continue
-          }
-          await db.environmentVariable.update({
-            where: { id: existing.id },
-            data: { value: encrypt(entry.value), encrypted: true },
-          })
-          updated.push(entry.key)
-        } else {
-          await db.environmentVariable.create({
-            data: {
-              projectId,
-              key: entry.key,
-              value: encrypt(entry.value),
-              encrypted: true,
-            },
-          })
-          added.push(entry.key)
+        const existing = new Map(existingRows.map((r) => [r.key, r.id]))
+        const newKeys = new Set(
+          parsed.entries.map((e) => e.key).filter((k) => !existing.has(k))
+        )
+        if (existing.size + newKeys.size > MAX_ENV_VARS) {
+          return { over: true as const, existing: existing.size, adding: newKeys.size }
         }
+
+        for (const entry of parsed.entries) {
+          const id = existing.get(entry.key)
+          if (id) {
+            if (!overwrite) {
+              skipped.push({ key: entry.key, reason: 'already set' })
+              continue
+            }
+            await tx.environmentVariable.update({
+              where: { id },
+              data: { value: encrypt(entry.value), encrypted: true },
+            })
+            updated.push(entry.key)
+          } else {
+            const created = await tx.environmentVariable.create({
+              data: {
+                projectId,
+                key: entry.key,
+                value: encrypt(entry.value),
+                encrypted: true,
+              },
+              select: { id: true },
+            })
+            existing.set(entry.key, created.id)
+            added.push(entry.key)
+          }
+        }
+        return { over: false as const }
+      }, { timeout: 30000 })
+
+      if (outcome.over) {
+        return NextResponse.json(
+          {
+            error:
+              `This website already has ${outcome.existing} variables and the import would add ` +
+              `${outcome.adding} more; the limit is ${MAX_ENV_VARS} per website.`,
+          },
+          { status: 400 }
+        )
       }
 
+      // Key names and counts only. Values are secrets and never logged.
       await logAudit({
         userId: decoded.userId,
         action: 'project.env.import',
         resource: 'project',
         resourceId: projectId,
         req: request,
-        metadata: { added: added.length, updated: updated.length, skipped: skipped.length },
+        metadata: {
+          added: added.length,
+          updated: updated.length,
+          skipped: skipped.length,
+          addedKeys: added.slice(0, AUDIT_MAX_KEYS),
+          updatedKeys: updated.slice(0, AUDIT_MAX_KEYS),
+        },
       }).catch(() => {})
 
       return NextResponse.json(
@@ -281,6 +321,14 @@ export async function POST(
       )
     }
 
+    const total = await db.environmentVariable.count({ where: { projectId } })
+    if (total >= MAX_ENV_VARS) {
+      return NextResponse.json(
+        { error: `This website already has ${total} variables; the limit is ${MAX_ENV_VARS}.` },
+        { status: 400 }
+      )
+    }
+
     // Always encrypt the value at rest with AES-256-GCM.
     // The `encrypted` flag is set to true so future reads know
     // to call decrypt() on the stored payload.
@@ -292,6 +340,16 @@ export async function POST(
         encrypted: true,
       },
     })
+
+    // The key name only — never the value.
+    await logAudit({
+      userId: decoded.userId,
+      action: 'project.env.create',
+      resource: 'project',
+      resourceId: projectId,
+      req: request,
+      metadata: { key: envVar.key, envVarId: envVar.id },
+    }).catch(() => {})
 
     return NextResponse.json({
       envVar: {

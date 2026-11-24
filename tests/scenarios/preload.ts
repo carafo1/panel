@@ -22,10 +22,22 @@ process.env.JWT_SECRET = 'scenario-tests-jwt-secret-not-for-production-012345678
 process.env.ENCRYPTION_KEY = '1'.repeat(64)
 process.env.CRON_API_KEY = 'scenario-tests-cron-key'
 // No outbound mail, payments or registrar calls from tests.
-delete process.env.EMAIL_PROVIDER
-delete process.env.SMTP_HOST
-delete process.env.STRIPE_SECRET_KEY
-delete process.env.DYNADOT_API_KEY
+// Set to EMPTY, not deleted: Prisma loads the project's .env into the test
+// process and fills every variable that is unset, so a deleted key came back
+// from a developer's real .env and a test reached the live registrar. An
+// empty value counts as "set" and reads as "not configured" everywhere.
+for (const k of [
+  'EMAIL_PROVIDER', 'SMTP_HOST', 'SMTP_USER', 'SMTP_PASS',
+  'STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET',
+  'DYNADOT_API_KEY', 'DYNADOT_SECRET_KEY',
+  'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN',
+  'WAAFI_API_KEY', 'WAAFI_MERCHANT_UID',
+  'MAILCOW_API_URL', 'MAILCOW_API_KEY',
+  'PDNS_API_URL', 'PDNS_API_KEY',
+  'CLOUDFLARE_API_TOKEN',
+]) {
+  process.env[k] = ''
+}
 
 const prismaBin = join(process.cwd(), 'node_modules', '.bin', process.platform === 'win32' ? 'prisma.cmd' : 'prisma')
 const push = Bun.spawnSync([prismaBin, 'db', 'push', '--skip-generate', '--accept-data-loss'], {

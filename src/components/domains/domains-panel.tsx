@@ -433,7 +433,7 @@ interface DomainLog {
   createdAt: string
 }
 
-type Tab = 'search' | 'domains' | 'invoices' | 'pricing' | 'admin'
+type Tab = 'search' | 'domains' | 'orders' | 'invoices' | 'pricing' | 'admin'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -528,17 +528,20 @@ export default function DomainsPanel() {
       {transferOpen && (
         <TransferDomainDialog
           onClose={() => setTransferOpen(false)}
-          onTransferred={() => setTab('domains')}
+          onTransferred={() => setTab('orders')}
         />
       )}
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
-        <TabsList className="grid w-full grid-cols-2 sm:grid-cols-5 h-auto">
+        <TabsList className={`grid w-full grid-cols-2 h-auto ${isAdmin ? 'sm:grid-cols-6' : 'sm:grid-cols-5'}`}>
           <TabsTrigger value="search" className="flex items-center gap-1.5">
             <Search className="h-4 w-4" /> Search
           </TabsTrigger>
           <TabsTrigger value="domains" className="flex items-center gap-1.5">
             <Globe className="h-4 w-4" /> My Domains
+          </TabsTrigger>
+          <TabsTrigger value="orders" className="flex items-center gap-1.5">
+            <ShoppingBag className="h-4 w-4" /> Orders
           </TabsTrigger>
           <TabsTrigger value="invoices" className="flex items-center gap-1.5">
             <FileText className="h-4 w-4" /> Invoices
@@ -554,10 +557,13 @@ export default function DomainsPanel() {
         </TabsList>
 
         <TabsContent value="search" className="mt-6">
-          <SearchTab onRegistered={() => setTab('invoices')} />
+          <SearchTab onRegistered={() => setTab('orders')} />
         </TabsContent>
         <TabsContent value="domains" className="mt-6">
           <DomainsListTab onSelect={setSelectedDomainId} />
+        </TabsContent>
+        <TabsContent value="orders" className="mt-6">
+          <OrdersTab onSearch={() => setTab('search')} onOpenDomain={setSelectedDomainId} />
         </TabsContent>
         <TabsContent value="invoices" className="mt-6">
           <InvoicesTab />
@@ -1442,7 +1448,7 @@ function DomainsListTab({ onSelect }: { onSelect: (id: string) => void }) {
           <h3 className="font-semibold text-lg">No domains yet</h3>
           <p className="text-sm text-muted-foreground mt-1 max-w-sm">
             Search for a domain and register it to get started. A new domain appears here once
-            its payment is confirmed; until then you can follow it under Invoices.
+            its payment is confirmed; until then you can follow it under Orders.
           </p>
         </CardContent>
       </Card>
@@ -2517,6 +2523,351 @@ function LogsSection({ logs }: { logs: DomainLog[] }) {
         </div>
       </CardContent>
     </Card>
+  )
+}
+
+// ─── Orders Tab ───────────────────────────────────────────────────────────────
+
+/** One row of GET /api/domains/orders. */
+interface DomainOrderItem {
+  id: string
+  domainName: string
+  kind: 'register' | 'renew' | 'transfer'
+  years: number
+  status: string
+  amount: number
+  currency: string
+  invoiceId: string | null
+  invoiceNumber: string | null
+  invoicePaid: boolean
+  domainId: string | null
+  domainActive: boolean
+  payment: {
+    method: 'stripe' | 'waafi' | 'manual' | null
+    payUrl: string | null
+    reference: string | null
+    instructions: string | null
+  } | null
+  message: string
+  createdAt: string
+  updatedAt: string
+}
+
+const ORDER_KIND_LABEL: Record<DomainOrderItem['kind'], string> = {
+  register: 'Registration',
+  renew: 'Renewal',
+  transfer: 'Transfer',
+}
+
+/** Finished orders: kept as history, collapsed below the ones still moving. */
+const SETTLED_ORDER_STATUSES = new Set(['completed', 'cancelled'])
+
+const ORDERS_PAGE_SIZE = 20
+
+function formatMoney(amount: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(amount)
+  } catch {
+    return `${amount.toFixed(2)} ${currency}`
+  }
+}
+
+interface OrdersPage {
+  orders: DomainOrderItem[]
+  nextCursor: string | null
+}
+
+function fetchOrdersPage(cursor: string | null): Promise<OrdersPage> {
+  const qs = cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''
+  return apiFetch<OrdersPage>(`/domains/orders?limit=${ORDERS_PAGE_SIZE}${qs}`)
+}
+
+function OrdersTab({
+  onSearch,
+  onOpenDomain,
+}: {
+  onSearch: () => void
+  onOpenDomain: (id: string) => void
+}) {
+  const [orders, setOrders] = useState<DomainOrderItem[]>([])
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [historyOpen, setHistoryOpen] = useState(false)
+
+  // Applies a first-page result. Only ever called after the request settles,
+  // so the initial effect never sets state synchronously.
+  const applyFirstPage = useCallback((result: Promise<OrdersPage>, isCurrent: () => boolean) => {
+    result
+      .then((data) => {
+        if (!isCurrent()) return
+        setOrders(data.orders || [])
+        setNextCursor(data.nextCursor ?? null)
+        setLoadError(null)
+      })
+      .catch((err) => {
+        if (isCurrent()) setLoadError((err as Error).message || 'Please try again.')
+      })
+      .finally(() => {
+        if (isCurrent()) setLoading(false)
+      })
+  }, [])
+
+  const load = useCallback(() => {
+    setLoading(true)
+    setLoadError(null)
+    applyFirstPage(fetchOrdersPage(null), () => true)
+  }, [applyFirstPage])
+
+  const loadMore = useCallback(async () => {
+    if (!nextCursor) return
+    setLoadingMore(true)
+    try {
+      const data = await fetchOrdersPage(nextCursor)
+      setOrders((prev) => {
+        const seen = new Set(prev.map((o) => o.id))
+        return [...prev, ...(data.orders || []).filter((o) => !seen.has(o.id))]
+      })
+      setNextCursor(data.nextCursor ?? null)
+    } catch (err) {
+      toast.error('Could not load more orders', { description: (err as Error).message })
+    } finally {
+      setLoadingMore(false)
+    }
+  }, [nextCursor])
+
+  useEffect(() => {
+    let current = true
+    applyFirstPage(fetchOrdersPage(null), () => current)
+    return () => {
+      current = false
+    }
+  }, [applyFirstPage])
+
+  if (loading) {
+    return (
+      <div className="space-y-3" role="status" aria-busy="true" aria-label="Loading orders">
+        {[1, 2, 3].map((i) => <Skeleton key={i} className="h-24" />)}
+      </div>
+    )
+  }
+
+  if (loadError) {
+    return (
+      <Card>
+        <CardContent className="flex flex-col items-center justify-center py-16 text-center" role="alert">
+          <AlertTriangle className="h-12 w-12 text-amber-500 mb-3" aria-hidden="true" />
+          <h3 className="font-semibold text-lg">Couldn&rsquo;t load your orders</h3>
+          <p className="text-sm text-muted-foreground mt-1 max-w-sm">{loadError}</p>
+          <Button variant="outline" size="sm" className="mt-4" onClick={() => load()}>
+            <RefreshCw className="h-3.5 w-3.5 me-1.5" aria-hidden="true" /> Try again
+          </Button>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  if (orders.length === 0) {
+    return (
+      <Card>
+        <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+          <ShoppingBag className="h-12 w-12 text-muted-foreground mb-3" aria-hidden="true" />
+          <h3 className="font-semibold text-lg">No domain orders yet</h3>
+          <p className="text-sm text-muted-foreground mt-1 max-w-sm">
+            When you register, renew or transfer a domain, the order shows up here straight
+            away, so you can follow it from payment to the domain going live.
+          </p>
+          <Button size="sm" className="mt-4" onClick={onSearch}>
+            <Search className="h-3.5 w-3.5 me-1.5" aria-hidden="true" /> Find a domain
+          </Button>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  const open = orders.filter((o) => !SETTLED_ORDER_STATUSES.has(o.status))
+  const settled = orders.filter((o) => SETTLED_ORDER_STATUSES.has(o.status))
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
+          <div className="min-w-0">
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <ShoppingBag className="h-5 w-5 text-indigo-500" aria-hidden="true" /> Orders
+            </CardTitle>
+            <CardDescription className="mt-1">
+              Orders that are awaiting payment or still being processed.
+            </CardDescription>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => load()} aria-label="Refresh orders">
+            <RefreshCw className="h-3.5 w-3.5 sm:me-1.5" aria-hidden="true" />
+            <span className="hidden sm:inline">Refresh</span>
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {open.length === 0 ? (
+            <p className="flex items-center gap-2 rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+              <CheckCircle2 className="h-4 w-4 text-indigo-500 shrink-0" aria-hidden="true" />
+              Nothing in progress. Your finished orders are listed under Order history.
+            </p>
+          ) : (
+            <ul className="divide-y rounded-md border" aria-label="Orders in progress">
+              {open.map((o) => (
+                <OrderListItem key={o.id} order={o} onOpenDomain={onOpenDomain} />
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      {settled.length > 0 && (
+        <Card>
+          <CardHeader className="py-0">
+            <h3 className="m-0">
+              <button
+                type="button"
+                className="flex w-full items-center justify-between gap-3 rounded-md py-4 text-start font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-expanded={historyOpen}
+                aria-controls="domain-order-history"
+                onClick={() => setHistoryOpen((v) => !v)}
+              >
+                <span className="flex items-center gap-2">
+                  <Clock className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+                  Order history
+                  <Badge variant="outline" className="font-normal">{settled.length}</Badge>
+                </span>
+                <ChevronRight
+                  className={`h-4 w-4 text-muted-foreground transition-transform ${historyOpen ? 'rotate-90' : ''}`}
+                  aria-hidden="true"
+                />
+              </button>
+            </h3>
+          </CardHeader>
+          <CardContent id="domain-order-history" hidden={!historyOpen} className="pt-0">
+            <ul className="divide-y rounded-md border" aria-label="Order history">
+              {settled.map((o) => (
+                <OrderListItem key={o.id} order={o} onOpenDomain={onOpenDomain} compact />
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
+
+      {nextCursor && (
+        <div className="flex justify-center">
+          <Button variant="outline" size="sm" onClick={() => void loadMore()} disabled={loadingMore}>
+            {loadingMore ? (
+              <Loader2 className="h-3.5 w-3.5 me-1.5 animate-spin" aria-hidden="true" />
+            ) : null}
+            {loadingMore ? 'Loading…' : 'Load older orders'}
+          </Button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function OrderListItem({
+  order,
+  onOpenDomain,
+  compact = false,
+}: {
+  order: DomainOrderItem
+  onOpenDomain: (id: string) => void
+  compact?: boolean
+}) {
+  const created = new Date(order.createdAt)
+  const yearsLabel = `${order.years} year${order.years === 1 ? '' : 's'}`
+  const awaitingPayment = order.status === 'pending_payment' && !order.invoicePaid
+  const payment = order.payment
+
+  const copyReference = async (ref: string) => {
+    try {
+      await navigator.clipboard.writeText(ref)
+      toast.success('Payment reference copied')
+    } catch {
+      toast.error('Could not copy. Select the reference and copy it manually.')
+    }
+  }
+
+  return (
+    <li className={compact ? 'p-3' : 'p-4'}>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+        <div className="min-w-0 space-y-1">
+          <p className="font-medium break-all flex items-center gap-2">
+            <Globe className="h-4 w-4 text-indigo-500 shrink-0" aria-hidden="true" />
+            {order.domainName}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {ORDER_KIND_LABEL[order.kind]} · {yearsLabel} · Ordered{' '}
+            <time dateTime={order.createdAt}>{created.toLocaleDateString()}</time>
+          </p>
+        </div>
+        <div className="flex items-center gap-3 sm:flex-col sm:items-end sm:gap-1">
+          <Badge variant="outline" className={statusColor(order.status)}>
+            {statusLabel(order.status)}
+          </Badge>
+          <span className="font-mono text-sm">{formatMoney(order.amount, order.currency)}</span>
+        </div>
+      </div>
+
+      <p className={`text-sm text-muted-foreground ${compact ? 'mt-1' : 'mt-2'}`}>{order.message}</p>
+
+      {awaitingPayment && payment?.method === 'manual' && payment.reference && (
+        <div className="mt-3 rounded-md border bg-muted/30 p-3 text-sm">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-muted-foreground">Payment reference</span>
+            <code className="font-mono font-medium break-all">{payment.reference}</code>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2"
+              onClick={() => void copyReference(payment.reference as string)}
+              aria-label={`Copy payment reference ${payment.reference}`}
+            >
+              <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+            </Button>
+          </div>
+          {payment.instructions && (
+            <p className="mt-2 text-xs text-muted-foreground whitespace-pre-line">
+              {payment.instructions}
+            </p>
+          )}
+        </div>
+      )}
+
+      {(awaitingPayment && payment?.payUrl) || order.invoiceId || (order.domainId && order.domainActive) ? (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          {awaitingPayment && payment?.payUrl && (
+            <Button asChild size="sm">
+              <a href={payment.payUrl}>
+                <Wallet className="h-3.5 w-3.5 me-1.5" aria-hidden="true" />
+                Pay {formatMoney(order.amount, order.currency)}
+                <span className="sr-only"> for {order.domainName}</span>
+              </a>
+            </Button>
+          )}
+          {order.invoiceId && (
+            <Button asChild size="sm" variant="outline">
+              <a href={`/api/invoices/${order.invoiceId}/pdf`} target="_blank" rel="noopener noreferrer">
+                <FileText className="h-3.5 w-3.5 me-1.5" aria-hidden="true" />
+                {order.invoiceNumber ? `Invoice ${order.invoiceNumber}` : 'Invoice'}
+                {order.invoicePaid ? ' (paid)' : ''}
+                <span className="sr-only"> (opens in a new tab)</span>
+              </a>
+            </Button>
+          )}
+          {order.domainId && order.domainActive && (
+            <Button size="sm" variant="ghost" onClick={() => onOpenDomain(order.domainId as string)}>
+              Manage domain
+              <ChevronRight className="h-3.5 w-3.5 ms-1" aria-hidden="true" />
+            </Button>
+          )}
+        </div>
+      ) : null}
+    </li>
   )
 }
 

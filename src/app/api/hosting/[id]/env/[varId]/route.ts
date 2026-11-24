@@ -4,6 +4,7 @@ import { authenticateRequest } from '@/lib/auth'
 import { requireProjectAccess } from '@/lib/project-access'
 import { isValidEnvKey, ENV_KEY_ERROR } from '@/lib/safe-values'
 import { encrypt, decrypt } from '@/lib/encryption'
+import { logAudit } from '@/lib/audit'
 
 /**
  * Mask a sensitive value for display.
@@ -59,6 +60,17 @@ export async function PATCH(
     const access = await requireProjectAccess(decoded, projectId, 'configure')
     if (!access.ok) return access.response
 
+    // A non-string key or value used to reach `.trim()` and surface as a 500.
+    if (
+      (key !== undefined && key !== null && typeof key !== 'string') ||
+      (value !== undefined && value !== null && typeof value !== 'string')
+    ) {
+      return NextResponse.json(
+        { error: 'Key and value must be strings' },
+        { status: 400 }
+      )
+    }
+
     // Find the env var
     const envVar = await db.environmentVariable.findFirst({
       where: { id: varId, projectId },
@@ -101,6 +113,21 @@ export async function PATCH(
       where: { id: varId },
       data: updateData,
     })
+
+    // Key names and whether the value changed — never the value itself.
+    await logAudit({
+      userId: decoded.userId,
+      action: 'project.env.update',
+      resource: 'project',
+      resourceId: projectId,
+      req: request,
+      metadata: {
+        envVarId: updated.id,
+        key: updated.key,
+        ...(updated.key !== envVar.key ? { previousKey: envVar.key } : {}),
+        valueChanged: 'value' in updateData,
+      },
+    }).catch(() => {})
 
     // For the response, decrypt the stored value (if encrypted) and mask it
     // so we never leak the plaintext over the wire on a PATCH response.
@@ -158,6 +185,15 @@ export async function DELETE(
     await db.environmentVariable.delete({
       where: { id: varId },
     })
+
+    await logAudit({
+      userId: decoded.userId,
+      action: 'project.env.delete',
+      resource: 'project',
+      resourceId: projectId,
+      req: request,
+      metadata: { envVarId: envVar.id, key: envVar.key },
+    }).catch(() => {})
 
     return NextResponse.json({
       message: 'Environment variable deleted successfully',

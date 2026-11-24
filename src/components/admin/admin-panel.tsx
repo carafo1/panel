@@ -50,6 +50,7 @@ import {
   LayoutGrid,
   Ban,
   ShieldAlert,
+  Gauge,
 } from 'lucide-react'
 import { CustomerActionsMenu } from '@/components/admin/customer-actions'
 import { AdminSearch } from '@/components/admin/admin-search'
@@ -73,6 +74,7 @@ import { ReportsAdminPanel } from '@/components/admin/reports-admin-panel'
 import { GatewaysAdminPanel } from '@/components/admin/gateways-admin-panel'
 import { BackupsAdminPanel } from '@/components/admin/backups-admin-panel'
 import { InfrastructurePanel } from '@/components/admin/infrastructure-panel'
+import { CapacityPanel } from '@/components/admin/capacity-panel'
 import { ServersPanel } from '@/components/admin/servers-panel'
 import { CmsPanel } from '@/components/admin/cms-panel'
 
@@ -498,6 +500,10 @@ export function AdminPanel() {
             <Server className="size-4 me-1.5" />
             Infrastructure
           </TabsTrigger>
+          <TabsTrigger value="capacity">
+            <Gauge className="size-4 me-1.5" />
+            Capacity
+          </TabsTrigger>
           <TabsTrigger value="content">
             <LayoutGrid className="size-4 me-1.5" />
             Content
@@ -537,6 +543,11 @@ export function AdminPanel() {
         {/* ── Infrastructure: live host metrics + platform totals ────── */}
         <TabsContent value="infrastructure">
           <InfrastructurePanel />
+        </TabsContent>
+
+        {/* ── Capacity: per-server headroom, per-site cost, orphans ──── */}
+        <TabsContent value="capacity">
+          <CapacityPanel />
         </TabsContent>
 
         {/* ── Content (CMS) Tab ─────────────────────────────────────── */}

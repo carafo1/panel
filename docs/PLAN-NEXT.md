@@ -47,6 +47,7 @@ webhooks, pipelines. 87/87 production checks pass
 | 16 | **Browser end-to-end tests in CI** | CI has unit + scenario tests but no browser tests of the customer flows (sign-in, create site, connect domain, upload, database). The bugs fixed today would have been caught. |
 | 17 | **SFTP onboarding** | FTP was removed (no FTP server exists). Add a short guide and a key generator in the SFTP section. |
 | 18 | **Capacity view for admins** | RAM/disk per customer site and per server, warning before a server is full. |
+| 18b | **Outgoing email from customer sites (high priority)** | WordPress (and other PHP) sites cannot send mail at all: the container has no mail transport ("sendmail: can't connect"), so contact forms, password resets and shop emails are lost. Add a managed mu-plugin / SMTP relay that sends through Mailcow with a per-site mailbox. |
 
 ## 4. Customer follow-up (not code)
 
