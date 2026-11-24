@@ -66,7 +66,10 @@ export async function activatePayment(
     return { success: false, error: 'Payment not found' }
   }
 
-  // Idempotency guard — never provision twice for one payment.
+  // Idempotency guard — never provision twice for one payment. Provisioning
+  // that never started for an already-completed payment (a crash between the
+  // flip below and the claim) is re-driven by the reconcile sweep
+  // (lib/reconcile.ts), which claims through the same atomic state machine.
   if (payment.status === 'completed') {
     return {
       success: true,
@@ -116,6 +119,12 @@ export async function activatePayment(
         ...metadata,
         ...(opts.extraMetadata || {}),
         completedAt: now.toISOString(),
+        // Marks this as a payment that must be provisioned. Set in the same
+        // write that completes it, so a crash before provisionForPayment runs
+        // (or claims) is picked up by the reconcile sweep instead of leaving a
+        // paid order with nothing built. Recurring renewals recorded by the
+        // Stripe webhook never carry it, so the sweep cannot provision them.
+        provisionRequired: true,
         ...(opts.confirmedByUserId || opts.confirmedByEmail
           ? {
               adminConfirmed: true,
@@ -252,8 +261,9 @@ export async function activatePayment(
 
   let automation: unknown = null
   try {
-    // REAL provisioning (Docker container / Dynadot domain / Mailcow email),
-    // not the old simulation. Idempotent via a metadata flag.
+    // REAL provisioning (Docker container / Dynadot domain / Mailcow email).
+    // Idempotent via the Payment.provisionStatus claim; a failure is recorded
+    // there (retry_pending / manual_review) for the sweep and the admin view.
     automation = await provisionForPayment(updatedPayment.id)
   } catch (error) {
     // The money is confirmed — never fail the confirmation because

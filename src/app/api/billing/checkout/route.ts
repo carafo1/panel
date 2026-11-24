@@ -14,6 +14,7 @@ import {
   duplicateOrderMessage,
 } from '@/lib/email-order-guard'
 import { activatePayment } from '@/lib/payment-activation'
+import { createDomainOrder } from '@/lib/domain-checkout'
 import { createSubscriptionInvoice, cycleDays } from '@/lib/invoices'
 import {
   processPayment,
@@ -271,6 +272,83 @@ async function postHandler(request: Request) {
     // but never actually checked anywhere.
     const gate = await requireVerifiedEmail(decoded.userId, decoded.role)
     if (!gate.ok) return gate.response!
+
+    // ── Domains go through a DomainOrder, never the orchestration pipeline ──
+    // This endpoint used to take the money and then have provisioning call the
+    // registrar directly: one year regardless of what was asked, no registrant
+    // contacts, no availability / format / already-held checks, and no
+    // DomainOrder to reconcile against. A domain purchase is now a domain order
+    // (validation, contacts, plan allowance, availability, quote, invoice) and
+    // is fulfilled by fulfilDomainOrder once the payment is confirmed.
+    if (type === 'both') {
+      return NextResponse.json(
+        {
+          error:
+            'Hosting and a domain cannot be bought in one order any more. Buy the hosting plan, then register the domain from the Domains page.',
+          code: 'DOMAIN_CHECKOUT_REQUIRED',
+        },
+        { status: 400 }
+      )
+    }
+    if (type === 'domain') {
+      const name = typeof domainName === 'string' ? domainName.trim().toLowerCase() : ''
+      if (!name) {
+        return NextResponse.json({ error: 'domainName is required' }, { status: 400 })
+      }
+      const activeDomainMethod = await resolveActiveMethod(requestedMethod)
+      if (!activeDomainMethod) {
+        return NextResponse.json(
+          {
+            error: `Payment method "${requestedMethod}" is not available. Please choose another method.`,
+          },
+          { status: 400 }
+        )
+      }
+      const registrant =
+        body.registrant && typeof body.registrant === 'object' ? body.registrant : undefined
+      if (!registrant) {
+        return NextResponse.json(
+          {
+            error:
+              'Registering a domain needs the registrant contact details. Use the Domains page to register it.',
+            code: 'REGISTRANT_REQUIRED',
+          },
+          { status: 400 }
+        )
+      }
+      const order = await createDomainOrder({
+        userId: decoded.userId,
+        email: user.email,
+        domain: name,
+        years: Number(body.years) || 1,
+        kind: 'register',
+        method: requestedMethod,
+        registrant,
+      })
+      if (!order.success) {
+        return NextResponse.json(
+          { error: order.error || 'Could not create the domain order' },
+          { status: 400 }
+        )
+      }
+      return NextResponse.json(
+        {
+          success: true,
+          method: requestedMethod,
+          status: order.status,
+          url: order.redirectUrl,
+          redirectUrl: order.redirectUrl,
+          paymentId: order.paymentId,
+          orderId: order.orderId,
+          invoiceId: order.invoiceId,
+          invoiceNumber: order.invoiceNumber,
+          amount: order.amount,
+          currency: order.currency,
+          demo: false,
+        },
+        { status: 201 }
+      )
+    }
 
     // Charge the real per-TLD selling price from the DomainPrice catalogue.
     //
