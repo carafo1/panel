@@ -44,6 +44,23 @@ export interface ExecResult {
   timedOut: boolean
 }
 
+/**
+ * Run the MySQL-family client that exists in the container. MariaDB images
+ * ship `mariadb` / `mariadb-dump`; MySQL images (mysql:8) only ship
+ * `mysql` / `mysqldump`. Always calling `mariadb` made every query on a
+ * MySQL database fail ("executable file not found", reported as a bare
+ * "Query failed"). Arguments are passed positionally to sh ("$@"), never
+ * interpolated into the script.
+ */
+export function mysqlFamilyClient(preferred: string, fallback: string): string[] {
+  return [
+    'sh',
+    '-c',
+    `if command -v ${preferred} >/dev/null 2>&1; then exec ${preferred} "$@"; else exec ${fallback} "$@"; fi`,
+    'sh',
+  ]
+}
+
 /** Hard ceiling on output we buffer, to protect the panel from a runaway query. */
 const MAX_OUTPUT_BYTES = 25 * 1024 * 1024 // 25 MB
 
@@ -79,7 +96,7 @@ function buildArgs(input: ExecInput): { cmd: string; args: string[]; env: string
     '-e',
     `MYSQL_PWD=${input.password}`,
     input.container,
-    'mariadb',
+    ...mysqlFamilyClient('mariadb', 'mysql'),
     `-u${input.user}`,
     ...(input.clientArgs ?? ['--batch']),
     ...(input.database ? [input.database] : []),
@@ -265,7 +282,7 @@ export function execDump(input: DumpInput): Promise<ExecResult> {
         '-e',
         `MYSQL_PWD=${input.password}`,
         input.container,
-        'mariadb-dump',
+        ...mysqlFamilyClient('mariadb-dump', 'mysqldump'),
         `-u${input.user}`,
         '--single-transaction',
         '--skip-lock-tables',
