@@ -164,6 +164,11 @@ async function runWp(site: Site, script: string, timeoutMs = 120_000, secrets: s
     // left WP-CLI without core files, so every plugin, theme and user action
     // failed with "This does not seem to be a WordPress installation".
     `--volumes-from ${shellQuote(site.containerName!)} -w /var/www/html ` +
+    // WordPress reads $_SERVER['HTTP_HOST'], which a CLI run lacks: PHP then
+    // printed a warning into the output and the plugin/theme/admin lists
+    // failed to parse (the tab showed them empty). PHP CLI takes $_SERVER
+    // from the environment, so pass the site's host.
+    `-e HTTP_HOST=${shellQuote(site.customDomain || site.subdomain)} ` +
     `wordpress:cli sh -c ${shellQuote(script)}`
   let result: { stdout: string; stderr: string; exitCode: number | null }
   try {
@@ -185,15 +190,23 @@ function lastLine(out: string): string {
   return (err || lines[lines.length - 1] || 'WordPress reported an error').slice(0, 300)
 }
 
-function parseJsonArray<T>(text: string): T[] {
-  const start = text.indexOf('[')
-  if (start === -1) return []
-  try {
-    const v = JSON.parse(text.slice(start))
-    return Array.isArray(v) ? (v as T[]) : []
-  } catch {
-    return []
+/**
+ * The JSON array in a WP-CLI section. Other output can precede it (PHP
+ * notices start with a "[date]" bracket too), so each line that opens an
+ * array is tried, not just the first "[" in the text.
+ */
+export function parseJsonArray<T>(text: string): T[] {
+  const lines = text.split(/\r?\n/)
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i].trimStart().startsWith('[')) continue
+    try {
+      const v = JSON.parse(lines.slice(i).join(String.fromCharCode(10)).trim())
+      if (Array.isArray(v)) return v as T[]
+    } catch {
+      /* not this line: keep looking */
+    }
   }
+  return []
 }
 
 // ─── Demo-mode model (development only) ────────────────────────────────────
