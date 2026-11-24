@@ -21,6 +21,18 @@ export async function register() {
     console.error('[instrumentation] loading Dynadot settings failed:', err)
   }
 
+  // Site imports run inside this process: one that was running when the
+  // previous process stopped (a deploy, a crash) is restarted now instead of
+  // sitting at "running" until a sweep fails it hours later.
+  setTimeout(() => {
+    import('./lib/migration/resume')
+      .then(({ resumeInterruptedMigrations }) => resumeInterruptedMigrations())
+      .then((n) => {
+        if (n > 0) console.log(`[instrumentation] resumed ${n} interrupted site import(s)`)
+      })
+      .catch((err) => console.error('[instrumentation] resuming site imports failed:', err))
+  }, 8000)
+
   if (process.env.DISABLE_CRON_SCHEDULER === '1') return
 
   setTimeout(() => {

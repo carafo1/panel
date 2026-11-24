@@ -872,6 +872,10 @@ function SearchSkeleton() {
 
 /** Lookup failed (registrar unreachable, rate limited, bad input). */
 function SearchErrorNotice({ message, onRetry }: { message: string; onRetry: () => void }) {
+  // A typing mistake (the server answers 400 "Enter a valid domain name") is
+  // not an outage: it used to appear under "Couldn't check availability" with
+  // a Try again button that could never succeed.
+  const invalidName = /valid domain name/i.test(message)
   return (
     <div
       role="alert"
@@ -879,12 +883,14 @@ function SearchErrorNotice({ message, onRetry }: { message: string; onRetry: () 
     >
       <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-400 shrink-0" aria-hidden="true" />
       <div className="flex-1 text-sm">
-        <p className="font-medium">Couldn&rsquo;t check availability</p>
+        <p className="font-medium">{invalidName ? 'Check the domain name' : <>Couldn&rsquo;t check availability</>}</p>
         <p className="text-muted-foreground">{message}</p>
       </div>
-      <Button variant="outline" size="sm" onClick={onRetry}>
-        <RefreshCw className="h-3.5 w-3.5 me-1.5" /> Try again
-      </Button>
+      {!invalidName && (
+        <Button variant="outline" size="sm" onClick={onRetry}>
+          <RefreshCw className="h-3.5 w-3.5 me-1.5" /> Try again
+        </Button>
+      )}
     </div>
   )
 }

@@ -52,7 +52,9 @@ export const useAppStore = create<AppState>((set) => ({
   view: 'landing',
   dashboardTab: 'overview',
   authMode: 'login',
-  sidebarOpen: true,
+  // Closed by default: on phones the open drawer covered every page on load.
+  // Desktop always shows the sidebar (lg:translate-x-0), whatever this says.
+  sidebarOpen: false,
   selectedProjectId: null,
   selectedDomainId: null,
   publicPage: { page: 'home' },

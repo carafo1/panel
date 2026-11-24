@@ -55,6 +55,31 @@ step() { echo ""; echo "${BLUE}${BOLD}── $* ──${NC}"; }
 
 cd "$INSTALL_DIR"
 
+# ── Wait for running site imports ─────────────────────────────────────────
+# Imports run inside the panel process; restarting it cuts them off (they are
+# restarted automatically afterwards, but a 400 MB transfer starts over).
+# Wait for them to finish first, up to IMPORT_WAIT_MINUTES (default 45);
+# IMPORT_WAIT_MINUTES=0 skips the wait.
+IMPORT_WAIT_MINUTES="${IMPORT_WAIT_MINUTES:-45}"
+DB_FILE="$INSTALL_DIR/db/custom.db"
+if [[ "$IMPORT_WAIT_MINUTES" -gt 0 ]] && command -v sqlite3 >/dev/null && [[ -f "$DB_FILE" ]]; then
+  running() { sqlite3 "file:$DB_FILE?mode=ro" "select count(*) from SiteMigration where status in ('pending','detecting','running','verifying');" 2>/dev/null || echo 0; }
+  n=$(running)
+  if [[ "$n" -gt 0 ]]; then
+    step "Waiting for $n running site import(s) to finish"
+    for ((i = 0; i < IMPORT_WAIT_MINUTES * 4; i++)); do
+      sleep 15
+      n=$(running)
+      [[ "$n" -eq 0 ]] && break
+    done
+    if [[ "$n" -gt 0 ]]; then
+      warn "$n import(s) still running after ${IMPORT_WAIT_MINUTES} min — continuing; they restart automatically after the update."
+    else
+      ok "Imports finished"
+    fi
+  fi
+fi
+
 # ── Pause background jobs ─────────────────────────────────────────────────
 # The worker drives the billing sweep. Keep it stopped until the new code
 # has been checked (see "Billing preview" below), so new billing rules never

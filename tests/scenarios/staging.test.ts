@@ -91,6 +91,24 @@ describe('staging copy commands', () => {
     rmSync(root, { recursive: true, force: true })
   })
 
+  it.skipIf(!haveBash)('WordPress: copies wp-content between the site/ layout and the older flat layout', () => {
+    const root = mkdtempSync(join(tmpdir(), 'stg-layout-'))
+    const live = join(root, 'live'), stg = join(root, 'stg')
+    // Live: new layout (everything in site/). Staging: old flat layout.
+    mkdirSync(join(live, 'site', 'wp-content', 'themes'), { recursive: true })
+    writeFileSync(join(live, 'site', 'wp-content', 'themes', 'style.css'), 'live theme')
+    writeFileSync(join(live, 'site', 'wp-config.php'), 'LIVE DB PASSWORD')
+    mkdirSync(join(stg, 'wp-content'), { recursive: true })
+    expect(sh(copyFilesScript('wordpress', posix(live), posix(stg), { replace: true })).code).toBe(0)
+    expect(readFileSync(join(stg, 'wp-content', 'themes', 'style.css'), 'utf8')).toBe('live theme')
+    expect(existsSync(join(stg, 'wp-config.php'))).toBe(false)
+    // And into a new-layout staging site.
+    mkdirSync(join(stg, 'site', 'wp-content'), { recursive: true })
+    expect(sh(copyFilesScript('wordpress', posix(live), posix(stg), { replace: true })).code).toBe(0)
+    expect(readFileSync(join(stg, 'site', 'wp-content', 'themes', 'style.css'), 'utf8')).toBe('live theme')
+    rmSync(root, { recursive: true, force: true })
+  })
+
   it.skipIf(!haveBash || process.platform === 'win32')('WordPress: a wp-content symlink is refused, never followed', () => {
     const root = mkdtempSync(join(tmpdir(), 'stg-link-'))
     const live = join(root, 'live'), stg = join(root, 'stg'), secret = join(root, 'host-secret')
@@ -111,7 +129,7 @@ describe('staging copy commands', () => {
     expect(cmd.startsWith('docker run --rm --network none')).toBe(true)
     expect(cmd).toContain('-v /opt/deployhub/projects/live:/src:ro -v /opt/deployhub/projects/stg:/dst')
     expect(cmd).toContain('--cap-drop ALL')
-    expect(cmd).toContain('/src/wp-content')
+    expect(cmd).toContain('/src/site')
     expect(cmd).not.toContain('/opt/deployhub/projects/live/wp-content')
     expect(() => copyFilesCommand('files', '/etc', '/opt/deployhub/projects/stg', { replace: false })).toThrow()
     expect(() => copyFilesCommand('files', '/opt/deployhub/projects/a/../../../etc', '/opt/deployhub/projects/stg', { replace: false })).toThrow()

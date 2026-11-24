@@ -555,20 +555,40 @@ define('WP_DEBUG', false);
 if (!defined('ABSPATH')) define('ABSPATH', dirname(__FILE__) . '/');
 require_once ABSPATH . 'wp-settings.php';
 `
-  const target = `${deployPath}/wp-config-docker.php`
-  const fix = await exec(
+  // Layout: everything in <deployPath>/site, mounted as /var/www/html.
+  // Sites deployed before kept only wp-content (and wp-config-docker.php,
+  // mounted over wp-config.php) on disk; core lived inside the container where
+  // the file manager could not show it. Move such a site over once.
+  const site = `${deployPath}/site`
+  const S = shellQuote(site)
+  const D = shellQuote(deployPath)
+  const layout = await exec(
     client,
-    `if [ -d ${shellQuote(target)} ] && [ ! -L ${shellQuote(target)} ]; then rmdir ${shellQuote(target)} 2>/dev/null && echo REMOVED_EMPTY_DIR || { echo NOT_EMPTY; exit 3; }; fi`,
-    { timeoutMs: 10000 }
+    [
+      `cd ${D} || exit 4`,
+      `if [ -L site ]; then echo 'site must be a folder, not a link' >&2; exit 5; fi`,
+      `mkdir -p site`,
+      // Old wp-content -> site/wp-content (only if the new one does not exist yet).
+      `if [ -d wp-content ] && [ ! -L wp-content ] && [ ! -e site/wp-content ]; then mv wp-content site/wp-content && echo MOVED_CONTENT; fi`,
+      // Leftovers of the old layout (an empty folder Docker made, or the old file).
+      `if [ -d wp-config-docker.php ] && [ ! -L wp-config-docker.php ]; then rmdir wp-config-docker.php 2>/dev/null || { echo 'wp-config-docker.php is a folder with files in it' >&2; exit 3; }; fi`,
+      `rm -f wp-config-docker.php`,
+      `if [ -d site/wp-config.php ] && [ ! -L site/wp-config.php ]; then rmdir site/wp-config.php 2>/dev/null || exit 3; fi`,
+      `chown 33:33 ${S}`,
+    ].join('\n'),
+    { timeoutMs: 60000 }
   )
-  if (fix.exitCode === 3) {
+  if (layout.exitCode === 3) {
     throw new Error('wp-config-docker.php is a folder with files in it. Remove or rename that folder, then redeploy.')
   }
-  if (fix.stdout.includes('REMOVED_EMPTY_DIR')) {
-    log('Removed an empty wp-config-docker.php folder left by an earlier failed deploy.')
+  if (layout.exitCode !== 0) {
+    throw new Error(`Could not prepare the site folder: ${(layout.stderr || layout.stdout).trim().slice(0, 200)}`)
   }
-  await unlinkSymlinks(client, deployPath, ['wp-config-docker.php'])
-  await putFile(client, target, cfg, { mode: 0o644 })
+  if (layout.stdout.includes('MOVED_CONTENT')) {
+    log('Moved wp-content into site/ — every WordPress file is now in the site folder.')
+  }
+  await unlinkSymlinks(client, site, ['wp-config.php'])
+  await putFile(client, `${site}/wp-config.php`, cfg, { mode: 0o644 })
 }
 
 async function unlinkSymlinks(
@@ -2970,15 +2990,13 @@ services:
       WORDPRESS_DB_HOST: ${dbHost}:3306
       WORDPRESS_DB_USER: ${project.databaseUser || 'wp'}
       WORDPRESS_DB_NAME: ${project.databaseName || 'wp'}
-      # No WORDPRESS_DB_PASSWORD here on purpose. The real credential is
-      # written into wp-config-docker.php (mounted over wp-config.php), which
-      # is what WordPress actually reads. This previously referenced an
-      # undefined ${'$'}{WP_DB_PASSWORD}, so Compose printed
-      # "variable is not set. Defaulting to a blank string" in the customer's
-      # install log — alarming, and it looked like the cause of the failure.
+      # No WORDPRESS_DB_PASSWORD here on purpose. The real credential is in
+      # the managed site/wp-config.php, which is what WordPress reads.
 ${envEntries(opts.envVars) ? envEntries(opts.envVars) + '\n' : ''}    volumes:
-      - ./wp-content:/var/www/html/wp-content
-      - ./wp-config-docker.php:/var/www/html/wp-config.php
+      # The WHOLE site lives on disk in ./site (core, wp-content, config), so
+      # the file manager, SFTP and backups see every file. The image copies
+      # WordPress core in on first start without touching existing content.
+      - ./site:/var/www/html
 ${limits ? limits + '\n' : ''}${health ? health + '\n' : ''}    networks:
       - default
       - deployhub
@@ -3058,7 +3076,7 @@ services:
       WORDPRESS_DB_PASSWORD: wpdbpass_${randomHex(8)}
       WORDPRESS_DB_NAME: wp
 ${env ? env + '\n' : ''}    volumes:
-      - ./wp-content:/var/www/html/wp-content
+      - ./site:/var/www/html
     depends_on:
       - db
 ${limits ? limits + '\n' : ''}${health ? health + '\n' : ''}    networks:

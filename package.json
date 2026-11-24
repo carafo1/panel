@@ -17,7 +17,7 @@
     "typecheck": "tsc --noEmit -p .",
     "test:integration": "bun test tests/integration/",
     "test:e2e": "playwright test",
-    "test:all": "bun test tests/",
+    "test:all": "bun run test && bun run test:scenarios && bun run test:integration",
     "test:security": "bash deploy/scripts/comprehensive-security-scan.sh",
     "db:push": "prisma db push",
     "db:pg-schema": "bun run scripts/postgres-schema.ts",
