@@ -159,7 +159,13 @@ if [ -d "$APP_DIR" ] && [ "$(id -u)" = "0" ]; then
   # Internal services must listen on loopback only.
   for p in 3000 3003 2019 8081; do
     exposed=$(ss -Hltn "sport = :$p" 2>/dev/null | awk '{print $4}' | grep -vE '^(127\.0\.0\.1|\[::1\]|::1):' | head -1)
-    [ -z "$exposed" ] && ok "port $p not exposed publicly" || bad "port $p not exposed publicly" "listening on $exposed"
+    if [ -z "$exposed" ]; then
+      ok "port $p not exposed publicly"
+    elif ufw status 2>/dev/null | grep -q '^Status: active' && ! ufw status 2>/dev/null | grep -qE "^$p(/tcp)?[[:space:]]+ALLOW"; then
+      ok "port $p blocked by the firewall (listens on $exposed)"
+    else
+      bad "port $p not exposed publicly" "listening on $exposed and allowed by the firewall"
+    fi
   done
   for p in 3306 5432 6379 11211; do
     exposed=$(ss -Hltn "sport = :$p" 2>/dev/null | awk '{print $4}' | grep -vE '^(127\.|\[::1\]|::1|172\.|10\.)' | head -1)
@@ -182,7 +188,12 @@ if [ -d "$APP_DIR" ] && [ "$(id -u)" = "0" ]; then
   section "Logs (last hour)"
   errs=$(journalctl -u apsamo-panel -u apsamo-worker -u apsamo-realtime --since "-60 min" -p err --no-pager 2>/dev/null | grep -vc '^-- ')
   [ "$errs" = "0" ] && ok "no errors from panel, worker or realtime" || warn "errors logged in the last hour" "$errs lines (journalctl -u apsamo-worker -p err)"
-  journalctl -u apsamo-worker --since "-90 min" --no-pager 2>/dev/null | grep -q "\[worker\]" && ok "worker is processing" || warn "worker activity" "no worker log lines in 90 min"
+  restarts=$(systemctl show apsamo-worker -p NRestarts --value 2>/dev/null || echo 0)
+  if systemctl is-active --quiet apsamo-worker && [ "${restarts:-0}" -lt 5 ]; then
+    ok "worker running (automatic restarts: ${restarts:-0})"
+  else
+    bad "worker running" "inactive, or restarted ${restarts:-?} times"
+  fi
   df_root=$(df -P / | awk 'NR==2 {print $5}' | tr -d %)
   [ "$df_root" -lt 85 ] && ok "disk usage ${df_root}%" || bad "disk usage" "${df_root}% used"
   mem=$(free | awk '/Mem:/ {printf "%d", $7/$2*100}')

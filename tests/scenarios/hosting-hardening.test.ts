@@ -237,3 +237,16 @@ describe('domain search input', () => {
     expect(bulk.status).toBe(400)
   })
 })
+
+describe('platform subdomain stays reachable', () => {
+  it('a site whose verified custom domain is primary still serves its subdomain', async () => {
+    const domain = `${uid('primary')}.com`.toLowerCase()
+    const p = await makeProject(owner.id, { serverId, customDomain: domain, containerName: uid('dh-prim'), externalPort: 31777 })
+    await db.websiteDomain.create({ data: { projectId: p.id, domain, verified: true, isPrimary: true } })
+    const { configs, servedHosts } = await buildServerProxyConfigs(serverId, true)
+    expect(servedHosts.get(p.id)).toBe(domain)
+    const mine = configs.find((c) => c.hostname === domain)!
+    expect(mine.extraHostnames).toContain(p.subdomain)
+    expect(mine.extraHostnames).not.toContain(domain) // not listed twice
+  })
+})

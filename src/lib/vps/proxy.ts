@@ -339,15 +339,18 @@ export async function buildServerProxyConfigs(
     // zone we publish has www as a CNAME to the domain, so leaving it out of
     // the proxy made www.<domain> fail (no site, no certificate).
     extraHostnames: [
-      ...new Set(
-        allCustomDomains
+      ...new Set([
+        // Keep the platform subdomain working when a custom domain is the
+        // primary: links to it used to stop resolving to the site.
+        ...(servedHosts.get(p.id) !== p.subdomain ? [p.subdomain] : []),
+        ...allCustomDomains
           .filter((d) => d.projectId === p.id)
           .flatMap((d) => {
             const name = d.domain.toLowerCase()
             return d.zoneCreated && !name.startsWith('www.') ? [name, `www.${name}`] : [name]
-          })
-      ),
-    ],
+          }),
+      ]),
+    ].filter((h) => h !== servedHosts.get(p.id)),
     // Localhost single-box: the host Caddy isn't on the docker network, so it
     // reaches the container via its published host port. Remote VPS: Caddy
     // shares the deployhub network and resolves the container name.
