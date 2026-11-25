@@ -53,6 +53,52 @@ import {
   type ConfineMode,
 } from './path-confine'
 import { archiveListingCommand, findUnsafeArchiveEntries, unsafeArchiveMessage } from './archive-safety'
+import {
+  ARCHIVE_TIME_LIMIT_SECONDS,
+  EXIT_NOT_A_FOLDER,
+  EXIT_TARGET_EXISTS,
+  EXIT_TIMED_OUT,
+  EXIT_TOO_LARGE,
+  MAX_DEST_SYMLINKS,
+  MAX_EXTRACT_ARCHIVE_BYTES,
+  MAX_EXTRACT_ENTRIES,
+  MAX_EXTRACT_UNCOMPRESSED_BYTES,
+  MAX_PREVIEW_BYTES,
+  archiveContentTotals,
+  archiveKindOf,
+  archiveMemberNames,
+  chmodCommand,
+  copyMoveCommand,
+  extractCommand,
+  extractSucceeded,
+  findManagedCollisions,
+  findSymlinkCollisions,
+  isDocumentRoot,
+  isManagedRelPath,
+  isSameOrInside,
+  listDestSymlinksCommand,
+  normalizeRel,
+  parseOctalMode,
+  previewContentType,
+  stageArchiveCommand,
+  validateSelection,
+  zipCommand,
+  zipFileName,
+} from './file-ops'
+import {
+  DemoFsError,
+  demoChmod,
+  demoCompress,
+  demoCopy,
+  demoExtract,
+  demoList,
+  demoMkdir,
+  demoRead,
+  demoRemove,
+  demoRename,
+  demoStat,
+  demoWrite,
+} from './demo-files'
 
 /**
  * A path the customer asked for that we refuse (absolute, `..`, escapes the
@@ -64,6 +110,39 @@ export class PathError extends Error {
     super(message)
     this.name = 'PathError'
   }
+}
+
+/**
+ * A file operation that ran but failed on the server (zip missing, disk
+ * full, timed out). The message is written for the customer and never
+ * carries host paths outside the site, so routes may show it (422).
+ */
+export class FileOperationError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'FileOperationError'
+  }
+}
+
+/** Run a demo-tree operation; its refusals are the caller's mistake (400). */
+function demoOp<T>(fn: () => T): T {
+  try {
+    return fn()
+  } catch (err) {
+    if (err instanceof DemoFsError) throw new PathError(err.message)
+    throw err
+  }
+}
+
+/** The path of a resolved location relative to the site's base ("" = base). */
+function relOf(r: { abs: string; base: string }): string {
+  return normalizeRel(path.posix.relative(r.base.replace(/\/+$/, ''), r.abs))
+}
+
+/** Last lines of a command's output for an error message, minus host paths. */
+function failureDetail(r: { stdout: string; stderr: string }, base: string): string {
+  const text = (r.stderr || r.stdout || '').trim().split('\n').slice(-3).join(' ')
+  return text.split(base.replace(/\/+$/, '')).join('').slice(0, 240)
 }
 
 // ─── Per-project storage root (LOCAL mode) ──────────────────────────────
@@ -348,9 +427,18 @@ export async function listFiles(
   const rp = await resolveProjectPath(project, subdir || '.')
   const { abs: resolved, base, isDemo } = rp
 
-  // Demo mode: synthetic listing.
+  // Demo mode: the in-memory website tree (demo-files.ts).
   if (isDemo) {
-    return demoListing(resolved, base)
+    const root = base.replace(/\/+$/, '')
+    return demoOp(() => demoList(projectId, relOf(rp))).map((e) => ({
+      name: e.name,
+      path: e.path,
+      absolutePath: `${root}/${e.path}`,
+      type: e.type,
+      size: e.size,
+      modifiedAt: e.modifiedAt,
+      permissions: e.permissions,
+    }))
   }
 
   await checkLocalConfinement(rp, resolved, 'list')
@@ -394,7 +482,8 @@ export async function uploadFile(
   const { abs, isDemo } = rp
 
   if (isDemo) {
-    return { ok: true, message: `[demo] Uploaded ${path.basename(abs)} (${content.length} bytes)` }
+    demoOp(() => demoWrite(projectId, relOf(rp), content))
+    return { ok: true, message: `Uploaded ${path.posix.basename(abs)}` }
   }
 
   await checkLocalConfinement(rp, abs, 'write')
@@ -427,10 +516,10 @@ export async function downloadFile(
   const filename = path.posix.basename(abs)
 
   if (isDemo) {
-    // Synthetic 1KB text body so the browser triggers a download.
-    const body = Buffer.from(
-      `# ${filename}\n\nThis is a demo-mode placeholder file.\nProject: ${project.slug}\n`
-    )
+    // Uploads over the demo tree's size cap keep only their size.
+    const stored = demoOp(() => demoRead(projectId, relOf(rp)))
+    const body =
+      stored ?? Buffer.from(`# ${filename}\n\nThis is a demo-mode placeholder file.\nProject: ${project.slug}\n`)
     return { content: body, filename, size: body.length }
   }
 
@@ -463,7 +552,8 @@ export async function deleteFile(
   }
 
   if (isDemo) {
-    return { ok: true, message: `[demo] Deleted ${path.posix.basename(abs)}` }
+    demoOp(() => demoRemove(projectId, relOf(rp)))
+    return { ok: true, message: `Deleted ${path.posix.basename(abs)}` }
   }
 
   // 'remove' lets a symlink itself be deleted (rm never follows the final
@@ -492,7 +582,8 @@ export async function createDirectory(
   const { abs, isDemo } = rp
 
   if (isDemo) {
-    return { ok: true, message: `[demo] Created directory ${path.posix.basename(abs)}` }
+    demoOp(() => demoMkdir(projectId, relOf(rp)))
+    return { ok: true, message: 'Directory created' }
   }
 
   await checkLocalConfinement(rp, abs, 'write')
@@ -520,7 +611,8 @@ export async function renameFile(
   const resolvedNew = await resolveProjectPath(project, newPath)
 
   if (resolvedOld.isDemo || resolvedNew.isDemo) {
-    return { ok: true, message: `[demo] Renamed ${oldPath} → ${newPath}` }
+    demoOp(() => demoRename(projectId, relOf(resolvedOld), relOf(resolvedNew)))
+    return { ok: true, message: 'Renamed' }
   }
 
   await checkLocalConfinement(resolvedOld, resolvedOld.abs, 'read')
@@ -561,8 +653,12 @@ export async function getFileContent(
   const { abs, isDemo } = rp
 
   if (isDemo) {
-    const demo = `# ${path.posix.basename(abs)}\n\nThis is a demo-mode placeholder.\n`
-    return { content: demo, size: demo.length, truncated: false }
+    const stat = demoOp(() => demoStat(projectId, relOf(rp)))
+    if (!stat) throw new PathError('That file does not exist.')
+    const stored = demoOp(() => demoRead(projectId, relOf(rp)))
+    const text = stored ? stored.toString('utf8') : `# ${path.posix.basename(abs)}\n\nThis is a demo-mode placeholder.\n`
+    const truncated = text.length > maxBytes
+    return { content: truncated ? text.slice(0, maxBytes) : text, size: stat.size, truncated }
   }
 
   await checkLocalConfinement(rp, abs, 'read')
@@ -601,7 +697,8 @@ export async function saveFileContent(
   const { abs, isDemo } = rp
 
   if (isDemo) {
-    return { ok: true, message: `[demo] Saved ${path.posix.basename(abs)} (${content.length} bytes)` }
+    demoOp(() => demoWrite(projectId, relOf(rp), content))
+    return { ok: true, message: 'Saved' }
   }
 
   await checkLocalConfinement(rp, abs, 'write')
@@ -769,33 +866,394 @@ export async function importArchive(
   return { ok: true, message: `Imported ${originalName || 'archive'}` }
 }
 
-// ─── Demo-mode synthetic listing ─────────────────────────────────────────
+// ─── Server-side operations: chmod, compress, extract, copy/move, preview ──
+//
+// Command building and validation live in file-ops.ts (unit-tested); these
+// wrappers resolve paths, apply the same confinement checks as above, and
+// run the command on the site's host (or the demo tree).
 
-function demoListing(resolved: string, deployPath: string): FileEntry[] {
-  // Only the root has a synthetic tree; subdirs return empty.
-  const isRoot = resolved.replace(/\/$/, '') === deployPath.replace(/\/$/, '')
-  if (!isRoot) return []
-  const now = new Date().toISOString()
-  const mk = (
-    name: string,
-    type: FileEntry['type'],
-    size: number,
-    perms: string
-  ): FileEntry => ({
-    name,
-    path: name,
-    absolutePath: `${deployPath.replace(/\/$/, '')}/${name}`,
-    type,
-    size,
-    modifiedAt: now,
-    permissions: perms,
+async function loadProject(projectId: string) {
+  const project = await db.project.findUnique({
+    where: { id: projectId },
+    include: { server: true },
   })
-  return [
-    mk('public', 'dir', 4096, 'rwxr-xr-x'),
-    mk('index.html', 'file', 612, 'rw-r--r--'),
-    mk('README.md', 'file', 184, 'rw-r--r--'),
-    mk('package.json', 'file', 256, 'rw-r--r--'),
-    mk('Dockerfile', 'file', 412, 'rw-r--r--'),
-    mk('.env.example', 'file', 88, 'rw-r--r--'),
-  ]
+  if (!project) throw new Error('Project not found')
+  return project
+}
+
+type ChmodOptions =
+  | { mode: string; recursive?: false }
+  | { recursive: true; dirMode: string; fileMode: string }
+
+/**
+ * Change the permissions of one file or folder. Recursive changes (folders
+ * only) set one mode on every folder and another on every file, never
+ * following links. setuid/setgid are refused; platform files and the hosting
+ * root keep the modes the platform gives them.
+ */
+export async function chmodPath(
+  projectId: string,
+  pathArg: string,
+  input: { mode?: unknown; recursive?: unknown; dirMode?: unknown; fileMode?: unknown }
+): Promise<{ ok: boolean; message: string; changed: number }> {
+  let opts: ChmodOptions
+  if (input.recursive === true) {
+    const dir = parseOctalMode(input.dirMode ?? input.mode)
+    if (!dir.ok) throw new PathError(dir.error)
+    const file = parseOctalMode(input.fileMode)
+    if (!file.ok) throw new PathError(file.error)
+    opts = { recursive: true, dirMode: dir.mode, fileMode: file.mode }
+  } else {
+    const m = parseOctalMode(input.mode)
+    if (!m.ok) throw new PathError(m.error)
+    opts = { mode: m.mode }
+  }
+
+  const project = await loadProject(projectId)
+  const rp = await resolveProjectPath(project, pathArg)
+  const rel = relOf(rp)
+  if (!rel) throw new PathError('The permissions of the hosting root are managed by the platform.')
+  if (isManagedRelPath(rel)) {
+    throw new PathError('This file is managed by Apsamo; the platform sets its permissions.')
+  }
+  const label = opts.recursive ? `${opts.dirMode} on folders and ${opts.fileMode} on files` : opts.mode
+
+  if (rp.isDemo) {
+    const changed = demoOp(() => demoChmod(projectId, rel, opts))
+    return { ok: true, message: `Permissions set to ${label}`, changed }
+  }
+
+  // chmod follows a link named on the command line, so a link is refused
+  // outright ('read' mode); recursive walks never follow links (find -P).
+  await checkLocalConfinement(rp, rp.abs, 'read')
+  const creds = await getServerCredentials(project.serverId!)
+  await withConnection(creds, async (client) => {
+    const r = await guardedExec(client, rp.base, [[rp.abs, 'read']], chmodCommand(rp.abs, opts), 120000)
+    if (r.exitCode === EXIT_NOT_A_FOLDER) throw new PathError('Only folders can be changed recursively.')
+    if (r.exitCode !== 0) {
+      throw new FileOperationError(`Permissions were not changed: ${failureDetail(r, rp.base) || 'unknown error'}`)
+    }
+  })
+  return { ok: true, message: `Permissions set to ${label}`, changed: 1 }
+}
+
+/**
+ * Compress items of one folder into `<folder>/<name>.zip` on the server.
+ * Links are stored as links; the input size and run time are bounded.
+ */
+export async function compressPaths(
+  projectId: string,
+  dirArg: string,
+  items: unknown,
+  nameArg: unknown
+): Promise<{ ok: boolean; message: string; path: string }> {
+  const selection = validateSelection(items)
+  if (!selection.ok) throw new PathError(selection.error)
+  const zip = zipFileName(nameArg)
+  if (!zip.ok) throw new PathError(zip.error)
+
+  const dirRel = normalizeRel(dirArg)
+  const names: string[] = []
+  for (const p of selection.paths) {
+    const parent = p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : ''
+    if (parent !== dirRel) throw new PathError('Everything you compress must be in the same folder.')
+    names.push(p.slice(parent ? parent.length + 1 : 0))
+  }
+  const outRel = dirRel ? `${dirRel}/${zip.name}` : zip.name
+
+  const project = await loadProject(projectId)
+  const dir = await resolveProjectPath(project, dirRel || '.')
+  const out = await resolveProjectPath(project, outRel)
+  const resolvedItems = await Promise.all(selection.paths.map((p) => resolveProjectPath(project, p)))
+
+  if (dir.isDemo) {
+    demoOp(() => demoCompress(projectId, dirRel, names, zip.name))
+    return { ok: true, message: `Created ${zip.name}`, path: outRel }
+  }
+
+  await checkLocalConfinement(dir, dir.abs, 'list')
+  await checkLocalConfinement(out, out.abs, 'write')
+  // An item may itself be a link (zip -y stores it as one); its folder must
+  // still resolve inside the site.
+  for (const it of resolvedItems) await checkLocalConfinement(it, it.abs, 'remove')
+
+  const creds = await getServerCredentials(project.serverId!)
+  await withConnection(creds, async (client) => {
+    const guards: Array<[string, ConfineMode]> = [
+      [dir.abs, 'list'],
+      [out.abs, 'write'],
+      ...resolvedItems.map((it): [string, ConfineMode] => [it.abs, 'remove']),
+    ]
+    const r = await guardedExec(
+      client,
+      dir.base,
+      guards,
+      zipCommand(dir.abs, names, out.abs),
+      (ARCHIVE_TIME_LIMIT_SECONDS + 60) * 1000
+    )
+    if (r.exitCode === EXIT_TARGET_EXISTS) throw new PathError(`${zip.name} already exists in this folder.`)
+    if (r.exitCode === EXIT_TOO_LARGE) {
+      throw new PathError('The selection is larger than 2 GB. Compress smaller parts, or use SFTP.')
+    }
+    if (r.exitCode === EXIT_TIMED_OUT) throw new FileOperationError('Compressing took too long and was stopped.')
+    if (r.exitCode !== 0 || !/__APSAMO_ZIP_DONE__/.test(r.stdout)) {
+      const detail = failureDetail(r, dir.base)
+      throw new FileOperationError(
+        /zip: (command )?not found/.test(detail)
+          ? 'The zip tool is not installed on this server.'
+          : `The archive could not be created: ${detail || 'unknown error'}`
+      )
+    }
+  })
+  return { ok: true, message: `Created ${zip.name}`, path: outRel }
+}
+
+/**
+ * Extract an archive that is already in the site into `destArg` (its own
+ * folder when omitted). The archive is copied to a private temp file first,
+ * so what is checked is exactly what is extracted. Refused when it holds
+ * links or out-of-tree paths (archive-safety), is over the size / entry
+ * limits, would write through a link already in the destination, or would
+ * replace a platform-managed file.
+ */
+export async function extractArchive(
+  projectId: string,
+  archiveArg: string,
+  destArg: string | undefined,
+  opts: { overwrite?: boolean } = {}
+): Promise<{ ok: boolean; message: string; entries: number; destination: string }> {
+  const project = await loadProject(projectId)
+  const arch = await resolveProjectPath(project, archiveArg)
+  const archRel = relOf(arch)
+  const kind = archiveKindOf(path.posix.basename(archRel))
+  if (!archRel || !kind) throw new PathError('Only .zip, .tar, .tar.gz and .tgz archives can be extracted.')
+  const destRel = destArg === undefined ? normalizeRel(path.posix.dirname(archRel)) : normalizeRel(destArg)
+  const dest = await resolveProjectPath(project, destRel || '.')
+  const overwrite = opts.overwrite === true
+  const where = destRel ? `${destRel}/` : 'the hosting root'
+
+  if (arch.isDemo) {
+    const written = demoOp(() => demoExtract(projectId, archRel, destRel, overwrite))
+    return {
+      ok: true,
+      message: `Extracted ${written} file${written === 1 ? '' : 's'} into ${where}`,
+      entries: written,
+      destination: destRel,
+    }
+  }
+
+  await checkLocalConfinement(arch, arch.abs, 'read')
+  await checkLocalConfinement(dest, dest.abs, 'write')
+  const creds = await getServerCredentials(project.serverId!)
+  const entries = await withConnection(creds, async (client) => {
+    const size = await guardedExec(client, arch.base, [[arch.abs, 'read']], `stat -c %s -- ${shellQuote(arch.abs)}`, 15000)
+    const bytes = Number(size.stdout.trim())
+    if (size.exitCode !== 0 || !Number.isFinite(bytes)) throw new PathError('That archive does not exist.')
+    if (bytes > MAX_EXTRACT_ARCHIVE_BYTES) {
+      throw new PathError('This archive is larger than 2 GB. Extract it over SSH or SFTP instead.')
+    }
+
+    const rand = Math.random().toString(36).slice(2, 8)
+    const tmp = `/tmp/apsamo-extract-${Date.now()}-${rand}.${kind}`
+    try {
+      const staged = await guardedExec(client, arch.base, [[arch.abs, 'read']], stageArchiveCommand(arch.abs, tmp), 300000)
+      if (staged.exitCode !== 0) {
+        throw new FileOperationError(`The archive could not be read: ${failureDetail(staged, arch.base) || 'unknown error'}`)
+      }
+
+      const listing = await exec(client, archiveListingCommand(kind, tmp), { timeoutMs: 120000 }).catch(() => null)
+      const out = listing && listing.exitCode === 0 ? listing.stdout : ''
+      const problems = out ? findUnsafeArchiveEntries(out) : null
+      if (problems === null || problems.length > 0) throw new PathError(unsafeArchiveMessage(problems))
+
+      const totals = archiveContentTotals(kind, out)
+      if (!totals) throw new PathError(unsafeArchiveMessage(null))
+      if (totals.entries > MAX_EXTRACT_ENTRIES) {
+        throw new PathError(`This archive holds more than ${MAX_EXTRACT_ENTRIES.toLocaleString('en-US')} entries, which is over the limit.`)
+      }
+      if (totals.bytes > MAX_EXTRACT_UNCOMPRESSED_BYTES) {
+        throw new PathError('This archive unpacks to more than 4 GB, which is over the limit.')
+      }
+
+      const members = archiveMemberNames(out)
+      const managed = findManagedCollisions(members, destRel)
+      if (managed.length) {
+        throw new PathError(
+          `The archive would replace files managed by Apsamo (${managed.slice(0, 3).join(', ')}). Extract it into a folder instead.`
+        )
+      }
+
+      const links = await guardedExec(client, dest.base, [[dest.abs, 'write']], listDestSymlinksCommand(dest.abs), 60000)
+      const linkList = links.stdout.split('\n').map((l) => l.trim()).filter(Boolean)
+      if (linkList.length > MAX_DEST_SYMLINKS) {
+        throw new PathError('The destination folder holds too many symbolic links to check safely. Extract into an empty folder.')
+      }
+      const through = findSymlinkCollisions(members, linkList)
+      if (through.length) {
+        throw new PathError(
+          `The archive would write through symbolic links in the destination (${through.slice(0, 3).join(', ')}). Extract into an empty folder.`
+        )
+      }
+
+      const r = await guardedExec(
+        client,
+        dest.base,
+        [[dest.abs, 'write']],
+        extractCommand(kind, tmp, dest.abs, { overwrite }),
+        (ARCHIVE_TIME_LIMIT_SECONDS + 60) * 1000
+      )
+      if (r.exitCode === EXIT_TIMED_OUT) throw new FileOperationError('Extracting took too long and was stopped; some files may have been written.')
+      if (!extractSucceeded(kind, r.exitCode)) {
+        const detail = failureDetail(r, dest.base)
+        throw new FileOperationError(
+          /unzip: (command )?not found/.test(detail)
+            ? 'The unzip tool is not installed on this server.'
+            : `The archive could not be extracted: ${detail || 'unknown error'}`
+        )
+      }
+      return totals.entries
+    } finally {
+      await exec(client, `rm -f -- ${shellQuote(tmp)}`, { timeoutMs: 10000 }).catch(() => {})
+    }
+  })
+  return {
+    ok: true,
+    message: `Extracted ${entries} entr${entries === 1 ? 'y' : 'ies'} into ${where}`,
+    entries,
+    destination: destRel,
+  }
+}
+
+/**
+ * Copy or move items into another folder of the site. Each item keeps its
+ * name; nothing is overwritten. Platform files and the website folder cannot
+ * be moved. Returns per-item failures instead of stopping at the first.
+ */
+export async function copyOrMovePaths(
+  projectId: string,
+  op: 'copy' | 'move',
+  items: unknown,
+  destArg: unknown
+): Promise<{ ok: boolean; message: string; done: number; failed: Array<{ path: string; error: string }> }> {
+  const selection = validateSelection(items)
+  if (!selection.ok) throw new PathError(selection.error)
+  if (typeof destArg !== 'string') throw new PathError('Choose a destination folder.')
+  const destRel = normalizeRel(destArg)
+
+  for (const p of selection.paths) {
+    if (op === 'move' && isManagedRelPath(p)) throw new PathError(`${p} is managed by Apsamo and must stay where it is.`)
+    if (op === 'move' && isDocumentRoot(p)) throw new PathError(`${p}/ holds your website and must stay where it is.`)
+    if (isSameOrInside(p, destRel)) throw new PathError(`${p} cannot be ${op === 'copy' ? 'copied' : 'moved'} into itself.`)
+    const parent = p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : ''
+    if (parent === destRel) throw new PathError(`${p} is already in that folder.`)
+  }
+
+  const project = await loadProject(projectId)
+  const dest = await resolveProjectPath(project, destRel || '.')
+  const pairs = await Promise.all(
+    selection.paths.map(async (p) => {
+      const name = p.slice(p.lastIndexOf('/') + 1)
+      return {
+        rel: p,
+        src: await resolveProjectPath(project, p),
+        target: await resolveProjectPath(project, destRel ? `${destRel}/${name}` : name),
+      }
+    })
+  )
+  const verb = op === 'copy' ? 'Copied' : 'Moved'
+  const summary = (done: number) => `${verb} ${done} item${done === 1 ? '' : 's'} to ${destRel ? `${destRel}/` : 'the hosting root'}`
+
+  if (dest.isDemo) {
+    const failed: Array<{ path: string; error: string }> = []
+    if (demoStat(projectId, destRel)?.type !== 'dir') throw new PathError('The destination folder does not exist.')
+    for (const { rel, target } of pairs) {
+      try {
+        demoOp(() => (op === 'copy' ? demoCopy(projectId, rel, relOf(target)) : demoRename(projectId, rel, relOf(target))))
+      } catch (err) {
+        failed.push({ path: rel, error: err instanceof Error ? err.message : 'failed' })
+      }
+    }
+    const done = pairs.length - failed.length
+    return { ok: done > 0, message: summary(done), done, failed }
+  }
+
+  await checkLocalConfinement(dest, dest.abs, 'list')
+  const creds = await getServerCredentials(project.serverId!)
+  const failed: Array<{ path: string; error: string }> = []
+  await withConnection(creds, async (client) => {
+    const isDir = await guardedExec(
+      client,
+      dest.base,
+      [[dest.abs, 'list']],
+      `if [ -d ${shellQuote(dest.abs)} ]; then echo yes; else exit ${EXIT_NOT_A_FOLDER}; fi`,
+      10000
+    )
+    if (isDir.exitCode !== 0) throw new PathError('The destination folder does not exist.')
+
+    for (const { rel, src, target } of pairs) {
+      try {
+        // The item itself may be a link (copied / moved as a link); its
+        // folder and the new location must resolve inside the site.
+        await checkLocalConfinement(src, src.abs, 'remove')
+        await checkLocalConfinement(target, target.abs, 'write')
+        const r = await guardedExec(
+          client,
+          src.base,
+          [
+            [src.abs, 'remove'],
+            [target.abs, 'write'],
+          ],
+          copyMoveCommand(op, src.abs, target.abs),
+          (ARCHIVE_TIME_LIMIT_SECONDS + 60) * 1000
+        )
+        if (r.exitCode === EXIT_TARGET_EXISTS) throw new PathError('something with that name is already there')
+        if (r.exitCode === EXIT_TIMED_OUT) throw new FileOperationError('took too long and was stopped')
+        if (r.exitCode !== 0) throw new FileOperationError(failureDetail(r, src.base) || 'failed')
+      } catch (err) {
+        if (!(err instanceof PathError || err instanceof FileOperationError)) throw err
+        failed.push({ path: rel, error: err.message })
+      }
+    }
+  })
+  const done = pairs.length - failed.length
+  return { ok: done > 0, message: summary(done), done, failed }
+}
+
+/**
+ * Bytes of an image or PDF for an inline preview, with its content type.
+ * Size-limited; refuses links like a download does.
+ */
+export async function previewFile(
+  projectId: string,
+  pathArg: string
+): Promise<{ content: Buffer; filename: string; contentType: string }> {
+  const project = await loadProject(projectId)
+  const rp = await resolveProjectPath(project, pathArg)
+  const filename = path.posix.basename(rp.abs)
+  const contentType = previewContentType(filename)
+  if (!contentType) throw new PathError('Only images and PDF files can be previewed.')
+
+  if (rp.isDemo) {
+    const stored = demoOp(() => demoRead(projectId, relOf(rp)))
+    if (!stored) throw new PathError('This demo file has no stored contents to preview.')
+    if (stored.length > MAX_PREVIEW_BYTES) throw new PathError('This file is too large to preview. Download it instead.')
+    return { content: stored, filename, contentType }
+  }
+
+  await checkLocalConfinement(rp, rp.abs, 'read')
+  const creds = await getServerCredentials(project.serverId!)
+  const content = await withConnection(creds, async (client) => {
+    const st = await guardedExec(
+      client,
+      rp.base,
+      [[rp.abs, 'read']],
+      `if [ -f ${shellQuote(rp.abs)} ]; then stat -c %s -- ${shellQuote(rp.abs)}; else exit ${EXIT_NOT_A_FOLDER}; fi`,
+      10000
+    )
+    const size = Number(st.stdout.trim())
+    if (st.exitCode !== 0 || !Number.isFinite(size)) throw new PathError('That file does not exist.')
+    if (size > MAX_PREVIEW_BYTES) throw new PathError('This file is too large to preview. Download it instead.')
+    return await getFile(client, rp.abs)
+  })
+  return { content, filename, contentType }
 }

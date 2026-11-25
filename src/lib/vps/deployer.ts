@@ -38,7 +38,7 @@
  * a realistic simulated success — the Project row is updated with a fake
  * containerId + simulated build logs, so the dashboard UX is intact.
  */
-import { readFile } from 'fs/promises'
+import { stat } from 'fs/promises'
 import path from 'path'
 import { UPLOAD_ROOT } from '../migration/uploads'
 import { db } from '@/lib/db'
@@ -82,6 +82,18 @@ import {
   siblingContainerCleanupCommand,
 } from './deploy-safety'
 import { archiveListingCommand, findUnsafeArchiveEntries, unsafeArchiveMessage } from './archive-safety'
+import { putFileFromPath } from '../migration/remote'
+import { zipEntryNames, zipFolderToFlatten, ZIP_FLATTEN_METHODS } from './zip-layout'
+import { ensureSiteMail, getSiteMailRuntime } from '@/lib/site-mail'
+import {
+  isSiteMailMethod,
+  msmtpDockerfileBlock,
+  siteMailContainerEnv,
+  wordPressMailDefines,
+  WP_MAIL_PLUGIN,
+  WP_MAIL_PLUGIN_PATH,
+  type SiteMailRuntime,
+} from '@/lib/site-mail-config'
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -534,6 +546,7 @@ async function writeWordPressConfig(
       dbPass = ''
     }
   }
+  const mailDefines = wordPressMailDefines(await getSiteMailRuntime(projectId).catch(() => null))
   if (!freshDb?.databaseHost) {
     log('WARNING: no provisioned database found on the project row — wp-config will contain placeholder DB values.')
   }
@@ -553,7 +566,7 @@ define('DB_CHARSET', 'utf8mb4');
 define('DB_COLLATE', '');
 \$table_prefix = 'wp_';
 define('WP_DEBUG', false);
-if (!defined('ABSPATH')) define('ABSPATH', dirname(__FILE__) . '/');
+${mailDefines}if (!defined('ABSPATH')) define('ABSPATH', dirname(__FILE__) . '/');
 require_once ABSPATH . 'wp-settings.php';
 `
   // Layout: everything in <deployPath>/site, mounted as /var/www/html.
@@ -590,6 +603,113 @@ require_once ABSPATH . 'wp-settings.php';
   }
   await unlinkSymlinks(client, site, ['wp-config.php'])
   await putFile(client, `${site}/wp-config.php`, cfg, { mode: 0o644 })
+  await writeWordPressMailPlugin(client, site, log)
+}
+
+/**
+ * Install the managed must-use mail plugin (inert unless wp-config defines the
+ * APSAMO_SMTP_* constants). Idempotent: rewritten on every deploy, so existing
+ * sites pick it up on their next redeploy.
+ *
+ * wp-content is writable by the site (uid 33). A link planted at wp-content or
+ * mu-plugins would turn this root-owned write into a write anywhere on the
+ * host, so links there are refused and the plugin is skipped.
+ */
+async function writeWordPressMailPlugin(
+  client: Parameters<typeof exec>[0],
+  site: string,
+  log: (m: string) => void
+): Promise<void> {
+  const S = shellQuote(site)
+  const prep = await exec(
+    client,
+    [
+      `cd ${S} || exit 4`,
+      `if [ -L wp-content ] || [ -L wp-content/mu-plugins ]; then exit 6; fi`,
+      `mkdir -p wp-content/mu-plugins || exit 4`,
+      `chown 33:33 wp-content wp-content/mu-plugins`,
+      `[ -L ${shellQuote(WP_MAIL_PLUGIN_PATH)} ] && rm -f -- ${shellQuote(WP_MAIL_PLUGIN_PATH)}; true`,
+    ].join('\n'),
+    { timeoutMs: 30000 }
+  )
+  if (prep.exitCode === 6) {
+    log('WARNING: wp-content or wp-content/mu-plugins is a link — the mail plugin was not installed.')
+    return
+  }
+  if (prep.exitCode !== 0) {
+    log(`WARNING: could not prepare wp-content/mu-plugins for the mail plugin: ${(prep.stderr || prep.stdout).trim().slice(0, 200)}`)
+    return
+  }
+  await putFile(client, `${site}/${WP_MAIL_PLUGIN_PATH}`, WP_MAIL_PLUGIN, { mode: 0o644 })
+}
+
+/**
+ * Push a changed mail setting (enable / disable / rotate / From) to a running
+ * site without a full redeploy. WordPress: rewrite wp-config.php + plugin.
+ * PHP: msmtp is baked into the image, so a redeploy is needed.
+ */
+export async function applySiteMailConfig(
+  projectId: string
+): Promise<{ applied: boolean; requiresRedeploy: boolean; message: string }> {
+  const project = await db.project.findUnique({
+    where: { id: projectId },
+    include: { server: true },
+  })
+  if (!project) return { applied: false, requiresRedeploy: false, message: 'Project not found' }
+  if (project.deploymentMethod === 'php') {
+    return { applied: false, requiresRedeploy: true, message: 'Redeploy the site to apply the mail settings.' }
+  }
+  if (project.deploymentMethod !== 'wordpress') {
+    return { applied: false, requiresRedeploy: false, message: 'Not a WordPress or PHP site.' }
+  }
+  if (!project.serverId || !project.server || !project.deployPath || isServerInDemoMode(project.server)) {
+    return { applied: false, requiresRedeploy: false, message: 'Saved. It applies when the site is deployed.' }
+  }
+  try {
+    const creds = await getServerCredentials(project.serverId)
+    await withConnection(creds, (client) =>
+      writeWordPressConfig(client, projectId, project.deployPath!, (m) => console.log(`[site-mail ${projectId.slice(0, 8)}] ${m}`))
+    )
+    return { applied: true, requiresRedeploy: false, message: 'Applied to the site.' }
+  } catch (err) {
+    return {
+      applied: false,
+      requiresRedeploy: true,
+      message: `Saved, but the site could not be updated (${err instanceof Error ? err.message : String(err)}). Redeploy to apply.`,
+    }
+  }
+}
+
+/**
+ * Run a mail test script with PHP inside the site's own container, so the
+ * test takes the same network path real mail does. null = no real container
+ * to run it in (the caller falls back to an SMTP test from the panel).
+ */
+export async function runSiteMailTestInContainer(
+  projectId: string,
+  method: 'wordpress' | 'php',
+  script: string,
+  to: string
+): Promise<{ ok: boolean; message: string } | null> {
+  const project = await db.project.findUnique({
+    where: { id: projectId },
+    include: { server: true },
+  })
+  if (!project?.serverId || !project.server || !project.containerName || isServerInDemoMode(project.server)) return null
+  if (project.status !== 'running') return null
+  const creds = await getServerCredentials(project.serverId)
+  const user = method === 'wordpress' ? '-u 33:33 ' : ''
+  const r = await withConnection(creds, (client) =>
+    exec(
+      client,
+      `docker exec ${user}-e APSAMO_TEST_TO=${shellQuote(to)} ${shellQuote(project.containerName!)} php -r ${shellQuote(script)} 2>&1`,
+      { timeoutMs: 90000 }
+    )
+  )
+  const out = (r.stdout || r.stderr || '').trim()
+  if (out.includes('APSAMO_MAIL_OK')) return { ok: true, message: 'Sent from inside the site container.' }
+  const why = out.split('APSAMO_MAIL_FAIL').pop()?.trim() || out
+  return { ok: false, message: (why || `exit ${r.exitCode}`).slice(-300) }
 }
 
 async function unlinkSymlinks(
@@ -977,15 +1097,20 @@ async function deployMethodProject(
         }).catch(() => {})
       } else if (source === 'zip' && settings.uploadId) {
         const localZip = path.join(UPLOAD_ROOT, `${settings.uploadId}.zip`)
-        let zipData: Buffer
+        let zipSize: number
         try {
-          zipData = await readFile(localZip)
+          const st = await stat(localZip)
+          if (!st.isFile()) throw new Error('not a regular file')
+          zipSize = st.size
         } catch (err) {
           throw new Error(`ZIP upload not found on panel server (${localZip}): ${err instanceof Error ? err.message : err}`)
         }
         const remoteZip = `${deployPath}.upload.zip`
-        stageLog(`Uploading ZIP (${zipData.length} bytes) to VPS…`)
-        await putFile(client, remoteZip, zipData, { mode: 0o644 })
+        stageLog(`Uploading ZIP (${zipSize} bytes) to VPS…`)
+        // Streamed from disk over SFTP (fastPut). Reading the archive into a
+        // Buffer first held the whole upload in the panel's heap, so a large
+        // ZIP could take the panel process down.
+        await putFileFromPath(client, localZip, remoteZip, { mode: 0o644 })
         // Refuse links and out-of-tree paths BEFORE extracting into the
         // project directory (see lib/vps/archive-safety).
         const listing = await exec(client, archiveListingCommand('zip', remoteZip), { timeoutMs: 120000 })
@@ -994,13 +1119,33 @@ async function deployMethodProject(
           await exec(client, `rm -f ${shellQuote(remoteZip)}`, { timeoutMs: 10000 }).catch(() => {})
           throw new Error(unsafeArchiveMessage(problems))
         }
+        // A site zipped as its folder ("my-site/index.html") would publish
+        // only a directory. See lib/vps/zip-layout.
+        const flatten = (ZIP_FLATTEN_METHODS as readonly string[]).includes(methodId)
+          ? zipFolderToFlatten(zipEntryNames(listing.stdout))
+          : null
         stageLog('Extracting ZIP…')
-        const r = await exec(
-          client,
-          `unzip -o ${shellQuote(remoteZip)} -d ${shellQuote(deployPath)} 2>&1 && rm -f ${shellQuote(remoteZip)}`,
-          { timeoutMs: 120000 }
-        )
-        if (r.exitCode !== 0) throw new Error(`unzip failed: ${r.stderr || r.stdout}`)
+        let r: ExecResult
+        if (flatten) {
+          stageLog(`The ZIP holds a single folder "${flatten}" — publishing its contents as the site root.`)
+          const tmp = `${deployPath}.unzip-tmp`
+          const T = shellQuote(tmp)
+          r = await exec(
+            client,
+            `rm -rf ${T} && mkdir -p ${T} && unzip -o -q ${shellQuote(remoteZip)} -d ${T} 2>&1 && ` +
+              `test -d ${shellQuote(`${tmp}/${flatten}`)} && ! test -L ${shellQuote(`${tmp}/${flatten}`)} && ` +
+              `cp -a -- ${shellQuote(`${tmp}/${flatten}`)}/. ${shellQuote(deployPath)}/ 2>&1; ` +
+              `rc=$?; rm -rf ${T} ${shellQuote(remoteZip)}; exit $rc`,
+            { timeoutMs: 300000 }
+          )
+        } else {
+          r = await exec(
+            client,
+            `unzip -o ${shellQuote(remoteZip)} -d ${shellQuote(deployPath)} 2>&1 && rm -f ${shellQuote(remoteZip)}`,
+            { timeoutMs: 300000 }
+          )
+        }
+        if (r.exitCode !== 0) throw new Error(`unzip failed: ${(r.stderr || r.stdout).slice(-500)}`)
       } else if (source === 'template') {
         stageLog('Writing starter template files…')
         const template = generatePlaceholderApp(methodId, project.name)
@@ -1088,7 +1233,12 @@ async function deployMethodProject(
   // Set when we deferred to a compose file the project supplied, which means
   // the running container's name is theirs to choose, not ours to assume.
   let usingProvidedCompose = false
-  let dockerfile = generateMethodDockerfile(methodId, project, settings, envVars)
+  // Outgoing mail identity (WordPress / PHP). Best-effort: a mail problem is
+  // logged and never fails the deploy. See lib/site-mail.
+  const siteMail: SiteMailRuntime | null = isSiteMailMethod(methodId)
+    ? await ensureSiteMail(projectId, stageLog)
+    : null
+  let dockerfile = generateMethodDockerfile(methodId, project, settings, envVars, false, siteMail)
   await runStage('write_dockerfile', 'Writing Dockerfile…', async () => {
     await withConnection(creds, async (client) => {
       // Decide the image shape from what the repository actually contains,
@@ -1155,7 +1305,9 @@ async function deployMethodProject(
     deployPath,
     containerPort,
     externalPort,
-    envVars,
+    // Only PHP reads the password from its environment (msmtp); WordPress
+    // reads it from the managed wp-config.php.
+    envVars: methodId === 'php' ? { ...envVars, ...siteMailContainerEnv(siteMail) } : envVars,
   })
   await runStage('write_compose', 'Writing docker-compose.yml…', async () => {
     await withConnection(creds, async (client) => {
@@ -2031,6 +2183,11 @@ export async function applyEnvironment(
   }
 
   const envVars = withRuntimePort(await getProjectEnvVars(projectId), containerPort)
+  // Keep the PHP site's mail password when recreating the container; without
+  // it msmtp could no longer authenticate.
+  if (methodId === 'php') {
+    Object.assign(envVars, siteMailContainerEnv(await getSiteMailRuntime(projectId).catch(() => null)))
+  }
 
   // NEXT_PUBLIC_* are compiled into the browser bundle; recreating the
   // container cannot change them. Report them rather than pretend.
@@ -2450,7 +2607,8 @@ function generateMethodDockerfile(
   project: { name: string; slug: string; runtime?: string | null; runtimeVersion?: string | null; buildCommand?: string | null; startCommand?: string | null; appPort?: number | null; documentRoot?: string | null; framework?: string | null; resourceRamMB?: number | null },
   settings: Record<string, unknown>,
   envVars: Record<string, string> = {},
-  standaloneSafe = false
+  standaloneSafe = false,
+  siteMail: SiteMailRuntime | null = null
 ): string {
   // These are interpolated into FROM / COPY / RUN lines below. Unchecked,
   // a newline in any of them appends arbitrary build instructions.
@@ -2492,7 +2650,7 @@ CMD ["php-fpm"]
     return `FROM php:${phpVersion}-apache
 RUN docker-php-ext-install mysqli pdo pdo_mysql && a2enmod rewrite
 ${phpIni}
-COPY . ${documentRoot}/
+${msmtpDockerfileBlock(siteMail)}COPY . ${documentRoot}/
 RUN chown -R www-data:www-data ${documentRoot}
 EXPOSE 80
 CMD ["apache2-foreground"]

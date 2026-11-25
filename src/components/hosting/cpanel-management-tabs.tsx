@@ -26,6 +26,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { toast } from 'sonner'
+import { InlineError } from '@/components/hosting/site/shared'
 import {
   Clock,
   Play,
@@ -271,8 +272,11 @@ export function CronTab({ projectId }: { projectId: string }) {
   const [command, setCommand] = useState('')
   const [description, setDescription] = useState('')
 
+  const [loadError, setLoadError] = useState<string | null>(null)
+
   const fetchJobs = useCallback(async () => {
     setLoading(true)
+    setLoadError(null)
     try {
       const res = await fetch(`/api/hosting/${projectId}/cron`, {
         headers: getAuthHeaders(),
@@ -281,10 +285,10 @@ export function CronTab({ projectId }: { projectId: string }) {
       if (res.ok) {
         setJobs(data.jobs || [])
       } else {
-        toast.error(data.error || 'Failed to load cron jobs')
+        setLoadError(data.error || `The server answered ${res.status}.`)
       }
     } catch {
-      toast.error('Network error loading cron jobs')
+      setLoadError('Network error. Check your connection and try again.')
     } finally {
       setLoading(false)
     }
@@ -490,6 +494,8 @@ export function CronTab({ projectId }: { projectId: string }) {
             <Skeleton className="h-14 w-full" />
             <Skeleton className="h-14 w-full" />
           </div>
+        ) : loadError ? (
+          <InlineError title="Could not load the cron jobs" message={loadError} onRetry={() => fetchJobs()} />
         ) : jobs.length === 0 ? (
           <div className="text-center py-10 text-muted-foreground">
             <Clock className="size-10 mx-auto mb-3 opacity-30" />
@@ -1562,8 +1568,11 @@ export function RedirectsTab({ projectId }: { projectId: string }) {
   const [matchQuery, setMatchQuery] = useState('')
   const [enabled, setEnabled] = useState(true)
 
+  const [loadError, setLoadError] = useState<string | null>(null)
+
   const fetchRedirects = useCallback(async () => {
     setLoading(true)
+    setLoadError(null)
     try {
       const res = await fetch(`/api/hosting/${projectId}/redirects`, {
         headers: getAuthHeaders(),
@@ -1572,10 +1581,10 @@ export function RedirectsTab({ projectId }: { projectId: string }) {
       if (res.ok) {
         setRedirects(data.redirects || [])
       } else {
-        toast.error(data.error || 'Failed to load redirects')
+        setLoadError(data.error || `The server answered ${res.status}.`)
       }
     } catch {
-      toast.error('Network error loading redirects')
+      setLoadError('Network error. Check your connection and try again.')
     } finally {
       setLoading(false)
     }
@@ -1737,6 +1746,8 @@ export function RedirectsTab({ projectId }: { projectId: string }) {
             <Skeleton className="h-14 w-full" />
             <Skeleton className="h-14 w-full" />
           </div>
+        ) : loadError ? (
+          <InlineError title="Could not load the redirects" message={loadError} onRetry={() => fetchRedirects()} />
         ) : redirects.length === 0 ? (
           <div className="text-center py-10 text-muted-foreground">
             <ArrowRightLeft className="size-10 mx-auto mb-3 opacity-30" />
@@ -2244,8 +2255,11 @@ export function SecurityTab({ projectId }: { projectId: string }) {
   const [permanent, setPermanent] = useState(true)
   const [expiresAt, setExpiresAt] = useState('')
 
+  const [loadError, setLoadError] = useState<string | null>(null)
+
   const fetchBlocks = useCallback(async () => {
     setLoading(true)
+    setLoadError(null)
     try {
       const res = await fetch(`/api/hosting/${projectId}/security`, {
         headers: getAuthHeaders(),
@@ -2254,10 +2268,10 @@ export function SecurityTab({ projectId }: { projectId: string }) {
       if (res.ok) {
         setBlocks(data.blocks || [])
       } else {
-        toast.error(data.error || 'Failed to load IP rules')
+        setLoadError(data.error || `The server answered ${res.status}.`)
       }
     } catch {
-      toast.error('Network error loading IP rules')
+      setLoadError('Network error. Check your connection and try again.')
     } finally {
       setLoading(false)
     }
@@ -2437,7 +2451,8 @@ export function SecurityTab({ projectId }: { projectId: string }) {
         </div>
       </CardHeader>
       <CardContent>
-        {/* Summary cards */}
+        {/* Summary cards (only once the rules are known: no zeros on a failed load) */}
+        {!loadError && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
           <div className="rounded-lg border p-3">
             <div className="text-xs text-muted-foreground">Total rules</div>
@@ -2456,12 +2471,15 @@ export function SecurityTab({ projectId }: { projectId: string }) {
             <div className="text-2xl font-semibold mt-1 text-amber-700 dark:text-amber-400">{expiredCount}</div>
           </div>
         </div>
+        )}
 
         {loading ? (
           <div className="space-y-3">
             <Skeleton className="h-14 w-full" />
             <Skeleton className="h-14 w-full" />
           </div>
+        ) : loadError ? (
+          <InlineError title="Could not load the IP rules" message={loadError} onRetry={() => fetchBlocks()} />
         ) : blocks.length === 0 ? (
           <div className="text-center py-10 text-muted-foreground">
             <Shield className="size-10 mx-auto mb-3 opacity-30" />

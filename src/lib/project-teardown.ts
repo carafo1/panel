@@ -106,6 +106,16 @@ export async function purgeProject(projectId: string): Promise<{ warnings: strin
     note('Backup cleanup', err)
   }
 
+  // ── 2b. The site's sending mailbox in Mailcow ─────────────────────────
+  // The SiteMail row cascades with the project; the Mailcow mailbox does not.
+  try {
+    const { removeSiteMail } = await import('@/lib/site-mail')
+    const mailWarning = await removeSiteMail(projectId)
+    if (mailWarning) warnings.push(mailWarning)
+  } catch (err) {
+    note('Sending mailbox removal', err)
+  }
+
   // ── 3. Remove the Project row and its children ────────────────────────
   // Twelve relations declare onDelete: Cascade and clean themselves up (env
   // vars, analytics events, pipelines, uptime monitors, cron jobs, FTP

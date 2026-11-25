@@ -565,6 +565,9 @@ export const config = {
   // Layer 1 (redirects/IP-blocks) fires for ALL non-static-asset routes
   // but only enforces when the request Host matches a project.
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|txt|xml|css|js|map|woff|woff2|ttf|eot|otf)$).*)',
+    // Static files are skipped by extension, but never under /api: the file
+    // manager's /api/hosting/<id>/files/<path>.png|.txt|.css … routes need
+    // the session cookie turned into auth here like every other API call.
+    '/((?!_next/static|_next/image|favicon.ico|(?!api/).*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|txt|xml|css|js|map|woff|woff2|ttf|eot|otf)$).*)',
   ],
 }

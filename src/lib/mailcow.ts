@@ -827,6 +827,62 @@ export async function updateMailbox(
   }
 }
 
+/**
+ * Cap how many messages a mailbox may send.
+ * POST /api/v1/edit/rl-mbox  { items: [address], attr: { rl_value, rl_frame } }
+ * `rl_frame` is s | m | h | d. Mailcow (rspamd ratelimit) defers anything
+ * over the limit, so a compromised site cannot burn the server's reputation.
+ */
+export async function setMailboxRateLimit(
+  address: string,
+  value: number,
+  frame: 's' | 'm' | 'h' | 'd' = 'h'
+): Promise<{ success: boolean; error?: string }> {
+  if (!isMailcowConfigured()) {
+    if (mailcowDemoForbidden()) return { success: false, error: MAIL_SERVER_NOT_CONFIGURED }
+    return { success: true }
+  }
+  try {
+    const env = await mailcowFetch<MailcowEnvelope | MailcowEnvelope[]>('/edit/rl-mbox', {
+      method: 'POST',
+      body: JSON.stringify({
+        items: [address],
+        attr: { rl_value: String(Math.max(0, Math.floor(value))), rl_frame: frame },
+      }),
+    })
+    return envelopeResult(env)
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+/**
+ * Set which other From addresses a mailbox may send as.
+ * POST /api/v1/edit/mailbox  { items: [address], attr: { sender_acl: [...] } }
+ * `["default"]` resets it to "own address only".
+ */
+export async function setMailboxSenderAcl(
+  address: string,
+  allowed: string[]
+): Promise<{ success: boolean; error?: string }> {
+  if (!isMailcowConfigured()) {
+    if (mailcowDemoForbidden()) return { success: false, error: MAIL_SERVER_NOT_CONFIGURED }
+    return { success: true }
+  }
+  try {
+    const env = await mailcowFetch<MailcowEnvelope | MailcowEnvelope[]>('/edit/mailbox', {
+      method: 'POST',
+      body: JSON.stringify({
+        items: [address],
+        attr: { sender_acl: allowed.length ? allowed : ['default'] },
+      }),
+    })
+    return envelopeResult(env)
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
 interface DeleteMailboxResult {
   success: boolean
   error?: string

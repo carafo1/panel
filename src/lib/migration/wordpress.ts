@@ -28,6 +28,13 @@ import {
 } from './remote'
 import { CACHE_DROPINS } from './detect'
 
+/**
+ * The client binary inside a database container. MariaDB 11 images ship only
+ * `mariadb` (no `mysql` alias), MySQL images only `mysql`; resolved by the
+ * container's own shell so one command works for both.
+ */
+export const IN_CONTAINER_SQL_CLIENT = '"$(command -v mariadb || command -v mysql)"'
+
 // ─── Types ────────────────────────────────────────────────────────────────
 
 export interface WpDatabaseConfig {
@@ -100,7 +107,7 @@ function mysqlImportPipeline(
   // MYSQL_PWD keeps the password off the process list, where every other user
   // on the box could read it via `ps`.
   const mysqlCmd = [
-    `mysql`,
+    IN_CONTAINER_SQL_CLIENT,
     `--default-character-set=utf8mb4`,
     `--max-allowed-packet=512M`,
     `-h`, '127.0.0.1',
@@ -182,7 +189,7 @@ async function runMysql(
   sql: string,
   opts: { timeoutMs?: number } = {}
 ) {
-  const inner = `mysql --default-character-set=utf8mb4 -h 127.0.0.1 -u ${shellQuote(db.user)} -N -B -e ${shellQuote(sql)} ${shellQuote(db.name)}`
+  const inner = `${IN_CONTAINER_SQL_CLIENT} --default-character-set=utf8mb4 -h 127.0.0.1 -u ${shellQuote(db.user)} -N -B -e ${shellQuote(sql)} ${shellQuote(db.name)}`
   const cmd = db.container
     ? `docker exec -i -e MYSQL_PWD=${shellQuote(db.password)} ${shellQuote(db.container)} sh -c ${shellQuote(inner)}`
     : `MYSQL_PWD=${shellQuote(db.password)} mysql --default-character-set=utf8mb4 -h ${shellQuote(db.host)} -P ${db.port ?? 3306} -u ${shellQuote(db.user)} -N -B -e ${shellQuote(sql)} ${shellQuote(db.name)}`

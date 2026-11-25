@@ -1,11 +1,17 @@
 import { NextResponse } from 'next/server'
 import { authenticateRequest } from '@/lib/auth'
 import { requireProjectAccess } from '@/lib/project-access'
-import { PathError } from '@/lib/vps/files'
+import { PathError, FileOperationError } from '@/lib/vps/files'
+import { previewHeaders } from '@/lib/vps/file-ops'
 
-/** A refused path is the caller's mistake (400); anything else is ours (500). */
+/**
+ * A refused path is the caller's mistake (400); an operation that ran and
+ * failed on the server carries a customer-safe message (422); anything else
+ * is ours (500).
+ */
 function fileError(error: unknown, label: string) {
   if (error instanceof PathError) return NextResponse.json({ error: error.message }, { status: 400 })
+  if (error instanceof FileOperationError) return NextResponse.json({ error: error.message }, { status: 422 })
   console.error(label, error)
   return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
 }
@@ -15,6 +21,9 @@ import {
   saveFileContent,
   deleteFile,
   renameFile,
+  chmodPath,
+  extractArchive,
+  previewFile,
 } from '@/lib/vps'
 
 /**
@@ -23,6 +32,11 @@ import {
  *
  *   GET    /api/hosting/[id]/files/<path>?action=download    — stream the file
  *   GET    /api/hosting/[id]/files/<path>?action=content     — text content (for editor)
+ *   GET    /api/hosting/[id]/files/<path>?action=preview     — image / PDF inline, real content type
+ *   POST   /api/hosting/[id]/files/<path>                    — more actions:
+ *              body: { action: 'chmod', mode }                         one file / folder
+ *              body: { action: 'chmod', recursive: true, dirMode, fileMode }   a folder and its contents
+ *              body: { action: 'extract', destination?, overwrite? }   archive already on the server
  *   PUT    /api/hosting/[id]/files/<path>                    — save text content (body: { content })
  *   DELETE /api/hosting/[id]/files/<path>                    — delete the file/dir
  *   POST   /api/hosting/[id]/files/<path>                    — action
@@ -55,6 +69,18 @@ export async function GET(
           { error: err instanceof PathError ? err.message : 'Invalid request' },
           { status: 400 }
         )
+      }
+    }
+
+    if (action === 'preview') {
+      try {
+        const { content, filename, contentType } = await previewFile(projectId, filePath)
+        return new NextResponse(new Uint8Array(content), {
+          status: 200,
+          headers: previewHeaders(filename, contentType, content.length),
+        })
+      } catch (err) {
+        return fileError(err, 'Preview file error:')
       }
     }
 
@@ -175,8 +201,32 @@ export async function POST(
         )
       }
     }
+    if (body.action === 'chmod') {
+      try {
+        const result = await chmodPath(projectId, filePath, {
+          mode: body.mode,
+          recursive: body.recursive,
+          dirMode: body.dirMode,
+          fileMode: body.fileMode,
+        })
+        return NextResponse.json(result)
+      } catch (err) {
+        return fileError(err, 'Chmod error:')
+      }
+    }
+    if (body.action === 'extract') {
+      if (body.destination !== undefined && typeof body.destination !== 'string') {
+        return NextResponse.json({ error: 'destination must be a folder path' }, { status: 400 })
+      }
+      try {
+        const result = await extractArchive(projectId, filePath, body.destination, { overwrite: body.overwrite === true })
+        return NextResponse.json(result)
+      } catch (err) {
+        return fileError(err, 'Extract error:')
+      }
+    }
     return NextResponse.json(
-      { error: 'Expected { action: "rename"|"mkdir", newPath }' },
+      { error: 'Expected { action: "rename"|"mkdir"|"chmod"|"extract", ... }' },
       { status: 400 }
     )
   } catch (error) {
