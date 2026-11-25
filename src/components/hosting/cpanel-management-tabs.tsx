@@ -16,7 +16,7 @@
  * The components follow the exact same conventions as
  * `website-management-tabs.tsx`:
  *   - shadcn/ui components only (Card, Button, Input, Label, Select, Dialog, ...)
- *   - emerald accent color (NO indigo or blue as primary)
+ *   - brand primary (the --primary token) for actions, like the rest of the panel
  *   - lucide-react icons
  *   - toast notifications via sonner
  *   - mobile-first responsive design
@@ -182,9 +182,9 @@ function generateRandomPassword(len = 20): string {
   return out
 }
 
-// Emerald-flavored primary button class (NO indigo/blue).
-const primaryBtn = 'bg-emerald-600 hover:bg-emerald-700 text-white'
-const primaryText = 'text-emerald-600 dark:text-emerald-400'
+// Primary action classes: the brand --primary token, as on the rest of the panel.
+const primaryBtn = 'bg-primary hover:bg-primary/90 text-primary-foreground'
+const primaryText = 'text-indigo-600 dark:text-indigo-400'
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -434,7 +434,7 @@ export function CronTab({ projectId }: { projectId: string }) {
     }
     if (status === 'success') {
       return (
-        <Badge variant="outline" className="bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/50 text-xs">
+        <Badge variant="outline" className="bg-indigo-50 text-indigo-700 dark:bg-indigo-900/20 dark:text-indigo-400 border-indigo-200 dark:border-indigo-900/50 text-xs">
           <CheckCircle2 className="size-3 me-1" />
           Success
         </Badge>
@@ -519,7 +519,7 @@ export function CronTab({ projectId }: { projectId: string }) {
                 {jobs.map((j) => (
                   <TableRow
                     key={j.id}
-                    className="hover:bg-emerald-50/40 dark:hover:bg-emerald-950/10 transition-colors"
+                    className="hover:bg-indigo-50/40 dark:hover:bg-indigo-950/10 transition-colors"
                   >
                     <TableCell>
                       <span className="font-mono text-xs">{j.expression}</span>
@@ -598,7 +598,7 @@ export function CronTab({ projectId }: { projectId: string }) {
                               {patching[j.id] ? (
                                 <Loader2 className="size-3.5 animate-spin" />
                               ) : j.enabled ? (
-                                <ShieldCheck className="size-3.5 text-emerald-600" />
+                                <ShieldCheck className="size-3.5 text-indigo-600" />
                               ) : (
                                 <ShieldAlert className="size-3.5 text-muted-foreground" />
                               )}
@@ -661,7 +661,7 @@ export function CronTab({ projectId }: { projectId: string }) {
                     key={p.expression}
                     type="button"
                     onClick={() => setExpression(p.expression)}
-                    className="text-[10px] px-2 py-1 rounded-md border bg-muted/50 hover:bg-emerald-50 hover:text-emerald-700 dark:hover:bg-emerald-900/20 dark:hover:text-emerald-400 transition-colors"
+                    className="text-[10px] px-2 py-1 rounded-md border bg-muted/50 hover:bg-indigo-50 hover:text-indigo-700 dark:hover:bg-indigo-900/20 dark:hover:text-indigo-400 transition-colors"
                   >
                     {p.label}
                   </button>
@@ -728,20 +728,20 @@ export function CronTab({ projectId }: { projectId: string }) {
             <div className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-900 border-b border-zinc-800">
               <span className="size-2 rounded-full bg-red-500/80" />
               <span className="size-2 rounded-full bg-amber-500/80" />
-              <span className="size-2 rounded-full bg-emerald-500/80" />
+              <span className="size-2 rounded-full bg-indigo-500/80" />
               <span className="ms-2 text-[10px] text-zinc-500 font-mono truncate">
                 {runJob?.expression} · {runJob?.id.slice(0, 8)}
               </span>
               {runOutput && (
                 <span className="ms-auto text-[10px] font-mono">
-                  <span className={runOutput.status === 'success' ? 'text-emerald-400' : 'text-red-400'}>
+                  <span className={runOutput.status === 'success' ? 'text-indigo-400' : 'text-red-400'}>
                     {runOutput.status === 'success' ? 'EXIT 0' : `EXIT ${runOutput.exitCode ?? '?'}`}
                   </span>
                   <span className="text-zinc-500 ms-2">{runOutput.durationMs}ms</span>
                 </span>
               )}
             </div>
-            <div className="p-3 text-xs font-mono text-emerald-400 overflow-auto h-72 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-zinc-700">
+            <div className="p-3 text-xs font-mono text-indigo-400 overflow-auto h-72 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-zinc-700">
               {running ? (
                 <div className="text-zinc-400 flex items-center gap-2">
                   <Loader2 className="size-3.5 animate-spin" />
@@ -1052,7 +1052,7 @@ export function FtpTab({ projectId }: { projectId: string }) {
         Read-Only
       </Badge>
     ) : (
-      <Badge variant="outline" className="bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/50 text-xs">
+      <Badge variant="outline" className="bg-indigo-50 text-indigo-700 dark:bg-indigo-900/20 dark:text-indigo-400 border-indigo-200 dark:border-indigo-900/50 text-xs">
         Read-Write
       </Badge>
     )
@@ -1117,7 +1117,7 @@ export function FtpTab({ projectId }: { projectId: string }) {
                 {accounts.map((a) => (
                   <TableRow
                     key={a.id}
-                    className={`hover:bg-emerald-50/40 dark:hover:bg-emerald-950/10 transition-colors ${!a.enabled ? 'opacity-60' : ''}`}
+                    className={`hover:bg-indigo-50/40 dark:hover:bg-indigo-950/10 transition-colors ${!a.enabled ? 'opacity-60' : ''}`}
                   >
                     <TableCell>
                       <div className="flex items-center gap-2">
@@ -1214,7 +1214,7 @@ export function FtpTab({ projectId }: { projectId: string }) {
                               {patching[a.id] ? (
                                 <Loader2 className="size-3.5 animate-spin" />
                               ) : a.enabled ? (
-                                <ShieldCheck className="size-3.5 text-emerald-600" />
+                                <ShieldCheck className="size-3.5 text-indigo-600" />
                               ) : (
                                 <ShieldAlert className="size-3.5 text-muted-foreground" />
                               )}
@@ -1272,7 +1272,7 @@ export function FtpTab({ projectId }: { projectId: string }) {
               />
               {username.trim() && (
                 <p className="text-xs text-muted-foreground">
-                  Full username: <span className="font-mono text-emerald-700 dark:text-emerald-400">{username.trim()}_&lt;slug&gt;</span>
+                  Full username: <span className="font-mono text-indigo-700 dark:text-indigo-400">{username.trim()}_&lt;slug&gt;</span>
                 </p>
               )}
             </div>
@@ -1375,7 +1375,7 @@ export function FtpTab({ projectId }: { projectId: string }) {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <CheckCircle2 className="size-5 text-emerald-600" />
+              <CheckCircle2 className="size-5 text-indigo-600" />
               FTP Account Created
             </DialogTitle>
             <DialogDescription>
@@ -1767,7 +1767,7 @@ export function RedirectsTab({ projectId }: { projectId: string }) {
                 {redirects.map((r) => (
                   <TableRow
                     key={r.id}
-                    className={`hover:bg-emerald-50/40 dark:hover:bg-emerald-950/10 transition-colors ${!r.enabled ? 'opacity-60' : ''}`}
+                    className={`hover:bg-indigo-50/40 dark:hover:bg-indigo-950/10 transition-colors ${!r.enabled ? 'opacity-60' : ''}`}
                   >
                     <TableCell className="font-mono text-xs">{r.fromPath}</TableCell>
                     <TableCell>
@@ -1782,7 +1782,7 @@ export function RedirectsTab({ projectId }: { projectId: string }) {
                     </TableCell>
                     <TableCell>
                       {r.enabled ? (
-                        <Badge variant="outline" className="bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/50 text-xs">
+                        <Badge variant="outline" className="bg-indigo-50 text-indigo-700 dark:bg-indigo-900/20 dark:text-indigo-400 border-indigo-200 dark:border-indigo-900/50 text-xs">
                           Active
                         </Badge>
                       ) : (
@@ -1819,7 +1819,7 @@ export function RedirectsTab({ projectId }: { projectId: string }) {
                               {patching[r.id] ? (
                                 <Loader2 className="size-3.5 animate-spin" />
                               ) : r.enabled ? (
-                                <ShieldCheck className="size-3.5 text-emerald-600" />
+                                <ShieldCheck className="size-3.5 text-indigo-600" />
                               ) : (
                                 <ShieldAlert className="size-3.5 text-muted-foreground" />
                               )}
@@ -2176,7 +2176,7 @@ function MalwareScanCard({ projectId }: { projectId: string }) {
                 ? ''
                 : result.infected.length > 0
                 ? 'border-destructive/40 bg-destructive/5'
-                : 'border-emerald-500/40 bg-emerald-500/5'
+                : 'border-indigo-500/40 bg-indigo-500/5'
             }`}
           >
             {!result.scanned ? (
@@ -2190,7 +2190,7 @@ function MalwareScanCard({ projectId }: { projectId: string }) {
               </p>
             ) : result.infected.length === 0 ? (
               <p className="text-sm">
-                <span className="font-medium text-emerald-600 dark:text-emerald-400">
+                <span className="font-medium text-indigo-600 dark:text-indigo-400">
                   No threats found.
                 </span>{' '}
                 <span className="text-muted-foreground">
@@ -2390,7 +2390,7 @@ export function SecurityTab({ projectId }: { projectId: string }) {
 
   const actionBadge = (a: string) =>
     a === 'allow' ? (
-      <Badge variant="outline" className="bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/50 text-xs">
+      <Badge variant="outline" className="bg-indigo-50 text-indigo-700 dark:bg-indigo-900/20 dark:text-indigo-400 border-indigo-200 dark:border-indigo-900/50 text-xs">
         <ShieldCheck className="size-3 me-1" />
         Allow
       </Badge>
@@ -2447,9 +2447,9 @@ export function SecurityTab({ projectId }: { projectId: string }) {
             <div className="text-xs text-red-700 dark:text-red-400">Deny</div>
             <div className="text-2xl font-semibold mt-1 text-red-700 dark:text-red-400">{denyCount}</div>
           </div>
-          <div className="rounded-lg border p-3 bg-emerald-50/50 dark:bg-emerald-950/10">
-            <div className="text-xs text-emerald-700 dark:text-emerald-400">Allow</div>
-            <div className="text-2xl font-semibold mt-1 text-emerald-700 dark:text-emerald-400">{allowCount}</div>
+          <div className="rounded-lg border p-3 bg-indigo-50/50 dark:bg-indigo-950/10">
+            <div className="text-xs text-indigo-700 dark:text-indigo-400">Allow</div>
+            <div className="text-2xl font-semibold mt-1 text-indigo-700 dark:text-indigo-400">{allowCount}</div>
           </div>
           <div className="rounded-lg border p-3 bg-amber-50/50 dark:bg-amber-950/10">
             <div className="text-xs text-amber-700 dark:text-amber-400">Expired</div>
@@ -2494,7 +2494,7 @@ export function SecurityTab({ projectId }: { projectId: string }) {
                   return (
                     <TableRow
                       key={b.id}
-                      className={`hover:bg-emerald-50/40 dark:hover:bg-emerald-950/10 transition-colors ${
+                      className={`hover:bg-indigo-50/40 dark:hover:bg-indigo-950/10 transition-colors ${
                         !b.enabled || expired ? 'opacity-60' : ''
                       }`}
                     >
@@ -2568,7 +2568,7 @@ export function SecurityTab({ projectId }: { projectId: string }) {
                                 {patching[b.id] ? (
                                   <Loader2 className="size-3.5 animate-spin" />
                                 ) : b.enabled ? (
-                                  <ShieldCheck className="size-3.5 text-emerald-600" />
+                                  <ShieldCheck className="size-3.5 text-indigo-600" />
                                 ) : (
                                   <ShieldAlert className="size-3.5 text-muted-foreground" />
                                 )}

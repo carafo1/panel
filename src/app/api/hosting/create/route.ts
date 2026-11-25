@@ -230,7 +230,7 @@ async function handleWizardCreate(
     const projectCount = await db.project.count({
       where: { userId: decoded.userId },
     })
-    if (projectCount >= subscription.plan.projects) {
+    if (subscription.plan.projects > 0 && projectCount >= subscription.plan.projects) {
       return NextResponse.json(
         {
           error: `Project limit reached (${subscription.plan.projects} projects on ${subscription.plan.name} plan)`,
@@ -692,7 +692,7 @@ async function handleLegacyCreate(
     const projectCount = await db.project.count({
       where: { userId: decoded.userId },
     })
-    if (projectCount >= subscription.plan.projects) {
+    if (subscription.plan.projects > 0 && projectCount >= subscription.plan.projects) {
       return NextResponse.json(
         { error: `Project limit reached (${subscription.plan.projects} projects on ${subscription.plan.name} plan)` },
         { status: 403 }

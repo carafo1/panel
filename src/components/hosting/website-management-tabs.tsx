@@ -16,7 +16,7 @@
  *
  * The components follow the existing patterns in `hosting-panel.tsx`:
  *   - shadcn/ui components only (Card, Button, Input, Label, Select, Dialog, …)
- *   - emerald accent color (NO indigo or blue as primary)
+ *   - brand primary (the --primary token) for actions, like the rest of the panel
  *   - lucide-react icons
  *   - toast notifications via sonner
  *   - mobile-first responsive design
@@ -225,9 +225,9 @@ async function copyToClipboard(text: string, label = 'Copied to clipboard') {
   }
 }
 
-// Emerald-flavored primary button class (NO indigo/blue).
-const primaryBtn = 'bg-emerald-600 hover:bg-emerald-700 text-white'
-const primaryText = 'text-emerald-600 dark:text-emerald-400'
+// Primary action classes: the brand --primary token, as on the rest of the panel.
+const primaryBtn = 'bg-primary hover:bg-primary/90 text-primary-foreground'
+const primaryText = 'text-indigo-600 dark:text-indigo-400'
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -394,7 +394,7 @@ function ConnectionPipeline({ d }: { d: WebsiteDomain }) {
                   blocked
                     ? 'bg-red-500/30'
                     : done
-                      ? 'bg-emerald-500'
+                      ? 'bg-indigo-500'
                       : 'bg-muted'
                 }`}
                 title={step.label}
@@ -415,7 +415,7 @@ function ConnectionPipeline({ d }: { d: WebsiteDomain }) {
             blocked
               ? 'text-red-600 dark:text-red-400'
               : conn.stage === 'live'
-                ? 'text-emerald-600 dark:text-emerald-400'
+                ? 'text-indigo-600 dark:text-indigo-400'
                 : 'text-muted-foreground'
           }`}
         >
@@ -732,7 +732,7 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
       )
     }
     return (
-      <Badge variant="outline" className="bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/50">
+      <Badge variant="outline" className="bg-indigo-50 text-indigo-700 dark:bg-indigo-900/20 dark:text-indigo-400 border-indigo-200 dark:border-indigo-900/50">
         MySQL
       </Badge>
     )
@@ -793,13 +793,13 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
                 {databases.map((db) => (
                   <TableRow
                     key={db.id}
-                    className="hover:bg-emerald-50/40 dark:hover:bg-emerald-950/10 transition-colors"
+                    className="hover:bg-indigo-50/40 dark:hover:bg-indigo-950/10 transition-colors"
                   >
                     <TableCell>
                       <div className="flex items-center gap-2">
                         <span className="font-mono text-sm font-medium">{db.name}</span>
                         {db.isPrimary && (
-                          <Badge variant="outline" className="bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/50 text-[10px] h-5">
+                          <Badge variant="outline" className="bg-indigo-50 text-indigo-700 dark:bg-indigo-900/20 dark:text-indigo-400 border-indigo-200 dark:border-indigo-900/50 text-[10px] h-5">
                             Primary
                           </Badge>
                         )}
@@ -1022,7 +1022,7 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <CheckCircle2 className="size-5 text-emerald-600" />
+              <CheckCircle2 className="size-5 text-indigo-600" />
               Database Created
             </DialogTitle>
             <DialogDescription>
@@ -1123,7 +1123,7 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <CheckCircle2 className="size-5 text-emerald-600" />
+              <CheckCircle2 className="size-5 text-indigo-600" />
               New password generated
             </DialogTitle>
             <DialogDescription>
@@ -1309,7 +1309,7 @@ function DriveBackupRow() {
     return (
       <div className="rounded-lg border p-3 flex items-center justify-between gap-3">
         <div className="flex items-start gap-2 text-sm min-w-0">
-          <CheckCircle2 className="size-4 text-emerald-600 mt-0.5 shrink-0" />
+          <CheckCircle2 className="size-4 text-indigo-600 mt-0.5 shrink-0" />
           <div className="min-w-0">
             <p>A copy also goes to your Google Drive</p>
             <p className="text-xs text-muted-foreground truncate">
@@ -1492,7 +1492,7 @@ export function BackupsTab({ projectId }: { projectId: string }) {
     const lower = (status || '').toLowerCase()
     if (lower === 'completed') {
       return (
-        <Badge variant="outline" className="bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/50">
+        <Badge variant="outline" className="bg-indigo-50 text-indigo-700 dark:bg-indigo-900/20 dark:text-indigo-400 border-indigo-200 dark:border-indigo-900/50">
           <CheckCircle2 className="size-3 me-1" />
           Completed
         </Badge>
@@ -1592,7 +1592,7 @@ export function BackupsTab({ projectId }: { projectId: string }) {
                 {backups.map((b) => (
                   <TableRow
                     key={b.id}
-                    className="hover:bg-emerald-50/40 dark:hover:bg-emerald-950/10 transition-colors"
+                    className="hover:bg-indigo-50/40 dark:hover:bg-indigo-950/10 transition-colors"
                   >
                     <TableCell>
                       <span className="font-mono text-xs break-all">{b.filename}</span>
@@ -1805,1021 +1805,10 @@ function RotateCwRestore({ className }: { className?: string }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// 3. FilesTab
+// 3. FilesTab — the file manager lives in ./site/file-manager.tsx
 // ═══════════════════════════════════════════════════════════════════════
 
-const TEXT_FILE_EXTENSIONS = [
-  'txt', 'md', 'markdown', 'json', 'yaml', 'yml', 'xml', 'csv', 'tsv', 'log',
-  'env', 'ini', 'conf', 'cfg', 'toml', 'js', 'jsx', 'ts', 'tsx', 'mjs', 'cjs',
-  'py', 'rb', 'php', 'go', 'rs', 'java', 'c', 'h', 'cpp', 'hpp', 'cs', 'swift',
-  'kt', 'sh', 'bash', 'zsh', 'sql', 'graphql', 'gql', 'vue', 'svelte', 'astro',
-  'html', 'htm', 'css', 'scss', 'sass', 'less', 'svg',
-]
-
-function isLikelyTextFile(name: string): boolean {
-  const lower = name.toLowerCase()
-  if (lower.startsWith('.')) {
-    const ext = lower.slice(1)
-    return TEXT_FILE_EXTENSIONS.includes(ext)
-  }
-  const dot = lower.lastIndexOf('.')
-  if (dot === -1) return false
-  return TEXT_FILE_EXTENSIONS.includes(lower.slice(dot + 1))
-}
-
-export function FilesTab({ projectId }: { projectId: string }) {
-  const [files, setFiles] = useState<FileEntry[]>([])
-  const [currentPath, setCurrentPath] = useState('')
-  const [parentPath, setParentPath] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [uploading, setUploading] = useState(false)
-  const [uploadProgress, setUploadProgress] = useState(0)
-  const [dragOver, setDragOver] = useState(false)
-  const [exporting, setExporting] = useState(false)
-  const [importing, setImporting] = useState(false)
-
-  // Editor dialog
-  const [editorFile, setEditorFile] = useState<FileEntry | null>(null)
-  const [editorContent, setEditorContent] = useState('')
-  const [editorOriginal, setEditorOriginal] = useState('')
-  const [editorTruncated, setEditorTruncated] = useState(false)
-  const [editorLoading, setEditorLoading] = useState(false)
-  const [editorSaving, setEditorSaving] = useState(false)
-
-  // New folder / new file / rename dialogs
-  const [newFolderOpen, setNewFolderOpen] = useState(false)
-  const [newFolderName, setNewFolderName] = useState('')
-  const [newFileOpen, setNewFileOpen] = useState(false)
-  const [newFileName, setNewFileName] = useState('')
-  const [renameEntry, setRenameEntry] = useState<FileEntry | null>(null)
-  const [renameValue, setRenameValue] = useState('')
-  const [deleteEntry, setDeleteEntry] = useState<FileEntry | null>(null)
-
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const importInputRef = useRef<HTMLInputElement>(null)
-
-  // Encode a project-relative path for use as URL path segments in the
-  // /files/[...path] routes: encode each segment but keep the "/" separators
-  // so nested paths (e.g. wp-content/themes/style.css) route correctly.
-  // For a single segment (root files) this is identical to encodeURIComponent.
-  const encodePath = (p: string) => p.split('/').map(encodeURIComponent).join('/')
-
-  const fetchFiles = useCallback(
-    async (path: string) => {
-      setLoading(true)
-      try {
-        const qs = path ? `?path=${encodeURIComponent(path)}` : ''
-        const res = await fetch(`/api/hosting/${projectId}/files${qs}`, {
-          headers: getAuthHeaders(),
-        })
-        const data: FileListResponse = await res.json()
-        if (res.ok) {
-          setFiles(data.files || [])
-          setCurrentPath(data.currentPath || '')
-          setParentPath(data.parentPath ?? null)
-        } else {
-          toast.error((data as unknown as { error?: string }).error || 'Failed to load files')
-        }
-      } catch {
-        toast.error('Network error loading files')
-      } finally {
-        setLoading(false)
-      }
-    },
-    [projectId]
-  )
-
-  useEffect(() => {
-    fetchFiles('')
-  }, [fetchFiles])
-
-  const crumbs = currentPath ? currentPath.split('/').filter(Boolean) : []
-
-  const navigateTo = (path: string) => {
-    if (path.includes('..')) return // safety
-    fetchFiles(path)
-  }
-
-  const navigateToCrumb = (index: number) => {
-    const sub = crumbs.slice(0, index + 1).join('/')
-    navigateTo(sub)
-  }
-
-  const handleUpload = async (file: File, targetPath: string) => {
-    // Same limit the server enforces (PROXY_BODY_LIMIT_BYTES): say so before
-    // sending hundreds of MB that would be refused at the end.
-    if (file.size > PROXY_BODY_LIMIT_BYTES) {
-      toast.error(
-        `${file.name} is too large to upload here (max ${formatMegabytes(PROXY_BODY_LIMIT_BYTES)}). Use SFTP access, or Import Site for a full website archive.`
-      )
-      return
-    }
-    setUploading(true)
-    setUploadProgress(0)
-    try {
-      const formData = new FormData()
-      formData.append('file', file)
-      formData.append('path', targetPath)
-      const xhr = new XMLHttpRequest()
-      xhr.open('POST', `/api/hosting/${projectId}/files`) // session cookie authenticates it
-      xhr.upload.onprogress = (e) => {
-        if (e.lengthComputable) {
-          setUploadProgress(Math.round((e.loaded / e.total) * 100))
-        }
-      }
-      const result = await new Promise<{ ok: boolean; message?: string; error?: string }>(
-        (resolve, reject) => {
-          xhr.onload = () => {
-            try {
-              const data = JSON.parse(xhr.responseText)
-              if (xhr.status >= 200 && xhr.status < 300) {
-                resolve({ ok: true, message: data.message })
-              } else {
-                resolve({ ok: false, error: data.error || data.message || 'Upload failed' })
-              }
-            } catch {
-              // A proxy rejecting the body (413, 502) answers with HTML, not
-              // JSON. Reporting "invalid server response" hides the status
-              // code, which is the only useful part.
-              resolve({
-                ok: false,
-                error:
-                  xhr.status >= 200 && xhr.status < 300
-                    ? 'Upload succeeded but the server response could not be read.'
-                    : `Upload failed (HTTP ${xhr.status || 'no response'}).`,
-              })
-            }
-          }
-          xhr.onerror = () => reject(new Error('Network error during upload'))
-          xhr.onabort = () => reject(new Error('Upload aborted'))
-          // The request was fully prepared above and then never sent, so this
-          // promise never settled: the spinner sat at 0% forever and no request
-          // reached the server. The two other XMLHttpRequest call sites in this
-          // codebase (the create and import wizards) both send correctly.
-          xhr.send(formData)
-        }
-      )
-      if (result.ok) {
-        toast.success(`Uploaded ${file.name}`)
-        fetchFiles(currentPath)
-      } else {
-        toast.error(result.error || 'Upload failed')
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Upload failed')
-    } finally {
-      setUploading(false)
-      setUploadProgress(0)
-    }
-  }
-
-  const handleUploadFiles = async (fileList: FileList) => {
-    for (const f of Array.from(fileList)) {
-      await handleUpload(f, currentPath)
-    }
-  }
-
-  const handleDownload = async (entry: FileEntry) => {
-    try {
-      const res = await fetch(
-        `/api/hosting/${projectId}/files/${encodePath(entry.path)}?action=download`,
-        { headers: getAuthHeaders() }
-      )
-      if (!res.ok) {
-        const data = await res.json().catch(() => null)
-        throw new Error(data?.error || 'Download failed')
-      }
-      const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = entry.name
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
-      toast.success('Download started')
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Download failed')
-    }
-  }
-
-  // Export the current folder (or whole site at root) as a downloadable archive.
-  const handleExport = async () => {
-    setExporting(true)
-    try {
-      const qs = currentPath ? `&path=${encodeURIComponent(currentPath)}` : ''
-      const res = await fetch(`/api/hosting/${projectId}/files?action=export${qs}`, {
-        headers: getAuthHeaders(),
-      })
-      if (!res.ok) {
-        const data = await res.json().catch(() => null)
-        throw new Error(data?.error || 'Export failed')
-      }
-      const blob = await res.blob()
-      const cd = res.headers.get('Content-Disposition') || ''
-      const match = cd.match(/filename="?([^"]+)"?/)
-      const fallback = `${currentPath ? currentPath.split('/').pop() : 'website'}-export.zip`
-      const filename = match?.[1] || fallback
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = filename
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
-      toast.success('Export ready — download started')
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Export failed')
-    } finally {
-      setExporting(false)
-    }
-  }
-
-  // Import a .zip / .tar.gz archive and extract it into the current folder.
-  const handleImport = async (file: File) => {
-    setImporting(true)
-    try {
-      const formData = new FormData()
-      formData.append('file', file)
-      formData.append('path', currentPath)
-      formData.append('action', 'import')
-      const res = await fetch(`/api/hosting/${projectId}/files`, {
-        method: 'POST',
-        credentials: 'same-origin',
-        body: formData,
-      })
-      const data = await res.json().catch(() => null)
-      if (res.ok) {
-        toast.success(data?.message || `Imported ${file.name}`)
-        fetchFiles(currentPath)
-      } else {
-        toast.error(data?.error || 'Import failed')
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Import failed')
-    } finally {
-      setImporting(false)
-    }
-  }
-
-  const openEditor = async (entry: FileEntry) => {
-    setEditorFile(entry)
-    setEditorContent('')
-    setEditorOriginal('')
-    setEditorTruncated(false)
-    setEditorLoading(true)
-    try {
-      const res = await fetch(
-        `/api/hosting/${projectId}/files/${encodePath(entry.path)}?action=content`,
-        { headers: getAuthHeaders() }
-      )
-      const data = await res.json()
-      if (res.ok) {
-        setEditorContent(data.content || '')
-        setEditorOriginal(data.content || '')
-        setEditorTruncated(!!data.truncated)
-      } else {
-        toast.error(data.error || 'Failed to load file content')
-        setEditorFile(null)
-      }
-    } catch {
-      toast.error('Network error loading file content')
-      setEditorFile(null)
-    } finally {
-      setEditorLoading(false)
-    }
-  }
-
-  const handleSaveFile = async () => {
-    if (!editorFile) return
-    setEditorSaving(true)
-    try {
-      const res = await fetch(
-        `/api/hosting/${projectId}/files/${encodePath(editorFile.path)}`,
-        {
-          method: 'PUT',
-          headers: getAuthHeaders(),
-          body: JSON.stringify({ content: editorContent }),
-        }
-      )
-      const data = await res.json()
-      if (res.ok) {
-        toast.success(data.message || 'File saved')
-        setEditorOriginal(editorContent)
-        fetchFiles(currentPath)
-      } else {
-        toast.error(data.error || 'Failed to save file')
-      }
-    } catch {
-      toast.error('Network error saving file')
-    } finally {
-      setEditorSaving(false)
-    }
-  }
-
-  const handleMkdir = async () => {
-    const name = newFolderName.trim()
-    if (!name) {
-      toast.error('Folder name required')
-      return
-    }
-    try {
-      const res = await fetch(
-        `/api/hosting/${projectId}/files/${encodePath(currentPath)}`,
-        {
-          method: 'POST',
-          headers: getAuthHeaders(),
-          body: JSON.stringify({ action: 'mkdir', newPath: name }),
-        }
-      )
-      const data = await res.json()
-      if (res.ok) {
-        toast.success('Folder created')
-        setNewFolderOpen(false)
-        setNewFolderName('')
-        fetchFiles(currentPath)
-      } else {
-        toast.error(data.error || 'Failed to create folder')
-      }
-    } catch {
-      toast.error('Network error creating folder')
-    }
-  }
-
-  const handleNewFile = async () => {
-    const name = newFileName.trim()
-    if (!name) {
-      toast.error('File name required')
-      return
-    }
-    const fullPath = currentPath ? `${currentPath}/${name}` : name
-    try {
-      const res = await fetch(
-        `/api/hosting/${projectId}/files/${encodePath(fullPath)}`,
-        {
-          method: 'PUT',
-          headers: getAuthHeaders(),
-          body: JSON.stringify({ content: '' }),
-        }
-      )
-      const data = await res.json()
-      if (res.ok) {
-        toast.success('File created')
-        setNewFileOpen(false)
-        setNewFileName('')
-        fetchFiles(currentPath)
-      } else {
-        toast.error(data.error || 'Failed to create file')
-      }
-    } catch {
-      toast.error('Network error creating file')
-    }
-  }
-
-  const handleRename = async () => {
-    if (!renameEntry) return
-    const name = renameValue.trim()
-    if (!name) {
-      toast.error('New name required')
-      return
-    }
-    try {
-      const res = await fetch(
-        `/api/hosting/${projectId}/files/${encodePath(renameEntry.path)}`,
-        {
-          method: 'POST',
-          headers: getAuthHeaders(),
-          body: JSON.stringify({ action: 'rename', newPath: name }),
-        }
-      )
-      const data = await res.json()
-      if (res.ok) {
-        toast.success('Renamed')
-        setRenameEntry(null)
-        setRenameValue('')
-        fetchFiles(currentPath)
-      } else {
-        toast.error(data.error || 'Failed to rename')
-      }
-    } catch {
-      toast.error('Network error renaming')
-    }
-  }
-
-  const handleDelete = async () => {
-    if (!deleteEntry) return
-    try {
-      const res = await fetch(
-        `/api/hosting/${projectId}/files/${encodePath(deleteEntry.path)}`,
-        { method: 'DELETE', headers: getAuthHeaders() }
-      )
-      const data = await res.json()
-      if (res.ok) {
-        toast.success('Deleted')
-        setDeleteEntry(null)
-        fetchFiles(currentPath)
-      } else {
-        toast.error(data.error || 'Failed to delete')
-      }
-    } catch {
-      toast.error('Network error deleting')
-    }
-  }
-
-  const fileIcon = (entry: FileEntry) => {
-    if (entry.type === 'directory') {
-      return <Folder className="size-4 text-amber-500 shrink-0" />
-    }
-    if (entry.type === 'symlink') {
-      return <Link2 className="size-4 text-violet-500 shrink-0" />
-    }
-    return <FileIcon className="size-4 text-muted-foreground shrink-0" />
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <div className="flex flex-col gap-3">
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div>
-              <CardTitle className="text-lg flex items-center gap-2">
-                <HardDrive className={`size-5 ${primaryText}`} />
-                Files
-              </CardTitle>
-              <CardDescription className="mt-1">
-                Browse, edit and upload files inside the project deploy path.
-              </CardDescription>
-            </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                className="hidden"
-                onChange={(e) => {
-                  if (e.target.files && e.target.files.length > 0) {
-                    handleUploadFiles(e.target.files)
-                    e.target.value = ''
-                  }
-                }}
-              />
-              <input
-                ref={importInputRef}
-                type="file"
-                accept=".zip,.tar.gz,.tgz,.tar"
-                className="hidden"
-                onChange={(e) => {
-                  if (e.target.files && e.target.files[0]) {
-                    handleImport(e.target.files[0])
-                    e.target.value = ''
-                  }
-                }}
-              />
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 text-xs"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploading}
-              >
-                {uploading ? (
-                  <Loader2 className="size-3.5 me-1 animate-spin" />
-                ) : (
-                  <Upload className="size-3.5 me-1" />
-                )}
-                Upload
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 text-xs"
-                onClick={() => setNewFolderOpen(true)}
-              >
-                <FolderPlus className="size-3.5 me-1" />
-                New Folder
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 text-xs"
-                onClick={() => setNewFileOpen(true)}
-              >
-                <FilePlus className="size-3.5 me-1" />
-                New File
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 text-xs"
-                onClick={handleExport}
-                disabled={exporting}
-                title="Download this folder (or the whole site at the root) as an archive"
-              >
-                {exporting ? (
-                  <Loader2 className="size-3.5 me-1 animate-spin" />
-                ) : (
-                  <Download className="size-3.5 me-1" />
-                )}
-                Export
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 text-xs"
-                onClick={() => importInputRef.current?.click()}
-                disabled={importing}
-                title="Upload a .zip / .tar.gz archive and extract it into this folder"
-              >
-                {importing ? (
-                  <Loader2 className="size-3.5 me-1 animate-spin" />
-                ) : (
-                  <Archive className="size-3.5 me-1" />
-                )}
-                Import
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 text-xs"
-                onClick={() => fetchFiles(currentPath)}
-                disabled={loading}
-              >
-                <RefreshCw className={`size-3.5 me-1 ${loading ? 'animate-spin' : ''}`} />
-                Refresh
-              </Button>
-            </div>
-          </div>
-
-          {/* Breadcrumb */}
-          <div className="flex items-center gap-1 text-xs flex-wrap">
-            <button
-              type="button"
-              onClick={() => navigateTo('')}
-              className={`inline-flex items-center gap-1 px-2 py-1 rounded hover:bg-muted ${
-                currentPath === '' ? 'text-emerald-600 dark:text-emerald-400 font-medium' : 'text-muted-foreground'
-              }`}
-            >
-              <Home className="size-3.5" />
-              deployPath
-            </button>
-            {crumbs.map((c, i) => (
-              <span key={i} className="inline-flex items-center">
-                <ChevronRight className="size-3 text-muted-foreground" />
-                <button
-                  type="button"
-                  onClick={() => navigateToCrumb(i)}
-                  className={`px-2 py-1 rounded hover:bg-muted ${
-                    i === crumbs.length - 1
-                      ? 'text-emerald-600 dark:text-emerald-400 font-medium'
-                      : 'text-muted-foreground'
-                  }`}
-                >
-                  {c}
-                </button>
-              </span>
-            ))}
-          </div>
-
-          {uploading && (
-            <div className="space-y-1">
-              <Progress value={uploadProgress} className="h-1.5" />
-              <p className="text-xs text-muted-foreground">Uploading... {uploadProgress}%</p>
-            </div>
-          )}
-        </div>
-      </CardHeader>
-      <CardContent>
-        <div
-          className={`rounded-lg border-2 border-dashed transition-colors ${
-            dragOver
-              ? 'border-emerald-400 bg-emerald-50/50 dark:bg-emerald-950/10'
-              : 'border-border'
-          }`}
-          onDragOver={(e) => {
-            e.preventDefault()
-            setDragOver(true)
-          }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={(e) => {
-            e.preventDefault()
-            setDragOver(false)
-            if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-              handleUploadFiles(e.dataTransfer.files)
-            }
-          }}
-        >
-          {loading ? (
-            <div className="p-4 space-y-3">
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-            </div>
-          ) : files.length === 0 ? (
-            <div className="text-center py-10 text-muted-foreground">
-              <FolderOpen className="size-10 mx-auto mb-3 opacity-30" />
-              <p className="text-sm font-medium">Empty folder</p>
-              <p className="text-xs mt-1">
-                Drag files here or use the Upload button to add files.
-              </p>
-            </div>
-          ) : (
-            <>
-              {/* Desktop table */}
-              <div className="hidden sm:block max-h-96 overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/20">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Size</TableHead>
-                      <TableHead>Modified</TableHead>
-                      <TableHead>Perms</TableHead>
-                      <TableHead className="text-end">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {parentPath !== null && parentPath !== undefined && (
-                      <TableRow
-                        className="hover:bg-muted/40 cursor-pointer"
-                        onClick={() => navigateTo(parentPath)}
-                      >
-                        <TableCell colSpan={5} className="text-xs">
-                          <span className="inline-flex items-center gap-2 text-muted-foreground">
-                            <ArrowUp className="size-4" />
-                            ..
-                          </span>
-                        </TableCell>
-                      </TableRow>
-                    )}
-                    {files.map((f) => (
-                      <TableRow
-                        key={f.path}
-                        className="hover:bg-emerald-50/40 dark:hover:bg-emerald-950/10 transition-colors cursor-pointer"
-                        onClick={() => {
-                          if (f.type === 'directory') {
-                            navigateTo(f.path)
-                          } else if (f.type === 'file' && isLikelyTextFile(f.name)) {
-                            openEditor(f)
-                          }
-                        }}
-                      >
-                        <TableCell>
-                          <div className="flex items-center gap-2 min-w-0">
-                            {fileIcon(f)}
-                            <span className="font-mono text-sm truncate">{f.name}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-xs text-muted-foreground">
-                          {f.type === 'directory' ? '—' : formatBytes(f.size)}
-                        </TableCell>
-                        <TableCell className="text-xs text-muted-foreground">
-                          {f.modifiedAt ? timeAgo(f.modifiedAt) : '—'}
-                        </TableCell>
-                        <TableCell className="font-mono text-xs text-muted-foreground">
-                          {f.permissions || '—'}
-                        </TableCell>
-                        <TableCell className="text-end">
-                          <div
-                            className="flex items-center justify-end gap-1"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            {f.type === 'file' && (
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="size-7"
-                                    onClick={() => handleDownload(f)}
-                                  >
-                                    <Download className="size-3.5" />
-                                  </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>Download</TooltipContent>
-                              </Tooltip>
-                            )}
-                            {f.type === 'file' && isLikelyTextFile(f.name) && (
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="size-7"
-                                    onClick={() => openEditor(f)}
-                                  >
-                                    <Edit className="size-3.5" />
-                                  </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>Edit</TooltipContent>
-                              </Tooltip>
-                            )}
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="size-7"
-                                  onClick={() => {
-                                    setRenameEntry(f)
-                                    setRenameValue(f.name)
-                                  }}
-                                >
-                                  <Edit2Pencil />
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent>Rename</TooltipContent>
-                            </Tooltip>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="size-7 text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/20"
-                                  onClick={() => setDeleteEntry(f)}
-                                >
-                                  <Trash2 className="size-3.5" />
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent>Delete</TooltipContent>
-                            </Tooltip>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-
-              {/* Mobile cards */}
-              <div className="sm:hidden max-h-96 overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/20 divide-y">
-                {parentPath !== null && parentPath !== undefined && (
-                  <button
-                    type="button"
-                    onClick={() => navigateTo(parentPath)}
-                    className="w-full text-start p-3 text-xs text-muted-foreground hover:bg-muted/40"
-                  >
-                    <span className="inline-flex items-center gap-2">
-                      <ArrowUp className="size-4" />
-                      ..
-                    </span>
-                  </button>
-                )}
-                {files.map((f) => (
-                  <div
-                    key={f.path}
-                    className="p-3 hover:bg-emerald-50/40 dark:hover:bg-emerald-950/10"
-                  >
-                    <button
-                      type="button"
-                      className="w-full text-start"
-                      onClick={() => {
-                        if (f.type === 'directory') {
-                          navigateTo(f.path)
-                        } else if (f.type === 'file' && isLikelyTextFile(f.name)) {
-                          openEditor(f)
-                        } else if (f.type === 'file') {
-                          handleDownload(f)
-                        }
-                      }}
-                    >
-                      <div className="flex items-center gap-2">
-                        {fileIcon(f)}
-                        <span className="font-mono text-sm truncate flex-1">{f.name}</span>
-                      </div>
-                      <div className="text-xs text-muted-foreground mt-1 ps-6">
-                        {f.type === 'directory' ? 'folder' : formatBytes(f.size)}
-                        {f.modifiedAt ? ` · ${timeAgo(f.modifiedAt)}` : ''}
-                        {f.permissions ? ` · ${f.permissions}` : ''}
-                      </div>
-                    </button>
-                    <div className="flex items-center gap-1 mt-2 ps-6">
-                      {f.type === 'file' && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-7 text-xs"
-                          onClick={() => handleDownload(f)}
-                        >
-                          <Download className="size-3 me-1" />
-                          Download
-                        </Button>
-                      )}
-                      {f.type === 'file' && isLikelyTextFile(f.name) && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-7 text-xs"
-                          onClick={() => openEditor(f)}
-                        >
-                          <Edit className="size-3 me-1" />
-                          Edit
-                        </Button>
-                      )}
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-7 text-xs"
-                        onClick={() => {
-                          setRenameEntry(f)
-                          setRenameValue(f.name)
-                        }}
-                      >
-                        <Edit2Pencil className="size-3 me-1" />
-                        Rename
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-7 text-xs text-red-600 hover:text-red-700"
-                        onClick={() => setDeleteEntry(f)}
-                      >
-                        <Trash2 className="size-3 me-1" />
-                        Delete
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-      </CardContent>
-
-      {/* Editor Dialog */}
-      <Dialog open={!!editorFile} onOpenChange={(v) => !v && setEditorFile(null)}>
-        <DialogContent className="sm:max-w-3xl max-h-[85vh] flex flex-col">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-base">
-              <Edit className={`size-4 ${primaryText}`} />
-              <span className="font-mono truncate">{editorFile?.name}</span>
-            </DialogTitle>
-            <DialogDescription className="font-mono text-xs">
-              {editorFile?.path}
-            </DialogDescription>
-          </DialogHeader>
-          {editorTruncated && (
-            <div className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/20 p-2 text-xs text-amber-700 dark:text-amber-400 flex items-center gap-2">
-              <AlertTriangle className="size-3.5 shrink-0" />
-              File truncated — only the first portion is shown for editing.
-            </div>
-          )}
-          <div className="flex-1 min-h-0">
-            {editorLoading ? (
-              <div className="space-y-2">
-                <Skeleton className="h-64 w-full" />
-              </div>
-            ) : (
-              <Textarea
-                value={editorContent}
-                onChange={(e) => setEditorContent(e.target.value)}
-                className="font-mono text-xs h-64 sm:h-80 resize-none"
-                spellCheck={false}
-              />
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditorFile(null)} disabled={editorSaving}>
-              Cancel
-            </Button>
-            <Button
-              className={primaryBtn}
-              onClick={handleSaveFile}
-              disabled={editorSaving || editorLoading || editorContent === editorOriginal}
-            >
-              {editorSaving ? (
-                <Loader2 className="size-4 me-2 animate-spin" />
-              ) : (
-                <Save className="size-4 me-2" />
-              )}
-              Save
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* New Folder Dialog */}
-      <Dialog open={newFolderOpen} onOpenChange={(v) => !v && setNewFolderOpen(false)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <FolderPlus className={`size-5 ${primaryText}`} />
-              New Folder
-            </DialogTitle>
-            <DialogDescription>
-              Create a folder inside the current directory.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-2 py-4">
-            <Label htmlFor="folder-name">Name</Label>
-            <Input
-              id="folder-name"
-              placeholder="my-folder"
-              value={newFolderName}
-              onChange={(e) => setNewFolderName(e.target.value)}
-              className="font-mono text-sm"
-              autoFocus
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setNewFolderOpen(false)}>Cancel</Button>
-            <Button className={primaryBtn} onClick={handleMkdir}>Create</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* New File Dialog */}
-      <Dialog open={newFileOpen} onOpenChange={(v) => !v && setNewFileOpen(false)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <FilePlus className={`size-5 ${primaryText}`} />
-              New File
-            </DialogTitle>
-            <DialogDescription>
-              Create an empty text file you can edit inline.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-2 py-4">
-            <Label htmlFor="file-name">Name</Label>
-            <Input
-              id="file-name"
-              placeholder="index.html"
-              value={newFileName}
-              onChange={(e) => setNewFileName(e.target.value)}
-              className="font-mono text-sm"
-              autoFocus
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setNewFileOpen(false)}>Cancel</Button>
-            <Button className={primaryBtn} onClick={handleNewFile}>Create</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Rename Dialog */}
-      <Dialog open={!!renameEntry} onOpenChange={(v) => !v && setRenameEntry(null)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Edit className={`size-5 ${primaryText}`} />
-              Rename {renameEntry?.type === 'directory' ? 'Folder' : 'File'}
-            </DialogTitle>
-            <DialogDescription className="font-mono text-xs">
-              {renameEntry?.path}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-2 py-4">
-            <Label htmlFor="rename-value">New name</Label>
-            <Input
-              id="rename-value"
-              value={renameValue}
-              onChange={(e) => setRenameValue(e.target.value)}
-              className="font-mono text-sm"
-              autoFocus
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setRenameEntry(null)}>Cancel</Button>
-            <Button className={primaryBtn} onClick={handleRename}>Rename</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Delete Confirmation */}
-      <AlertDialog open={!!deleteEntry} onOpenChange={(v) => !v && setDeleteEntry(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2">
-              <AlertTriangle className="size-5 text-red-500" />
-              Delete {deleteEntry?.type === 'directory' ? 'Folder' : 'File'}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              Permanently delete <span className="font-mono">{deleteEntry?.name}</span>?
-              {deleteEntry?.type === 'directory' && ' This will also delete everything inside the folder.'}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDelete}
-              className="bg-red-600 hover:bg-red-700 text-white"
-            >
-              <Trash2 className="size-4 me-2" />
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </Card>
-  )
-}
-
-// lucide-react doesn't export a "pencil" by default — alias to Edit
-function Edit2Pencil({ className }: { className?: string }) {
-  return <Edit className={className} />
-}
+export { FileManager as FilesTab } from './site/file-manager'
 
 // ═══════════════════════════════════════════════════════════════════════
 // 4. TerminalTab
@@ -3092,14 +2081,14 @@ export function TerminalTab({ projectId }: { projectId: string }) {
           <div className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-900 border-b border-zinc-800">
             <span className="size-2 rounded-full bg-red-500/80" />
             <span className="size-2 rounded-full bg-amber-500/80" />
-            <span className="size-2 rounded-full bg-emerald-500/80" />
+            <span className="size-2 rounded-full bg-indigo-500/80" />
             <span className="ms-2 text-[10px] text-zinc-500 font-mono truncate">
               {containerNameRef.current} · session {sessionId.slice(0, 8)}
             </span>
           </div>
           <div
             ref={scrollRef}
-            className="p-3 text-xs font-mono text-emerald-400 overflow-auto h-80 sm:h-96 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-zinc-700"
+            className="p-3 text-xs font-mono text-indigo-400 overflow-auto h-80 sm:h-96 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-zinc-700"
           >
             {lines.length === 0 ? (
               <div className="text-zinc-500">
@@ -3136,7 +2125,7 @@ export function TerminalTab({ projectId }: { projectId: string }) {
               })
             )}
             <form onSubmit={handleSubmit} className="flex items-center gap-2 mt-1">
-              <span className="text-emerald-400 shrink-0">{getPrompt()}</span>
+              <span className="text-indigo-400 shrink-0">{getPrompt()}</span>
               <input
                 ref={inputRef}
                 value={input}
@@ -3164,13 +2153,13 @@ export function TerminalTab({ projectId }: { projectId: string }) {
 function usageColor(percent: number): string {
   if (percent > 85) return 'bg-red-500'
   if (percent > 60) return 'bg-amber-500'
-  return 'bg-emerald-500'
+  return 'bg-indigo-500'
 }
 
 function usageTextColor(percent: number): string {
   if (percent > 85) return 'text-red-600 dark:text-red-400'
   if (percent > 60) return 'text-amber-600 dark:text-amber-400'
-  return 'text-emerald-600 dark:text-emerald-400'
+  return 'text-indigo-600 dark:text-indigo-400'
 }
 
 function Sparkline({
@@ -3475,7 +2464,7 @@ export function ResourcesTab({ projectId }: { projectId: string }) {
               <Server className="size-3.5" />
               Status
             </span>
-            <Badge variant="outline" className={c.status === 'running' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/50' : 'bg-muted'}>
+            <Badge variant="outline" className={c.status === 'running' ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-900/20 dark:text-indigo-400 border-indigo-200 dark:border-indigo-900/50' : 'bg-muted'}>
               {c.status}
             </Badge>
           </div>
@@ -3484,7 +2473,7 @@ export function ResourcesTab({ projectId }: { projectId: string }) {
         <Separator />
 
         {/* Plan limits */}
-        <div className="rounded-lg border border-emerald-200 dark:border-emerald-900/50 bg-emerald-50/40 dark:bg-emerald-950/10 p-4">
+        <div className="rounded-lg border border-indigo-200 dark:border-indigo-900/50 bg-indigo-50/40 dark:bg-indigo-950/10 p-4">
           <div className="flex items-start gap-2">
             <Server className={`size-4 mt-0.5 shrink-0 ${primaryText}`} />
             <div>
@@ -3727,7 +2716,7 @@ export function DomainsTab({
     const status = (d.sslStatus || 'none').toLowerCase()
     if (status === 'issued') {
       return (
-        <Badge variant="outline" className="bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/50 text-xs">
+        <Badge variant="outline" className="bg-indigo-50 text-indigo-700 dark:bg-indigo-900/20 dark:text-indigo-400 border-indigo-200 dark:border-indigo-900/50 text-xs">
           <ShieldCheck className="size-3 me-1" />
           Issued
         </Badge>
@@ -3814,7 +2803,7 @@ export function DomainsTab({
                 {domains.map((d) => (
                   <TableRow
                     key={d.id}
-                    className="hover:bg-emerald-50/40 dark:hover:bg-emerald-950/10 transition-colors"
+                    className="hover:bg-indigo-50/40 dark:hover:bg-indigo-950/10 transition-colors"
                   >
                     <TableCell>
                       <div className="flex items-center gap-2">
@@ -3829,7 +2818,7 @@ export function DomainsTab({
                     </TableCell>
                     <TableCell>
                       {d.isPrimary ? (
-                        <Badge variant="outline" className="bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/50 text-xs">
+                        <Badge variant="outline" className="bg-indigo-50 text-indigo-700 dark:bg-indigo-900/20 dark:text-indigo-400 border-indigo-200 dark:border-indigo-900/50 text-xs">
                           Primary
                         </Badge>
                       ) : (
@@ -3843,7 +2832,7 @@ export function DomainsTab({
                       {d.verified ? (
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <span className="inline-flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
+                            <span className="inline-flex items-center gap-1 text-xs text-indigo-600 dark:text-indigo-400">
                               <CheckCircle2 className="size-4" />
                               Yes
                             </span>
@@ -4552,7 +3541,7 @@ export function EmailTab({ projectId }: { projectId: string }) {
                   {mailboxes.map((mb) => (
                     <TableRow
                       key={mb.id}
-                      className="hover:bg-emerald-50/40 dark:hover:bg-emerald-950/10 transition-colors"
+                      className="hover:bg-indigo-50/40 dark:hover:bg-indigo-950/10 transition-colors"
                     >
                       <TableCell>
                         <div className="flex items-center gap-2 flex-wrap">
@@ -4560,7 +3549,7 @@ export function EmailTab({ projectId }: { projectId: string }) {
                           {mb.isDefault && (
                             <Badge
                               variant="outline"
-                              className="bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/50 text-[10px] h-5"
+                              className="bg-indigo-50 text-indigo-700 dark:bg-indigo-900/20 dark:text-indigo-400 border-indigo-200 dark:border-indigo-900/50 text-[10px] h-5"
                             >
                               Default
                             </Badge>
@@ -4574,9 +3563,9 @@ export function EmailTab({ projectId }: { projectId: string }) {
                         {mb.active ? (
                           <Badge
                             variant="outline"
-                            className="bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/50 text-xs"
+                            className="bg-indigo-50 text-indigo-700 dark:bg-indigo-900/20 dark:text-indigo-400 border-indigo-200 dark:border-indigo-900/50 text-xs"
                           >
-                            <span className="size-1.5 rounded-full bg-emerald-500 me-1.5" />
+                            <span className="size-1.5 rounded-full bg-indigo-500 me-1.5" />
                             Active
                           </Badge>
                         ) : (
@@ -4593,7 +3582,7 @@ export function EmailTab({ projectId }: { projectId: string }) {
                         {mb.dkimEnabled ? (
                           <Tooltip>
                             <TooltipTrigger asChild>
-                              <span className="inline-flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
+                              <span className="inline-flex items-center gap-1 text-xs text-indigo-600 dark:text-indigo-400">
                                 <ShieldCheck className="size-4" />
                                 On
                               </span>
@@ -4923,7 +3912,7 @@ export function EmailTab({ projectId }: { projectId: string }) {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <CheckCircle2 className="size-5 text-emerald-600" />
+              <CheckCircle2 className="size-5 text-indigo-600" />
               Mailbox Created
             </DialogTitle>
             <DialogDescription>
