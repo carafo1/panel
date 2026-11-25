@@ -254,6 +254,13 @@ export async function provisionProjectDatabase(
   opts: {
     type?: 'mysql' | 'mariadb' | 'postgres' | 'postgresql'
     name?: string
+    /**
+     * Make this the site's database even when others exist (an import's new
+     * database replaces whatever the site used before). Without it, a stale
+     * earlier database kept the primary flag, and deleting it later wiped the
+     * site's database settings.
+     */
+    primary?: boolean
     onLog?: (m: string) => void
   } = {}
 ): Promise<ProvisionedDatabase> {
@@ -308,7 +315,8 @@ export async function provisionProjectDatabase(
   const rootPass = randomPassword(32)
   const containerName = `deployhub-db-${slug}-${short}`
   const sqlitePath = path.join(DB_DIR, projectId, `${dbName}.db`)
-  const isPrimary = (await db.websiteDatabase.count({ where: { projectId } })) === 0
+  const isPrimary =
+    opts.primary === true || (await db.websiteDatabase.count({ where: { projectId } })) === 0
 
   log(`Provisioning ${type} database "${dbName}"…`)
 
@@ -465,6 +473,11 @@ export async function provisionProjectDatabase(
   // Mirror the primary DB info onto the Project row (legacy compat for
   // WordPress/Laravel which read from project.databaseName etc.).
   if (isPrimary) {
+    // Only one primary per site.
+    await db.websiteDatabase.updateMany({
+      where: { projectId, isPrimary: true, NOT: { name: dbName } },
+      data: { isPrimary: false },
+    })
     await db.project.update({
       where: { id: projectId },
       data: {
@@ -541,8 +554,10 @@ export async function dropProjectDatabase(
 
   await db.websiteDatabase.delete({ where: { id: dbId } })
 
-  // If it was the primary, clear the project-level mirror.
-  if (row.isPrimary) {
+  // Clear the project-level mirror only when it describes THIS database. A
+  // stale primary flag on an old database must not wipe the settings of the
+  // database the site actually uses (it broke a live site after an import).
+  if (row.isPrimary && (!project.databaseName || project.databaseName === row.name)) {
     await db.project.update({
       where: { id: projectId },
       data: {

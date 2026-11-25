@@ -89,7 +89,8 @@ import {
   isSiteMailMethod,
   msmtpDockerfileBlock,
   siteMailContainerEnv,
-  wordPressMailDefines,
+  wordPressMailConfigFile,
+  WP_MAIL_CONFIG_PATH,
   WP_MAIL_PLUGIN,
   WP_MAIL_PLUGIN_PATH,
   type SiteMailRuntime,
@@ -546,10 +547,7 @@ async function writeWordPressConfig(
       dbPass = ''
     }
   }
-  const mailDefines = wordPressMailDefines(await getSiteMailRuntime(projectId).catch(() => null))
-  if (!freshDb?.databaseHost) {
-    log('WARNING: no provisioned database found on the project row — wp-config will contain placeholder DB values.')
-  }
+  const mailRuntime = await getSiteMailRuntime(projectId).catch(() => null)
   const cfg = `<?php
 // Behind the Caddy reverse proxy WordPress must trust X-Forwarded-Proto,
 // otherwise it emits http:// asset URLs on https pages and the browser
@@ -566,7 +564,7 @@ define('DB_CHARSET', 'utf8mb4');
 define('DB_COLLATE', '');
 \$table_prefix = 'wp_';
 define('WP_DEBUG', false);
-${mailDefines}if (!defined('ABSPATH')) define('ABSPATH', dirname(__FILE__) . '/');
+if (!defined('ABSPATH')) define('ABSPATH', dirname(__FILE__) . '/');
 require_once ABSPATH . 'wp-settings.php';
 `
   // Layout: everything in <deployPath>/site, mounted as /var/www/html.
@@ -601,9 +599,67 @@ require_once ABSPATH . 'wp-settings.php';
   if (layout.stdout.includes('MOVED_CONTENT')) {
     log('Moved wp-content into site/ — every WordPress file is now in the site folder.')
   }
-  await unlinkSymlinks(client, site, ['wp-config.php'])
-  await putFile(client, `${site}/wp-config.php`, cfg, { mode: 0o644 })
+  // Only (re)write wp-config.php when it is ours to write. An imported site
+  // keeps its own (its keys, table prefix and settings), and with no database
+  // on record placeholders would replace working settings: both took a live
+  // site down with "Error establishing a database connection".
+  const existing = await exec(
+    client,
+    `f=${shellQuote(`${site}/wp-config.php`)}; if [ -f "$f" ] && [ ! -L "$f" ]; then grep -q ${shellQuote(MANAGED_WP_CONFIG_MARKER)} "$f" && echo MANAGED || echo CUSTOM; else echo NONE; fi`,
+    { timeoutMs: 15000 }
+  )
+  const state = existing.stdout.trim()
+  if (state === 'CUSTOM') {
+    log("Kept the site's own wp-config.php (not managed by the panel).")
+  } else if (state === 'MANAGED' && !freshDb?.databaseHost) {
+    log('WARNING: no database on record for this site — kept the existing wp-config.php instead of writing placeholder values.')
+  } else {
+    if (!freshDb?.databaseHost) {
+      log('WARNING: no provisioned database found on the project row — wp-config will contain placeholder DB values.')
+    }
+    await unlinkSymlinks(client, site, ['wp-config.php'])
+    await putFile(client, `${site}/wp-config.php`, cfg, { mode: 0o640 })
+    await exec(client, `chown 33:33 ${shellQuote(`${site}/wp-config.php`)}`, { timeoutMs: 15000 })
+  }
+  await writeWordPressMailFiles(client, site, mailRuntime, log)
+}
+
+/** Marker line in the wp-config.php the panel generates. */
+const MANAGED_WP_CONFIG_MARKER = 'Behind the Caddy reverse proxy WordPress must trust'
+
+/**
+ * Mail plugin + its settings file. Never touches wp-config.php except to drop
+ * APSAMO_SMTP_* lines an earlier version put there (they would shadow the
+ * settings file, e.g. keep an old password after a rotation).
+ */
+async function writeWordPressMailFiles(
+  client: Parameters<typeof exec>[0],
+  site: string,
+  rt: Awaited<ReturnType<typeof getSiteMailRuntime>> | null,
+  log: (m: string) => void
+): Promise<void> {
   await writeWordPressMailPlugin(client, site, log)
+  const cfgPath = `${site}/${WP_MAIL_CONFIG_PATH}`
+  await exec(
+    client,
+    `f=${shellQuote(`${site}/wp-config.php`)}; if [ -f "$f" ] && [ ! -L "$f" ] && grep -q APSAMO_SMTP_ "$f"; then sed -i -e '/^\\/\\/ Outgoing mail through the hosting mail server/d' -e '/^\\/\\/ used by wp-content\\/mu-plugins\\/apsamo-mail.php/d' -e '/APSAMO_SMTP_/d' "$f"; fi`,
+    { timeoutMs: 15000 }
+  )
+  if (!rt) {
+    await exec(client, `rm -f -- ${shellQuote(cfgPath)}`, { timeoutMs: 15000 })
+    return
+  }
+  const linkCheck = await exec(
+    client,
+    `cd ${shellQuote(site)} && { [ -L wp-content ] || [ -L ${shellQuote(WP_MAIL_CONFIG_PATH)} ]; } && echo LINK || true`,
+    { timeoutMs: 15000 }
+  )
+  if (linkCheck.stdout.includes('LINK')) {
+    log('WARNING: wp-content or the mail settings file is a link — mail settings were not written.')
+    return
+  }
+  await putFile(client, cfgPath, wordPressMailConfigFile(rt), { mode: 0o640 })
+  await exec(client, `chown 33:33 ${shellQuote(cfgPath)}`, { timeoutMs: 15000 })
 }
 
 /**
@@ -667,9 +723,16 @@ export async function applySiteMailConfig(
   }
   try {
     const creds = await getServerCredentials(project.serverId)
-    await withConnection(creds, (client) =>
-      writeWordPressConfig(client, projectId, project.deployPath!, (m) => console.log(`[site-mail ${projectId.slice(0, 8)}] ${m}`))
-    )
+    // Only the mail plugin and its settings file: never regenerate
+    // wp-config.php just to change mail settings.
+    const rt = await getSiteMailRuntime(projectId).catch(() => null)
+    const log = (m: string) => console.log(`[site-mail ${projectId.slice(0, 8)}] ${m}`)
+    await withConnection(creds, async (client) => {
+      const site = `${project.deployPath}/site`
+      const ok = await exec(client, `[ -d ${shellQuote(site)} ] && [ ! -L ${shellQuote(site)} ] && echo yes || true`, { timeoutMs: 15000 })
+      if (!ok.stdout.includes('yes')) throw new Error('the site folder was not found')
+      await writeWordPressMailFiles(client, site, rt, log)
+    })
     return { applied: true, requiresRedeploy: false, message: 'Applied to the site.' }
   } catch (err) {
     return {
