@@ -108,7 +108,8 @@ fi
 if [[ "$INCLUDE_STORAGE" == "1" ]] && [[ -d "$STORAGE_ROOT" ]]; then
   ok "Copying storage (this may take a while)..."
   mkdir -p "$STAGE/apsamo/storage"
-  cp -a "$STORAGE_ROOT/." "$STAGE/apsamo/storage/" 2>/dev/null || warn "Some storage files could not be copied"
+  # Import uploads are transient (swept after 48h) and can be many GB: skip them.
+  tar -C "$STORAGE_ROOT" --exclude=./migration-uploads -cf - . 2>/dev/null     | tar -C "$STAGE/apsamo/storage" -xf - 2>/dev/null || warn "Some storage files could not be copied"
 fi
 
 # Copy Caddyfile

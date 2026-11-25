@@ -40,6 +40,7 @@
  */
 import { readFile } from 'fs/promises'
 import path from 'path'
+import { UPLOAD_ROOT } from '../migration/uploads'
 import { db } from '@/lib/db'
 import { STACK_DEFINITIONS, getStackDefinition } from '@/lib/stacks'
 import { isValidEnvKey, yamlQuoted, safeRuntimeVersion, safeDocumentRoot } from '@/lib/safe-values'
@@ -975,7 +976,7 @@ async function deployMethodProject(
           data: { sourceCommit: sha.stdout.trim() || null },
         }).catch(() => {})
       } else if (source === 'zip' && settings.uploadId) {
-        const localZip = `/tmp/apsamo-uploads/${settings.uploadId}.zip`
+        const localZip = path.join(UPLOAD_ROOT, `${settings.uploadId}.zip`)
         let zipData: Buffer
         try {
           zipData = await readFile(localZip)
