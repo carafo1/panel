@@ -37,7 +37,7 @@
  * without a circular import).
  */
 import { spawn, type ChildProcess } from 'child_process'
-import { mkdir, copyFile, chmod } from 'fs/promises'
+import { mkdir, copyFile, chmod, stat } from 'fs/promises'
 import { EventEmitter } from 'events'
 
 // ─── Shared types (structurally compatible with ssh.ts) ──────────────────
@@ -340,16 +340,40 @@ class LocalStream extends EventEmitter {
  * and `getFile` already buffer through a local temp file, so for localhost
  * servers we just copy that temp file to/from the (local) remote path.
  */
+type TransferCb = (err?: Error | null) => void
+type TransferOpts = { step?: (transferred: number, chunk: number, total: number) => void }
+
+export function localTransfer(
+  src: string,
+  dest: string,
+  optsOrCb: TransferOpts | TransferCb,
+  maybeCb?: TransferCb
+): void {
+  const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb
+  const opts = typeof optsOrCb === 'function' ? {} : optsOrCb || {}
+  if (typeof cb !== 'function') throw new TypeError('fastPut/fastGet: a callback is required')
+  copyFile(src, dest)
+    .then(async () => {
+      if (opts.step) {
+        const { size } = await stat(dest)
+        opts.step(size, size, size)
+      }
+    })
+    .then(
+      () => cb(undefined),
+      (err) => cb(err instanceof Error ? err : new Error(String(err)))
+    )
+}
+
 class LocalSftp {
-  fastPut(localSrc: string, remoteDest: string, cb: (err?: Error) => void): void {
-    copyFile(localSrc, remoteDest)
-      .then(() => cb(undefined))
-      .catch(cb)
+  // ssh2's signature is (src, dest, [options], callback). Accept both forms:
+  // treating the options object as the callback left the caller waiting
+  // forever after a successful copy (imports hung at "Transferring backup").
+  fastPut(localSrc: string, remoteDest: string, optsOrCb: TransferOpts | TransferCb, cb?: TransferCb): void {
+    localTransfer(localSrc, remoteDest, optsOrCb, cb)
   }
-  fastGet(remoteSrc: string, localDest: string, cb: (err?: Error) => void): void {
-    copyFile(remoteSrc, localDest)
-      .then(() => cb(undefined))
-      .catch(cb)
+  fastGet(remoteSrc: string, localDest: string, optsOrCb: TransferOpts | TransferCb, cb?: TransferCb): void {
+    localTransfer(remoteSrc, localDest, optsOrCb, cb)
   }
   chmod(remotePath: string, mode: number, cb: (err?: Error) => void): void {
     chmod(remotePath, mode)
