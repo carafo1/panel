@@ -767,6 +767,7 @@ const stageDetect: StageFn = async (ctx) => {
       })
       stashed = found
         .filter((f) => !/\/wp-content\/(uploads|ai1wm-backups|updraft|backup)/i.test(f.path))
+        .filter((f) => !/\/wp-content\/(plugins|themes|mu-plugins)\//i.test(f.path))
         .map((f) => f.path)
       if (stashed.length > 0) {
         ctx.log(`Re-scanned the workspace and found ${stashed.length} SQL dump(s).`)
@@ -778,6 +779,7 @@ const stageDetect: StageFn = async (ctx) => {
       sqlFiles: stashed,
       sourceType: ctx.sourceType,
       priorWarnings: ctx.warnings,
+      preferredHosts: [ctx.opts.targetUrl, ctx.opts.originalUrl].filter((u): u is string => Boolean(u)),
       onLog: ctx.log,
     })
     ctx.detection = detection
