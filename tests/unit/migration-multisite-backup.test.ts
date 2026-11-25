@@ -4,7 +4,7 @@
  * domain and that site's own database dump, not the first alphabetically.
  */
 import { describe, expect, test } from 'bun:test'
-import { chooseSiteRoot, normalizeHost, preferDumpsForDatabase } from '../../src/lib/migration/detect'
+import { chooseSiteRoot, importSourceDir, normalizeHost, preferDumpsForDatabase } from '../../src/lib/migration/detect'
 
 const X = '/w/extracted'
 const sites = [
@@ -69,5 +69,17 @@ describe('preferDumpsForDatabase', () => {
   test('a prefix of another name does not match', () => {
     const out = preferDumpsForDatabase([`${X}/a/wp_site2.sql`, `${X}/a/wp_site.sql`], 'wp_site', X)
     expect(out[0]).toBe(`${X}/a/wp_site.sql`)
+  })
+})
+
+describe('importSourceDir', () => {
+  test('copies the detected site folder, not the whole backup', () => {
+    expect(importSourceDir(`${X}/domains/qansorobad.so/public_html`, X)).toBe(`${X}/domains/qansorobad.so/public_html`)
+    expect(importSourceDir(`${X}/public_html/`, `${X}/`)).toBe(`${X}/public_html`)
+  })
+  test('falls back to the extraction root when the root is missing or outside it', () => {
+    expect(importSourceDir(null, X)).toBe(X)
+    expect(importSourceDir('/etc', X)).toBe(X)
+    expect(importSourceDir(`${X}-evil/x`, X)).toBe(X)
   })
 })

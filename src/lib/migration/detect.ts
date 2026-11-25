@@ -252,6 +252,18 @@ export function preferDumpsForDatabase(
   return [...uploaded, ...matches, ...rest]
 }
 
+/**
+ * The folder to copy into the website root: the site root detection found,
+ * when it lies inside the extracted backup; otherwise the extraction root.
+ */
+export function importSourceDir(rootDir: string | null | undefined, extractDir: string): string {
+  if (!rootDir) return extractDir
+  const base = extractDir.replace(/\/+$/, '')
+  const root = rootDir.replace(/\/+$/, '')
+  if (root === base || root.startsWith(base + '/')) return root
+  return extractDir
+}
+
 /** DB_NAME from a wp-config.php, when it is a plain string literal. */
 async function readDbName(client: AnyClient, root: string): Promise<string | null> {
   const r = await exec(
