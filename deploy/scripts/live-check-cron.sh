@@ -43,6 +43,17 @@ echo "$new_state" > "$STATE"
 [ "$new_state" = "$old_state" ] && exit 0
 
 to=$(envval ALERT_EMAIL); [ -n "$to" ] || to=$(envval ADMIN_EMAIL)
+# Last resort: the panel's admin accounts (comma-separated), from the database
+# (SQLite file: URL or PostgreSQL URL, whichever the panel uses).
+if [ -z "$to" ]; then
+  dburl=$(envval DATABASE_URL)
+  q="select group_concat(email, ',') from \"User\" where role in ('admin','super_admin') and email like '%@%'"
+  if [[ "$dburl" == file:* ]] && command -v sqlite3 >/dev/null 2>&1; then
+    to=$(sqlite3 -readonly "${dburl#file:}" "$q" 2>/dev/null || true)
+  elif [ -n "$dburl" ] && command -v psql >/dev/null 2>&1; then
+    to=$(psql "${dburl%%\?*}" -At -c "${q/group_concat(email, ',')/string_agg(email, ',')}" 2>/dev/null || true)
+  fi
+fi
 host=$(envval SMTP_HOST); port=$(envval SMTP_PORT); user=$(envval SMTP_USER); pass=$(envval SMTP_PASS)
 from=$(envval SMTP_FROM_EMAIL); [ -n "$from" ] || from="$user"
 if [ -z "$to" ] || [ -z "$host" ] || [ -z "$user" ] || [ -z "$pass" ]; then
@@ -79,10 +90,13 @@ msg=$(mktemp)
 } > "$msg"
 
 proto=smtp; [ "${port:-587}" = "465" ] && proto=smtps
+rcpts=()
+IFS=',' read -ra _to <<< "$to"
+for a in "${_to[@]}"; do a="${a// /}"; [ -n "$a" ] && rcpts+=(--mail-rcpt "$a"); done
 # Password via a curl config file on stdin, never on the command line.
 if printf 'user = "%s:%s"\n' "$user" "$pass" | curl -sS --max-time 60 -K - \
      --url "$proto://$host:${port:-587}" --ssl-reqd \
-     --mail-from "$from" --mail-rcpt "$to" --upload-file "$msg" >/dev/null 2>>"$LOG"; then
+     --mail-from "$from" "${rcpts[@]}" --upload-file "$msg" >/dev/null 2>>"$LOG"; then
   echo "$now alert sent ($new_state)" >> "$LOG"
 else
   echo "$now alert FAILED to send ($new_state)" >> "$LOG"
