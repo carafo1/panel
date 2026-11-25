@@ -8,10 +8,9 @@
  * area: where files live, how they are named, and how partial (chunked)
  * uploads are assembled.
  *
- * The path layout is deliberately compatible with the existing deployer, which
- * reads plain ZIP uploads from `/tmp/apsamo-uploads/<uploadId>.zip`. Anything
- * that is not a ZIP keeps its real extension, because the extractor dispatches
- * on it.
+ * The deployer reads plain ZIP uploads from `<UPLOAD_ROOT>/<uploadId>.zip`.
+ * Anything that is not a ZIP keeps its real extension, because the extractor
+ * dispatches on it.
  *
  * Uploads are anonymous blobs owned by a user, not by a project — the customer
  * uploads first and picks a destination afterwards. Every read therefore
@@ -26,8 +25,12 @@ import { pipeline } from 'stream/promises'
 
 // ─── Storage layout ───────────────────────────────────────────────────────
 
+// Persistent storage, never /tmp: the panel's systemd unit runs with
+// PrivateTmp=true, so anything under /tmp vanishes on every restart or deploy
+// and a half-finished import would lose its archive.
 export const UPLOAD_ROOT =
-  process.env.MIGRATION_UPLOAD_ROOT || '/tmp/apsamo-uploads'
+  process.env.MIGRATION_UPLOAD_ROOT ||
+  path.join(process.env.STORAGE_ROOT || path.join(process.cwd(), 'storage'), 'migration-uploads')
 
 /** Hard ceiling on a single upload. Overridable for customers on big plans. */
 export const MAX_UPLOAD_BYTES = Number(
