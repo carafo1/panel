@@ -19,6 +19,8 @@
  *   PUT    /files/<p>  { content }              save (also creates)
  *   POST   /files/<p>  { action:'rename', newPath }
  *   DELETE /files/<p>
+ * and, through the dialogs in file-dialogs.tsx: chmod, extract, compress,
+ * copy / move and preview.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { toast } from 'sonner'
@@ -30,19 +32,25 @@ import {
   ArrowUpDown,
   ChevronRight,
   CornerLeftUp,
+  Copy,
   Download,
+  Eye,
   File as FileIcon,
+  FileArchive,
   FileCode2,
   FileImage,
   FilePlus,
   FileText,
   Folder,
+  FolderInput,
   FolderOpen,
   FolderPlus,
+  KeyRound,
   HardDrive,
   Link2,
   Loader2,
   MoreHorizontal,
+  PackageOpen,
   Pencil,
   Plus,
   RefreshCw,
@@ -89,15 +97,18 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { EmptyState, InlineError, formatDate, jsonHeaders, timeAgo } from './shared'
+import { CompressDialog, ExtractDialog, PermissionsDialog, PreviewDialog, TransferDialog } from './file-dialogs'
 import {
   DOCUMENT_ROOT_DIR,
   encodePath,
   fileKind,
   formatBytes,
+  isArchive,
   isLikelyTextFile,
   isManagedFile,
   joinPath,
   parentOf,
+  previewKind,
   sortEntries,
   toOctal,
   validateName,
@@ -115,6 +126,9 @@ interface UploadItem {
   state: 'uploading' | 'done' | 'error'
   error?: string
 }
+
+/** focusReturn value meaning "the row is gone; focus the listing". */
+const LISTING_FOCUS = '/' // never a real entry path
 
 const KIND_ICON = {
   folder: Folder,
@@ -422,6 +436,10 @@ export function FileManager({ projectId }: { projectId: string }) {
   const [confirmDiscard, setConfirmDiscard] = useState(false)
   const [managedConfirm, setManagedConfirm] = useState<FileEntry | null>(null)
   const dirty = !!editor && !editor.loading && editor.content !== editor.original
+  const editorOpen = useRef(false)
+  useEffect(() => {
+    editorOpen.current = !!editor
+  }, [editor])
 
   const openEditor = async (entry: FileEntry, opts: { confirmed?: boolean } = {}) => {
     if (isManagedFile(entry) && !opts.confirmed) {
@@ -564,6 +582,9 @@ export function FileManager({ projectId }: { projectId: string }) {
       toast.success(`${verb} ${name}`)
       setAnnounce(`${verb} ${name}`)
       const createdFile = nameDialog.mode === 'file'
+      if (nameDialog.mode === 'rename' && focusReturn.current === nameDialog.entry.path) {
+        focusReturn.current = joinPath(parentOf(nameDialog.entry.path), name)
+      }
       setNameDialog(null)
       await load(path, { quiet: true })
       if (createdFile && isLikelyTextFile(name)) {
@@ -604,15 +625,71 @@ export function FileManager({ projectId }: { projectId: string }) {
       setAnnounce(msg)
     }
     if (failed.length) toast.error(`${failed.length} could not be deleted`, { description: failed.slice(0, 3).join(' · ') })
+    if (focusReturn.current !== null && toDelete.some((e) => e.path === focusReturn.current)) {
+      focusReturn.current = LISTING_FOCUS
+    }
     setDeleting(false)
     setToDelete(null)
     setSelected(new Set())
     load(path, { quiet: true })
   }
 
+  // ── Server-side actions (file-dialogs.tsx) ───────────────────────────
+  const [chmodEntry, setChmodEntry] = useState<FileEntry | null>(null)
+  const [transfer, setTransfer] = useState<{ op: 'copy' | 'move'; items: FileEntry[] } | null>(null)
+  const [extractEntry, setExtractEntry] = useState<FileEntry | null>(null)
+  const [compressItems, setCompressItems] = useState<FileEntry[] | null>(null)
+  const [previewEntry, setPreviewEntry] = useState<FileEntry | null>(null)
+
+  /** A dialog's action succeeded: say so, clear the selection, reload. */
+  const actionDone = (message: string, close: () => void) => {
+    toast.success(message)
+    setAnnounce(message)
+    close()
+    setSelected(new Set())
+    load(path, { quiet: true })
+  }
+
+  // ── Focus return ─────────────────────────────────────────────────────
+  // A dialog opened from a row's ⋮ menu gives focus back to that ⋮ button
+  // when it closes (the menu item that opened it no longer exists). After a
+  // rename the row has a new path; after a delete it is gone, and focus goes
+  // to the listing instead of being lost on <body>.
+  const rowTriggers = useRef(new Map<string, HTMLButtonElement>())
+  const listingRef = useRef<HTMLDivElement>(null)
+  const focusReturn = useRef<string | null>(null)
+  const movedAway = useRef(false)
+  const fromRow = (entry: FileEntry, open: () => void) => {
+    focusReturn.current = entry.path
+    open()
+  }
+  const restoreRowFocus = (e: Event) => {
+    const target = focusReturn.current
+    if (target === null) return
+    e.preventDefault()
+    focusReturn.current = null
+    if (target === LISTING_FOCUS) {
+      listingRef.current?.focus()
+      return
+    }
+    let tries = 0
+    const attempt = () => {
+      const el = rowTriggers.current.get(target)
+      if (el && el.isConnected) {
+        el.focus()
+        return
+      }
+      // The listing may still be reloading (rename); give it a moment.
+      if (++tries < 30) window.setTimeout(attempt, 50)
+      else listingRef.current?.focus()
+    }
+    attempt()
+  }
+
   // ── Row activation ───────────────────────────────────────────────────
   const activate = (entry: FileEntry) => {
     if (entry.type === 'directory') navigate(entry.path)
+    else if (entry.type === 'file' && previewKind(entry.name) && !entry.name.toLowerCase().endsWith('.svg')) setPreviewEntry(entry)
     else if (entry.type === 'file' && isLikelyTextFile(entry.name)) openEditor(entry)
     else download(entry)
   }
@@ -850,6 +927,15 @@ export function FileManager({ projectId }: { projectId: string }) {
                 <Download aria-hidden /> Download
               </Button>
             )}
+            <Button size="sm" variant="outline" className="bg-background" onClick={() => setCompressItems(selectedEntries)} aria-label="Compress selected to .zip">
+              <FileArchive aria-hidden /> <span className="hidden sm:inline">Compress</span>
+            </Button>
+            <Button size="sm" variant="outline" className="bg-background" onClick={() => setTransfer({ op: 'copy', items: selectedEntries })} aria-label="Copy selected to another folder">
+              <Copy aria-hidden /> <span className="hidden sm:inline">Copy to…</span>
+            </Button>
+            <Button size="sm" variant="outline" className="bg-background" onClick={() => setTransfer({ op: 'move', items: selectedEntries })} aria-label="Move selected to another folder">
+              <FolderInput aria-hidden /> <span className="hidden sm:inline">Move to…</span>
+            </Button>
             <Button size="sm" variant="outline" className="bg-background text-red-700 hover:text-red-800 dark:text-red-300" onClick={() => setToDelete(selectedEntries)}>
               <Trash2 aria-hidden /> Delete
             </Button>
@@ -861,7 +947,12 @@ export function FileManager({ projectId }: { projectId: string }) {
       )}
 
       {/* Listing */}
-      <div className="max-h-[min(70vh,44rem)] overflow-auto">
+      <div
+        ref={listingRef}
+        tabIndex={-1}
+        aria-label="File list"
+        className="max-h-[min(70vh,44rem)] overflow-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+      >
         {status === 'loading' ? (
           <div className="space-y-px p-4" aria-busy="true" aria-label="Loading files">
             {Array.from({ length: 6 }).map((_, i) => (
@@ -962,18 +1053,32 @@ export function FileManager({ projectId }: { projectId: string }) {
                     <td className="pe-3 text-end">
                       <DropdownMenu modal={false}>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="size-8" aria-label={`Actions for ${entry.name}`}>
+                          <Button
+                            ref={(el) => {
+                              if (el) rowTriggers.current.set(entry.path, el)
+                              else rowTriggers.current.delete(entry.path)
+                            }}
+                            variant="ghost"
+                            size="icon"
+                            className="size-8"
+                            aria-label={`Actions for ${entry.name}`}
+                          >
                             <MoreHorizontal aria-hidden />
                           </Button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-48">
+                        <DropdownMenuContent align="end" className="w-52">
                           {entry.type === 'directory' && (
                             <DropdownMenuItem onSelect={() => navigate(entry.path)}>
                               <FolderOpen aria-hidden /> Open
                             </DropdownMenuItem>
                           )}
+                          {entry.type === 'file' && previewKind(entry.name) && (
+                            <DropdownMenuItem onSelect={() => fromRow(entry, () => setPreviewEntry(entry))}>
+                              <Eye aria-hidden /> Preview
+                            </DropdownMenuItem>
+                          )}
                           {editable && (
-                            <DropdownMenuItem onSelect={() => openEditor(entry)}>
+                            <DropdownMenuItem onSelect={() => fromRow(entry, () => openEditor(entry))}>
                               <Pencil aria-hidden /> Edit
                             </DropdownMenuItem>
                           )}
@@ -982,11 +1087,33 @@ export function FileManager({ projectId }: { projectId: string }) {
                               <Download aria-hidden /> {entry.type === 'directory' ? 'Download as .zip' : 'Download'}
                             </DropdownMenuItem>
                           )}
-                          <DropdownMenuItem onSelect={() => openNameDialog({ mode: 'rename', entry })}>
+                          {entry.type === 'file' && isArchive(entry.name) && (
+                            <DropdownMenuItem onSelect={() => fromRow(entry, () => setExtractEntry(entry))}>
+                              <PackageOpen aria-hidden /> Extract…
+                            </DropdownMenuItem>
+                          )}
+                          {entry.type !== 'symlink' && (
+                            <DropdownMenuItem onSelect={() => fromRow(entry, () => setCompressItems([entry]))}>
+                              <FileArchive aria-hidden /> Compress to .zip…
+                            </DropdownMenuItem>
+                          )}
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem onSelect={() => fromRow(entry, () => setTransfer({ op: 'copy', items: [entry] }))}>
+                            <Copy aria-hidden /> Copy to…
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onSelect={() => fromRow(entry, () => setTransfer({ op: 'move', items: [entry] }))}>
+                            <FolderInput aria-hidden /> Move to…
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onSelect={() => fromRow(entry, () => openNameDialog({ mode: 'rename', entry }))}>
                             <FileText aria-hidden /> Rename
                           </DropdownMenuItem>
+                          {entry.type !== 'symlink' && !managed && (
+                            <DropdownMenuItem onSelect={() => fromRow(entry, () => setChmodEntry(entry))}>
+                              <KeyRound aria-hidden /> Permissions…
+                            </DropdownMenuItem>
+                          )}
                           <DropdownMenuSeparator />
-                          <DropdownMenuItem variant="destructive" onSelect={() => setToDelete([entry])}>
+                          <DropdownMenuItem variant="destructive" onSelect={() => fromRow(entry, () => setToDelete([entry]))}>
                             <Trash2 aria-hidden /> Delete
                           </DropdownMenuItem>
                         </DropdownMenuContent>
@@ -1023,7 +1150,7 @@ export function FileManager({ projectId }: { projectId: string }) {
 
       {/* New folder / new file / rename */}
       <Dialog open={!!nameDialog} onOpenChange={(v) => !v && !nameBusy && setNameDialog(null)}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-md" onCloseAutoFocus={restoreRowFocus}>
           <form
             onSubmit={(e) => {
               e.preventDefault()
@@ -1070,7 +1197,6 @@ export function FileManager({ projectId }: { projectId: string }) {
                 }}
                 placeholder={nameDialog?.mode === 'folder' ? 'images' : 'index.html'}
                 className="font-mono text-sm"
-                autoFocus
                 aria-invalid={!!nameError}
                 aria-describedby={nameError ? 'fm-name-error' : undefined}
               />
@@ -1095,7 +1221,7 @@ export function FileManager({ projectId }: { projectId: string }) {
 
       {/* Delete confirmation */}
       <AlertDialog open={!!toDelete} onOpenChange={(v) => !v && !deleting && setToDelete(null)}>
-        <AlertDialogContent>
+        <AlertDialogContent onCloseAutoFocus={restoreRowFocus}>
           <AlertDialogHeader>
             <AlertDialogTitle>
               Delete {toDelete && toDelete.length === 1 ? (toDelete[0].type === 'directory' ? 'this folder' : 'this file') : `${toDelete?.length ?? 0} items`}?
@@ -1142,7 +1268,13 @@ export function FileManager({ projectId }: { projectId: string }) {
 
       {/* Managed-file edit warning */}
       <AlertDialog open={!!managedConfirm} onOpenChange={(v) => !v && setManagedConfirm(null)}>
-        <AlertDialogContent>
+        <AlertDialogContent
+          onCloseAutoFocus={(e) => {
+            // "Edit anyway" opened the editor: it owns focus now and returns it later.
+            if (editorOpen.current) e.preventDefault()
+            else restoreRowFocus(e)
+          }}
+        >
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2">
               <ShieldAlert className="size-5 text-amber-600" aria-hidden />
@@ -1170,7 +1302,10 @@ export function FileManager({ projectId }: { projectId: string }) {
 
       {/* Editor */}
       <Dialog open={!!editor} onOpenChange={(v) => !v && closeEditor()}>
-        <DialogContent className="flex h-[92dvh] max-w-[calc(100%-1rem)] flex-col gap-3 p-4 sm:h-[85vh] sm:max-w-5xl sm:p-6">
+        <DialogContent
+          className="flex h-[92dvh] max-w-[calc(100%-1rem)] flex-col gap-3 p-4 sm:h-[85vh] sm:max-w-5xl sm:p-6"
+          onCloseAutoFocus={restoreRowFocus}
+        >
           <DialogHeader className="pe-8">
             <DialogTitle className="flex min-w-0 items-center gap-2 text-base">
               <span className="truncate font-mono">{editor?.entry.name}</span>
@@ -1238,6 +1373,54 @@ export function FileManager({ projectId }: { projectId: string }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <PermissionsDialog
+        base={base}
+        entry={chmodEntry}
+        onClose={() => setChmodEntry(null)}
+        onDone={(m) => actionDone(m, () => setChmodEntry(null))}
+        onCloseAutoFocus={restoreRowFocus}
+      />
+      <TransferDialog
+        base={base}
+        op={transfer?.op ?? null}
+        items={transfer?.items ?? []}
+        startPath={path}
+        onClose={() => setTransfer(null)}
+        onDone={(m) => {
+          if (transfer?.op === 'move') movedAway.current = true
+          actionDone(m, () => setTransfer(null))
+        }}
+        onCloseAutoFocus={(e) => {
+          // A moved row is gone from this folder.
+          if (movedAway.current && focusReturn.current !== null) focusReturn.current = LISTING_FOCUS
+          movedAway.current = false
+          restoreRowFocus(e)
+        }}
+      />
+      <ExtractDialog
+        base={base}
+        entry={extractEntry}
+        onClose={() => setExtractEntry(null)}
+        onDone={(m) => actionDone(m, () => setExtractEntry(null))}
+        onCloseAutoFocus={restoreRowFocus}
+      />
+      <CompressDialog
+        base={base}
+        open={!!compressItems}
+        items={compressItems ?? []}
+        folder={path}
+        onClose={() => setCompressItems(null)}
+        onDone={(m) => actionDone(m, () => setCompressItems(null))}
+        onCloseAutoFocus={restoreRowFocus}
+      />
+      <PreviewDialog
+        base={base}
+        entry={previewEntry}
+        onClose={() => setPreviewEntry(null)}
+        onDownload={download}
+        onCloseAutoFocus={restoreRowFocus}
+      />
 
       <AlertDialog open={confirmDiscard} onOpenChange={setConfirmDiscard}>
         <AlertDialogContent>

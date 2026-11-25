@@ -13,6 +13,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
+import { InlineError } from '@/components/hosting/site/shared'
 import {
   Mail,
   Users,
@@ -346,13 +347,16 @@ function AliasesPanel({
   const [dests, setDests] = useState('')
   const [saving, setSaving] = useState(false)
 
+  const [loadError, setLoadError] = useState<string | null>(null)
+
   const load = useCallback(async () => {
     setLoading(true)
+    setLoadError(null)
     try {
       const r = await api<{ aliases: MailAlias[] }>(`/api/hosting/${projectId}/email/aliases`)
       setAliases(r.aliases || [])
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Could not load aliases')
+      setLoadError(e instanceof Error ? e.message : 'Could not load aliases')
     } finally {
       setLoading(false)
     }
@@ -508,6 +512,8 @@ function AliasesPanel({
               <Skeleton key={i} className="h-10 w-full" />
             ))}
           </div>
+        ) : loadError ? (
+          <InlineError title="Could not load the aliases" message={loadError} onRetry={() => load()} />
         ) : aliases.length === 0 ? (
           <div className="text-center py-10">
             <AtSign className="size-8 mx-auto text-muted-foreground mb-2" />
@@ -703,13 +709,16 @@ function SpamPanel({ projectId, domains }: { projectId: string; domains: string[
   const [value, setValue] = useState('')
   const [saving, setSaving] = useState(false)
 
+  const [loadError, setLoadError] = useState<string | null>(null)
+
   const load = useCallback(async () => {
     setLoading(true)
+    setLoadError(null)
     try {
       const r = await api<{ policy: SpamPolicy }>(`/api/hosting/${projectId}/email/spam`)
       setPolicy(r.policy)
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Could not load spam settings')
+      setLoadError(e instanceof Error ? e.message : 'Could not load spam settings')
     } finally {
       setLoading(false)
     }
@@ -814,6 +823,9 @@ function SpamPanel({ projectId, domains }: { projectId: string; domains: string[
           </Button>
         </div>
 
+        {loadError ? (
+          <InlineError title="Could not load the spam settings" message={loadError} onRetry={() => load()} />
+        ) : (
         <div className="grid md:grid-cols-2 gap-3">
           <PolicyList
             title="Allow list"
@@ -832,6 +844,7 @@ function SpamPanel({ projectId, domains }: { projectId: string; domains: string[
             onRemove={(id) => remove('bl', id)}
           />
         </div>
+        )}
       </CardContent>
     </Card>
   )
@@ -902,15 +915,18 @@ function QuarantinePanel({
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<number | null>(null)
 
+  const [loadError, setLoadError] = useState<string | null>(null)
+
   const load = useCallback(async () => {
     setLoading(true)
+    setLoadError(null)
     try {
       const r = await api<{ messages: QuarantineItem[] }>(
         `/api/hosting/${projectId}/email/quarantine`
       )
       setItems(r.messages || [])
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Could not load quarantine')
+      setLoadError(e instanceof Error ? e.message : 'Could not load quarantine')
     } finally {
       setLoading(false)
     }
@@ -957,6 +973,8 @@ function QuarantinePanel({
               <Skeleton key={i} className="h-10 w-full" />
             ))}
           </div>
+        ) : loadError ? (
+          <InlineError title="Could not load the quarantine" message={loadError} onRetry={() => load()} />
         ) : items.length === 0 ? (
           <div className="text-center py-10">
             <CheckCircle2 className="size-8 mx-auto text-emerald-500 mb-2" />
@@ -1031,15 +1049,18 @@ function LogsPanel({ projectId }: { projectId: string }) {
   const [entries, setEntries] = useState<LogEntry[]>([])
   const [loading, setLoading] = useState(true)
 
+  const [loadError, setLoadError] = useState<string | null>(null)
+
   const load = useCallback(async () => {
     setLoading(true)
+    setLoadError(null)
     try {
       const r = await api<{ entries: LogEntry[] }>(
         `/api/hosting/${projectId}/email/logs?kind=${kind}&limit=200`
       )
       setEntries(r.entries || [])
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Could not load logs')
+      setLoadError(e instanceof Error ? e.message : 'Could not load logs')
     } finally {
       setLoading(false)
     }
@@ -1081,6 +1102,8 @@ function LogsPanel({ projectId }: { projectId: string }) {
               <Skeleton key={i} className="h-6 w-full" />
             ))}
           </div>
+        ) : loadError ? (
+          <InlineError title="Could not load the activity logs" message={loadError} onRetry={() => load()} />
         ) : entries.length === 0 ? (
           <div className="text-center py-10">
             <XCircle className="size-8 mx-auto text-muted-foreground mb-2" />

@@ -2,11 +2,16 @@ import { NextResponse } from 'next/server'
 import { PROXY_BODY_LIMIT_BYTES, exceedsProxyBodyLimit, formatMegabytes } from '@/lib/request-limits'
 import { authenticateRequest } from '@/lib/auth'
 import { requireProjectAccess } from '@/lib/project-access'
-import { PathError } from '@/lib/vps/files'
+import { PathError, FileOperationError } from '@/lib/vps/files'
 
-/** A refused path is the caller's mistake (400); anything else is ours (500). */
+/**
+ * A refused path is the caller's mistake (400); an operation that ran and
+ * failed on the server carries a customer-safe message (422); anything else
+ * is ours (500).
+ */
 function fileError(error: unknown, label: string) {
   if (error instanceof PathError) return NextResponse.json({ error: error.message }, { status: 400 })
+  if (error instanceof FileOperationError) return NextResponse.json({ error: error.message }, { status: 422 })
   console.error(label, error)
   return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
 }
@@ -16,6 +21,8 @@ import {
   createDirectory,
   exportArchive,
   importArchive,
+  compressPaths,
+  copyOrMovePaths,
   type FileEntry,
 } from '@/lib/vps'
 
@@ -38,6 +45,9 @@ const MAX_IMPORT_BYTES = PROXY_BODY_LIMIT_BYTES
  *              — extract an uploaded .zip / .tar.gz into <subdir>
  *            OR JSON: { path, content }   — inline text upload
  *            OR JSON: { action: 'mkdir', path }
+ *            OR JSON: { action: 'compress', path: <folder>, items: [paths], name }
+ *              — zip items of <folder> into <folder>/<name>.zip on the server
+ *            OR JSON: { action: 'copy' | 'move', items: [paths], destination }
  */
 
 export async function GET(
@@ -178,6 +188,24 @@ export async function POST(
     const body = await request.json().catch(() => null)
     if (!body) {
       return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
+    }
+    if (body.action === 'compress') {
+      if (typeof body.path !== 'string') {
+        return NextResponse.json({ error: 'path (the folder) is required' }, { status: 400 })
+      }
+      const result = await compressPaths(projectId, body.path, body.items, body.name)
+      return NextResponse.json(result, { status: 201 })
+    }
+    if (body.action === 'copy' || body.action === 'move') {
+      const result = await copyOrMovePaths(projectId, body.action, body.items, body.destination)
+      if (result.done === 0) {
+        const first = result.failed[0]
+        return NextResponse.json(
+          { ...result, error: first ? `${first.path}: ${first.error}` : 'Nothing was changed.' },
+          { status: 400 }
+        )
+      }
+      return NextResponse.json(result)
     }
     if (body.action === 'mkdir' && typeof body.path === 'string') {
       const result = await createDirectory(projectId, body.path)

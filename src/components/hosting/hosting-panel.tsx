@@ -679,6 +679,29 @@ function CreateProjectDialog({
 // The per-website view (header, areas, file manager …) lives in
 // src/components/hosting/site/site-view.tsx.
 
+// ─── Address bar ↔ open website ─────────────────────────────────
+
+/**
+ * Put the open website in the query string, or take it out. History is
+ * replaced, not pushed, and the hash (the site's area) is left alone.
+ */
+function writeSiteToUrl(projectId: string | null) {
+  if (typeof window === 'undefined') return
+  const url = new URL(window.location.href)
+  if (projectId) {
+    url.searchParams.set('tab', 'hosting')
+    url.searchParams.set('project', projectId)
+  } else {
+    if (!url.searchParams.has('project')) return
+    url.searchParams.delete('project')
+    if (url.searchParams.get('tab') === 'hosting') url.searchParams.delete('tab')
+  }
+  const next = `${url.pathname}${url.search}${url.hash}`
+  if (next !== `${window.location.pathname}${window.location.search}${window.location.hash}`) {
+    window.history.replaceState(window.history.state, '', next)
+  }
+}
+
 // ─── Main Component ─────────────────────────────────────────────
 
 export default function HostingPanel() {
@@ -692,6 +715,15 @@ export default function HostingPanel() {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(() =>
     typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('project')
   )
+
+  // The open website lives in the address bar (?tab=hosting&project=<id>,
+  // plus the site's area hash, which site-view.tsx manages), so a reload or
+  // a copied link opens the same site. Closing it, or leaving Hosting,
+  // removes it again.
+  useEffect(() => {
+    writeSiteToUrl(selectedProjectId)
+  }, [selectedProjectId])
+  useEffect(() => () => writeSiteToUrl(null), [])
 
   // ── Search / filter / sort state ──────────────────────────────────
   const [searchInput, setSearchInput] = useState('')

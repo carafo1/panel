@@ -125,6 +125,7 @@ import {
 } from './site-areas'
 import { describeSiteStatus, TONE_CLASSES } from './site-status'
 import { SiteOverview } from './site-overview'
+import { SiteMailCard } from './site-mail-card'
 import { InlineError } from './shared'
 
 // Types
@@ -688,9 +689,7 @@ export function ProjectDetailView({
 
   // Settings state
   const [settingsAutoDeploy, setSettingsAutoDeploy] = useState(false)
-  const [settingsSsl, setSettingsSsl] = useState(false)
   const [settingsRepoUrl, setSettingsRepoUrl] = useState('')
-  const [settingsCustomDomain, setSettingsCustomDomain] = useState('')
   const [savingSettings, setSavingSettings] = useState(false)
 
   // Env vars state
@@ -738,6 +737,10 @@ export function ProjectDetailView({
   const [loadError, setLoadError] = useState<string | null>(null)
   const kindRef = useRef<ReturnType<typeof siteKind>>(null)
   const kindResolved = useRef(false)
+  // The area the address bar named when the site opened (a deep link or a
+  // reload). Read once: the unmount cleanup below drops the hash, and in
+  // development React replays effects, so reading it later could miss it.
+  const [initialHash] = useState(() => (typeof window === 'undefined' ? '' : window.location.hash))
   const locRef = useRef<AreaLocation>(loc)
   useEffect(() => {
     locRef.current = loc
@@ -805,20 +808,25 @@ export function ProjectDetailView({
       if (!kindResolved.current) {
         kindResolved.current = true
         kindRef.current = siteKind(data.project)
-        setLoc(resolveHash(window.location.hash, kindRef.current))
+        const first = resolveHash(window.location.hash || initialHash, kindRef.current)
+        locRef.current = first
+        setLoc(first)
+        if (initialHash) {
+          // Keep the address bar naming the area, so a reload lands here again.
+          const hash = first.section ?? hashFor(first.area, first.advanced)
+          window.history.replaceState(window.history.state, '', `${window.location.pathname}${window.location.search}#${hash}`)
+        }
       }
       setProject(data.project)
       // Initialize settings
       setSettingsAutoDeploy(data.project.autoDeploy)
-      setSettingsSsl(data.project.sslEnabled)
       setSettingsRepoUrl(data.project.repoUrl || '')
-      setSettingsCustomDomain(data.project.customDomain || '')
     } catch {
       setLoadError('Network error. Check your connection and try again.')
     } finally {
       setLoading(false)
     }
-  }, [projectId])
+  }, [projectId, initialHash])
 
   const fetchEnvVars = useCallback(async () => {
     setEnvLoading(true)
@@ -979,10 +987,10 @@ export function ProjectDetailView({
         method: 'PATCH',
         headers: getAuthHeaders(),
         body: JSON.stringify({
+          // SSL and domains are managed in Domains & SSL; they are not sent
+          // from here, so this card cannot undo a change made there.
           autoDeploy: settingsAutoDeploy,
-          sslEnabled: settingsSsl,
           repoUrl: settingsRepoUrl,
-          customDomain: settingsCustomDomain,
         }),
       })
       const data = await res.json()
@@ -1784,6 +1792,8 @@ export function ProjectDetailView({
 
         <TabsContent value="email" className="space-y-6">
           <section id="email" className="space-y-6">
+            {/* Outgoing mail sent by the website itself (forms, resets). */}
+            <SiteMailCard projectId={project.id} />
             <EmailTab projectId={project.id} />
             {/* Native management over Mailcow: aliases, forwarding, catch-all,
                 spam policy, quarantine and activity logs. */}
@@ -2426,40 +2436,26 @@ export function ProjectDetailView({
             <Settings className="size-5 text-indigo-600" />
             Settings
           </CardTitle>
-          <CardDescription>Configure your project settings</CardDescription>
+          <CardDescription>Deployment settings for this website</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Auto-deploy toggle */}
-            <div className="flex items-center justify-between rounded-lg border p-4">
+            <div className="flex items-center justify-between gap-4 rounded-lg border p-4">
               <div className="space-y-0.5">
-                <Label className="text-base">Auto-deploy</Label>
-                <p className="text-xs text-muted-foreground">
+                <Label htmlFor="auto-deploy" className="text-base">Auto-deploy</Label>
+                <p id="auto-deploy-help" className="text-xs text-muted-foreground">
                   Automatically deploy when changes are pushed to the linked repository
                 </p>
               </div>
               <Switch
+                id="auto-deploy"
+                aria-describedby="auto-deploy-help"
                 checked={settingsAutoDeploy}
                 onCheckedChange={setSettingsAutoDeploy}
               />
             </div>
 
-            {/* SSL toggle */}
-            <div className="flex items-center justify-between rounded-lg border p-4">
-              <div className="space-y-0.5">
-                <Label className="text-base">SSL</Label>
-                <p className="text-xs text-muted-foreground">
-                  Enable HTTPS with automatic SSL certificate provisioning
-                </p>
-              </div>
-              <Switch
-                checked={settingsSsl}
-                onCheckedChange={setSettingsSsl}
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* GitHub repo URL */}
             <div className="space-y-2">
               <Label htmlFor="repo-url">GitHub Repository URL</Label>
@@ -2471,18 +2467,17 @@ export function ProjectDetailView({
                 className="font-mono text-sm"
               />
             </div>
+          </div>
 
-            {/* Custom domain */}
-            <div className="space-y-2">
-              <Label htmlFor="custom-domain">Custom Domain</Label>
-              <Input
-                id="custom-domain"
-                placeholder="www.myapp.com"
-                value={settingsCustomDomain}
-                onChange={(e) => setSettingsCustomDomain(e.target.value)}
-                className="font-mono text-sm"
-              />
-            </div>
+          {/* Domains and HTTPS have one home: the Domains & SSL area. */}
+          <div className="flex flex-col gap-3 rounded-lg border border-dashed bg-muted/30 p-4 text-sm sm:flex-row sm:items-center">
+            <Globe className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+            <p className="flex-1 text-muted-foreground">
+              Custom domains and HTTPS certificates are managed in Domains &amp; SSL.
+            </p>
+            <Button type="button" variant="outline" size="sm" onClick={() => goTo('domains')}>
+              Open Domains &amp; SSL
+            </Button>
           </div>
 
           <div className="flex justify-end">

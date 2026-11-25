@@ -470,11 +470,48 @@ model Project {
   ipBlocks           IpBlock[]
   sftpAccess         SftpAccess?
   cdnZones           CdnZone[]
+  siteMail           SiteMail?
 
   @@index([parentProjectId])
 
   // ── pgvector embedding (PostgreSQL only) ── Populated by src/lib/embeddings.ts when the project is created or updated.
   embedding Unsupported("vector(1536)")?
+}
+
+/// Outgoing-mail identity of one website (WordPress / PHP).
+///
+/// Each site gets its own Mailcow mailbox on the platform sending domain
+/// (site-<slug>@<SITE_MAIL_DOMAIN>) and authenticates to Mailcow's submission
+/// port with it. A mailbox per site means one abused site can be rate-limited,
+/// disabled or rotated without touching any other site.
+///
+/// The password is AES-256-GCM ciphertext (lib/encryption). NEVER select
+/// `passwordEnc` into a response payload. Additive table: dropping it (and the
+/// Project.siteMail back-relation) reverses the change completely.
+model SiteMail {
+  id        String  @id @default(cuid())
+  projectId String  @unique
+  /// Mailbox login and envelope sender, lowercased.
+  address   String  @unique
+  passwordEnc String
+  /// false = the customer switched sending off (mailbox deactivated in Mailcow).
+  enabled   Boolean @default(true)
+  /// Optional header From on a domain the owner hosts mail for with us
+  /// (allowed through the mailbox's Mailcow sender ACL). null = `address`.
+  fromAddress String?
+  fromName    String?
+  /// Mailcow mailbox exists with the stored password.
+  mailboxCreated Boolean @default(false)
+  /// Messages per hour Mailcow lets this mailbox send.
+  rateLimitPerHour Int @default(100)
+  lastError       String?
+  lastTestAt      DateTime?
+  lastTestOk      Boolean?
+  lastTestMessage String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 }
 
 model Domain {

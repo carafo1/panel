@@ -151,3 +151,80 @@ export function formatBytes(bytes: number): string {
   }
   return `${n.toFixed(n < 10 && i > 0 ? 1 : 0)} ${units[i]}`
 }
+
+// ─── Permissions dialog ──────────────────────────────────────────────────
+
+/** One row of the permissions grid: owner, group, others. */
+export type PermWho = 'owner' | 'group' | 'others'
+export type PermBit = 'read' | 'write' | 'execute'
+export type PermGrid = Record<PermWho, Record<PermBit, boolean>>
+
+const WHO: PermWho[] = ['owner', 'group', 'others']
+
+/** "755" → grid. Anything that is not three octal digits gives an all-false grid. */
+export function gridFromOctal(octal: string): PermGrid {
+  const digits = /^[0-7]{3}$/.test(octal) ? octal : '000'
+  const grid = {} as PermGrid
+  WHO.forEach((who, i) => {
+    const d = Number(digits[i])
+    grid[who] = { read: !!(d & 4), write: !!(d & 2), execute: !!(d & 1) }
+  })
+  return grid
+}
+
+/** Grid → "755". */
+export function octalFromGrid(grid: PermGrid): string {
+  return WHO.map((who) => String((grid[who].read ? 4 : 0) + (grid[who].write ? 2 : 0) + (grid[who].execute ? 1 : 0))).join('')
+}
+
+/**
+ * Validate a mode typed in the dialog. Mirrors the server (file-ops.ts):
+ * three octal digits; a leading 0 is accepted; setuid / setgid refused.
+ */
+export function validateOctalMode(raw: string): { ok: true; mode: string } | { ok: false; error: string } {
+  const s = raw.trim()
+  if (!/^[0-7]{3,4}$/.test(s)) return { ok: false, error: 'Use three digits from 0 to 7, such as 644 or 755.' }
+  if (s.length === 4) {
+    const special = Number(s[0])
+    if (special & 6) return { ok: false, error: 'Setuid and setgid cannot be set here.' }
+    if (special !== 0) return { ok: false, error: 'Special bits are not supported here; use three digits.' }
+    return { ok: true, mode: s.slice(1) }
+  }
+  return { ok: true, mode: s }
+}
+
+/** "rwxr-xr-x" → readable summary for the dialog, e.g. "Owner can read, write and run". */
+export function describeOctal(octal: string): string {
+  if (!/^[0-7]{3}$/.test(octal)) return ''
+  const grid = gridFromOctal(octal)
+  const part = (who: PermWho, label: string) => {
+    const g = grid[who]
+    const can = [g.read && 'read', g.write && 'write', g.execute && 'run'].filter(Boolean) as string[]
+    if (!can.length) return `${label}: no access`
+    return `${label}: ${can.length > 1 ? can.slice(0, -1).join(', ') + ' and ' + can[can.length - 1] : can[0]}`
+  }
+  return [part('owner', 'Owner'), part('group', 'Group'), part('others', 'Everyone else')].join(' · ')
+}
+
+// ─── Preview ─────────────────────────────────────────────────────────────
+
+const PREVIEW_IMAGE = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'bmp', 'ico', 'svg'])
+
+/** 'image' / 'pdf' when the preview endpoint can show this file, else null. */
+export function previewKind(name: string): 'image' | 'pdf' | null {
+  const lower = name.toLowerCase()
+  const ext = lower.includes('.') ? lower.slice(lower.lastIndexOf('.') + 1) : ''
+  if (ext === 'pdf') return 'pdf'
+  if (PREVIEW_IMAGE.has(ext)) return 'image'
+  return null
+}
+
+/** Default archive name for a selection: the item's name, or the folder's. */
+export function defaultZipName(selection: string[], folder: string): string {
+  if (selection.length === 1) {
+    const name = selection[0].slice(selection[0].lastIndexOf('/') + 1)
+    return `${name.replace(/\.(zip|tar|tar\.gz|tgz)$/i, '')}.zip`
+  }
+  const base = folder ? folder.slice(folder.lastIndexOf('/') + 1) : 'website'
+  return `${base}-files.zip`
+}

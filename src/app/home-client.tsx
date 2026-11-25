@@ -514,12 +514,16 @@ export default function HomeClient({
     }
 
     if (tab || paymentStatus) {
-      // Clean the URL
-      params.delete('tab')
+      // Clean the URL. A website deep link (?tab=hosting&project=<id>#files)
+      // stays as it is: the hosting panel keeps it in sync with the open
+      // site, so a reload lands on the same site and area. The hash is kept
+      // in every case (it names the area inside the site).
       params.delete('payment')
+      const keepSite = tab === 'hosting' && !!params.get('project')
+      if (!keepSite) params.delete('tab')
       const remaining = params.toString()
-      const newUrl = remaining ? `/?${remaining}` : '/'
-      window.history.replaceState({}, '', newUrl)
+      const newUrl = `${window.location.pathname}${remaining ? `?${remaining}` : ''}${window.location.hash}`
+      window.history.replaceState(window.history.state, '', newUrl)
     }
   }, [setDashboardTab])
 

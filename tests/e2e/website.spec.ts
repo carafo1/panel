@@ -146,3 +146,135 @@ test('the file manager uploads a small file and one over 10 MB', async ({ page, 
   // Uploads over 10 MB once died in the request proxy (silent 10 MB cap).
   await upload('big-e2e.bin', Buffer.alloc(11 * 1024 * 1024, 7), 'application/octet-stream')
 })
+
+// ─── File manager: server-side actions (demo-mode file tree) ─────────────
+
+/** The file manager, opened in the website folder (site/). */
+async function openFiles(page: Page) {
+  await openWebsite(page)
+  await openArea(page, 'Files')
+  const files = await reveal(page, 'files')
+  await expect(files.getByRole('navigation', { name: 'Folder path' }).getByText('Website root')).toBeVisible()
+  return files
+}
+
+type Section = Awaited<ReturnType<typeof reveal>>
+
+const actions = (files: Section, name: string) => files.getByRole('button', { name: `Actions for ${name}`, exact: true })
+// `has` is evaluated inside each row, so it must not start from #files again.
+const row = (files: Section, name: string) =>
+  files.getByRole('row').filter({ has: files.page().getByRole('button', { name: `Actions for ${name}`, exact: true }) })
+const toast = (page: Page, text: string | RegExp) => page.getByRole('region', { name: /Notifications/ }).getByText(text)
+
+async function openFolder(page: Page, files: Section, name: string) {
+  await actions(files, name).click()
+  await page.getByRole('menuitem', { name: 'Open', exact: true }).click()
+  await expect(files.getByRole('navigation', { name: 'Folder path' }).getByRole('button', { name, exact: true })).toBeVisible()
+}
+
+test('the permissions dialog changes a mode and returns focus to the row menu', async ({ page, health }) => {
+  allowMailToast(health)
+  const files = await openFiles(page)
+  const menu = actions(files, 'readme.html')
+
+  await menu.click()
+  await page.getByRole('menuitem', { name: 'Permissions…' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Change permissions' })
+  const mode = dialog.getByRole('textbox', { name: 'Mode' })
+  await expect(mode).toHaveValue('644')
+
+  // The checkbox grid and the octal field stay in sync.
+  await dialog.getByRole('checkbox', { name: 'Group: write (mode)' }).check()
+  await expect(mode).toHaveValue('664')
+  // setuid is refused before anything is sent.
+  await mode.fill('4755')
+  await dialog.getByRole('button', { name: 'Apply' }).click()
+  await expect(dialog.getByRole('alert')).toContainText('Setuid')
+  await mode.fill('600')
+  await dialog.getByRole('button', { name: 'Apply' }).click()
+
+  await expect(toast(page, 'Permissions set to 600')).toBeVisible()
+  await expect(dialog).toBeHidden()
+  await expect(menu).toBeFocused()
+  await expect(row(files, 'readme.html')).toContainText('rw-------')
+})
+
+test('compress a folder to .zip and extract it back into a new folder', async ({ page, health }) => {
+  allowMailToast(health)
+  const files = await openFiles(page)
+  const stamp = Date.now().toString(36)
+  const zip = `themes-${stamp}.zip`
+
+  await openFolder(page, files, 'wp-content')
+  await actions(files, 'themes').click()
+  await page.getByRole('menuitem', { name: 'Compress to .zip…' }).click()
+  const compress = page.getByRole('dialog', { name: 'Compress to .zip' })
+  await expect(compress.getByLabel('Archive name')).toHaveValue('themes.zip')
+  await compress.getByLabel('Archive name').fill(zip)
+  await compress.getByRole('button', { name: 'Compress' }).click()
+  await expect(toast(page, `Created ${zip}`)).toBeVisible()
+  await expect(row(files, zip)).toBeVisible()
+
+  await actions(files, zip).click()
+  await page.getByRole('menuitem', { name: 'Extract…' }).click()
+  const extract = page.getByRole('dialog', { name: `Extract ${zip}` })
+  await extract.getByRole('checkbox', { name: 'Put the files in a new folder' }).check()
+  await expect(extract.getByLabel('Folder name')).toHaveValue(`themes-${stamp}`)
+  await extract.getByLabel('Folder name').fill(`restored-${stamp}`)
+  await extract.getByRole('button', { name: 'Extract', exact: true }).click()
+  await expect(toast(page, `Extracted 1 file into site/wp-content/restored-${stamp}/`)).toBeVisible()
+
+  // The archive held themes/twentytwentyfour/style.css.
+  await openFolder(page, files, `restored-${stamp}`)
+  await openFolder(page, files, 'themes')
+  await openFolder(page, files, 'twentytwentyfour')
+  await expect(row(files, 'style.css')).toBeVisible()
+})
+
+test('copy a file with the folder picker, and preview an image', async ({ page, health }) => {
+  allowMailToast(health)
+  const files = await openFiles(page)
+
+  await actions(files, 'license.txt').click()
+  await page.getByRole('menuitem', { name: 'Copy to…' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Copy license.txt' })
+  await expect(dialog.getByRole('button', { name: 'Already in this folder' })).toBeDisabled()
+  await dialog.getByRole('button', { name: 'wp-admin', exact: true }).click()
+  await expect(dialog.getByText('/site/wp-admin', { exact: true })).toBeVisible()
+  await dialog.getByRole('button', { name: 'Copy here' }).click()
+  await expect(toast(page, 'Copied 1 item to site/wp-admin/')).toBeVisible()
+  await expect(dialog).toBeHidden()
+  await openFolder(page, files, 'wp-admin')
+  await expect(row(files, 'license.txt')).toBeVisible()
+
+  await files.getByRole('navigation', { name: 'Folder path' }).getByRole('button', { name: 'site', exact: true }).click()
+  for (const dir of ['wp-content', 'uploads', '2026', '11']) await openFolder(page, files, dir)
+  await files.getByRole('button', { name: 'garden-logo.png', exact: true }).click()
+  const preview = page.getByRole('dialog', { name: 'garden-logo.png' })
+  const img = preview.getByRole('img', { name: 'Preview of garden-logo.png' })
+  await expect(img).toBeVisible()
+  expect(await img.evaluate((el) => (el as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
+  const res = await page.request.get(`/api/hosting/${SITE.id}/files/site/wp-content/uploads/2026/11/garden-logo.png?action=preview`)
+  expect(res.headers()['content-type']).toBe('image/png')
+  expect(res.headers()['content-security-policy']).toContain('sandbox')
+})
+
+test('a deep link opens the website on its area, and a reload keeps it there', async ({ page, health }) => {
+  allowMailToast(health)
+  await page.goto(`/?tab=hosting&project=${SITE.id}#files`)
+  await expect(page.getByRole('heading', { name: SITE.name })).toBeVisible()
+  await expect(siteTabs(page).getByRole('tab', { name: 'Files', exact: true })).toHaveAttribute('aria-selected', 'true')
+  await expect(page).toHaveURL(new RegExp(`\\?tab=hosting&project=${SITE.id}#files$`))
+
+  await openArea(page, 'Domains & SSL')
+  await expect(page).toHaveURL(new RegExp(`project=${SITE.id}#domains$`))
+  await page.reload()
+  await expect(page.getByRole('heading', { name: SITE.name })).toBeVisible()
+  await expect(siteTabs(page).getByRole('tab', { name: 'Domains & SSL', exact: true })).toHaveAttribute('aria-selected', 'true')
+  await expect(page).toHaveURL(new RegExp(`project=${SITE.id}#domains$`))
+
+  // Closing the website takes it out of the address bar.
+  await page.getByRole('button', { name: 'All websites' }).click()
+  await expect(page.getByText(SITE.name).first()).toBeVisible()
+  await expect(page).not.toHaveURL(/project=|#/)
+})

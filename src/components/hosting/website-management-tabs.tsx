@@ -26,6 +26,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { toast } from 'sonner'
 import { PROXY_BODY_LIMIT_BYTES, formatMegabytes } from '@/lib/request-limits'
+import { InlineError } from '@/components/hosting/site/shared'
 import {
   Database as DatabaseIcon,
   HardDrive,
@@ -488,8 +489,11 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
 
+  const [loadError, setLoadError] = useState<string | null>(null)
+
   const fetchDatabases = useCallback(async () => {
     setLoading(true)
+    setLoadError(null)
     try {
       const res = await fetch(`/api/hosting/${projectId}/databases`, {
         headers: getAuthHeaders(),
@@ -498,10 +502,10 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
       if (res.ok) {
         setDatabases(data.databases || [])
       } else {
-        toast.error(data.error || 'Failed to load databases')
+        setLoadError(data.error || `The server answered ${res.status}.`)
       }
     } catch {
-      toast.error('Network error loading databases')
+      setLoadError('Network error. Check your connection and try again.')
     } finally {
       setLoading(false)
     }
@@ -768,6 +772,8 @@ export function DatabaseTab({ projectId }: { projectId: string }) {
             <Skeleton className="h-14 w-full" />
             <Skeleton className="h-14 w-full" />
           </div>
+        ) : loadError ? (
+          <InlineError title="Could not load the databases" message={loadError} onRetry={() => fetchDatabases()} />
         ) : databases.length === 0 ? (
           <div className="text-center py-10 text-muted-foreground">
             <DatabaseIcon className="size-10 mx-auto mb-3 opacity-30" />
@@ -1362,8 +1368,11 @@ export function BackupsTab({ projectId }: { projectId: string }) {
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
 
+  const [loadError, setLoadError] = useState<string | null>(null)
+
   const fetchBackups = useCallback(async () => {
     setLoading(true)
+    setLoadError(null)
     try {
       const res = await fetch(`/api/hosting/${projectId}/backups`, {
         headers: getAuthHeaders(),
@@ -1372,10 +1381,10 @@ export function BackupsTab({ projectId }: { projectId: string }) {
       if (res.ok) {
         setBackups(data.backups || [])
       } else {
-        toast.error(data.error || 'Failed to load backups')
+        setLoadError(data.error || `The server answered ${res.status}.`)
       }
     } catch {
-      toast.error('Network error loading backups')
+      setLoadError('Network error. Check your connection and try again.')
     } finally {
       setLoading(false)
     }
@@ -1566,6 +1575,8 @@ export function BackupsTab({ projectId }: { projectId: string }) {
             <Skeleton className="h-14 w-full" />
             <Skeleton className="h-14 w-full" />
           </div>
+        ) : loadError ? (
+          <InlineError title="Could not load the backups" message={loadError} onRetry={() => fetchBackups()} />
         ) : backups.length === 0 ? (
           <div className="text-center py-10 text-muted-foreground">
             <Archive className="size-10 mx-auto mb-3 opacity-30" />
@@ -2531,8 +2542,11 @@ export function DomainsTab({
   const [verifying, setVerifying] = useState(false)
   const [patching, setPatching] = useState<Record<string, boolean>>({})
 
+  const [loadError, setLoadError] = useState<string | null>(null)
+
   const fetchDomains = useCallback(async () => {
     setLoading(true)
+    setLoadError(null)
     try {
       const res = await fetch(`/api/hosting/${projectId}/domains`, {
         headers: getAuthHeaders(),
@@ -2542,10 +2556,10 @@ export function DomainsTab({
         setDomains(data.domains || [])
         setConnectTarget(data.connectTarget || null)
       } else {
-        toast.error(data.error || 'Failed to load domains')
+        setLoadError(data.error || `The server answered ${res.status}.`)
       }
     } catch {
-      toast.error('Network error loading domains')
+      setLoadError('Network error. Check your connection and try again.')
     } finally {
       setLoading(false)
     }
@@ -2774,6 +2788,8 @@ export function DomainsTab({
             <Skeleton className="h-14 w-full" />
             <Skeleton className="h-14 w-full" />
           </div>
+        ) : loadError ? (
+          <InlineError title="Could not load the domains" message={loadError} onRetry={() => fetchDomains()} />
         ) : domains.length === 0 ? (
           <div className="text-center py-10 text-muted-foreground">
             <Globe className="size-10 mx-auto mb-3 opacity-30" />
@@ -3276,8 +3292,12 @@ export function EmailTab({ projectId }: { projectId: string }) {
   const [dnsRecords, setDnsRecords] = useState<EmailDnsRecordsResponse | null>(null)
   const [dnsLoading, setDnsLoading] = useState(false)
 
+  const [loadError, setLoadError] = useState<{ message: string; unavailable: boolean } | null>(null)
+  const [dnsError, setDnsError] = useState<string | null>(null)
+
   const fetchMailboxes = useCallback(async () => {
     setLoading(true)
+    setLoadError(null)
     try {
       const res = await fetch(`/api/hosting/${projectId}/email`, {
         headers: getAuthHeaders(),
@@ -3291,10 +3311,10 @@ export function EmailTab({ projectId }: { projectId: string }) {
         setCreateDomain((prev) => prev || domains[0] || '')
         setDnsDomain((prev) => prev || domains[0] || '')
       } else {
-        toast.error(data.error || 'Failed to load mailboxes')
+        setLoadError({ message: data.error || `The server answered ${res.status}.`, unavailable: res.status === 503 })
       }
     } catch {
-      toast.error('Network error loading mailboxes')
+      setLoadError({ message: 'Network error. Check your connection and try again.', unavailable: false })
     } finally {
       setLoading(false)
     }
@@ -3310,6 +3330,7 @@ export function EmailTab({ projectId }: { projectId: string }) {
       return
     }
     setDnsLoading(true)
+    setDnsError(null)
     try {
       const res = await fetch(
         `/api/hosting/${projectId}/email/dns-records?domain=${encodeURIComponent(domain)}`,
@@ -3319,11 +3340,11 @@ export function EmailTab({ projectId }: { projectId: string }) {
       if (res.ok) {
         setDnsRecords(data)
       } else {
-        toast.error(data.error || 'Failed to load DNS records')
+        setDnsError(data.error || `The server answered ${res.status}.`)
         setDnsRecords(null)
       }
     } catch {
-      toast.error('Network error loading DNS records')
+      setDnsError('Network error. Check your connection and try again.')
       setDnsRecords(null)
     } finally {
       setDnsLoading(false)
@@ -3510,6 +3531,16 @@ export function EmailTab({ projectId }: { projectId: string }) {
             <Skeleton className="h-14 w-full" />
             <Skeleton className="h-14 w-full" />
           </div>
+        ) : loadError?.unavailable ? (
+          <div role="status" className="flex items-start gap-3 rounded-lg border border-dashed bg-muted/30 p-4 text-sm">
+            <Mail className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+            <div className="min-w-0">
+              <p className="font-medium">Mailboxes are not available yet</p>
+              <p className="mt-0.5 text-muted-foreground">{loadError.message}</p>
+            </div>
+          </div>
+        ) : loadError ? (
+          <InlineError title="Could not load the mailboxes" message={loadError.message} onRetry={() => fetchMailboxes()} />
         ) : mailboxes.length === 0 ? (
           <div className="text-center py-10 text-muted-foreground">
             <Mail className="size-10 mx-auto mb-3 opacity-30" />
@@ -3710,6 +3741,8 @@ export function EmailTab({ projectId }: { projectId: string }) {
                     <p className="text-xs text-muted-foreground py-2">
                       Add a custom domain to your project to see its DNS records.
                     </p>
+                  ) : dnsError ? (
+                    <InlineError title="Could not load the DNS records" message={dnsError} onRetry={() => fetchDnsRecords(dnsDomain)} />
                   ) : dnsRecords ? (
                     <>
                       <p className="text-xs text-muted-foreground">
