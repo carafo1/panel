@@ -735,6 +735,9 @@ export async function extractPayload(
       // stale backups of the very site we are importing, and picking one would
       // silently restore an older copy of the customer's data.
       .filter((f) => !/\/wp-content\/(uploads|ai1wm-backups|updraft|backup)/i.test(f.path))
+      // Plugins and themes ship schema files (e.g. litespeed-cache's
+      // data_structure/*.sql): never a site's database.
+      .filter((f) => !/\/wp-content\/(plugins|themes|mu-plugins)\//i.test(f.path))
       .filter((f) => f.size > 0)
       .map((f) => f.path)
   }

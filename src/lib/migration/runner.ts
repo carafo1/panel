@@ -52,7 +52,7 @@ import {
 } from './remote'
 import { extractPayload, cloneRepository, redactUrl } from './extract'
 import { generateImportCompose, generateStaticNginxConf } from './compose'
-import { detectSite, validateDetection } from './detect'
+import { detectSite, validateDetection, importSourceDir } from './detect'
 import {
   importSqlDump,
   rewriteSiteUrls,
@@ -767,6 +767,7 @@ const stageDetect: StageFn = async (ctx) => {
       })
       stashed = found
         .filter((f) => !/\/wp-content\/(uploads|ai1wm-backups|updraft|backup)/i.test(f.path))
+        .filter((f) => !/\/wp-content\/(plugins|themes|mu-plugins)\//i.test(f.path))
         .map((f) => f.path)
       if (stashed.length > 0) {
         ctx.log(`Re-scanned the workspace and found ${stashed.length} SQL dump(s).`)
@@ -778,6 +779,7 @@ const stageDetect: StageFn = async (ctx) => {
       sqlFiles: stashed,
       sourceType: ctx.sourceType,
       priorWarnings: ctx.warnings,
+      preferredHosts: [ctx.opts.targetUrl, ctx.opts.originalUrl].filter((u): u is string => Boolean(u)),
       onLog: ctx.log,
     })
     ctx.detection = detection
@@ -1011,9 +1013,17 @@ const stageImportFiles: StageFn = async (ctx) => {
       )
     }
 
-    const size = await remoteSize(client, ctx.extractDir!)
+    // Copy the site folder detection chose (e.g. public_html/ or
+    // domains/<domain>/public_html/), not the whole backup: copying the
+    // extraction root put WordPress several folders below the web root and
+    // the site served nothing.
+    const source = importSourceDir(ctx.detection?.rootDir, ctx.extractDir!)
+    if (source !== ctx.extractDir) {
+      ctx.log(`Website folder in the backup: ${source.replace(ctx.extractDir!, '.')}`)
+    }
+    const size = await remoteSize(client, source)
     ctx.log(`Copying ${formatBytes(size)} of website files…`)
-    await copyContents(client, ctx.extractDir!, ctx.sitePath)
+    await copyContents(client, source, ctx.sitePath)
 
     // A wp-config.php from the old host names a database that does not exist
     // here. It is replaced in the `configure` stage, but move it aside now so

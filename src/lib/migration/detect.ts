@@ -191,6 +191,90 @@ async function countChildren(
 
 // ─── Root discovery ───────────────────────────────────────────────────────
 
+// ─── Multi-site backups ───────────────────────────────────────────────────
+
+/** Lower-case host without a leading www. ("https://www.A.so/x" -> "a.so"). */
+export function normalizeHost(value: string): string {
+  let h = value.trim().toLowerCase()
+  try {
+    if (/^[a-z]+:\/\//.test(h)) h = new URL(h).host
+  } catch {
+    /* keep as typed */
+  }
+  return h.replace(/\/.*$/, '').replace(/:\d+$/, '').replace(/^www\./, '')
+}
+
+/**
+ * Pick one site root out of several found in one backup.
+ *
+ * Whole-account backups (Hostinger `domains/<domain>/public_html`, cPanel
+ * add-on domains) hold several sites at the same depth. Taking the first one
+ * alphabetically imported the wrong website, so prefer the directory whose
+ * path names the website's own domain; otherwise keep the shallowest, then
+ * alphabetical, and let the caller warn.
+ */
+export function chooseSiteRoot(
+  candidates: string[],
+  preferredHosts: string[]
+): { root: string; matched: boolean } | null {
+  if (candidates.length === 0) return null
+  const depth = (p: string) => p.split('/').length
+  const sorted = [...candidates].sort((a, b) => depth(a) - depth(b) || a.localeCompare(b))
+  const hosts = preferredHosts.map(normalizeHost).filter(Boolean)
+  for (const host of hosts) {
+    const hit = sorted.find((p) =>
+      p
+        .toLowerCase()
+        .split('/')
+        .some((seg) => normalizeHost(seg) === host)
+    )
+    if (hit) return { root: hit, matched: true }
+  }
+  return { root: sorted[0], matched: false }
+}
+
+/**
+ * Put the dumps that belong to `dbName` first. A dump uploaded separately
+ * (outside `extractDir`) always stays first: the customer chose it.
+ */
+export function preferDumpsForDatabase(
+  files: string[],
+  dbName: string | null,
+  extractDir: string
+): string[] {
+  const uploaded = files.filter((f) => !f.startsWith(extractDir + '/'))
+  const inside = files.filter((f) => f.startsWith(extractDir + '/'))
+  if (!dbName) return [...uploaded, ...inside]
+  const want = dbName.toLowerCase()
+  const base = (f: string) => (f.split('/').pop() || '').toLowerCase().replace(/\.sql(\.gz)?$/, '')
+  const matches = inside.filter((f) => base(f) === want || base(f).startsWith(want + '.') || base(f).startsWith(want + '_') || base(f).startsWith(want + '-'))
+  const rest = inside.filter((f) => !matches.includes(f))
+  return [...uploaded, ...matches, ...rest]
+}
+
+/**
+ * The folder to copy into the website root: the site root detection found,
+ * when it lies inside the extracted backup; otherwise the extraction root.
+ */
+export function importSourceDir(rootDir: string | null | undefined, extractDir: string): string {
+  if (!rootDir) return extractDir
+  const base = extractDir.replace(/\/+$/, '')
+  const root = rootDir.replace(/\/+$/, '')
+  if (root === base || root.startsWith(base + '/')) return root
+  return extractDir
+}
+
+/** DB_NAME from a wp-config.php, when it is a plain string literal. */
+async function readDbName(client: AnyClient, root: string): Promise<string | null> {
+  const r = await exec(
+    client,
+    `grep -m1 -oE "define *\\( *['\\"]DB_NAME['\\"] *, *['\\"][^'\\"]+['\\"]" ${shellQuote(`${root}/wp-config.php`)} 2>/dev/null || true`,
+    { timeoutMs: 20000 }
+  )
+  const m = r.stdout.match(/,\s*['"]([^'"]+)['"]/)
+  return m ? m[1] : null
+}
+
 /**
  * Find the site root when it is not the extraction root.
  *
@@ -201,7 +285,9 @@ async function countChildren(
  */
 async function findSiteRoot(
   client: AnyClient,
-  extractDir: string
+  extractDir: string,
+  preferredHosts: string[] = [],
+  warnings: string[] = []
 ): Promise<{ root: string; marker: string | null }> {
   const markers = [
     'wp-config.php',
@@ -230,6 +316,32 @@ async function findSiteRoot(
       if (await remoteExists(client, `${candidate}/${marker}`)) {
         return { root: candidate, marker }
       }
+    }
+  }
+
+  // Several WordPress installs in one backup (a whole hosting account): pick
+  // the one for this website's domain instead of the first alphabetically.
+  {
+    const r = await exec(
+      client,
+      `find ${shellQuote(extractDir)} -maxdepth 5 -name wp-config.php -type f -not -path '*/wp-content/*' 2>/dev/null | head -50 || true`,
+      { timeoutMs: 120_000 }
+    )
+    const dirs = r.stdout
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .map((p) => p.slice(0, p.lastIndexOf('/')))
+    if (dirs.length > 1) {
+      const pick = chooseSiteRoot(dirs, preferredHosts)!
+      const rel = (p: string) => p.replace(extractDir, '.')
+      const others = dirs.filter((d) => d !== pick.root).map(rel)
+      warnings.push(
+        pick.matched
+          ? `This backup contains ${dirs.length} websites. Imported ${rel(pick.root)} (matches this website's domain); not imported: ${others.join(', ')}.`
+          : `This backup contains ${dirs.length} websites and none matches this website's domain, so ${rel(pick.root)} was imported. Not imported: ${others.join(', ')}. If that is the wrong site, import again from a backup of just the site you want.`
+      )
+      return { root: pick.root, marker: 'wp-config.php' }
     }
   }
 
@@ -296,6 +408,8 @@ export interface DetectOptions {
   sourceType: MigrationSourceType
   /** Warnings accumulated by extraction, carried into the result. */
   priorWarnings?: string[]
+  /** The website's domain(s), used to pick one site out of a multi-site backup. */
+  preferredHosts?: string[]
   onLog?: (line: string) => void
 }
 
@@ -313,7 +427,7 @@ export async function detectSite(
   const log = (l: string) => opts.onLog?.(l)
   const warnings = [...(opts.priorWarnings ?? [])]
 
-  const { root, marker } = await findSiteRoot(client, opts.extractDir)
+  const { root, marker } = await findSiteRoot(client, opts.extractDir, opts.preferredHosts ?? [], warnings)
   if (root !== opts.extractDir) {
     log(`Site root found at ${root.replace(opts.extractDir, '.')}`)
   }
@@ -329,7 +443,15 @@ export async function detectSite(
   // Rank SQL dumps: biggest first, but a dump that mentions the options table
   // outranks a bigger one that does not (customers often include an unrelated
   // analytics export that dwarfs the real dump).
-  const rankedSql = await rankSqlFiles(client, opts.sqlFiles)
+  let rankedSql = await rankSqlFiles(client, opts.sqlFiles)
+  // The site's own wp-config.php names its database; a dump with that name is
+  // the right one even when another dump in the backup is bigger.
+  const dbName = stack === 'wordpress' ? await readDbName(client, root) : null
+  if (dbName && rankedSql.length > 1) {
+    const before = rankedSql[0]
+    rankedSql = preferDumpsForDatabase(rankedSql, dbName, opts.extractDir)
+    if (rankedSql[0] !== before) log(`Using the dump for database ${dbName} (named in the site's wp-config.php).`)
+  }
 
   const result: DetectionResult = {
     stack,
