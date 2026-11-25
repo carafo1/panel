@@ -63,6 +63,7 @@ import {
   fixPermissions,
   repairWordPressInstall,
   wipeDatabaseTables,
+  IN_CONTAINER_SQL_CLIENT,
   type WpDatabaseConfig,
   type WpImportContext,
 } from './wordpress'
@@ -1061,10 +1062,12 @@ const stageImportSql: StageFn = async (ctx) => {
     await withConnection(ctx.creds!, async (client) => {
       const r = await exec(
         client,
-        `docker exec -e MYSQL_PWD=${shellQuote(ctx.dbConfig!.password)} ${shellQuote(ctx.dbConfig!.container || '')} ` +
-          `mysql -N -B -h 127.0.0.1 -u ${shellQuote(ctx.dbConfig!.user)} -e ` +
+        `docker exec -e MYSQL_PWD=${shellQuote(ctx.dbConfig!.password)} ${shellQuote(ctx.dbConfig!.container || '')} sh -c ` +
           shellQuote(
-            `SELECT table_name FROM information_schema.tables WHERE table_schema='${ctx.dbConfig!.name}' AND table_name LIKE '%options' LIMIT 5`
+            `${IN_CONTAINER_SQL_CLIENT} -N -B -h 127.0.0.1 -u ${shellQuote(ctx.dbConfig!.user)} -e ` +
+              shellQuote(
+                `SELECT table_name FROM information_schema.tables WHERE table_schema='${ctx.dbConfig!.name}' AND table_name LIKE '%options' LIMIT 5`
+              )
           ),
         { timeoutMs: 120_000 }
       )
