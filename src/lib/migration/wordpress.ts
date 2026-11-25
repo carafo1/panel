@@ -383,7 +383,11 @@ export async function runWpCli(
   const network = opts.network || 'deployhub'
   const quoted = args.map((a) => shellQuote(a)).join(' ')
   const cmd =
-    `docker run --rm --network ${shellQuote(network)} ` +
+    // Run as uid 33 (www-data in the site image, which owns the files):
+    // the cli image's own www-data has another uid and could not read the
+    // 0640 wp-config.php, so every WP-CLI step failed with "Strange
+    // wp-config.php file" / "not a WordPress installation".
+    `docker run --rm --network ${shellQuote(network)} --user 33:33 ` +
     `-v ${shellQuote(ctx.sitePath)}:/var/www/html ` +
     `-e WORDPRESS_DB_HOST=${shellQuote(ctx.db.container || ctx.db.host)} ` +
     `-e WORDPRESS_DB_USER=${shellQuote(ctx.db.user)} ` +

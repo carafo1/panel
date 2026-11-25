@@ -107,7 +107,7 @@ async function inferPrefixFromDump(
 ): Promise<string | null> {
   const r = await exec(
     client,
-    `grep -a -m1 -oiE "CREATE TABLE [\\\`\\"]?[A-Za-z0-9_]+options[\\\`\\"]?" ${shellQuote(sqlFile)} 2>/dev/null || true`,
+    `${dumpReader(sqlFile)} | grep -a -m1 -oiE "CREATE TABLE [\\\`\\"]?[A-Za-z0-9_]+options[\\\`\\"]?" || true`,
     { timeoutMs: 300_000 }
   )
   const m = r.stdout.match(/CREATE TABLE [`"]?([A-Za-z0-9_]+)options[`"]?/i)
@@ -123,6 +123,17 @@ async function inferPrefixFromDump(
  * blob makes it look binary — without it grep prints "binary file matches" and
  * we detect nothing.
  */
+/**
+ * Shell that writes a dump's SQL text to stdout: gzipped dumps (common from
+ * Hostinger/cPanel) are decompressed, otherwise grep saw only binary and the
+ * site URL and table prefix were never found.
+ */
+export function dumpReader(sqlFile: string): string {
+  return /\.gz$/i.test(sqlFile)
+    ? `gzip -dc ${shellQuote(sqlFile)} 2>/dev/null`
+    : `cat ${shellQuote(sqlFile)} 2>/dev/null`
+}
+
 async function readUrlFromDump(
   client: AnyClient,
   sqlFile: string,
@@ -130,7 +141,7 @@ async function readUrlFromDump(
 ): Promise<string | null> {
   const r = await exec(
     client,
-    `grep -a -m1 -oiE "'${key}',[[:space:]]*'[^']*'" ${shellQuote(sqlFile)} 2>/dev/null | head -1 || true`,
+    `${dumpReader(sqlFile)} | grep -a -m1 -oiE "'${key}',[[:space:]]*'[^']*'" | head -1 || true`,
     { timeoutMs: 300_000 }
   )
   const m = r.stdout.match(/'[^']*',\s*'([^']*)'/)
@@ -155,7 +166,7 @@ async function isMultisite(
   if (sqlFile) {
     const dump = await exec(
       client,
-      `grep -a -m1 -oiE "CREATE TABLE [\\\`\\"]?[A-Za-z0-9_]*blogs[\\\`\\"]?" ${shellQuote(sqlFile)} 2>/dev/null || true`,
+      `${dumpReader(sqlFile)} | grep -a -m1 -oiE "CREATE TABLE [\\\`\\"]?[A-Za-z0-9_]*blogs[\\\`\\"]?" || true`,
       { timeoutMs: 300_000 }
     )
     if (dump.stdout.trim()) return true
@@ -560,7 +571,7 @@ async function rankSqlFiles(
     // minutes on a large backup and this is a ranking heuristic, not a proof.
     const head = await exec(
       client,
-      `head -c 2000000 ${shellQuote(f)} 2>/dev/null | grep -a -ciE "CREATE TABLE [\\\`\\"]?[A-Za-z0-9_]*(options|users|posts)" || true`,
+      `${dumpReader(f)} | head -c 2000000 | grep -a -ciE "CREATE TABLE [\\\`\\"]?[A-Za-z0-9_]*(options|users|posts)" || true`,
       { timeoutMs: 60000 }
     )
     const hits = parseInt(head.stdout.trim(), 10) || 0
