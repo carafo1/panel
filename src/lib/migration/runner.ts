@@ -954,6 +954,7 @@ const stageCreateDatabase: StageFn = async (ctx) => {
 
   const provisioned = await provisionProjectDatabase(ctx.projectId, {
     type: 'mariadb',
+    primary: true,
     onLog: ctx.log,
   })
   await db.project.update({

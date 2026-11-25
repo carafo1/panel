@@ -150,6 +150,22 @@ export function wordPressMailDefines(rt: SiteMailRuntime | null): string {
 
 export const WP_MAIL_PLUGIN_PATH = 'wp-content/mu-plugins/apsamo-mail.php'
 
+/** The settings file the plugin loads, inside wp-content (not a plugin). */
+export const WP_MAIL_CONFIG_NAME = 'apsamo-mail-config.php'
+export const WP_MAIL_CONFIG_PATH = `wp-content/${WP_MAIL_CONFIG_NAME}`
+
+/**
+ * Contents of the settings file. Exits when requested directly over HTTP, so
+ * it can never print anything; holds only constants.
+ */
+export function wordPressMailConfigFile(rt: SiteMailRuntime): string {
+  return [
+    '<?php',
+    "if (!defined('ABSPATH')) { exit; }",
+    wordPressMailDefines(rt),
+  ].join('\n')
+}
+
 /**
  * The must-use plugin. Static text: all configuration comes from constants.
  *
@@ -168,6 +184,11 @@ export const WP_MAIL_PLUGIN = `<?php
  */
 if (!defined('ABSPATH')) {
     exit;
+}
+// Settings live in their own file (written by the panel), so applying them
+// never regenerates wp-config.php.
+if (!defined('APSAMO_SMTP_HOST') && defined('WP_CONTENT_DIR') && is_readable(WP_CONTENT_DIR . '/${WP_MAIL_CONFIG_NAME}')) {
+    require WP_CONTENT_DIR . '/${WP_MAIL_CONFIG_NAME}';
 }
 if (!defined('APSAMO_SMTP_HOST') || !defined('APSAMO_SMTP_USER') || !defined('APSAMO_SMTP_PASS')) {
     return;
