@@ -83,3 +83,13 @@ describe('importSourceDir', () => {
     expect(importSourceDir(`${X}-evil/x`, X)).toBe(X)
   })
 })
+
+import { dumpReader } from '../../src/lib/migration/detect'
+
+describe('dumpReader', () => {
+  test('decompresses gzipped dumps before searching them', () => {
+    expect(dumpReader('/w/db.sql.gz')).toMatch(/^gzip -dc .*\/w\/db\.sql\.gz/)
+    expect(dumpReader('/w/DB.SQL.GZ')).toMatch(/^gzip -dc /)
+    expect(dumpReader('/w/db.sql')).toMatch(/^cat .*\/w\/db\.sql/)
+  })
+})
