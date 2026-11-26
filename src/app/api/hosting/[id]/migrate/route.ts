@@ -14,6 +14,8 @@ import {
   type MigrationSourceType,
 } from '@/lib/migration'
 import { toMigrationView } from '@/lib/migration/view'
+import { intendedSiteHost } from '@/lib/site-domain'
+import { isPlatformHostname } from '@/lib/site-address'
 
 /**
  * Per-project import endpoint.
@@ -230,9 +232,25 @@ export async function POST(
       sizeBytes = (sizeBytes ?? 0) + sqlUpload.sizeBytes
     }
 
-    const targetUrl =
-      body.targetUrl?.trim() ||
-      `https://${project.customDomain || project.subdomain}`
+    // The site's own domain, never a platform address.
+    const defaultHost = await intendedSiteHost(project.id)
+    const targetUrl = body.targetUrl?.trim() || (defaultHost ? `https://${defaultHost}` : '')
+    if (!targetUrl) {
+      return NextResponse.json(
+        { error: 'Connect a domain to this website before importing into it.', code: 'DOMAIN_REQUIRED' },
+        { status: 400 }
+      )
+    }
+    try {
+      if (isPlatformHostname(new URL(targetUrl).hostname)) {
+        return NextResponse.json(
+          { error: 'The import target must be this website’s own domain.', code: 'DOMAIN_REQUIRED' },
+          { status: 400 }
+        )
+      }
+    } catch {
+      return NextResponse.json({ error: 'targetUrl is not a valid URL.' }, { status: 400 })
+    }
 
     // ── Create + launch ──────────────────────────────────────────────
     const { migrationId } = await createMigration({

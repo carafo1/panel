@@ -8,6 +8,7 @@ import { requireProjectAccess } from '@/lib/project-access'
 import { emitWebhookEvent } from '@/lib/webhook-delivery'
 import { validateGitUrl } from '@/lib/vps/deploy-safety'
 import { toggleSsl } from '@/lib/vps/ssl'
+import { siteHostname, publicUrlOrNull } from '@/lib/site-address'
 
 export async function GET(
   request: Request,
@@ -82,7 +83,7 @@ export async function GET(
           id: project.deployments[0].id,
           status: project.deployments[0].status,
           createdAt: project.deployments[0].createdAt.toISOString(),
-          deployUrl: project.deployments[0].deployUrl,
+          deployUrl: publicUrlOrNull(project.deployments[0].deployUrl),
         }
       : null
 
@@ -97,6 +98,13 @@ export async function GET(
         status: project.status,
         subdomain: project.subdomain,
         customDomain: project.customDomain,
+        // The public address (real domain) or null — "No domain connected".
+        address: siteHostname(project),
+        pendingDomain: siteHostname(project)
+          ? null
+          : project.websiteDomains.find((d) => !d.verified && d.isPrimary)?.domain ??
+            project.websiteDomains.find((d) => !d.verified)?.domain ??
+            null,
         environment: project.environment,
         parentProjectId: project.parentProjectId,
         repoUrl: project.repoUrl,
@@ -195,7 +203,7 @@ export async function GET(
           commit: d.commit,
           branch: d.branch,
           status: d.status,
-          deployUrl: d.deployUrl,
+          deployUrl: publicUrlOrNull(d.deployUrl),
           duration: d.duration,
           triggeredBy: d.triggeredBy,
           createdAt: d.createdAt.toISOString(),
@@ -443,7 +451,7 @@ export async function DELETE(
     // anything that could not be removed comes back in `warnings`.
     const { warnings } = await purgeProject(id)
     void emitWebhookEvent(decoded.userId, 'project.deleted', {
-      project: { id, name: project.name, subdomain: project.subdomain },
+      project: { id, name: project.name, domain: siteHostname(project) },
     })
 
     // Audit the delete. This AuditLog row is not FK'd to the Project, so it

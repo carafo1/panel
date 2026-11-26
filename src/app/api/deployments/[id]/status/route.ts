@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { requireProjectAccess } from '@/lib/project-access'
+import { siteUrl, publicUrlOrNull } from '@/lib/site-address'
 
 /**
  * GET /api/deployments/[id]/status
@@ -63,11 +64,8 @@ export async function GET(
     const access = await requireProjectAccess(decoded, deployment.projectId, 'view')
     if (!access.ok) return access.response
 
-    const url =
-      deployment.deployUrl ||
-      (deployment.project.subdomain
-        ? `https://${deployment.project.subdomain}`
-        : null)
+    // The site's real domain only; null when none is connected.
+    const url = publicUrlOrNull(deployment.deployUrl) || siteUrl(deployment.project)
 
     return NextResponse.json({
       deploymentId: deployment.id,

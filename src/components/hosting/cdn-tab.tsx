@@ -218,7 +218,7 @@ export function CdnTab({ projectId }: { projectId: string }) {
                 ))}
               </div>
             ) : (
-              info.zones.length === 0 && <p className="text-sm text-muted-foreground">Connect your own domain to this website first (Domains section). Free subdomains are already served by us.</p>
+              info.zones.length === 0 && <p className="text-sm text-muted-foreground">Connect a domain to this website first (Domains &amp; SSL). The CDN protects your own domain.</p>
             )}
           </>
         )}

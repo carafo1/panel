@@ -68,8 +68,8 @@ import {
 interface ProjectRef {
   id: string
   name: string
-  subdomain: string
-  customDomain?: string | null
+  /** The site's real domain; null when none is connected. */
+  address: string | null
 }
 
 interface Monitor {
@@ -203,12 +203,12 @@ function AddMonitorDialog({
     }
   }, [open, projectId, projects])
 
-  // When the user picks a project, prefill the URL field with its subdomain.
+  // When the user picks a project, prefill the URL field with its domain.
   useEffect(() => {
     if (!projectId) return
     const p = projects.find((x) => x.id === projectId)
-    if (p && !url) {
-      setUrl(`https://${p.customDomain || p.subdomain}`)
+    if (p && !url && p.address) {
+      setUrl(`https://${p.address}`)
     }
   }, [projectId, projects, url])
 
@@ -286,7 +286,7 @@ function AddMonitorDialog({
               <Globe className="absolute start-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
               <Input
                 id="monitor-url"
-                placeholder="https://myapp.apsamo.com"
+                placeholder="https://example.com"
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
                 className="ps-9"
@@ -855,8 +855,7 @@ export default function UptimePanel() {
       const list = ((data.projects as any[]) || []).map((p) => ({
         id: p.id,
         name: p.name,
-        subdomain: p.subdomain,
-        customDomain: p.customDomain ?? null,
+        address: (p.address as string | null | undefined) ?? p.customDomain ?? null,
       }))
       setProjects(list)
     } catch {

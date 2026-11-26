@@ -27,6 +27,7 @@
  */
 import { db } from '@/lib/db'
 import { getDomainInfo, isDynadotDemoMode } from '@/lib/dynadot'
+import { siteHostname } from '@/lib/site-address'
 
 const DAY = 24 * 60 * 60 * 1000
 export const CERT_EXPIRY_WARNING_DAYS = 14
@@ -279,19 +280,23 @@ export async function checkCertificates(deps: InfraDeps = {}): Promise<Certifica
   const probe = deps.probeCertificates ?? realProbeCertificates
   const projects = await db.project.findMany({
     where: { status: 'running', sslEnabled: true, serverId: { not: null } },
-    select: { id: true, serverId: true, customDomain: true, subdomain: true, sslCertStatus: true },
+    select: { id: true, serverId: true, customDomain: true, sslCertStatus: true },
     take: PROJECT_BATCH,
   })
-  const real = deps.probeCertificates ? null : await realServers([...new Set(projects.map((p) => p.serverId!))])
-  const byServer = new Map<string, typeof projects>()
-  for (const p of projects) {
+  // Only sites with a real domain have (or should have) a certificate.
+  const withHost = projects
+    .map((p) => ({ ...p, hostname: siteHostname(p) }))
+    .filter((p): p is typeof p & { hostname: string } => !!p.hostname)
+  const real = deps.probeCertificates ? null : await realServers([...new Set(withHost.map((p) => p.serverId!))])
+  const byServer = new Map<string, typeof withHost>()
+  for (const p of withHost) {
     if (real && !real.has(p.serverId!)) continue
     byServer.set(p.serverId!, [...(byServer.get(p.serverId!) ?? []), p])
   }
 
   const result: CertificateCheck = { checked: 0, issued: 0, notServed: [], expiringSoon: [], serverErrors: [] }
   for (const [serverId, group] of byServer) {
-    const hosts = group.map((p) => ({ id: p.id, hostname: p.customDomain || p.subdomain }))
+    const hosts = group.map((p) => ({ id: p.id, hostname: p.hostname }))
     let probes: Awaited<ReturnType<NonNullable<InfraDeps['probeCertificates']>>>
     try {
       probes = await probe(serverId, hosts)
@@ -302,7 +307,7 @@ export async function checkCertificates(deps: InfraDeps = {}): Promise<Certifica
     for (const r of probes) {
       const p = group.find((x) => x.id === r.projectId)
       if (!p) continue
-      const hostname = p.customDomain || p.subdomain
+      const hostname = p.hostname
       result.checked++
       if (!r.ok) {
         result.notServed.push({ projectId: p.id, hostname, previous: p.sslCertStatus })

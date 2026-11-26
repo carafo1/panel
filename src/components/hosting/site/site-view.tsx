@@ -8,6 +8,7 @@
  * Moved out of hosting-panel.tsx, which keeps the website list.
  */
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { siteHostname, NO_DOMAIN_LABEL } from '@/lib/site-address'
 import { toast } from 'sonner'
 import {
   AlertTriangle,
@@ -138,8 +139,12 @@ interface Project {
   stack?: string | null
   deploymentMethod?: string | null
   status: string
+  /** Internal identifier — never shown or linked. */
   subdomain: string
-  customDomain?: string
+  customDomain?: string | null
+  /** Public address (real domain) from the API, or null: no domain connected. */
+  address?: string | null
+  pendingDomain?: string | null
   sslEnabled: boolean
   autoDeploy: boolean
   lastDeployment?: {
@@ -1382,9 +1387,11 @@ export function ProjectDetailView({
     lastDeployment: project.deployments[0] ?? null,
   })
   const tone = TONE_CLASSES[meaning.tone]
-  const primaryDomain =
-    project.websiteDomains?.find((d) => d.isPrimary)?.domain || project.customDomain || project.subdomain
-  const liveUrl = `https://${primaryDomain}`
+  // The site's real domain only. None connected → no link, no Visit button.
+  const primaryDomain = project.address ?? siteHostname(project)
+  const liveUrl = primaryDomain ? `https://${primaryDomain}` : null
+  const pendingDomain =
+    project.pendingDomain ?? project.websiteDomains?.find((d) => !d.verified)?.domain ?? null
   const latestDeployment = project.deployments[0] ?? null
   const canDeploy = project.access?.canDeploy !== false
   const isStagingCopy = project.environment === 'staging'
@@ -1427,31 +1434,50 @@ export function ProjectDetailView({
             </span>
           </div>
           <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
-            <a
-              href={liveUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 font-mono text-[13px] text-foreground/80 underline-offset-4 hover:text-primary hover:underline"
-            >
-              {primaryDomain}
-              <ExternalLink className="size-3" aria-hidden />
-              <span className="sr-only">(opens in a new tab)</span>
-            </a>
-            {primaryDomain !== project.subdomain && (
-              <span className="font-mono text-xs">also {project.subdomain}</span>
+            {liveUrl ? (
+              <a
+                href={liveUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 font-mono text-[13px] text-foreground/80 underline-offset-4 hover:text-primary hover:underline"
+              >
+                {primaryDomain}
+                <ExternalLink className="size-3" aria-hidden />
+                <span className="sr-only">(opens in a new tab)</span>
+              </a>
+            ) : (
+              <span className="inline-flex flex-wrap items-center gap-2" data-testid="site-no-domain">
+                <span className="text-[13px] text-foreground/80">
+                  {pendingDomain ? `${pendingDomain} · waiting for DNS` : NO_DOMAIN_LABEL}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => goTo('domains')}
+                  className="text-xs font-medium text-primary underline-offset-2 hover:underline"
+                >
+                  {pendingDomain ? 'Finish connecting' : 'Connect a domain'}
+                </button>
+              </span>
             )}
             <span className="text-xs">{kind === 'wordpress' ? 'WordPress' : frameworkLabel(project.framework)}</span>
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" asChild>
-            <a href={liveUrl} target="_blank" rel="noopener noreferrer">
+          {liveUrl ? (
+            <Button variant="outline" asChild>
+              <a href={liveUrl} target="_blank" rel="noopener noreferrer">
+                <Globe aria-hidden />
+                Visit site
+              </a>
+            </Button>
+          ) : (
+            <Button variant="outline" disabled title="Connect a domain to visit this website">
               <Globe aria-hidden />
               Visit site
-            </a>
-          </Button>
-          {kind === 'wordpress' && (
+            </Button>
+          )}
+          {kind === 'wordpress' && liveUrl && (
             <Button variant="outline" asChild>
               <a href={`${liveUrl}/wp-admin/`} target="_blank" rel="noopener noreferrer">
                 <LayoutDashboard aria-hidden />

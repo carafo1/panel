@@ -21,6 +21,7 @@ import * as sslRoute from '@/app/api/hosting/[id]/ssl/route'
 import * as backupsRoute from '@/app/api/hosting/[id]/backups/route'
 import { buildServerProxyConfigs, expireIpRules, generateCaddyBlock } from '@/lib/vps/proxy'
 import { BIND_SOURCE_GUARD } from '@/lib/vps/deploy-safety'
+import { BRAND_DOMAIN } from '@/lib/brand-config'
 import { makeUser, makeProject, authed, params, uid } from './helpers'
 
 type U = Awaited<ReturnType<typeof makeUser>>
@@ -78,11 +79,15 @@ describe('unverified domains are never served', () => {
     await db.domain.create({ data: { userId: other.id, name: someoneElses.customDomain!.toLowerCase(), status: 'active', provider: 'dynadot' } })
 
     const { servedHosts, configs } = await buildServerProxyConfigs(serverId, true)
-    expect(servedHosts.get(unproven.id)).toBe(unproven.subdomain)
+    // No proven domain → not routed at all (there is no platform fallback).
+    expect(servedHosts.has(unproven.id)).toBe(false)
     expect(servedHosts.get(verified.id)).toBe(verified.customDomain)
     expect(servedHosts.get(owned.id)).toBe(owned.customDomain)
-    expect(servedHosts.get(someoneElses.id)).toBe(someoneElses.subdomain)
-    expect(configs.map((c) => c.hostname)).not.toContain(unproven.customDomain)
+    expect(servedHosts.has(someoneElses.id)).toBe(false)
+    const allHosts = configs.flatMap((c) => [c.hostname, ...(c.extraHostnames || [])])
+    expect(allHosts).not.toContain(unproven.customDomain)
+    expect(allHosts).not.toContain(unproven.subdomain)
+    expect(allHosts).not.toContain(someoneElses.customDomain)
   })
 })
 
@@ -95,15 +100,16 @@ describe('www for domains whose DNS we host', () => {
     const manualDomain = `${uid('manual')}.com`.toLowerCase()
     await db.websiteDomain.create({ data: { projectId: manual.id, domain: manualDomain, verified: true, zoneCreated: false, connectionMethod: 'manual' } })
     const { configs } = await buildServerProxyConfigs(serverId, true)
-    const extras = configs.flatMap((c) => c.extraHostnames || [])
-    expect(extras).toEqual(expect.arrayContaining([hostedDomain, `www.${hostedDomain}`, manualDomain]))
-    expect(extras).not.toContain(`www.${manualDomain}`)
+    const hosts = configs.flatMap((c) => [c.hostname, ...(c.extraHostnames || [])])
+    expect(hosts).toEqual(expect.arrayContaining([hostedDomain, `www.${hostedDomain}`, manualDomain]))
+    expect(hosts).not.toContain(`www.${manualDomain}`)
   })
 })
 
 describe('IP rules', () => {
   it('drops expired rules from the config and disables them', async () => {
     const p = await makeProject(owner.id, { serverId, containerName: uid('dh-ip'), externalPort: 31999 })
+    await db.websiteDomain.create({ data: { projectId: p.id, domain: `${uid('ip')}.com`.toLowerCase(), verified: true, isPrimary: true } })
     const past = new Date(Date.now() - 60_000)
     const future = new Date(Date.now() + 3_600_000)
     await db.ipBlock.createMany({
@@ -238,15 +244,37 @@ describe('domain search input', () => {
   })
 })
 
-describe('platform subdomain stays reachable', () => {
-  it('a site whose verified custom domain is primary still serves its subdomain', async () => {
+describe('sites are served on real domains only', () => {
+  const brand = (process.env.BRAND_DOMAIN || BRAND_DOMAIN).toLowerCase()
+
+  it('a site with a verified primary domain never also serves its platform subdomain', async () => {
     const domain = `${uid('primary')}.com`.toLowerCase()
-    const p = await makeProject(owner.id, { serverId, customDomain: domain, containerName: uid('dh-prim'), externalPort: 31777 })
+    const slug = uid('prim')
+    const p = await makeProject(owner.id, {
+      serverId, customDomain: domain, subdomain: `${slug}.${brand}`, containerName: uid('dh-prim'), externalPort: 31777,
+    })
     await db.websiteDomain.create({ data: { projectId: p.id, domain, verified: true, isPrimary: true } })
     const { configs, servedHosts } = await buildServerProxyConfigs(serverId, true)
     expect(servedHosts.get(p.id)).toBe(domain)
     const mine = configs.find((c) => c.hostname === domain)!
-    expect(mine.extraHostnames).toContain(p.subdomain)
-    expect(mine.extraHostnames).not.toContain(domain) // not listed twice
+    expect(mine.extraHostnames ?? []).not.toContain(p.subdomain)
+    expect(mine.extraHostnames ?? []).not.toContain(domain) // not listed twice
+  })
+
+  it('no config ever contains a <slug>.<platform domain> host, and a site without a domain is not routed', async () => {
+    const slug = uid('nodomain')
+    const bare = await makeProject(owner.id, {
+      serverId, subdomain: `${slug}.${brand}`, containerName: uid('dh-bare'), externalPort: 31666,
+    })
+    // Old data that put a platform name in customDomain or a domain row.
+    const legacy = await makeProject(owner.id, {
+      serverId, customDomain: `${uid('legacy')}.${brand}`, containerName: uid('dh-leg'), externalPort: 31667,
+    })
+    await db.websiteDomain.create({ data: { projectId: legacy.id, domain: `www.${uid('leg')}.${brand}`, verified: true, isPrimary: true } })
+    const { configs, servedHosts } = await buildServerProxyConfigs(serverId, true)
+    expect(servedHosts.has(bare.id)).toBe(false)
+    expect(servedHosts.has(legacy.id)).toBe(false)
+    const hosts = configs.flatMap((c) => [c.hostname, ...(c.extraHostnames || [])]).map((h) => h.toLowerCase())
+    expect(hosts.filter((h) => h === brand || h.endsWith(`.${brand}`))).toEqual([])
   })
 })

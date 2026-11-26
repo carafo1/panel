@@ -6,6 +6,7 @@ import { logAudit } from '@/lib/audit'
 import { createMonitor } from '@/lib/monitor'
 import { deployProject } from '@/lib/vps'
 import { claimDeploySlot } from '@/lib/deploy-guard'
+import { siteUrl } from '@/lib/site-address'
 
 export async function POST(
   request: Request,
@@ -173,8 +174,9 @@ export async function POST(
     // Auto-provision an uptime monitor for the deployed URL so the user gets
     // visibility into the new deployment without manual setup. Skip if one
     // already exists for this project + URL (e.g. on redeploy).
-    const monitorUrl = `https://${project.subdomain}`
-    try {
+    // Only for a site with a real domain: there is no platform address.
+    const monitorUrl = siteUrl(project)
+    if (monitorUrl) try {
       const existing = await db.uptimeMonitor.findFirst({
         where: { projectId: project.id, url: monitorUrl },
         select: { id: true },
@@ -193,7 +195,7 @@ export async function POST(
           id: deployment.id,
           projectId: project.id,
           status: 'building',
-          deployUrl: `https://${project.subdomain}`,
+          deployUrl: siteUrl(project),
           triggeredBy: 'user',
           branch,
           createdAt: deployment.createdAt,

@@ -12,6 +12,7 @@
 import { db } from '@/lib/db'
 import { emitWebhookEvent } from '@/lib/webhook-delivery'
 import { sendDeploymentEmail } from '@/lib/email'
+import { siteUrl, publicUrlOrNull } from '@/lib/site-address'
 
 export type DeployPhase = 'started' | 'success' | 'failed'
 
@@ -30,7 +31,6 @@ export async function announceDeployment(opts: {
           id: true,
           name: true,
           userId: true,
-          subdomain: true,
           customDomain: true,
           user: { select: { email: true } },
         },
@@ -42,9 +42,8 @@ export async function announceDeployment(opts: {
     ])
     if (!project) return
 
-    const url =
-      deployment?.deployUrl ||
-      (project.customDomain ? `https://${project.customDomain}` : project.subdomain ? `https://${project.subdomain}` : null)
+    // The site's real domain only; null when none is connected.
+    const url = publicUrlOrNull(deployment?.deployUrl) || siteUrl(project)
 
     await emitWebhookEvent(
       project.userId,

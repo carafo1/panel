@@ -1,6 +1,6 @@
 'use client'
 
-import { Globe, Link2, Server } from 'lucide-react'
+import { Link2, Server } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import {
   Select,
@@ -16,18 +16,25 @@ import { isValidDomain, slugify } from './format'
 
 export const BRAND_DOMAIN = process.env.NEXT_PUBLIC_BRAND_DOMAIN || 'apsamo.com'
 
-export type AddressType = 'subdomain' | 'existing' | 'external'
+/**
+ * Every website needs a real domain: one in the account, or one the customer
+ * owns elsewhere. There is no free platform address.
+ */
+export type AddressType = 'existing' | 'external'
 
 export interface IdentityValue {
   name: string
-  addressType: AddressType
+  /** Null until the customer picks one; the step cannot continue without it. */
+  addressType: AddressType | null
   existingDomain: string
   externalDomain: string
 }
 
+export const DOMAIN_REQUIRED_MESSAGE = 'Choose a domain for this website — buy one or connect a domain you own.'
+
 export const EMPTY_IDENTITY: IdentityValue = {
   name: '',
-  addressType: 'subdomain',
+  addressType: null,
   existingDomain: '',
   externalDomain: '',
 }
@@ -40,21 +47,22 @@ export function nameError(name: string): string | null {
 }
 
 export function addressError(v: IdentityValue): string | null {
+  if (!v.addressType) return DOMAIN_REQUIRED_MESSAGE
   if (v.addressType === 'existing' && !v.existingDomain) return 'Choose one of your domains.'
   if (v.addressType === 'external') {
     if (!v.externalDomain.trim()) return 'Enter the domain you want to use.'
     if (!isValidDomain(v.externalDomain)) return 'That does not look like a domain. Use a format like example.com.'
     if (v.externalDomain.trim().toLowerCase().endsWith(`.${BRAND_DOMAIN}`))
-      return `Addresses on ${BRAND_DOMAIN} are given out automatically. Choose “Free address” instead.`
+      return `Addresses on ${BRAND_DOMAIN} belong to the platform. Use a domain you own.`
   }
   return null
 }
 
 /** Payload fields both create endpoints accept. */
-export function identityPayload(v: IdentityValue): { name: string; domainType: AddressType; domain?: string } {
+export function identityPayload(v: IdentityValue): { name: string; domainType?: AddressType; domain?: string } {
   return {
     name: v.name.trim(),
-    domainType: v.addressType,
+    domainType: v.addressType ?? undefined,
     domain:
       v.addressType === 'existing'
         ? v.existingDomain
@@ -67,7 +75,7 @@ export function identityPayload(v: IdentityValue): { name: string; domainType: A
 export function addressSummary(v: IdentityValue): string {
   if (v.addressType === 'existing') return v.existingDomain
   if (v.addressType === 'external') return `${v.externalDomain.trim().toLowerCase()} (connects after you update DNS)`
-  return `A free ${BRAND_DOMAIN} address`
+  return 'No domain chosen'
 }
 
 /** Website name and how visitors reach it. */
@@ -88,7 +96,6 @@ export function SiteIdentity({
   onClose: () => void
 }) {
   const setDashboardTab = useAppStore((s) => s.setDashboardTab)
-  const slug = slugify(value.name)
   const nErr = showErrors ? nameError(value.name) : null
   const aErr = showErrors ? addressError(value) : null
   const nameHint = 'Only you see this. You can change it later.'
@@ -115,20 +122,6 @@ export function SiteIdentity({
         value={value.addressType}
         onChange={(addressType) => onChange({ ...value, addressType })}
         choices={[
-          {
-            value: 'subdomain',
-            title: 'Free address',
-            meta: 'Ready straight away',
-            icon: <Globe className="size-4" />,
-            description: (
-              <>
-                <span className="font-mono text-foreground">
-                  {slug || 'your-site'}-xxxx.{BRAND_DOMAIN}
-                </span>
-                <span className="block">The last four characters are added to keep it unique. You can connect your own domain at any time.</span>
-              </>
-            ),
-          },
           {
             value: 'existing',
             title: 'A domain in my account',
@@ -179,7 +172,7 @@ export function SiteIdentity({
               id="nw-external"
               label={<span className="sr-only">Your domain</span>}
               error={aErr}
-              hint="Your site starts on a free address. Afterwards we show the two DNS records to add; the domain connects by itself once they are in place."
+              hint="Afterwards we show the DNS records to add. Your site goes online on this domain by itself once they are in place."
             >
               <Input
                 id="nw-external"
@@ -196,6 +189,11 @@ export function SiteIdentity({
           ) : null
         }
       </ChoiceList>
+      {aErr && !value.addressType && (
+        <p id="nw-address-error" role="alert" className="-mt-3 text-xs text-destructive">
+          {aErr}
+        </p>
+      )}
 
       <p className="text-xs text-muted-foreground">
         No domain yet?{' '}
@@ -209,7 +207,7 @@ export function SiteIdentity({
         >
           Buy or transfer one in Domains
         </button>{' '}
-        — start on the free address now and connect it when it is ready.
+        — then come back and choose it here.
       </p>
     </div>
   )

@@ -21,6 +21,7 @@ import { assertPublicUrl, fetchPublicTarget } from '@/lib/ssrf'
 import { createNotification } from '@/lib/notifications'
 import { sendEmail } from '@/lib/email'
 import { emitWebhookEvent } from '@/lib/webhook-delivery'
+import { publicUrlOrNull } from '@/lib/site-address'
 
 const DEFAULT_TIMEOUT_MS = 10_000
 
@@ -150,6 +151,11 @@ export async function runUptimeChecks(): Promise<RunResult> {
     )
     return result
   }
+
+  // Monitors left on a retired `<slug>.<platform domain>` address are inert:
+  // those addresses are no longer served, so checking them would only raise
+  // false outage alerts. They stay in the database untouched.
+  monitors = monitors.filter((m) => publicUrlOrNull(m.url) !== null)
 
   const now = Date.now()
   const due = monitors.filter((m) => {

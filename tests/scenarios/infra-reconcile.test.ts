@@ -33,8 +33,9 @@ beforeAll(async () => {
     })
   serverId = (await mk('infra-a')).id
   otherServerId = (await mk('infra-b')).id
+  // Every site has a real domain: certificates exist only for those.
   const site = async (key: string, extra: Record<string, unknown>) => {
-    p[key] = (await makeProject(userId, { serverId, ...extra })).id
+    p[key] = (await makeProject(userId, { serverId, customDomain: `${uid(key)}.example.com`.toLowerCase(), ...extra })).id
   }
   await site('healthy', { containerName: uid('dh-healthy') })
   await site('byId', { containerId: 'abcdef1234567890' })
@@ -42,7 +43,7 @@ beforeAll(async () => {
   await site('stopped', { containerName: uid('dh-stopped') })
   await site('gone', { containerName: uid('dh-gone') })
   await site('stoppedProject', { containerName: uid('dh-off'), status: 'stopped' })
-  p.unreachable = (await makeProject(userId, { serverId: otherServerId, containerName: uid('dh-x') })).id
+  p.unreachable = (await makeProject(userId, { serverId: otherServerId, containerName: uid('dh-x'), customDomain: `${uid('unreach')}.example.com` })).id
 })
 
 async function containerFake(): Promise<(serverId: string) => Promise<ContainerRow[]>> {
@@ -116,6 +117,20 @@ describe('certificate check', () => {
     expect(r.expiringSoon.map((e) => e.projectId)).toEqual(expect.arrayContaining([p.byId]))
     expect(r.expiringSoon.map((e) => e.projectId)).not.toContain(p.healthy)
     expect(r.serverErrors.map((e) => e.serverId)).toContain(otherServerId)
+  })
+
+  it('never probes a site without a domain (nothing is issued for its internal subdomain)', async () => {
+    const bare = await makeProject(userId, { serverId, containerName: uid('dh-bare') })
+    const seen: string[] = []
+    await checkCertificates({
+      force: true,
+      probeCertificates: async (_sid, projects) => {
+        seen.push(...projects.map((x) => x.id))
+        return []
+      },
+    })
+    expect(seen).not.toContain(bare.id)
+    expect(seen).toContain(p.healthy)
   })
 
   it('skips projects with SSL off', async () => {

@@ -9,12 +9,9 @@ import { deployProject } from '@/lib/vps'
 import { validateGitUrl } from '@/lib/vps/deploy-safety'
 import { isAdmin } from '@/lib/security'
 import { getDeploymentMethod, type DeploymentMethodId } from '@/lib/deployment-methods'
-import { BRAND_DOMAIN } from '@/lib/brand-config'
 import { emitWebhookEvent } from '@/lib/webhook-delivery'
+import { resolveSiteDomainChoice, internalSiteKey } from '@/lib/site-domain'
 import {
-  isValidHostname,
-  isReservedHostname,
-  findConflict,
   generateVerificationToken,
   getServerIps,
   VERIFY_PREFIX,
@@ -125,7 +122,8 @@ async function postHandler(request: Request) {
 
 interface WizardPayload {
   name: string
-  domainType?: 'subdomain' | 'existing' | 'new' | 'external'
+  /** Required with `domain`: there is no free platform address. */
+  domainType?: 'existing' | 'new' | 'external'
   domain?: string
   /**
    * How this project deploys.
@@ -241,73 +239,27 @@ async function handleWizardCreate(
   }
 
   // ── Domain resolution ─────────────────────────────────────────────
-  const slug = slugify(name) + '-' + randomSuffix(4)
-  let subdomain: string
-  let customDomain: string | null = null
-  // Set instead of customDomain when the domain is registered elsewhere: it
-  // is attached as a pending WebsiteDomain and only serves once verified.
-  let externalDomain: string | null = null
-
-  const domainType = body.domainType || 'subdomain'
-  if (domainType === 'subdomain') {
-    subdomain = `${slug}.${BRAND_DOMAIN}`
-  } else {
-    const requestedDomain = (body.domain || '').toLowerCase().trim()
-    if (!requestedDomain) {
-      return NextResponse.json(
-        { error: 'Domain is required when domainType is "existing" or "new"' },
-        { status: 400 }
-      )
-    }
-    if (!isValidHostname(requestedDomain)) {
-      return NextResponse.json(
-        { error: `"${requestedDomain}" is not a valid domain name.` },
-        { status: 400 }
-      )
-    }
-    if (isReservedHostname(requestedDomain, BRAND_DOMAIN)) {
-      return NextResponse.json(
-        { error: `${requestedDomain} belongs to the platform and cannot be used. Use your own domain.` },
-        { status: 400 }
-      )
-    }
-    // Platform-wide, so a customer cannot claim a hostname already serving
-    // another tenant here.
-    const clash = await findConflict(requestedDomain)
-    if (clash.conflict) {
-      return NextResponse.json(
-        { error: `${requestedDomain} is already in use on this platform.` },
-        { status: 409 }
-      )
-    }
-
-    if (domainType === 'existing') {
-      const owned = await db.domain.findFirst({
-        where: { userId: decoded.userId, name: requestedDomain },
-      })
-      if (!owned) {
-        return NextResponse.json(
-          { error: `Domain ${requestedDomain} not found in your account. Choose "Use a domain registered elsewhere" if it is with another registrar.` },
-          { status: 400 }
-        )
-      }
-    }
-
-    subdomain = `${slug}.${BRAND_DOMAIN}` // always also assigned a subdomain
-
-    // SECURITY: `customDomain` is what the Caddy generator emits, so it is
-    // only set for a domain we already know the customer controls (one
-    // registered through this platform). An EXTERNAL domain is recorded as a
-    // pending WebsiteDomain instead — the site goes live on its subdomain
-    // immediately, and the domain is attached automatically by the domain
-    // sweep once DNS proves ownership. Writing it here would serve a hostname
-    // nobody has proven they own.
-    if (domainType === 'existing') {
-      customDomain = requestedDomain
-    } else {
-      externalDomain = requestedDomain
-    }
+  // A website is only ever served on a real domain: one in the account, or
+  // one the customer owns elsewhere (attached pending verification). There is
+  // no free platform address any more.
+  const choice = await resolveSiteDomainChoice({
+    userId: decoded.userId,
+    domainType: body.domainType,
+    domain: body.domain,
+  })
+  if (!choice.ok) {
+    return NextResponse.json({ error: choice.error, code: choice.code }, { status: choice.status })
   }
+  const slug = slugify(name) + '-' + randomSuffix(4)
+  // Internal identifier only (deploy folder / container naming history);
+  // never published, proxied or shown.
+  const subdomain = internalSiteKey(slug)
+  // SECURITY: `customDomain` is what the Caddy generator emits, so it is
+  // only set for a domain already in the customer's account. An EXTERNAL
+  // domain is recorded as a pending WebsiteDomain and attached by the domain
+  // sweep once DNS proves ownership.
+  const customDomain: string | null = choice.customDomain
+  const externalDomain: string | null = choice.externalDomain
 
   // Check slug uniqueness.
   const existing = await db.project.findFirst({ where: { slug } })
@@ -426,13 +378,13 @@ async function handleWizardCreate(
       installSettings,
     },
   })
-  void emitWebhookEvent(decoded.userId, 'project.created', { project: { id: project.id, name: project.name, subdomain: project.subdomain } }, { projectId: project.id })
+  void emitWebhookEvent(decoded.userId, 'project.created', { project: { id: project.id, name: project.name, domain: choice.domain } }, { projectId: project.id })
 
   // ── External domain: attach as PENDING ────────────────────────────
-  // Hosting is provisioned immediately and serves on the subdomain. The
-  // domain sweep connects this hostname (and Caddy issues its certificate)
-  // as soon as the customer's DNS proves ownership — no transfer required,
-  // and no manual "Verify" click needed.
+  // Hosting is provisioned immediately but is not routed until this domain
+  // is verified: the domain sweep connects the hostname (and Caddy issues its
+  // certificate) as soon as the customer's DNS proves ownership — no
+  // transfer required, and no manual "Verify" click needed.
   let pendingDomainSetup: {
     domain: string
     txtRecord: { type: string; name: string; value: string }
@@ -507,8 +459,9 @@ async function handleWizardCreate(
           name: project.name,
           slug: project.slug,
           status: project.status,
-          subdomain: project.subdomain,
           customDomain: project.customDomain,
+          domain: choice.domain,
+          pendingDomain: pendingDomainSetup,
           autoDeploy: project.autoDeploy,
         },
         message:
@@ -598,7 +551,7 @@ async function handleWizardCreate(
       name: project.name,
       method: methodId,
       source,
-      domain: customDomain || subdomain,
+      domain: choice.domain,
       serverId: server.id,
     },
   })
@@ -612,11 +565,10 @@ async function handleWizardCreate(
         method: methodId,
         framework,
         status: project.status,
-        subdomain,
         customDomain,
-        // Pending external domain, if one was supplied. The site is already
-        // live on `subdomain`; this one connects automatically once DNS
-        // proves ownership.
+        domain: choice.domain,
+        // Pending external domain, if one was supplied. The site is routed
+        // on it automatically once DNS proves ownership.
         pendingDomain: pendingDomainSetup,
         sslEnabled: project.sslEnabled,
         deploymentMethod: methodId,
@@ -652,6 +604,36 @@ async function handleWizardCreate(
   )
 }
 
+/**
+ * Attach a domain registered elsewhere as the site's PENDING primary domain.
+ * It is routed only after the domain sweep proves DNS ownership. Never fails
+ * site creation — the customer can retry from the Domains tab.
+ */
+async function attachPendingDomain(projectId: string, domain: string) {
+  try {
+    const token = generateVerificationToken()
+    await db.websiteDomain.create({
+      data: {
+        projectId,
+        domain,
+        isPrimary: true,
+        sslEnabled: true,
+        sslStatus: 'none',
+        verified: false,
+        verificationToken: token,
+      },
+    })
+    return {
+      domain,
+      txtRecord: { type: 'TXT', name: `${VERIFY_PREFIX}.${domain}`, value: token },
+      aRecord: { type: 'A', name: domain, value: await getServerIps() },
+    }
+  } catch (err) {
+    console.error('[hosting/create] external domain attach failed:', err)
+    return null
+  }
+}
+
 // ─── Legacy payload handler (back-compat) ────────────────────────────────
 
 interface LegacyPayload {
@@ -660,6 +642,9 @@ interface LegacyPayload {
   planId?: string
   repoUrl?: string
   branch?: string
+  /** Required: the site's real domain (see resolveSiteDomainChoice). */
+  domain?: string
+  domainType?: 'existing' | 'new' | 'external'
 }
 
 async function handleLegacyCreate(
@@ -700,8 +685,18 @@ async function handleLegacyCreate(
     }
   }
 
+  // Same rule as the wizard: a real domain is required.
+  const choice = await resolveSiteDomainChoice({
+    userId: decoded.userId,
+    domainType: body.domainType,
+    domain: body.domain,
+  })
+  if (!choice.ok) {
+    return NextResponse.json({ error: choice.error, code: choice.code }, { status: choice.status })
+  }
+
   const slug = slugify(name)
-  const subdomain = `${slug}.${BRAND_DOMAIN}`
+  const subdomain = internalSiteKey(slug)
 
   const existing = await db.project.findFirst({ where: { slug } })
   if (existing) {
@@ -745,6 +740,7 @@ async function handleLegacyCreate(
       status: autoDeploy ? 'creating' : 'stopped',
       serverId: server.id,
       subdomain,
+      customDomain: choice.customDomain,
       sslEnabled: true,
       autoDeploy,
       repoUrl: repoUrl || null,
@@ -760,7 +756,11 @@ async function handleLegacyCreate(
       appPort: 3000,
     },
   })
-  void emitWebhookEvent(decoded.userId, 'project.created', { project: { id: project.id, name: project.name, subdomain: project.subdomain } }, { projectId: project.id })
+  void emitWebhookEvent(decoded.userId, 'project.created', { project: { id: project.id, name: project.name, domain: choice.domain } }, { projectId: project.id })
+
+  const pendingDomain = choice.externalDomain
+    ? await attachPendingDomain(project.id, choice.externalDomain)
+    : null
 
   if (!autoDeploy) {
     return NextResponse.json(
@@ -772,7 +772,9 @@ async function handleLegacyCreate(
           name: project.name,
           slug: project.slug,
           status: project.status,
-          subdomain: project.subdomain,
+          customDomain: project.customDomain,
+          domain: choice.domain,
+          pendingDomain,
           autoDeploy: project.autoDeploy,
         },
         message:
@@ -857,7 +859,7 @@ async function handleLegacyCreate(
     metadata: {
       name: project.name,
       framework: project.framework,
-      subdomain,
+      domain: choice.domain,
       serverId: server.id,
       legacy: true,
     },
@@ -871,7 +873,9 @@ async function handleLegacyCreate(
         slug: project.slug,
         framework: project.framework,
         status: project.status,
-        subdomain: project.subdomain,
+        customDomain: project.customDomain,
+        domain: choice.domain,
+        pendingDomain,
         sslEnabled: project.sslEnabled,
         autoDeploy: project.autoDeploy,
         server: {
@@ -884,7 +888,8 @@ async function handleLegacyCreate(
       deployment: {
         id: deployment.id,
         status: 'queued',
-        deployUrl: `https://${subdomain}`,
+        // Only a domain already in the account is routed straight away.
+        deployUrl: choice.customDomain ? `https://${choice.customDomain}` : null,
       },
       message: 'Project created — deployment started',
     },

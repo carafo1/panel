@@ -83,6 +83,8 @@ async function makeOrder(
         invoiceId: linkSub ? inv.id : null,
         // Provision a project only — never start a real deploy from a test.
         deployMode: 'manual', projectName: uid('proj'),
+        // Every website needs a real domain; without one only the plan is bought.
+        siteDomain: `${uid('site')}.example.com`,
       }),
     },
   })

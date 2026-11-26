@@ -2761,7 +2761,8 @@ export function DomainsTab({
   }
 
   const brandDomain = process.env.NEXT_PUBLIC_BRAND_DOMAIN || 'apsamo.com'
-  const subdomainHint = projectId ? `${projectId.slice(-6)}.${brandDomain}` : `your-subdomain.${brandDomain}`
+  // DNS target customers point a CNAME at (never a per-site platform address).
+  const cnameTarget = process.env.NEXT_PUBLIC_CONNECT_HOSTNAME || `connect.${brandDomain}`
 
   return (
     <Card>
@@ -2793,10 +2794,9 @@ export function DomainsTab({
         ) : domains.length === 0 ? (
           <div className="text-center py-10 text-muted-foreground">
             <Globe className="size-10 mx-auto mb-3 opacity-30" />
-            <p className="text-sm font-medium">No custom domains</p>
+            <p className="text-sm font-medium">No domain connected</p>
             <p className="text-xs mt-1">
-              Your website is accessible at <span className="font-mono">{subdomainHint}</span>.
-              Add a custom domain to use your own.
+              This website is not online yet. Connect a domain you own to put it online.
             </p>
             <Button className={`${primaryBtn} mt-4`} size="sm" onClick={() => setCreateOpen(true)}>
               <Plus className="size-3.5 me-1" />
@@ -2970,7 +2970,7 @@ export function DomainsTab({
               />
               <p className="text-xs text-muted-foreground">
                 First point an A record at your server IP, or a CNAME at
-                <span className="font-mono"> {subdomainHint}</span>.
+                <span className="font-mono"> {cnameTarget}</span>.
               </p>
             </div>
             <div className="flex items-center justify-between rounded-lg border p-3">

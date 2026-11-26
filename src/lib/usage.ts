@@ -74,7 +74,7 @@ export async function collectUsageForUser(userId: string): Promise<UsageTotals> 
   }
 
   // Counted resources — cheap and exact.
-  const [databases, domains, mailboxes, cronJobs, backups, ftpAccounts] =
+  const [databases, domains, mailboxes, cronJobs, backups, ftpAccounts, subdomains] =
     await Promise.all([
       db.websiteDatabase.count({ where: { project: { userId } } }).catch(() => 0),
       db.domain.count({ where: { userId } }).catch(() => 0),
@@ -82,6 +82,13 @@ export async function collectUsageForUser(userId: string): Promise<UsageTotals> 
       db.cronJob.count({ where: { project: { userId } } }).catch(() => 0),
       db.websiteBackup.count({ where: { project: { userId } } }).catch(() => 0),
       db.ftpAccount.count({ where: { project: { userId } } }).catch(() => 0),
+      // Subdomains are DNS records under the customer's own domains (same
+      // rule as plan-limits). Sites no longer get a platform subdomain.
+      db.dnsRecord
+        .count({
+          where: { domain: { userId }, type: { in: ['A', 'AAAA', 'CNAME'] }, name: { notIn: ['@', 'www'] } },
+        })
+        .catch(() => 0),
     ])
 
   return {
@@ -95,8 +102,7 @@ export async function collectUsageForUser(userId: string): Promise<UsageTotals> 
     ftpAccounts,
     cronJobs,
     domains,
-    // Project subdomains are 1:1 with projects on this platform.
-    subdomains: projects.length,
+    subdomains,
     backups,
   }
 }

@@ -68,6 +68,7 @@ import {
   type WpImportContext,
 } from './wordpress'
 import { getUpload, markConsumed, formatBytes } from './uploads'
+import { intendedSiteHost } from '@/lib/site-domain'
 import {
   MIGRATION_STAGES,
   TOTAL_STAGE_WEIGHT,
@@ -145,6 +146,12 @@ export async function createMigration(
 ): Promise<{ migrationId: string }> {
   const project = await db.project.findUnique({ where: { id: opts.projectId } })
   if (!project) throw new Error('Project not found')
+  // Imported content is rewritten to the site's own domain — never to a
+  // platform address.
+  const defaultHost = opts.targetUrl ? null : await intendedSiteHost(project.id)
+  if (!opts.targetUrl && !defaultHost) {
+    throw new Error('Connect a domain to this website before importing into it.')
+  }
 
   const migration = await db.siteMigration.create({
     data: {
@@ -155,7 +162,7 @@ export async function createMigration(
       sourceRef: redactUrl(opts.sourceRef),
       sizeBytes: opts.sizeBytes ?? null,
       originalUrl: opts.originalUrl ?? null,
-      targetUrl: opts.targetUrl ?? `https://${project.customDomain || project.subdomain}`,
+      targetUrl: opts.targetUrl ?? `https://${defaultHost}`,
       status: 'pending',
       progress: 0,
       // The token is deliberately dropped before persisting: a retry re-reads
@@ -215,8 +222,8 @@ export async function runMigration(
   const demo = isServerInDemoMode(project.server)
   const deployPath = project.deployPath || `${PROJECT_ROOT}/${project.slug}`
   const workDir = `${MIGRATION_ROOT}/${migrationId}`
-  const targetUrl =
-    migration.targetUrl || `https://${project.customDomain || project.subdomain}`
+  const fallbackHost = migration.targetUrl ? null : await intendedSiteHost(project.id)
+  const targetUrl = migration.targetUrl || (fallbackHost ? `https://${fallbackHost}` : '')
 
   // Rolling log buffer per stage. `stageLogs` is keyed by stage name so a
   // resumed run appends rather than replaces.
@@ -1442,7 +1449,8 @@ const stageVerify: StageFn = async (ctx) => {
     ctx.log('No published port to check — skipping the HTTP verification.')
     return
   }
-  const host = project.customDomain || project.subdomain
+  // Host header for an internal request straight to the container.
+  const host = (await intendedSiteHost(project.id)) || 'localhost'
 
   await withConnection(ctx.creds!, async (client) => {
     let lastStatus = '000'
@@ -1731,7 +1739,7 @@ export async function rollbackMigration(
     payloadFilename: '',
     remoteArchive: null,
     extractDir: null,
-    targetUrl: migration.targetUrl || `https://${project.customDomain || project.subdomain}`,
+    targetUrl: migration.targetUrl || '',
     originalUrl: migration.originalUrl,
     warnings: [],
     log,

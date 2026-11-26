@@ -40,6 +40,7 @@ export async function GET(
             status: true,
             framework: true,
             subdomain: true,
+            customDomain: true,
             createdAt: true,
           },
         },

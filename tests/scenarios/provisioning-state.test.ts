@@ -101,7 +101,7 @@ afterAll(() => {
 
 describe('provisioning claim and outcomes', () => {
   it('provisions once and records provisioned; a second call is not claimed', async () => {
-    const p = await makePaid(user.id, { purchaseType: 'hosting', deployMode: 'manual', projectName: uid('p') })
+    const p = await makePaid(user.id, { purchaseType: 'hosting', deployMode: 'manual', projectName: uid('p'), siteDomain: `${uid('site')}.example.com` })
     const first = await provisionForPayment(p.id)
     expect(first.provisioned).toBe(true)
     expect(first.status).toBe('provisioned')
@@ -116,6 +116,26 @@ describe('provisioning claim and outcomes', () => {
     const again = await provisionForPayment(p.id)
     expect(again.provisioned).toBe(false)
     expect(await db.project.count({ where: { id: first.projectId } })).toBe(1)
+  })
+
+  it('creates the website on the domain chosen at checkout, attached pending verification', async () => {
+    const domain = `${uid('own')}.example.com`
+    const p = await makePaid(user.id, { purchaseType: 'hosting', deployMode: 'manual', projectName: uid('p'), siteDomain: domain })
+    const r = await provisionForPayment(p.id)
+    expect(r.provisioned).toBe(true)
+    const project = await db.project.findUniqueOrThrow({ where: { id: r.projectId! }, include: { websiteDomains: true } })
+    // External domain: not served until DNS proves ownership.
+    expect(project.customDomain).toBeNull()
+    expect(project.websiteDomains.map((d) => [d.domain, d.verified, d.isPrimary])).toEqual([[domain, false, true]])
+  })
+
+  it('a plan bought without a domain creates no website (there is no platform address)', async () => {
+    const name = uid('nodomain')
+    const p = await makePaid(user.id, { purchaseType: 'hosting', deployMode: 'manual', projectName: name })
+    const r = await provisionForPayment(p.id)
+    expect(r.provisioned).toBe(true)
+    expect(r.projectId).toBeUndefined()
+    expect(await db.project.count({ where: { userId: user.id, name } })).toBe(0)
   })
 
   it('only one of two concurrent claims wins', async () => {
@@ -148,7 +168,7 @@ describe('provisioning claim and outcomes', () => {
 
   it('no usable server: retry_pending with the reason, nothing created; failed after 3 attempts', async () => {
     const name = uid('noserver')
-    const p = await makePaid(user.id, { purchaseType: 'hosting', projectName: name })
+    const p = await makePaid(user.id, { purchaseType: 'hosting', projectName: name, siteDomain: `${uid('site')}.example.com` })
     for (const expected of ['retry_pending', 'retry_pending', 'failed'] as const) {
       const r = await provisionForPayment(p.id)
       expect(r.provisioned).toBe(false)

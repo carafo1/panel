@@ -27,7 +27,12 @@ interface Info {
   staging: null | {
     id: string
     name: string
-    url: string
+    /** https://staging.<site domain>, or null when the live site has no domain. */
+    url: string | null
+    domain: string | null
+    domainStatus: 'live' | 'awaiting_dns' | 'none'
+    /** The record to add at the customer's DNS host when their zone is not ours. */
+    dnsRecord: { type: string; name: string; value: string[] } | null
     status: string
     stagingStatus: string | null
     stagingMessage: string | null
@@ -170,10 +175,16 @@ export function StagingTab({ projectId, onOpenProject }: { projectId: string; on
             <div className="flex flex-wrap items-center gap-3 rounded-lg border p-4">
               <div className="min-w-0 flex-1">
                 <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
-                  <a href={s.url} target="_blank" rel="noreferrer" className="truncate hover:underline">
-                    {s.url.replace('https://', '')}
-                  </a>
-                  <ExternalLink className="size-3.5 text-muted-foreground" />
+                  {s.url && s.domainStatus === 'live' ? (
+                    <>
+                      <a href={s.url} target="_blank" rel="noreferrer" className="truncate hover:underline">
+                        {s.url.replace('https://', '')}
+                      </a>
+                      <ExternalLink className="size-3.5 text-muted-foreground" />
+                    </>
+                  ) : (
+                    <span className="truncate">{s.domain ?? 'No domain connected'}</span>
+                  )}
                   {busy ? (
                     <Badge variant="secondary" className="gap-1">
                       <Loader2 className="size-3 animate-spin" /> {s.stagingStatus}
@@ -202,6 +213,18 @@ export function StagingTab({ projectId, onOpenProject }: { projectId: string; on
                 </Button>
               )}
             </div>
+
+            {s.domainStatus === 'awaiting_dns' && s.dnsRecord && (
+              <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100" role="note">
+                <p className="font-medium">Add this DNS record to open the staging site</p>
+                <p className="mt-1 text-xs">
+                  Your domain&apos;s DNS is hosted elsewhere, so add it at your DNS provider. Staging comes online by itself once it points here.
+                </p>
+                <p className="mt-2 font-mono text-xs break-all">
+                  {s.dnsRecord.type} {s.dnsRecord.name} → {s.dnsRecord.value.join(', ') || 'your server IP'}
+                </p>
+              </div>
+            )}
 
             {s.stagingMessage && (
               <p

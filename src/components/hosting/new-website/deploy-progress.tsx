@@ -124,7 +124,8 @@ export function DeployProgress({
 }: {
   projectId: string
   projectName: string
-  liveUrl: string
+  /** Null while the chosen domain still waits for its DNS records. */
+  liveUrl: string | null
   isWordPress: boolean
   wpAdmin?: { user: string; password: string }
   pendingDomain?: PendingDomain | null
@@ -216,7 +217,29 @@ export function DeployProgress({
   let banner: ReactNode = null
   let actions: ReactNode = null
 
-  if (state === 'live') {
+  if (state === 'live' && !liveUrl) {
+    headline = 'Your website is ready'
+    subline = undefined
+    banner = (
+      <OutcomeBanner tone="success" title={pendingDomain ? `Almost online at ${pendingDomain.domain}` : 'No domain connected'}>
+        <p>
+          {pendingDomain
+            ? 'Add the DNS records below at your domain provider. The site goes online on your domain by itself once they are in place.'
+            : 'Connect a domain in Domains & SSL to put it online.'}
+        </p>
+      </OutcomeBanner>
+    )
+    actions = (
+      <>
+        <Button type="button" variant="ghost" onClick={onStartOver}>
+          Add another website
+        </Button>
+        <Button type="button" onClick={onOpenSite}>
+          Manage website
+        </Button>
+      </>
+    )
+  } else if (state === 'live' && liveUrl) {
     headline = 'Your website is ready'
     subline = undefined
     banner = (
@@ -286,7 +309,9 @@ export function DeployProgress({
       banner={
         <>
           {banner}
-          {state === 'live' && isWordPress && wpAdmin && <WordPressLogin url={liveUrl} {...wpAdmin} />}
+          {state === 'live' && isWordPress && wpAdmin && (liveUrl || pendingDomain) && (
+            <WordPressLogin url={liveUrl ?? `https://${pendingDomain!.domain}`} {...wpAdmin} />
+          )}
           {state === 'live' && pendingDomain && <DnsRecords pending={pendingDomain} />}
         </>
       }

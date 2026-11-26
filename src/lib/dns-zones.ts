@@ -383,3 +383,24 @@ export async function getZoneRecords(domain: string): Promise<ZoneRecord[]> {
   }
   return out
 }
+
+/**
+ * Delete whole RRsets (name + type) from a zone we host. Used only by the
+ * platform-zone cleanup of retired site subdomains; callers decide exactly
+ * which names are safe. Never touches the zone itself.
+ */
+export async function deleteRecordSets(
+  zone: string,
+  rrsets: Array<{ name: string; type: string }>
+): Promise<{ ok: boolean; detail: string }> {
+  if (rrsets.length === 0) return { ok: true, detail: 'nothing to delete' }
+  const res = await pdns(`/zones/${fqdn(zone)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      rrsets: rrsets.map((r) => ({ name: fqdn(r.name), type: r.type, changetype: 'DELETE' })),
+    }),
+  })
+  return res.ok
+    ? { ok: true, detail: `deleted ${rrsets.length} record set(s)` }
+    : { ok: false, detail: `delete failed: ${JSON.stringify(res.body).slice(0, 180)}` }
+}

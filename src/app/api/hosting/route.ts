@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
 import { isAdmin } from '@/lib/security'
 import { accessibleProjectsWhere } from '@/lib/project-access'
+import { siteHostname, publicUrlOrNull } from '@/lib/site-address'
 
 export async function GET(request: Request) {
   try {
@@ -32,14 +33,14 @@ export async function GET(request: Request) {
 
     if (search) {
       // SQLite doesn't support mode: 'insensitive' so we use contains with
-      // a case-normalized comparison. We OR across name / subdomain /
-      // customDomain / framework / slug.
+      // a case-normalized comparison. We OR across name / slug / domains /
+      // framework (never the internal subdomain, which is not an address).
       where.AND.push({
         OR: [
           { name: { contains: search } },
           { slug: { contains: search } },
-          { subdomain: { contains: search } },
           { customDomain: { contains: search } },
+          { websiteDomains: { some: { domain: { contains: search } } } },
           { description: { contains: search } },
           { framework: { contains: search } },
         ],
@@ -77,6 +78,7 @@ export async function GET(request: Request) {
           take: 1,
         },
         domains: true,
+        websiteDomains: { select: { domain: true, isPrimary: true, verified: true } },
         team: { select: { id: true, name: true } },
       },
       orderBy,
@@ -94,6 +96,15 @@ export async function GET(request: Request) {
       status: p.status,
       subdomain: p.subdomain,
       customDomain: p.customDomain,
+      // The public address: the site's real domain, or null ("No domain
+      // connected"). Clients must use this, never `subdomain`.
+      address: siteHostname(p),
+      // A domain attached but still waiting for DNS verification.
+      pendingDomain: siteHostname(p)
+        ? null
+        : p.websiteDomains.find((d) => !d.verified && d.isPrimary)?.domain ??
+          p.websiteDomains.find((d) => !d.verified)?.domain ??
+          null,
       sslEnabled: p.sslEnabled,
       autoDeploy: p.autoDeploy,
       // SECURITY: hide Docker container internals from non-admin customers.
@@ -117,7 +128,9 @@ export async function GET(request: Request) {
             region: p.server.region,
           }
         : null,
-      lastDeployment: p.deployments[0] || null,
+      lastDeployment: p.deployments[0]
+        ? { ...p.deployments[0], deployUrl: publicUrlOrNull(p.deployments[0].deployUrl) }
+        : null,
       domains: p.domains,
       // Shared projects are labelled so members can tell them from their own.
       team: p.team ? { id: p.team.id, name: p.team.name } : null,

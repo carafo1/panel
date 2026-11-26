@@ -1209,9 +1209,10 @@ async function provisionHosting(
     const assignedServer = await selectHostingServer()
     if (!assignedServer) throw new Error(NO_SERVER_MESSAGE)
 
-    // 3. Subdomain from the WHOLE domain (example.com → example-com), so
-    //    example.com and example.net no longer collide on "example"; a
-    //    remaining clash gets a random suffix.
+    // 3. Internal subdomain key from the WHOLE domain (example.com →
+    //    example-com), so example.com and example.net no longer collide on
+    //    "example"; a remaining clash gets a random suffix. It is never
+    //    served or shown — the site is reached on domainName.
     const base = slug.replace(/\./g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'site'
     let subdomain = APP_SUBDOMAIN_PATTERN.replace('{slug}', base)
     for (let i = 0; i < 5; i++) {
@@ -1238,7 +1239,8 @@ async function provisionHosting(
       },
     })
   }
-  const url = `https://${project.subdomain}`
+  // The domain this pipeline is for — never the internal platform subdomain.
+  const url = `https://${(project.customDomain || domainName).toLowerCase()}`
 
   // Link the Domain to the Project (idempotent).
   await db.domain.update({

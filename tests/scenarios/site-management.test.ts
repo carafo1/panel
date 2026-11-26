@@ -33,7 +33,7 @@ beforeAll(async () => {
   dev = await makeUser('wp-dev')
   viewer = await makeUser('wp-viewer')
   outsider = await makeUser('wp-outsider')
-  wpSite = (await makeProject(owner.id, { deploymentMethod: 'wordpress', stack: 'wordpress', framework: 'wordpress', wpAdminUser: 'siteadmin' })).id
+  wpSite = (await makeProject(owner.id, { deploymentMethod: 'wordpress', stack: 'wordpress', framework: 'wordpress', wpAdminUser: 'siteadmin', customDomain: `${uid('wp')}.example.com` })).id
   laravelSite = (await makeProject(owner.id, { deploymentMethod: 'laravel', stack: 'php', framework: 'laravel' })).id
   staticSite = (await makeProject(owner.id, { deploymentMethod: 'static', stack: 'static', framework: 'static' })).id
 
