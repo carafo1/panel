@@ -233,7 +233,7 @@ export async function GET(request: Request) {
       take: limit,
       include: {
         user: { select: { id: true, name: true, email: true } },
-        project: { select: { id: true, name: true, status: true, subdomain: true } },
+        project: { select: { id: true, name: true, status: true, customDomain: true } },
         _count: {
           select: { dnsRecords: true, logs: true, orders: true, invoices: true },
         },
@@ -289,7 +289,8 @@ export async function GET(request: Request) {
                   id: d.project.id,
                   name: d.project.name,
                   status: d.project.status,
-                  subdomain: d.project.subdomain,
+                  // The site's real domain only (null: none connected).
+                  domain: d.project.customDomain,
                 }
               : null,
             dnsRecordsCount: d._count.dnsRecords,

@@ -4,6 +4,7 @@ import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { requireProjectAccess } from '@/lib/project-access'
 import { logAudit } from '@/lib/audit'
 import { getProjectCertInfo, forceRenew, toggleSsl } from '@/lib/vps/ssl'
+import { siteHostname } from '@/lib/site-address'
 
 /**
  * /api/hosting/[id]/ssl
@@ -75,7 +76,7 @@ export async function GET(
     return NextResponse.json({
       projectId: id,
       projectName: project.name,
-      hostname: project.customDomain || project.subdomain,
+      hostname: siteHostname(project),
       sslEnabled: project.sslEnabled,
       sslCertStatus: project.sslCertStatus,
       sslCertExpiry: project.sslCertExpiry?.toISOString() ?? null,
@@ -197,7 +198,7 @@ export async function POST(
       status: result.ok ? 'success' : 'failure',
       metadata: {
         name: project.name,
-        hostname: project.customDomain || project.subdomain,
+        hostname: siteHostname(project),
         action,
         enabled: typeof enabled === 'boolean' ? enabled : undefined,
         message: result.message,

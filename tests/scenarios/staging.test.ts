@@ -8,7 +8,10 @@ import * as staging from '@/app/api/hosting/[id]/staging/route'
 import * as hosting from '@/app/api/hosting/route'
 import { copyFilesCommand, copyFilesScript, copyDatabaseCommand, stagingMode } from '@/lib/staging'
 import { checkLimit } from '@/lib/plan-limits'
-import { makeUser, makeProject, makePlan, authed, params } from './helpers'
+import { makeUser, makeProject, makePlan, authed, params, uid } from './helpers'
+
+/** Live sites always have a real domain; staging lives at staging.<domain>. */
+const liveDomain = () => `${uid('live')}.example.com`
 
 let ip = 0
 const call = (token: string, id: string, method: 'GET' | 'POST' | 'DELETE', body?: Record<string, unknown>) => {
@@ -172,7 +175,7 @@ describe('staging sites', () => {
     const plan = await makePlan({ stagingEnvironment: true, projects: 1 })
     await db.subscription.create({ data: { userId: u.id, planId: plan.id, status: 'active', currentPeriodStart: new Date(), currentPeriodEnd: new Date(Date.now() + 30 * 86400_000) } })
     const server = await demoServer()
-    const live = await makeProject(u.id, { serverId: server.id, deploymentMethod: 'wordpress', stack: 'wordpress', framework: 'wordpress', deployPath: '/opt/deployhub/projects/live' })
+    const live = await makeProject(u.id, { serverId: server.id, deploymentMethod: 'wordpress', stack: 'wordpress', framework: 'wordpress', deployPath: '/opt/deployhub/projects/live', customDomain: liveDomain() })
     await db.environmentVariable.create({ data: { projectId: live.id, key: 'API_KEY', value: 'enc', encrypted: true } })
 
     expect((await call(stranger.token, live.id, 'POST', { action: 'create' })).status).toBeGreaterThanOrEqual(403)
@@ -180,7 +183,14 @@ describe('staging sites', () => {
     const res = await call(u.token, live.id, 'POST', { action: 'create' })
     expect(res.status).toBe(201)
     const { staging: s } = await res.json()
-    expect(s.subdomain).toContain('-staging.')
+    // staging.<live domain>, never a platform subdomain. PowerDNS is not
+    // configured in tests, so the customer is told which record to add.
+    expect(s.domain).toBe(`staging.${live.customDomain}`)
+    expect(s.url).toBe(`https://staging.${live.customDomain}`)
+    expect(s.domainStatus).toBe('awaiting_dns')
+    expect(s.dnsRecord).toMatchObject({ type: 'A', name: `staging.${live.customDomain}` })
+    const stagingRow = await db.websiteDomain.findUnique({ where: { domain: `staging.${live.customDomain}` } })
+    expect(stagingRow).toMatchObject({ projectId: s.id, verified: false, isPrimary: true, connectionMethod: 'manual' })
     expect((await call(u.token, live.id, 'POST', { action: 'create' })).status).toBe(409)
     expect(await waitFor(s.id, (st) => st !== 'creating')).toBe('ready')
 
@@ -218,6 +228,7 @@ describe('staging sites', () => {
     const server = await demoServer()
     const live = await makeProject(u.id, {
       serverId: server.id, deploymentMethod: 'nodejs', deploymentSource: 'git', repoUrl: 'https://github.com/acme/site', sourceBranch: 'main',
+      customDomain: liveDomain(),
     })
     expect((await call(u.token, live.id, 'POST', { action: 'create', branch: 'bad..branch' })).status).toBe(400)
     const res = await call(u.token, live.id, 'POST', { action: 'create', branch: 'develop' })
@@ -230,10 +241,20 @@ describe('staging sites', () => {
     expect((await push.json()).error).toMatch(/merge/i)
   }, 60_000)
 
+  it('is refused for a live site without a domain (there is no platform address)', async () => {
+    const u = await makeUser('stg-nodomain')
+    const server = await demoServer()
+    const live = await makeProject(u.id, { serverId: server.id, deploymentMethod: 'static', deploymentSource: 'zip' })
+    const res = await call(u.token, live.id, 'POST', { action: 'create' })
+    expect(res.status).toBe(409)
+    expect((await res.json()).error).toMatch(/domain/i)
+    expect(await db.project.count({ where: { parentProjectId: live.id } })).toBe(0)
+  })
+
   it('deleting the live site also deletes its staging copy', async () => {
     const u = await makeUser('stg-purge')
     const server = await demoServer()
-    const live = await makeProject(u.id, { serverId: server.id, deploymentMethod: 'static', deploymentSource: 'zip' })
+    const live = await makeProject(u.id, { serverId: server.id, deploymentMethod: 'static', deploymentSource: 'zip', customDomain: liveDomain() })
     const { staging: s } = await (await call(u.token, live.id, 'POST', { action: 'create' })).json()
     await waitFor(s.id, (st) => st !== 'creating')
     const { purgeProject } = await import('@/lib/project-teardown')

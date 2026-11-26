@@ -13,6 +13,23 @@ invoices, plans, notifications, monitors, support tickets, teams,
 webhooks, pipelines. 87/87 production checks pass
 (`deploy/scripts/live-check.sh`).
 
+### Update 26 Nov 2026
+
+Done and verified live: items 10–18 and **18b (website email**: each
+WordPress/PHP site sends through its own rate-limited mailbox; tested end to
+end on qansorobad.so), **15 (live checks every 15 min** — alert e-mails still
+need a real inbox: `admin@apsamo.com` does not exist; set `ALERT_EMAIL`),
+**19 (Qansorobad import** — site live with its real content), **20**.
+
+Import fixes shipped: uploads survive restarts; imports no longer hang at
+"Transferring"; SQL import works on MariaDB 11; whole-account backups
+(Hostinger `domains/*`) import the site for this domain and its database;
+the site folder (not the whole backup) is copied; WP-CLI steps run.
+Safety fix: turning on email never rewrites `wp-config.php`.
+
+Still open: items 1, 2, 5 (need accounts/keys), 6–8 (your passwords/keys);
+3–4 skipped by decision.
+
 ---
 
 ## 1. Needs a decision or an account from you (blocks a feature)

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
 import { accessibleProjectsWhere } from '@/lib/project-access'
+import { publicUrlOrNull } from '@/lib/site-address'
 
 export async function GET(request: Request) {
   try {
@@ -24,6 +25,7 @@ export async function GET(request: Request) {
             name: true,
             slug: true,
             subdomain: true,
+            customDomain: true,
           },
         },
       },
@@ -37,7 +39,7 @@ export async function GET(request: Request) {
         commit: d.commit,
         branch: d.branch,
         status: d.status,
-        deployUrl: d.deployUrl,
+        deployUrl: publicUrlOrNull(d.deployUrl),
         duration: d.duration,
         triggeredBy: d.triggeredBy,
         createdAt: d.createdAt,

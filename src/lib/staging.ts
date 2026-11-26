@@ -27,10 +27,18 @@
  *
  * Long operations run in the background; progress is kept on the staging row
  * (stagingStatus / stagingMessage) and the owner gets a notification.
+ *
+ * Address: `staging.<live site's domain>` — never a platform subdomain. When
+ * the live domain's zone is hosted on our nameservers (PowerDNS) the record
+ * is created for the customer and the address works at once. Otherwise the
+ * staging copy is still created, and the customer is told which DNS record
+ * to add; the domain sweep routes it as soon as that record points here.
  */
 import crypto from 'crypto'
 import { db } from '@/lib/db'
-import { BRAND_DOMAIN } from '@/lib/brand-config'
+import { siteHostname } from '@/lib/site-address'
+import { internalSiteKey } from '@/lib/site-domain'
+import { generateVerificationToken, getServerIps, isPublicIpv4, VERIFY_PREFIX } from '@/lib/custom-domains'
 import { decrypt } from '@/lib/encryption'
 import { createNotification } from '@/lib/notifications'
 import { claimDeploySlot } from '@/lib/deploy-guard'
@@ -52,7 +60,7 @@ export type StagingMode = 'wordpress' | 'files' | 'git'
 type ProjectRow = NonNullable<Awaited<ReturnType<typeof loadProject>>>
 
 async function loadProject(id: string) {
-  return db.project.findUnique({ where: { id }, include: { server: true, websiteDatabases: true } })
+  return db.project.findUnique({ where: { id }, include: { server: true, websiteDatabases: true, websiteDomains: true } })
 }
 
 const isWordPress = (p: { deploymentMethod: string | null; stack: string; framework: string }) =>
@@ -87,16 +95,48 @@ export async function planAllowsStaging(userId: string, role?: string): Promise<
 }
 
 export async function findStaging(liveId: string) {
-  return db.project.findFirst({ where: { parentProjectId: liveId, environment: 'staging' } })
+  return db.project.findFirst({
+    where: { parentProjectId: liveId, environment: 'staging' },
+    include: { websiteDomains: true, server: { select: { ip: true } } },
+  })
 }
 
-function publicView(s: Awaited<ReturnType<typeof findStaging>>) {
+/** `staging.<domain>` for a live site, or null when the site has no domain. */
+export function stagingHostFor(liveDomain: string | null | undefined): string | null {
+  const d = (liveDomain || '').trim().toLowerCase()
+  if (!d) return null
+  return d.startsWith('staging.') ? null : `staging.${d}`
+}
+
+/** The address a site is (or will be) reached on, verified or not. */
+function addressOf(p: {
+  customDomain: string | null
+  websiteDomains?: Array<{ domain: string; isPrimary: boolean; verified: boolean }>
+}): string | null {
+  return (
+    siteHostname(p) ||
+    p.websiteDomains?.find((d) => d.isPrimary)?.domain ||
+    p.websiteDomains?.[0]?.domain ||
+    null
+  )
+}
+
+async function publicView(s: Awaited<ReturnType<typeof findStaging>>) {
   if (!s) return null
+  const row = s.websiteDomains.find((d) => d.isPrimary) || s.websiteDomains[0] || null
+  const domain = siteHostname(s) || row?.domain || null
+  const live = !!domain && (!!siteHostname(s) || !!row?.verified)
   return {
     id: s.id,
     name: s.name,
-    url: `https://${s.subdomain}`,
-    subdomain: s.subdomain,
+    url: domain ? `https://${domain}` : null,
+    domain,
+    // 'awaiting_dns': the customer has to add the record below at their DNS host.
+    domainStatus: !domain ? 'none' : live ? 'live' : 'awaiting_dns',
+    dnsRecord:
+      domain && !live
+        ? { type: 'A', name: domain, value: await stagingTargetIps(s.server?.ip ?? null) }
+        : null,
     status: s.status,
     stagingStatus: s.stagingStatus,
     stagingMessage: s.stagingMessage,
@@ -120,7 +160,7 @@ export async function stagingInfo(liveId: string, actor: { userId: string; role?
     planAllows: plan.allowed,
     planName: plan.planName,
     liveBranch: live.sourceBranch,
-    staging: publicView(await findStaging(liveId)),
+    staging: await publicView(await findStaging(liveId)),
   }
 }
 
@@ -236,7 +276,11 @@ function primaryDb(p: ProjectRow): DbRef | null {
   return { type: row.type === 'postgres' ? 'postgres' : 'mysql', container: row.externalRef, name: row.name, user: row.username, password }
 }
 
-const siteUrl = (p: { customDomain: string | null; subdomain: string }) => `https://${p.customDomain || p.subdomain}`
+const siteUrl = (p: Parameters<typeof addressOf>[0]) => {
+  const host = addressOf(p)
+  if (!host) throw new Error('The website has no domain connected, so its addresses cannot be rewritten.')
+  return `https://${host}`
+}
 
 async function setState(stagingId: string, data: { stagingStatus?: string; stagingMessage?: string | null; stagingSyncedAt?: Date; stagingPushedAt?: Date }) {
   await db.project.update({ where: { id: stagingId }, data }).catch(() => {})
@@ -306,6 +350,60 @@ async function copyContent(from: ProjectRow, to: ProjectRow, mode: StagingMode, 
 
 const STAGING_SLUG = (slug: string) => `${slug.slice(0, 40)}-staging`
 
+/** Where the customer points staging.<domain>: the site's server, else the platform IPs. */
+async function stagingTargetIps(serverIp: string | null): Promise<string[]> {
+  if (serverIp && isPublicIpv4(serverIp)) return [serverIp]
+  return getServerIps().catch(() => [])
+}
+
+/**
+ * Give the staging site its address, staging.<live domain>.
+ *
+ *   Live domain's zone on our PowerDNS → publish the A record ourselves and
+ *   attach the hostname as verified (its parent is the customer's verified
+ *   domain, and the record now points here), so it is routed at once.
+ *
+ *   Zone elsewhere → attach it PENDING (connectionMethod 'manual', so the
+ *   sweep never creates a zone for it). The sweep routes it as soon as the
+ *   customer's A record (or TXT proof) shows up.
+ */
+async function attachStagingDomain(stagingId: string, host: string, liveDomain: string, serverIp: string | null) {
+  const ips = await stagingTargetIps(serverIp)
+  let published = false
+  try {
+    const zones = await import('@/lib/dns-zones')
+    if (ips.length > 0 && zones.isDnsHostingConfigured() && (await zones.zoneExists(liveDomain))) {
+      const r = await zones.createZone({
+        domain: liveDomain,
+        records: ips.map((ip) => ({ name: host, type: 'A' as const, content: ip, ttl: 3600 })),
+      })
+      published = r.ok
+      if (!r.ok) console.error('[staging] could not publish', host, '-', r.detail)
+    }
+  } catch (err) {
+    console.error('[staging] DNS publish failed for', host, err)
+  }
+  await db.websiteDomain.create({
+    data: {
+      projectId: stagingId,
+      domain: host,
+      isPrimary: true,
+      sslEnabled: true,
+      sslStatus: published ? 'pending' : 'none',
+      connectionMethod: 'manual',
+      verified: published,
+      verificationMethod: published ? 'parent-zone' : null,
+      verifiedAt: published ? new Date() : null,
+      verificationToken: generateVerificationToken(),
+    },
+  })
+  if (published) {
+    await db.project.update({ where: { id: stagingId }, data: { customDomain: host } }).catch(() => {})
+  } else {
+    console.log(`[staging] ${host}: zone not hosted here; customer must add A ${host} → ${ips.join(', ')} (or TXT ${VERIFY_PREFIX}.${host})`)
+  }
+}
+
 export async function createStaging(liveId: string, actor: { userId: string; role?: string }, input: { branch?: unknown } = {}) {
   const live = await loadProject(liveId)
   if (!live) throw new StagingError('Website not found.', 404)
@@ -317,6 +415,15 @@ export async function createStaging(liveId: string, actor: { userId: string; rol
   const plan = await planAllowsStaging(live.userId, actor.role)
   if (!plan.allowed) throw new StagingError(`Staging is not included in the ${plan.planName} plan. Upgrade to a plan with staging to use it.`, 403)
   if (await findStaging(liveId)) throw new StagingError('This website already has a staging site.', 409)
+  // Staging lives at staging.<live domain>; there is no platform address.
+  const liveDomain = siteHostname(live)
+  const stagingHost = stagingHostFor(liveDomain)
+  if (!stagingHost) {
+    throw new StagingError('Connect a domain to this website first. Its staging copy is served on staging.<your domain>.', 409)
+  }
+  if (await db.websiteDomain.findUnique({ where: { domain: stagingHost }, select: { id: true } })) {
+    throw new StagingError(`${stagingHost} is already in use on this platform.`, 409)
+  }
 
   let branch = live.sourceBranch || 'main'
   if (m.mode === 'git' && typeof input.branch === 'string' && input.branch.trim()) {
@@ -340,7 +447,8 @@ export async function createStaging(liveId: string, actor: { userId: string; rol
       stack: live.stack,
       status: 'creating',
       serverId: live.serverId,
-      subdomain: `${slug}.${BRAND_DOMAIN}`,
+      // Internal identifier only; never served or shown.
+      subdomain: internalSiteKey(slug),
       sslEnabled: true,
       autoDeploy: false,
       repoUrl: live.repoUrl,
@@ -373,8 +481,10 @@ export async function createStaging(liveId: string, actor: { userId: string; rol
     },
   })
 
+  await attachStagingDomain(staging.id, stagingHost, liveDomain!, live.server?.ip ?? null)
+
   void buildStaging(staging.id, liveId, m.mode, actor.userId).catch((err) => console.error('[staging] create crashed:', err))
-  return publicView(staging)
+  return await publicView(await findStaging(liveId))
 }
 
 async function buildStaging(stagingId: string, liveId: string, mode: StagingMode, actorId: string) {
@@ -408,7 +518,16 @@ async function buildStaging(stagingId: string, liveId: string, mode: StagingMode
     }
 
     await setState(stagingId, { stagingStatus: 'ready', stagingMessage: null, stagingSyncedAt: new Date() })
-    await notify(actorId, 'Staging site ready', `${staging.name} is ready at https://${staging.subdomain}`, true, liveId)
+    const view = await publicView(await findStaging(liveId))
+    await notify(
+      actorId,
+      'Staging site ready',
+      view?.domainStatus === 'awaiting_dns' && view.dnsRecord
+        ? `${staging.name} is ready. Add an A record for ${view.dnsRecord.name} pointing to ${view.dnsRecord.value.join(', ')} at your DNS provider to open it.`
+        : `${staging.name} is ready at ${view?.url ?? 'its staging address'}`,
+      true,
+      liveId
+    )
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error('[staging] create failed:', msg)
@@ -522,6 +641,13 @@ export async function deleteStaging(liveId: string) {
   const staging = await findStaging(liveId)
   if (!staging) throw new StagingError('This website has no staging site.', 404)
   if (staging.stagingStatus === 'pushing') throw new StagingError('Wait for the push to live to finish.', 409)
+  // Remove the staging record we published in the customer's zone.
+  const auto = staging.websiteDomains.find((d) => d.verificationMethod === 'parent-zone')
+  if (auto) {
+    const zone = auto.domain.replace(/^staging\./, '')
+    const { deleteRecordSets } = await import('@/lib/dns-zones')
+    await deleteRecordSets(zone, [{ name: auto.domain, type: 'A' }]).catch(() => null)
+  }
   const { purgeProject } = await import('@/lib/project-teardown')
   const { warnings } = await purgeProject(staging.id)
   return { ok: true, warnings }

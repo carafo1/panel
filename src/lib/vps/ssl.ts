@@ -28,6 +28,7 @@ import {
 } from './ssh'
 import { getServerCredentials } from './provisioner'
 import { isValidHostname } from '@/lib/custom-domains'
+import { siteHostname } from '@/lib/site-address'
 
 // ─── Real certificate check ──────────────────────────────────────────────
 
@@ -134,7 +135,10 @@ export async function getProjectCertInfo(projectId: string): Promise<CertInfo | 
   })
   if (!project) return null
 
-  const hostname = project.customDomain || project.subdomain
+  // Certificates exist only for a site's real domain. No domain connected →
+  // nothing to report (and nothing is ever issued for the internal subdomain).
+  const hostname = siteHostname(project)
+  if (!hostname) return null
 
   if (isServerInDemoMode(project.server)) {
     const expiry = project.sslCertExpiry
@@ -231,7 +235,8 @@ export async function getServerSslSummary(serverId: string): Promise<SslHealthSu
   })
   const out: SslHealthSummary[] = []
   for (const p of projects) {
-    const hostname = p.customDomain || p.subdomain
+    const hostname = siteHostname(p)
+    if (!hostname) continue // unrouted: no certificate
     const days = p.sslCertExpiry
       ? Math.round((p.sslCertExpiry.getTime() - Date.now()) / (24 * 60 * 60 * 1000))
       : null
@@ -262,7 +267,10 @@ export async function forceRenew(projectId: string): Promise<{ ok: boolean; mess
   if (!project || !project.server) {
     return { ok: false, message: 'Project or server not found' }
   }
-  const hostname = project.customDomain || project.subdomain
+  const hostname = siteHostname(project)
+  if (!hostname) {
+    return { ok: false, message: 'Connect a domain to this website first — certificates are issued for its domain.' }
+  }
 
   if (isServerInDemoMode(project.server)) {
     await db.project.update({

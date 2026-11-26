@@ -22,6 +22,20 @@ import { encrypt } from '@/lib/encryption'
 import { withConnection, exec, isServerInDemoMode, shellQuote } from './ssh'
 import { getServerCredentials } from './provisioner'
 import type { ProjectPermission } from '@/lib/project-access'
+import { siteHostname, isPlatformHostname } from '@/lib/site-address'
+
+/** WordPress's own siteurl, unless it is a retired platform address. */
+function publicSiteUrl(raw: string | undefined, host: string | null): string | null {
+  const v = (raw || '').trim()
+  if (v) {
+    try {
+      if (!isPlatformHostname(new URL(v).hostname)) return v
+    } catch {
+      /* not a URL — fall through */
+    }
+  }
+  return host ? `https://${host}` : null
+}
 
 /** A refusal the customer can act on (bad input, not a WordPress site, …). */
 export class SiteToolError extends Error {
@@ -167,7 +181,9 @@ async function runWp(site: Site, script: string, timeoutMs = 120_000, secrets: s
     // WordPress reads $_SERVER['HTTP_HOST'], which a CLI run lacks: PHP then
     // printed a warning into the output and the plugin/theme/admin lists
     // failed to parse (the tab showed them empty). PHP CLI takes $_SERVER
-    // from the environment, so pass the site's host.
+    // from the environment, so pass the site's host. Internal to this CLI run
+    // only (a site without a domain falls back to its internal name, which
+    // is never served).
     `-e HTTP_HOST=${shellQuote(site.customDomain || site.subdomain)} ` +
     `wordpress:cli sh -c ${shellQuote(script)}`
   let result: { stdout: string; stderr: string; exitCode: number | null }
@@ -254,7 +270,8 @@ function demoState(projectId: string): DemoWp {
 
 export async function getWordPressOverview(projectId: string): Promise<WpOverview> {
   const { project, demo } = await loadSite(projectId)
-  const host = project.customDomain || project.subdomain
+  // The site's real domain only; null when none is connected.
+  const host = siteHostname(project)
 
   if (demo) {
     const s = demoState(projectId)
@@ -262,8 +279,8 @@ export async function getWordPressOverview(projectId: string): Promise<WpOvervie
       demo: true,
       coreVersion: s.coreVersion,
       coreUpdate: s.coreVersion === '6.7.1' ? null : '6.7.1',
-      siteUrl: `https://${host}`,
-      adminUrl: `https://${host}/wp-admin/`,
+      siteUrl: host ? `https://${host}` : null,
+      adminUrl: host ? `https://${host}/wp-admin/` : null,
       maintenance: s.maintenance,
       debug: s.debug,
       plugins: s.plugins,
@@ -301,7 +318,7 @@ export async function getWordPressOverview(projectId: string): Promise<WpOvervie
     }
   }
   const updates = parseJsonArray<{ version: string }>(sections.update || '')
-  const siteUrl = (sections.siteurl || '').trim() || `https://${host}`
+  const siteUrl = publicSiteUrl(sections.siteurl, host)
   const plugins = parseJsonArray<WpExtension>(sections.plugins || '')
   const coreVersion = (sections.core || '').trim() || null
 
@@ -310,7 +327,7 @@ export async function getWordPressOverview(projectId: string): Promise<WpOvervie
     coreVersion,
     coreUpdate: updates[0]?.version || null,
     siteUrl,
-    adminUrl: `${siteUrl.replace(/\/+$/, '')}/wp-admin/`,
+    adminUrl: siteUrl ? `${siteUrl.replace(/\/+$/, '')}/wp-admin/` : null,
     maintenance: (sections.maint || '').trim() === 'on',
     debug: /^(1|true)$/i.test((sections.debug || '').trim()),
     plugins,

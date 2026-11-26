@@ -7,6 +7,7 @@
  * people come here for. No number is shown that the API did not return.
  */
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { NO_DOMAIN_LABEL } from '@/lib/site-address'
 import { ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -156,8 +157,9 @@ export function SiteOverview({
 }: {
   project: SiteProject
   kind: SiteKind
-  primaryDomain: string
-  liveUrl: string
+  /** The site's real domain, or null when none is connected. */
+  primaryDomain: string | null
+  liveUrl: string | null
   sslInfo: SiteSslInfo | null
   sslLoading: boolean
   latestDeployment: SiteDeployment | null
@@ -217,10 +219,22 @@ export function SiteOverview({
         </h3>
         <dl className="grid gap-px overflow-hidden rounded-xl border bg-border sm:grid-cols-2 xl:grid-cols-4">
           <Fact label="Domain & HTTPS" action={<FactLink onClick={() => onNavigate('domains')}>Manage domains</FactLink>}>
-            <p className="truncate font-mono text-[13px]" title={primaryDomain}>
-              {primaryDomain}
-            </p>
-            {sslLoading ? <Skeleton className="h-4 w-40" /> : <p className={TONE_TEXT[ssl.tone]}>{ssl.text}</p>}
+            {primaryDomain ? (
+              <>
+                <p className="truncate font-mono text-[13px]" title={primaryDomain}>
+                  {primaryDomain}
+                </p>
+                {sslLoading ? <Skeleton className="h-4 w-40" /> : <p className={TONE_TEXT[ssl.tone]}>{ssl.text}</p>}
+              </>
+            ) : (
+              <>
+                <p className="font-medium">{NO_DOMAIN_LABEL}</p>
+                <p className="text-muted-foreground">The site is not online until a domain is connected.</p>
+                <Button variant="link" className="h-auto p-0 text-sm" onClick={() => onNavigate('domains')}>
+                  Connect a domain
+                </Button>
+              </>
+            )}
             {extraDomains > 0 && (
               <p className="text-muted-foreground">
                 +{extraDomains} more domain{extraDomains === 1 ? '' : 's'}
@@ -329,7 +343,7 @@ export function SiteOverview({
           Details
         </h3>
         <dl className="grid grid-cols-1 gap-x-8 gap-y-2 rounded-xl border bg-card p-4 text-sm sm:grid-cols-2 sm:p-5">
-          <DetailRow label="Address">{project.subdomain}</DetailRow>
+          <DetailRow label="Address">{primaryDomain ?? NO_DOMAIN_LABEL}</DetailRow>
           <DetailRow label="Server">{project.server ? `${project.server.name} · ${project.server.region}` : 'Not assigned yet'}</DetailRow>
           <DetailRow label="Created">{formatDate(project.createdAt)}</DetailRow>
           <DetailRow label="Auto-deploy">

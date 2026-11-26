@@ -3170,7 +3170,7 @@ interface AdminDomain {
   externalId?: string | null
   nameservers: string[]
   owner: { id: string; name: string; email: string }
-  project: { id: string; name: string; status: string; subdomain: string } | null
+  project: { id: string; name: string; status: string; domain: string | null } | null
   dnsRecordsCount: number
   logsCount: number
   ordersCount: number
@@ -3720,7 +3720,7 @@ function AdminTab({ onSelect }: { onSelect: (id: string) => void }) {
                                   <TooltipContent>
                                     Linked project: {d.project.name} ({d.project.status})
                                     <br />
-                                    Subdomain: {d.project.subdomain}
+                                    Site address: {d.project.domain || 'No domain connected'}
                                   </TooltipContent>
                                 </Tooltip>
                               </TooltipProvider>

@@ -533,6 +533,20 @@ export async function runScheduledReconcile(): Promise<void> {
       return 0
     })
     if (expired > 0) console.log(`[reconcile] disabled ${expired} expired IP rule(s)`)
+    // Websites are served on real domains only: drop the retired
+    // `<slug>.<platform domain>` routes (once) and their DNS records.
+    const cleanup = await import('@/lib/site-dns-cleanup')
+    await cleanup.purgeSubdomainRoutesOnce().catch((err) =>
+      console.error('[reconcile] subdomain route purge failed:', err instanceof Error ? err.message : err)
+    )
+    const dns = await cleanup.cleanupPlatformSiteRecords().catch((err) => ({
+      skipped: undefined,
+      removed: [],
+      error: err instanceof Error ? err.message : String(err),
+    }))
+    if (dns.removed.length > 0 || dns.error) {
+      console.log(`[reconcile] retired site DNS records removed=${dns.removed.length}${dns.error ? ` error=${dns.error}` : ''}`)
+    }
   }
   if (await acquireCronLease('reconcile', RECONCILE_INTERVAL_MS)) {
     await runReconcile()

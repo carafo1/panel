@@ -163,7 +163,8 @@ type Result =
       kind: 'deploy'
       projectId: string
       projectName: string
-      liveUrl: string
+      /** Null until the chosen domain is connected (external domains wait for DNS). */
+      liveUrl: string | null
       pendingDomain: PendingDomain | null
       manual: boolean
     }
@@ -537,7 +538,8 @@ export default function NewWebsiteWizard({
         kind: 'deploy',
         projectId: p.id,
         projectName: p.name,
-        liveUrl: `https://${p.customDomain || p.subdomain}`,
+        // The site's own domain; an external one is online once its DNS is in place.
+        liveUrl: p.customDomain ? `https://${p.customDomain}` : null,
         pendingDomain: (p.pendingDomain as PendingDomain | null) ?? null,
         manual: data.deployMode === 'manual',
       })

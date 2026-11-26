@@ -34,7 +34,7 @@ function starterArticles() {
       category: 'getting-started',
       title: 'Put your first website online',
       summary: 'Create a site from a template, a Git repository or an upload.',
-      body: `Open **Hosting** in your panel and choose **New project**.\n\nYou can start from:\n\n- **A template** — WordPress and other ready-made stacks.\n- **A GitHub repository** — connect GitHub once, then pick the repository and branch. New pushes can deploy automatically.\n- **An upload** — a ZIP of your site's files.\n\nEvery site gets a free address on our domain straight away. When it shows **Running**, open it from the project page. To use your own domain, see *Connect your domain*.`,
+      body: `Open **Hosting** in your panel and choose **New project**.\n\nYou can start from:\n\n- **A template** — WordPress and other ready-made stacks.\n- **A GitHub repository** — connect GitHub once, then pick the repository and branch. New pushes can deploy automatically.\n- **An upload** — a ZIP of your site's files.\n\nEvery site runs on its own domain: choose one in your account or one you own elsewhere when you create it (buy one under **Domains** if you need to). A domain registered elsewhere goes online once its DNS points to us — see *Connect your domain*.`,
     },
     {
       slug: 'connect-your-domain',

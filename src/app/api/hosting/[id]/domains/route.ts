@@ -153,7 +153,11 @@ export async function POST(
     }
     const domain = body.domain.toLowerCase().trim()
     const sslEnabled = body.sslEnabled !== false // default true
-    const isPrimary = body.isPrimary === true
+    // A site's first domain is its primary: sites have no other address,
+    // so it becomes the site's address as soon as it is verified.
+    const isFirstDomain =
+      !project.customDomain && (await db.websiteDomain.count({ where: { projectId } })) === 0
+    const isPrimary = body.isPrimary === true || isFirstDomain
 
     if (!isValidHostname(domain)) {
       return NextResponse.json(

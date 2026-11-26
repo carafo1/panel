@@ -2,6 +2,7 @@ import { NextResponse, NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { readSessionCookie, hasUsableBearer, cookieAuthAllowed } from '@/lib/session'
 import { buildCsp, generateNonce } from '@/lib/csp'
+import { isPlatformHostname } from '@/lib/site-address'
 
 /**
  * #8 API Rate Limiting Proxy + Project Redirect/IP-Block Enforcement
@@ -15,7 +16,8 @@ import { buildCsp, generateNonce } from '@/lib/csp'
  *
  *  ── Layer 1: Project Redirects + IP Blocks ──────────────────────────────
  *  Runs FIRST (before rate limiting). Only fires for requests whose Host
- *  header matches a project's `customDomain` or `subdomain`. Skips the
+ *  header matches a project's real domain (`customDomain` or a verified
+ *  WebsiteDomain) — never the internal `subdomain`. Skips the
  *  panel's own routes (`/api/*`, `/dashboard`, `/_next/*`, `/admin`, etc.).
  *  Queries the DB for active Redirect + IpBlock rows (cached 10s in memory)
  *  and either returns a 301/302 redirect, a 403 Forbidden, or falls through.
@@ -59,8 +61,8 @@ interface CachedIpBlock {
 
 interface CachedProjectHost {
   id: string
-  subdomain: string
-  customDomain: string | null
+  /** Real domains only, lowercased. */
+  hosts: string[]
 }
 
 let redirectsCache: CachedRedirect[] = []
@@ -105,14 +107,19 @@ async function ensureCacheFresh(): Promise<void> {
             where: { status: 'running' },
             select: {
               id: true,
-              subdomain: true,
               customDomain: true,
+              websiteDomains: { where: { verified: true }, select: { domain: true } },
             },
           }),
         ])
         redirectsCache = redirects as CachedRedirect[]
         ipBlocksCache = ipBlocks as CachedIpBlock[]
-        projectHostsCache = projects as CachedProjectHost[]
+        projectHostsCache = projects.map((p) => ({
+          id: p.id,
+          hosts: [p.customDomain, ...p.websiteDomains.map((d) => d.domain)]
+            .filter((h): h is string => !!h && !isPlatformHostname(h))
+            .map((h) => h.toLowerCase()),
+        }))
         lastRefreshAt = Date.now()
       } catch (err) {
         // Don't update lastRefreshAt so we retry on the next request.
@@ -165,16 +172,16 @@ function ipMatch(rule: string, ip: string): boolean {
 }
 
 /**
- * Find the project that owns the given Host header (matches customDomain or
- * subdomain). Returns null if no match.
+ * Find the project that owns the given Host header (matches one of its real
+ * domains). The internal platform subdomain never matches. Returns null if
+ * no match.
  */
 function findProjectByHost(host: string): CachedProjectHost | null {
   if (!host) return null
   // Strip :port suffix for matching.
   const hostname = host.split(':')[0].toLowerCase()
   for (const p of projectHostsCache) {
-    if (p.subdomain && p.subdomain.toLowerCase() === hostname) return p
-    if (p.customDomain && p.customDomain.toLowerCase() === hostname) return p
+    if (p.hosts.includes(hostname)) return p
   }
   return null
 }

@@ -10,8 +10,10 @@
  * `Authorization: Bearer` header the API routes already understand. API keys
  * and explicit bearer tokens (CLI, scripts) keep working unchanged.
  *
- * Cross-site use. Customer sites are served from subdomains of the panel's own
- * domain, so they are "same-site" and SameSite=Lax alone would let one of them
+ * Cross-site use. Customer sites used to be served from subdomains of the
+ * panel's own domain (they are now served on their own domains only, but the
+ * defence stays: old DNS, staging copies or a misconfiguration could still put
+ * one there). Such a site is "same-site", and SameSite=Lax alone would let it
  * make the panel act with the visitor's session. The cookie is therefore only
  * honoured for requests the browser marks as coming from the panel's own
  * origin (Fetch Metadata, with an Origin-header fallback), plus plain

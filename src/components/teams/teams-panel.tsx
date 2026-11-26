@@ -98,6 +98,7 @@ interface TeamProject {
   status: string
   framework: string
   subdomain: string
+  customDomain?: string | null
   createdAt: string
 }
 
@@ -677,7 +678,7 @@ export default function TeamsPanel() {
                   >
                     <div>
                       <div className="font-medium">{project.name}</div>
-                      <div className="text-sm text-muted-foreground">{project.subdomain}</div>
+                      <div className="text-sm text-muted-foreground">{project.customDomain || 'No domain connected'}</div>
                     </div>
                     <div className="flex items-center gap-2">
                       <ProjectStatusBadge status={project.status} />

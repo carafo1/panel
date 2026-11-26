@@ -141,7 +141,7 @@ interface CheckoutResult {
   // Demo-mode success payload
   payment?: { id: string; amount: number; currency: string; status: string; type: string }
   subscription?: { id: string; status: string; planName: string; planId: string } | null
-  project?: { id: string; name: string; slug: string; subdomain: string; status: string; framework: string; customDomain: string | null } | null
+  project?: { id: string; name: string; slug: string; status: string; framework: string; customDomain: string | null } | null
   domain?: { id: string; name: string; status: string; registrar: string } | null
   deployment?: { id: string; status: string; deployUrl: string | null; branch: string } | null
   automation?: { processed: boolean; actionsCount: number; results: unknown[] }
@@ -300,6 +300,9 @@ function CheckoutDialog({
   const [domainName, setDomainName] = useState('')
   const { setDashboardTab } = useAppStore()
   const [projectName, setProjectName] = useState('')
+  // The website's own domain. Optional: without one only the plan is bought
+  // and the website is created later, from Websites, once there is a domain.
+  const [siteDomain, setSiteDomain] = useState('')
   const [framework, setFramework] = useState('nextjs')
   const [loading, setLoading] = useState(false)
   const [success, setSuccess] = useState<CheckoutResult | null>(null)
@@ -386,6 +389,7 @@ function CheckoutDialog({
           method: selectedMethod,
           projectName: projectName.trim(),
           framework,
+          ...(siteDomain.trim() ? { domain: siteDomain.trim().toLowerCase() } : {}),
         }),
       })
 
@@ -434,6 +438,7 @@ function CheckoutDialog({
     }
     setSuccess(null)
     setDomainName('')
+    setSiteDomain('')
     setProjectName('')
     setFramework('nextjs')
     setSelectedMethod('')
@@ -586,13 +591,10 @@ function CheckoutDialog({
                         <p className="font-medium text-sm">Project Created</p>
                         <p className="text-sm text-muted-foreground">{success.project.name}</p>
                         <p className="text-xs text-indigo-600 mt-1">
-                          https://{success.project.subdomain}
+                          {success.project.customDomain
+                            ? `https://${success.project.customDomain}`
+                            : 'Goes online once your domain’s DNS points here (see Domains & SSL).'}
                         </p>
-                        {success.project.customDomain && (
-                          <p className="text-xs text-indigo-600">
-                            Custom: {success.project.customDomain}
-                          </p>
-                        )}
                       </div>
                     </div>
                   )}
@@ -681,8 +683,22 @@ function CheckoutDialog({
                   value={projectName}
                   onChange={(e) => setProjectName(e.target.value)}
                 />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="site-domain">Website domain (optional)</Label>
+                <Input
+                  id="site-domain"
+                  placeholder="example.com"
+                  value={siteDomain}
+                  onChange={(e) => setSiteDomain(e.target.value)}
+                  autoCapitalize="off"
+                  autoComplete="off"
+                  spellCheck={false}
+                  inputMode="url"
+                />
                 <p className="text-xs text-muted-foreground">
-                  A subdomain will be auto-generated (e.g., my-awesome-project.apsamo.com)
+                  A domain in your account or one you own elsewhere. Leave it empty to buy the
+                  plan now and create your website once you have a domain.
                 </p>
               </div>
               <div className="space-y-2">
@@ -711,7 +727,7 @@ function CheckoutDialog({
                   <p className="text-xs text-muted-foreground">
                     Domains are ordered separately on the Domains page, where we check
                     availability and collect the registrant details the registry requires.
-                    Your site also gets a free subdomain.
+                    Every website is served on its own domain.
                   </p>
                 </div>
               </div>

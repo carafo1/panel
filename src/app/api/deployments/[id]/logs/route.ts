@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { authenticateRequest } from '@/lib/auth'
 import { requireProjectAccess } from '@/lib/project-access'
+import { publicUrlOrNull } from '@/lib/site-address'
 
 export async function GET(
   request: Request,
@@ -51,7 +52,7 @@ export async function GET(
         branch: deployment.branch,
         status: deployment.status,
         buildLog: deployment.buildLog,
-        deployUrl: deployment.deployUrl,
+        deployUrl: publicUrlOrNull(deployment.deployUrl),
         duration: deployment.duration,
         triggeredBy: deployment.triggeredBy,
         createdAt: deployment.createdAt,

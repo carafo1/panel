@@ -5,11 +5,8 @@ import { authenticateRequest } from '@/lib/auth'
 import { enforceLimit } from '@/lib/plan-limits'
 import { logAudit } from '@/lib/audit'
 import { assertPublicUrl } from '@/lib/ssrf'
-import { BRAND_DOMAIN } from '@/lib/brand-config'
+import { resolveSiteDomainChoice, internalSiteKey } from '@/lib/site-domain'
 import {
-  isValidHostname,
-  isReservedHostname,
-  findConflict,
   generateVerificationToken,
   getServerIps,
   VERIFY_PREFIX,
@@ -36,9 +33,10 @@ import { toMigrationView } from '@/lib/migration/view'
  * an empty project the customer did not ask for and has to clean up. Here, if
  * the import cannot be started, the project we just created is removed again.
  *
- * The site is always assigned a platform subdomain, so it is reachable the
- * moment the import finishes even when the customer's real domain still points
- * at their old host — which it will, since they have not cut over yet.
+ * A real domain is required (there is no free platform address). A domain in
+ * the account is routed as soon as the import finishes; one registered
+ * elsewhere is routed once its DNS proves ownership — typically when the
+ * customer cuts over from their old host.
  */
 
 export const runtime = 'nodejs'
@@ -54,7 +52,7 @@ function slugify(text: string): string {
 
 interface ImportCreatePayload {
   name: string
-  domainType?: 'subdomain' | 'existing' | 'external'
+  domainType?: 'existing' | 'external' | 'new'
   domain?: string
   sourceType: MigrationSourceType
   sourceMode?: MigrationSourceMode
@@ -85,6 +83,18 @@ export async function POST(request: Request) {
     const name = (body.name || '').trim()
     if (!name) {
       return NextResponse.json({ error: 'A website name is required' }, { status: 400 })
+    }
+
+    // A real domain is required — there is no free platform address.
+    // Checked first so a missing domain is reported before any upload or
+    // source lookup.
+    const choice = await resolveSiteDomainChoice({
+      userId: decoded.userId,
+      domainType: body.domainType,
+      domain: body.domain,
+    })
+    if (!choice.ok) {
+      return NextResponse.json({ error: choice.error, code: choice.code }, { status: choice.status })
     }
 
     const source = getSourceDefinition(body.sourceType)
@@ -179,61 +189,15 @@ export async function POST(request: Request) {
     const denied = await enforceLimit(decoded.userId, 'websites', { role: decoded.role })
     if (denied) return denied
 
-    // ── Domain ───────────────────────────────────────────────────────
+    // ── Domain (validated above) ─────────────────────────────────────
     const slug = `${slugify(name)}-${crypto.randomBytes(2).toString('hex')}`
-    const subdomain = `${slug}.${BRAND_DOMAIN}`
-    let customDomain: string | null = null
-    let externalDomain: string | null = null
-
-    const domainType = body.domainType || 'subdomain'
-    if (domainType !== 'subdomain') {
-      const requested = (body.domain || '').toLowerCase().trim()
-      if (!requested) {
-        return NextResponse.json(
-          { error: 'A domain is required when not using a platform subdomain.' },
-          { status: 400 }
-        )
-      }
-      if (!isValidHostname(requested)) {
-        return NextResponse.json(
-          { error: `"${requested}" is not a valid domain name.` },
-          { status: 400 }
-        )
-      }
-      if (isReservedHostname(requested, BRAND_DOMAIN)) {
-        return NextResponse.json(
-          { error: `${requested} belongs to the platform and cannot be used.` },
-          { status: 400 }
-        )
-      }
-      const clash = await findConflict(requested)
-      if (clash.conflict) {
-        return NextResponse.json(
-          { error: `${requested} is already in use on this platform.` },
-          { status: 409 }
-        )
-      }
-      if (domainType === 'existing') {
-        const owned = await db.domain.findFirst({
-          where: { userId: decoded.userId, name: requested },
-        })
-        if (!owned) {
-          return NextResponse.json(
-            {
-              error: `${requested} is not in your account. Choose "registered elsewhere" if it is with another registrar.`,
-            },
-            { status: 400 }
-          )
-        }
-        customDomain = requested
-      } else {
-        // SECURITY: an unverified external hostname is never written to
-        // `customDomain`, because that is what the Caddy generator serves.
-        // It is attached as a pending domain and connected once DNS proves
-        // ownership.
-        externalDomain = requested
-      }
-    }
+    // Internal identifier only; never served or shown.
+    const subdomain = internalSiteKey(slug)
+    // SECURITY: an unverified external hostname is never written to
+    // `customDomain` (what the Caddy generator serves); it is attached as a
+    // pending domain and connected once DNS proves ownership.
+    const customDomain: string | null = choice.customDomain
+    const externalDomain: string | null = choice.externalDomain
 
     // ── Server assignment ────────────────────────────────────────────
     const candidates = await db.server.findMany({
@@ -319,7 +283,9 @@ export async function POST(request: Request) {
     }
 
     // ── Start the import ─────────────────────────────────────────────
-    const targetUrl = `https://${customDomain || subdomain}`
+    // The site's own domain from the start, so WordPress URLs are rewritten
+    // to it rather than to a platform address.
+    const targetUrl = `https://${choice.domain}`
     const { migrationId } = await createMigration({
       projectId: project.id,
       userId: decoded.userId,
@@ -364,7 +330,7 @@ export async function POST(request: Request) {
         migrationId,
         sourceType: source.id,
         sourceMode: mode,
-        domain: customDomain || subdomain,
+        domain: choice.domain,
         serverId: server.id,
       },
     })
@@ -383,8 +349,8 @@ export async function POST(request: Request) {
           id: project.id,
           name: project.name,
           slug: project.slug,
-          subdomain,
           customDomain,
+          domain: choice.domain,
           pendingDomain,
           status: project.status,
           server: { id: server.id, name: server.name, region: server.region },

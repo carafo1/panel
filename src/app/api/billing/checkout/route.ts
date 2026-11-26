@@ -4,7 +4,9 @@ import { db } from '@/lib/db'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { processEvent } from '@/lib/automation'
 import { isStripeDemoMode } from '@/lib/stripe'
-import { BRAND_DOMAIN, NS1_HOSTNAME, NS2_HOSTNAME } from '@/lib/brand-config'
+import { NS1_HOSTNAME, NS2_HOSTNAME } from '@/lib/brand-config'
+import { resolveSiteDomainChoice, internalSiteKey, type SiteDomainChoice } from '@/lib/site-domain'
+import { generateVerificationToken } from '@/lib/custom-domains'
 import { getPriceForDomain } from '@/lib/pricing'
 import { dynadotService } from '@/lib/dynadot-service'
 import { requireVerifiedEmail } from '@/lib/require-verified'
@@ -58,6 +60,11 @@ async function postHandler(request: Request) {
       projectName,
       framework,
       method,
+      // The website's real domain (hosting only). Optional: without one the
+      // plan is bought and no website is created until the customer adds a
+      // site with a domain. There is no free platform address.
+      domain: siteDomainInput,
+      domainType: siteDomainTypeInput,
     } = body
 
     if (!planId || !type) {
@@ -273,6 +280,22 @@ async function postHandler(request: Request) {
     const gate = await requireVerifiedEmail(decoded.userId, decoded.role)
     if (!gate.ok) return gate.response!
 
+    // ── Website domain (hosting) ─────────────────────────────────────
+    // Validated exactly like /api/hosting/create. Supplied → paid
+    // provisioning creates the website on it. Omitted → plan only.
+    let siteChoice: Extract<SiteDomainChoice, { ok: true }> | null = null
+    if (type === 'hosting' && typeof siteDomainInput === 'string' && siteDomainInput.trim()) {
+      const choice = await resolveSiteDomainChoice({
+        userId: decoded.userId,
+        domainType: siteDomainTypeInput,
+        domain: siteDomainInput,
+      })
+      if (!choice.ok) {
+        return NextResponse.json({ error: choice.error, code: choice.code }, { status: choice.status })
+      }
+      siteChoice = choice
+    }
+
     // ── Domains go through a DomainOrder, never the orchestration pipeline ──
     // This endpoint used to take the money and then have provisioning call the
     // registrar directly: one year regardless of what was asked, no registrant
@@ -479,7 +502,19 @@ async function postHandler(request: Request) {
       if (due > 0) amount = due
     }
     // Explicit link from the payment to the bill it pays (read by activation).
-    const linkMetadata = checkoutInvoice ? { invoiceId: checkoutInvoice.id } : undefined
+    // The website domain rides along so paid provisioning creates the site on it.
+    const linkMetadata: Record<string, unknown> | undefined =
+      checkoutInvoice || siteChoice
+        ? {
+            ...(checkoutInvoice ? { invoiceId: checkoutInvoice.id } : {}),
+            ...(siteChoice
+              ? {
+                  siteDomain: siteChoice.domain,
+                  siteDomainType: siteChoice.customDomain ? 'existing' : 'external',
+                }
+              : {}),
+          }
+        : undefined
 
     // ═══════════════════════════════════════════════════════════════
     // SPECIAL PATH: Stripe demo mode keeps the original inline-success
@@ -491,10 +526,12 @@ async function postHandler(request: Request) {
       // Typed explicitly: `let project = null` infers the type `null`, which
       // makes every later `project.id` a `never` and hides real errors.
       let project: Awaited<ReturnType<typeof db.project.create>> | null = null
-      if (type === 'hosting' || type === 'both') {
+      // Only with a chosen domain: every website needs a real one.
+      if ((type === 'hosting' || type === 'both') && siteChoice) {
         const name = projectName || `My ${plan.name} Project`
         const slug = slugify(name) + '-' + Date.now().toString(36)
-        const subdomain = `${slug}.${BRAND_DOMAIN}`
+        // Internal identifier only; never served or shown.
+        const subdomain = internalSiteKey(slug)
         const fw = framework || 'nextjs'
 
         const servers = await db.server.findMany({
@@ -512,11 +549,26 @@ async function postHandler(request: Request) {
             framework: fw,
             status: 'creating',
             subdomain,
+            customDomain: siteChoice.customDomain,
             serverId: bestServer?.id || null,
             sslEnabled: true,
             autoDeploy: true,
           },
         })
+        if (siteChoice.externalDomain) {
+          // Routed only once DNS proves ownership (domain sweep).
+          await db.websiteDomain.create({
+            data: {
+              projectId: project.id,
+              domain: siteChoice.externalDomain,
+              isPrimary: true,
+              sslEnabled: true,
+              sslStatus: 'none',
+              verified: false,
+              verificationToken: generateVerificationToken(),
+            },
+          })
+        }
       }
 
       // Create Domain (domain or both)
@@ -679,7 +731,6 @@ async function postHandler(request: Request) {
               id: updatedProject.id,
               name: updatedProject.name,
               slug: updatedProject.slug,
-              subdomain: updatedProject.subdomain,
               status: updatedProject.status,
               framework: updatedProject.framework,
               customDomain: updatedProject.customDomain,

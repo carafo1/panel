@@ -66,8 +66,8 @@ export async function GET(request: Request) {
               OR: [
                 { name: like },
                 { slug: like },
-                { subdomain: like },
                 { customDomain: like },
+                { websiteDomains: { some: { domain: like } } },
               ],
             },
             select: {
@@ -75,7 +75,6 @@ export async function GET(request: Request) {
               name: true,
               slug: true,
               status: true,
-              subdomain: true,
               customDomain: true,
               user: { select: { email: true } },
             },
@@ -169,7 +168,8 @@ export async function GET(request: Request) {
         type: 'project' as const,
         id: p.id,
         title: p.name,
-        subtitle: p.customDomain || p.subdomain || p.slug,
+        // Real domain only — never the internal platform subdomain.
+        subtitle: p.customDomain || `${p.slug} · No domain connected`,
         ownerEmail: p.user?.email ?? null,
         status: p.status,
       })),

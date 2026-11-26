@@ -15,7 +15,6 @@ import {
   Star,
   Quote,
   Sparkles,
-  ExternalLink,
   Loader2,
   AlertTriangle,
   RefreshCw,
@@ -186,7 +185,11 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
   const [selectedDomain, setSelectedDomain] = useState<string | null>(null)
   const [selectedDomainPrice, setSelectedDomainPrice] = useState<number | null>(null)
   const [deployOutcome, setDeployOutcome] = useState<DeployOutcome>('live')
-  const [useFreeSubdomain, setUseFreeSubdomain] = useState(false)
+  // A domain the customer already owns (in this account or elsewhere). There
+  // is no free platform address: every website is served on a real domain.
+  const [useOwnDomain, setUseOwnDomain] = useState(false)
+  const [ownDomain, setOwnDomain] = useState('')
+  const [ownDomainError, setOwnDomainError] = useState<string | null>(null)
   const [plans, setPlans] = useState<PlanOption[]>([])
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null)
   const [deploying, setDeploying] = useState(false)
@@ -256,7 +259,7 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
         setDomainError(availabilityErrorFromResponse(res.status, data))
       } else {
         setDomainResults(data as DomainResult)
-        setUseFreeSubdomain(false)
+        setUseOwnDomain(false)
       }
     } catch {
       setDomainError(AVAILABILITY_COPY.unknown.detail)
@@ -267,7 +270,29 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
   const chooseDomain = (domain: string, price: number) => {
     setSelectedDomain(domain)
     setSelectedDomainPrice(price)
-    setUseFreeSubdomain(false)
+    setUseOwnDomain(false)
+  }
+
+  const ownDomainValue = ownDomain.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '')
+  const ownDomainLooksValid = /^(?!-)[a-z0-9-]{1,63}(\.(?!-)[a-z0-9-]{1,63})+$/.test(ownDomainValue)
+
+  /** Continue from the domain step; errors show only after trying. */
+  const continueFromDomain = () => {
+    if (useOwnDomain) {
+      if (!ownDomainLooksValid) {
+        setOwnDomainError('Enter your domain, like example.com.')
+        return
+      }
+      setOwnDomainError(null)
+      setStep(4)
+      return
+    }
+    if (!selectedDomain) {
+      setOwnDomainError('Choose a domain for this website — buy one or connect a domain you own.')
+      return
+    }
+    setOwnDomainError(null)
+    setStep(4)
   }
 
   /** Close the wizard and open the domain search with the chosen name. */
@@ -295,7 +320,6 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
     if (!selectedPlan || !isAuthenticated) return
     setDeploying(true)
     try {
-      const slug = projectName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
       const res = await fetch('/api/billing/checkout', {
         method: 'POST',
         credentials: 'same-origin',
@@ -305,6 +329,9 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
           type: 'hosting',
           projectName,
           framework,
+          // An owned domain creates the website on it once paid. A domain
+          // still to be bought is registered first; the website follows.
+          ...(useOwnDomain && ownDomainLooksValid ? { domain: ownDomainValue } : {}),
         }),
       })
       const data = await res.json().catch(() => ({}))
@@ -323,7 +350,7 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
       const redirect: string | undefined = (!data.demo && data.url) || data.redirectUrl || undefined
       if (redirect) {
         toast.success('Redirecting to payment…', {
-          description: selectedDomain && !useFreeSubdomain
+          description: selectedDomain && !useOwnDomain
             ? `After payment, register ${selectedDomain} from the Domains page.`
             : undefined,
         })
@@ -335,14 +362,14 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
         // Manual / bank transfer: nothing is provisioned until an admin
         // confirms the money. Do not claim the site is live.
         setDeployOutcome('awaiting_payment')
-        setDeployUrl(`${slug}.apsamo.com`)
+        setDeployUrl(useOwnDomain ? ownDomainValue : '')
         setDeploySuccess(true)
         toast.success('Order placed. Awaiting payment confirmation.')
         return
       }
 
       setDeployOutcome('live')
-      setDeployUrl(data.project?.subdomain || `${slug}.apsamo.com`)
+      setDeployUrl(data.project?.customDomain || (useOwnDomain ? ownDomainValue : ''))
       setDeploySuccess(true)
       toast.success('Deployment started!')
     } catch {
@@ -350,7 +377,7 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
     } finally {
       setDeploying(false)
     }
-  }, [selectedPlan, isAuthenticated, projectName, framework, selectedDomain, useFreeSubdomain])
+  }, [selectedPlan, isAuthenticated, projectName, framework, selectedDomain, useOwnDomain, ownDomainLooksValid, ownDomainValue])
 
   const primaryState = domainResults
     ? availabilityOf({
@@ -364,7 +391,6 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
 
   // Progress
   const progress = (step / 5) * 100
-  const slug = projectName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 
   const selectedPlanData = plans.find((p) => p.id === selectedPlan)
   const monthlyCost = selectedPlanData ? selectedPlanData.price : 0
@@ -518,7 +544,7 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
               <div className="flex-1 flex flex-col animate-fade-in-up">
                 <div className="text-center mb-8">
                   <h2 className="text-2xl font-bold mb-2">Choose a Domain</h2>
-                  <p className="text-muted-foreground">Search for a custom domain or use a free subdomain</p>
+                  <p className="text-muted-foreground">Every website runs on its own domain. Find a new one or use one you own.</p>
                   <p className="text-xs text-muted-foreground mt-2 max-w-md mx-auto">
                     A custom domain is ordered separately after your site is set up, so we can
                     collect the registrant details the registry requires.
@@ -569,7 +595,7 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                       domain={domainResults.domain}
                       state={primaryState}
                       price={domainResults.price}
-                      selected={selectedDomain === domainResults.domain && !useFreeSubdomain}
+                      selected={selectedDomain === domainResults.domain && !useOwnDomain}
                       onChoose={chooseDomain}
                     />
                     {domainResults.suggestions?.map((s) => (
@@ -578,18 +604,20 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                         domain={s.domain}
                         state={availabilityOf({ status: s.status, available: s.available, price: s.price })}
                         price={s.price}
-                        selected={selectedDomain === s.domain && !useFreeSubdomain}
+                        selected={selectedDomain === s.domain && !useOwnDomain}
                         onChoose={chooseDomain}
                       />
                     ))}
                   </ul>
                 )}
 
-                {/* Free subdomain option */}
+                {/* A domain the customer already owns */}
                 <button
-                  onClick={() => { setUseFreeSubdomain(true); setSelectedDomain(null) }}
-                  className={`w-full flex items-center gap-3 p-4 rounded-xl border-2 transition-all mb-4 ${
-                    useFreeSubdomain
+                  type="button"
+                  aria-pressed={useOwnDomain}
+                  onClick={() => { setUseOwnDomain(true); setSelectedDomain(null); setOwnDomainError(null) }}
+                  className={`w-full flex items-center gap-3 p-4 rounded-xl border-2 transition-all mb-3 ${
+                    useOwnDomain
                       ? 'border-indigo-500 bg-indigo-500/5'
                       : 'border-border hover:border-indigo-500/30'
                   }`}
@@ -598,13 +626,34 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                     <Globe className="size-5 text-indigo-500" />
                   </div>
                   <div className="text-start">
-                    <p className="font-semibold text-sm">Use a free subdomain</p>
+                    <p className="font-semibold text-sm">I already own a domain</p>
                     <p className="text-xs text-muted-foreground">
-                      <span className="text-indigo-600 font-mono">{slug}.apsamo.com</span> — Free with any plan
+                      In this account or at any registrar. No transfer needed.
                     </p>
                   </div>
-                  <Badge variant="secondary" className="ms-auto bg-indigo-500/10 text-indigo-600 text-[10px]">FREE</Badge>
                 </button>
+                {useOwnDomain && (
+                  <div className="mb-4 space-y-1.5">
+                    <label htmlFor="onb-own-domain" className="text-sm font-medium">Your domain</label>
+                    <Input
+                      id="onb-own-domain"
+                      value={ownDomain}
+                      onChange={(e) => setOwnDomain(e.target.value)}
+                      placeholder="example.com"
+                      inputMode="url"
+                      autoComplete="off"
+                      spellCheck={false}
+                      aria-invalid={Boolean(ownDomainError)}
+                      aria-describedby={ownDomainError ? 'onb-domain-error' : undefined}
+                      className="h-11"
+                    />
+                  </div>
+                )}
+                {ownDomainError && (
+                  <p id="onb-domain-error" role="alert" className="mb-4 text-xs text-destructive">
+                    {ownDomainError}
+                  </p>
+                )}
 
                 <div className="mt-auto flex items-center justify-between">
                   <button
@@ -619,8 +668,7 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                     </Button>
                     <Button
                       className="bg-indigo-500 hover:bg-indigo-600 text-white"
-                      onClick={() => setStep(4)}
-                      disabled={!selectedDomain && !useFreeSubdomain}
+                      onClick={continueFromDomain}
                     >
                       Continue <ArrowRight className="size-4 ms-1" />
                     </Button>
@@ -725,14 +773,14 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                   <div className="flex items-center justify-between py-2 border-b border-border">
                     <span className="text-sm text-muted-foreground">Domain</span>
                     <span className="font-semibold text-sm font-mono">
-                      {useFreeSubdomain ? `${slug}.apsamo.com` : selectedDomain}
+                      {useOwnDomain ? ownDomainValue : selectedDomain}
                     </span>
                   </div>
-                  {!useFreeSubdomain && selectedDomain && (
+                  {!useOwnDomain && selectedDomain && (
                     <p className="text-xs text-muted-foreground -mt-1 pb-2 border-b border-border">
-                      Until {selectedDomain} is registered your site runs on{' '}
-                      <span className="font-mono">{slug}.apsamo.com</span>. You&apos;ll register the
-                      domain next{selectedDomainPrice ? ` (${selectedDomainPrice.toFixed(2)}/yr, billed separately)` : ''}.
+                      You&apos;ll register {selectedDomain} next
+                      {selectedDomainPrice ? ` (${selectedDomainPrice.toFixed(2)}/yr, billed separately)` : ''}, then
+                      create your website on it.
                     </p>
                   )}
                   <div className="flex items-center justify-between py-2 border-b border-border">
@@ -795,15 +843,25 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                     ? 'Your hosting is set up and the first deployment has started.'
                     : 'Your site will be set up as soon as your payment is confirmed. You can follow it under Billing.'}
                 </p>
-                <div className="flex items-center gap-2 bg-indigo-500/10 border border-indigo-500/20 rounded-lg px-4 py-3 mb-8">
-                  <Globe className="size-4 text-indigo-500" />
-                  <span className="font-mono font-semibold text-indigo-600 text-sm">
-                    https://{deployUrl}
-                  </span>
-                  <ExternalLink className="size-3 text-indigo-500" />
-                </div>
+                {deployUrl ? (
+                  <div className="flex flex-col items-center gap-1 bg-indigo-500/10 border border-indigo-500/20 rounded-lg px-4 py-3 mb-8">
+                    <span className="flex items-center gap-2">
+                      <Globe className="size-4 text-indigo-500" />
+                      <span className="font-mono font-semibold text-indigo-600 text-sm">https://{deployUrl}</span>
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      Online once the domain&apos;s DNS points here — the steps are in Domains &amp; SSL.
+                    </span>
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground mb-8 max-w-md">
+                    {selectedDomain
+                      ? `Next, register ${selectedDomain}. Then create your website on it from Websites.`
+                      : 'Create your website from Websites once you have a domain.'}
+                  </p>
+                )}
                 <div className="flex flex-col sm:flex-row gap-3">
-                  {selectedDomain && !useFreeSubdomain && (
+                  {selectedDomain && !useOwnDomain && (
                     <Button
                       size="lg"
                       className="bg-indigo-500 hover:bg-indigo-600 text-white px-8 h-12 text-base"
@@ -815,8 +873,8 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
                   )}
                   <Button
                     size="lg"
-                    variant={selectedDomain && !useFreeSubdomain ? 'outline' : 'default'}
-                    className={selectedDomain && !useFreeSubdomain
+                    variant={selectedDomain && !useOwnDomain ? 'outline' : 'default'}
+                    className={selectedDomain && !useOwnDomain
                       ? 'px-8 h-12 text-base'
                       : 'bg-indigo-500 hover:bg-indigo-600 text-white px-10 h-12 text-base'}
                     onClick={onComplete}

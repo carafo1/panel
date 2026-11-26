@@ -448,7 +448,7 @@ export default function AnalyticsPanel() {
             {selectedProject.name}
           </Badge>
           <span className="text-xs text-muted-foreground font-mono">
-            {selectedProject.customDomain || selectedProject.subdomain}
+            {selectedProject.customDomain || 'No domain connected'}
           </span>
         </div>
       )}

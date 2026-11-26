@@ -84,6 +84,7 @@ interface Project {
   framework: string
   status: string
   subdomain: string
+  customDomain?: string | null
   repoUrl?: string
   autoDeploy: boolean
   sslEnabled: boolean
@@ -1127,7 +1128,7 @@ function ActivityFeed({ projects }: { projects: ProjectWithIntegration[] }) {
           projectName: project.name,
           message: `Auto-deploy enabled for ${integration.branch}`,
           timestamp: integration.updatedAt,
-          detail: `${integration.repoFullName} → ${project.subdomain}`,
+          detail: `${integration.repoFullName} → ${project.customDomain || project.name}`,
         })
       }
 

@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { createMonitor } from '@/lib/monitor'
 import { accessibleProjectsWhere, requireProjectAccess } from '@/lib/project-access'
+import { publicUrlOrNull, isPlatformHostname } from '@/lib/site-address'
 
 /**
  * GET /api/monitors
@@ -49,7 +50,8 @@ export async function GET(request: Request) {
     })
 
     return NextResponse.json({
-      monitors: monitors.map((m) => ({
+      // Monitors on a retired platform address are not shown (or checked).
+      monitors: monitors.filter((m) => publicUrlOrNull(m.url) !== null).map((m) => ({
         id: m.id,
         projectId: m.projectId,
         url: m.url,
@@ -131,6 +133,12 @@ export async function POST(request: Request) {
     if (!/^https?:$/.test(parsedUrl.protocol)) {
       return NextResponse.json(
         { error: 'Only http(s) URLs can be monitored' },
+        { status: 400 }
+      )
+    }
+    if (isPlatformHostname(parsedUrl.hostname)) {
+      return NextResponse.json(
+        { error: 'Monitor the website on its own domain. Connect a domain in Domains & SSL first.' },
         { status: 400 }
       )
     }

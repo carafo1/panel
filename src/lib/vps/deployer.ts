@@ -49,6 +49,8 @@ import { getDeploymentMethod, type DeploymentMethodId } from '@/lib/deployment-m
 import { encrypt, decrypt } from '@/lib/encryption'
 import { broadcastDeploymentLog, broadcastDeploymentStatus } from '@/lib/realtime'
 import { announceDeployment } from '@/lib/deploy-events'
+import { siteUrl } from '@/lib/site-address'
+import { intendedSiteHost } from '@/lib/site-domain'
 import {
   withConnection,
   exec,
@@ -941,7 +943,7 @@ async function verifyHttpUpstream(
  */
 async function markDeploymentLive(
   deploymentId: string,
-  data: { buildLog: string; deployUrl: string; duration: number }
+  data: { buildLog: string; deployUrl: string | null; duration: number }
 ): Promise<boolean> {
   const res = await db.deployment.updateMany({
     where: { id: deploymentId, status: { in: ACTIVE_DEPLOY_STATUSES } },
@@ -1065,7 +1067,7 @@ async function deployMethodProject(
       data: {
         status: 'live',
         buildLog: buildLogStr,
-        deployUrl: `https://${project.customDomain || project.subdomain}`,
+        deployUrl: siteUrl(project),
         duration: Math.round((Date.now() - start) / 1000),
       },
     })
@@ -1411,7 +1413,7 @@ async function deployMethodProject(
   if (methodId === 'laravel') {
     await runStage('run_migrations', 'Writing .env + running migrations…', async () => {
       await withConnection(creds, async (client) => {
-        const envContent = generateLaravelEnv(project)
+        const envContent = generateLaravelEnv(project, await intendedSiteHost(projectId))
         await unlinkSymlinks(client, deployPath, ['.env'])
         await putFile(client, `${deployPath}/.env`, envContent, { mode: 0o644 })
         // We'll actually run the migrations AFTER the container is up — for
@@ -1627,8 +1629,25 @@ async function deployMethodProject(
         }
         // Same managed config as before the container started (idempotent).
         await writeWordPressConfig(client, projectId, deployPath, stageLog)
-        // Run wp core install via the wp-cli container.
-        const url = `https://${project.customDomain || project.subdomain}`
+        // Run wp core install via the wp-cli container. The site URL is the
+        // site's own domain from the start (never a platform address).
+        const host = await intendedSiteHost(projectId)
+        if (!host) {
+          // Only a site created before domains were required can get here.
+          // An installed WordPress keeps its URL; a fresh one must not be
+          // installed on a made-up address.
+          const installed = await exec(
+            client,
+            `docker run --rm --network deployhub --user 33:33 --volumes-from ${shellQuote(containerName)} -w /var/www/html wordpress:cli wp core is-installed --path=/var/www/html >/dev/null 2>&1 && echo yes || echo no`,
+            { timeoutMs: 60000 }
+          )
+          if (installed.stdout.trim().endsWith('yes')) {
+            stageLog('No domain connected — WordPress is already installed, leaving its address unchanged.')
+            return
+          }
+          throw new Error('Connect a domain to this website before installing WordPress — the domain becomes its address.')
+        }
+        const url = `https://${host}`
         // --user 33:33: the apache image serves files as www-data (uid 33); the
         // cli image defaults to uid 82, which would leave files Apache can't write.
         // --volumes-from: WordPress core lives in the site container's own
@@ -1746,7 +1765,7 @@ async function deployMethodProject(
 
   const stillActive = await markDeploymentLive(deploymentId, {
     buildLog: buildLog.join('\n'),
-    deployUrl: `https://${project.customDomain || project.subdomain}`,
+    deployUrl: siteUrl(project),
     duration: Math.round((Date.now() - start) / 1000),
   })
   if (!stillActive) {
@@ -1859,7 +1878,7 @@ async function deployLegacyProject(
       data: {
         status: 'live',
         buildLog: buildLogStr,
-        deployUrl: `https://${project.customDomain || project.subdomain}`,
+        deployUrl: siteUrl(project),
         duration: Math.round((Date.now() - start) / 1000),
       },
     })
@@ -2100,7 +2119,7 @@ async function deployLegacyProject(
 
   const stillActive = await markDeploymentLive(deploymentId, {
     buildLog: buildLog.join('\n'),
-    deployUrl: `https://${project.customDomain || project.subdomain}`,
+    deployUrl: siteUrl(project),
     duration: Math.round((Date.now() - start) / 1000),
   })
   if (!stillActive) {
@@ -3363,8 +3382,9 @@ networks:
 
 // ─── Laravel .env generation ─────────────────────────────────────────────
 
-function generateLaravelEnv(project: { name: string; customDomain?: string | null; subdomain: string; databaseHost?: string | null; databaseName?: string | null; databaseUser?: string | null; databasePassword?: string | null }): string {
-  const url = `https://${project.customDomain || project.subdomain}`
+function generateLaravelEnv(project: { name: string; databaseHost?: string | null; databaseName?: string | null; databaseUser?: string | null; databasePassword?: string | null }, host: string | null): string {
+  // The site's own domain; never the internal platform subdomain.
+  const url = host ? `https://${host}` : 'http://localhost'
   // databasePassword is encrypted at rest — we can't decrypt here without
   // importing decrypt. The deployer's post_install step (which has access
   // to the encryption module) injects the real value via docker exec.
@@ -3530,13 +3550,13 @@ function generateDemoBuildLog(
   containerPort: number,
   externalPort: number
 ): string {
-  const url = project.customDomain || project.subdomain
+  const url = siteUrl(project)?.replace(/^https:\/\//, '') || null
   const method = project.deploymentMethod || project.stack
   return `APSAMO Panel deployment log
 ==========================
 Project: ${project.name} (${project.slug})
 Method:  ${method} (${stackName})
-Target:  ${url}
+Target:  ${url ?? 'no domain connected (not routed)'}
 
 [1/13] Planning deployment…                                       OK
 [2/13] Creating project directory /opt/deployhub/projects/${project.slug}… OK
@@ -3560,7 +3580,7 @@ Target:  ${url}
 [12/13] Post-install setup…                                       ${method === 'wordpress' ? 'WordPress core installed' : method === 'laravel' ? 'migrations + config cache' : 'skipped'}
 [13/13] Verifying deployment…                                     OK — container is running
 
-✓ Deployment live at https://${url}
+${url ? `✓ Deployment live at https://${url}` : '✓ Deployment running — connect a domain to put it online'}
 Total time: 8.3s (simulated)
 `
 }
@@ -3571,7 +3591,7 @@ function generateDemoRuntimeLog(project: {
   subdomain: string
   customDomain: string | null
 }): string {
-  const url = project.customDomain || project.subdomain
+  const url = siteUrl(project)
   const ts = new Date().toISOString()
   if (project.stack === 'nodejs') {
     return `[${ts}] Listening on port 3000
@@ -3586,7 +3606,7 @@ function generateDemoRuntimeLog(project: {
 [${ts}] PHP 8.2.0 — ${project.name} running`
   }
   return `[${ts}] Container running — ${project.name}
-[${ts}] Serving on https://${url}
+[${ts}] ${url ? `Serving on ${url}` : 'Running (no domain connected)'}
 [${ts}] No errors in the last 5 minutes`
 }
 

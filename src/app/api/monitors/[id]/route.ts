@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { verifyTokenFresh, extractTokenFromHeader } from '@/lib/auth'
 import { deleteMonitor, setMonitorEnabled } from '@/lib/monitor'
 import { requireProjectAccess, type ProjectPermission } from '@/lib/project-access'
+import { isPlatformHostname } from '@/lib/site-address'
 
 /**
  * Resolve a monitor and verify the caller has `permission` on the parent
@@ -183,6 +184,12 @@ export async function PATCH(
       if (!/^https?:$/.test(parsed.protocol)) {
         return NextResponse.json(
           { error: 'Only http(s) URLs can be monitored' },
+          { status: 400 }
+        )
+      }
+      if (isPlatformHostname(parsed.hostname)) {
+        return NextResponse.json(
+          { error: 'Monitor the website on its own domain. Connect a domain in Domains & SSL first.' },
           { status: 400 }
         )
       }

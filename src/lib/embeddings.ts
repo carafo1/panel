@@ -303,8 +303,8 @@ export function projectToText(p: {
     `Framework: ${p.framework}`,
     `Stack: ${p.stack}`,
     `Status: ${p.status}`,
-    `URL: ${p.subdomain}`,
-    p.customDomain ? `Custom domain: ${p.customDomain}` : '',
+    // The real domain only; the internal subdomain is not an address.
+    p.customDomain ? `Domain: ${p.customDomain}` : 'Domain: none connected',
     p.deploymentMethod ? `Deployment method: ${p.deploymentMethod}` : '',
     p.runtime ? `Runtime: ${p.runtime}` : '',
   ].filter(Boolean).join('\n')

@@ -70,6 +70,7 @@ interface Deployment {
     name: string
     slug: string
     subdomain: string
+    customDomain?: string | null
     framework?: string
   }
 }
@@ -425,7 +426,7 @@ export function DeploymentsPanel() {
 
     // Search filter (by project name, branch, or commit)
     if (searchQuery) {
-      const haystack = `${d.project.name} ${d.branch} ${d.commit || ''} ${d.project.subdomain} ${d.project.slug} ${d.triggeredBy}`.toLowerCase()
+      const haystack = `${d.project.name} ${d.branch} ${d.commit || ''} ${d.project.customDomain ?? ''} ${d.project.slug} ${d.triggeredBy}`.toLowerCase()
       if (!haystack.includes(searchQuery)) return false
     }
     return true
@@ -435,7 +436,7 @@ export function DeploymentsPanel() {
   // matches exist in each bucket)
   const searchFiltered = deployments.filter((d) => {
     if (!searchQuery) return true
-    const haystack = `${d.project.name} ${d.branch} ${d.commit || ''} ${d.project.subdomain} ${d.project.slug} ${d.triggeredBy}`.toLowerCase()
+    const haystack = `${d.project.name} ${d.branch} ${d.commit || ''} ${d.project.customDomain ?? ''} ${d.project.slug} ${d.triggeredBy}`.toLowerCase()
     return haystack.includes(searchQuery)
   })
   const counts = {

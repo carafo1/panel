@@ -278,3 +278,35 @@ test('a deep link opens the website on its area, and a reload keeps it there', a
   await expect(page.getByText(SITE.name).first()).toBeVisible()
   await expect(page).not.toHaveURL(/project=|#/)
 })
+
+test('the new website flow requires a real domain and offers no free platform address', async ({ page }) => {
+  await page.goto('/')
+  await sidebar(page).getByRole('navigation').getByRole('button', { name: 'Hosting', exact: true }).click()
+  await page.getByRole('button', { name: 'New website', exact: true }).click()
+  await page.getByText('Start a new WordPress site').click()
+
+  // Only real domains: one in the account or one owned elsewhere.
+  await expect(page.getByRole('radio', { name: /A domain in my account/ })).toHaveCount(1)
+  await expect(page.getByRole('radio', { name: /A domain I own elsewhere/ })).toHaveCount(1)
+  await expect(page.getByText('Free address')).toHaveCount(0)
+  await expect(page.getByText(/\.apsamo\.(com|test)/)).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Buy or transfer one in Domains' })).toBeVisible()
+
+  // Continuing without a domain shows the error inline, like the rest of the flow.
+  await page.getByLabel('Website name').fill('Domainless Bakery')
+  await page.getByRole('button', { name: 'Continue' }).click()
+  await expect(page.getByText('Choose a domain for this website — buy one or connect a domain you own.')).toBeVisible()
+
+  // Picking a domain owned elsewhere clears that error.
+  await page.getByRole('radio', { name: /A domain I own elsewhere/ }).check({ force: true })
+  await page.locator('#nw-external').fill('domainless-bakery.example.org')
+  await expect(page.getByText('Choose a domain for this website — buy one or connect a domain you own.')).toHaveCount(0)
+})
+
+test('the website header shows only the real domain, never a platform address', async ({ page }) => {
+  await openWebsite(page)
+  const header = page.locator('header').filter({ has: page.getByRole('heading', { name: SITE.name }) })
+  await expect(header.getByRole('link', { name: new RegExp(SITE.customDomain.replace(/\./g, '\.')) })).toBeVisible()
+  await expect(header.getByText(SITE.subdomain)).toHaveCount(0)
+  await expect(page.getByText(SITE.subdomain)).toHaveCount(0)
+})

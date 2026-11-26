@@ -10,7 +10,9 @@
  *   - HTTP→HTTPS redirects are automatic.
  *   - Requests to https://<domain>/ are reverse-proxied to the project's
  *     container on the deployhub docker network.
- *   - Custom domains + subdomains are both supported.
+ *   - Sites are served on their REAL domains only (a domain in the account
+ *     or a verified external one). No `<slug>.<platform domain>` host is
+ *     ever written; a site with no such domain is simply not routed.
  *
  * The on-VPS Caddyfile lives at /etc/caddy/Caddyfile (Debian/Ubuntu default).
  * After every change we run `caddy reload --config /etc/caddy/Caddyfile`
@@ -21,6 +23,7 @@
  */
 import { db } from '@/lib/db'
 import { isValidHostname } from '@/lib/custom-domains'
+import { isPlatformHostname } from '@/lib/site-address'
 import {
   withConnection,
   exec,
@@ -91,9 +94,9 @@ export interface ProjectProxyResult {
 // ─── Configure a project's proxy entry ───────────────────────────────────
 
 /**
- * Add or update the Caddyfile entry for a project. The project's hostname
- * (customDomain or subdomain) is mapped to the container's address on the
- * deployhub docker network.
+ * Add or update the Caddyfile entry for a project. The project's real domain
+ * is mapped to the container's address on the deployhub docker network. A
+ * project with no connected domain gets no entry (it keeps running, unrouted).
  */
 export async function configureProjectProxy(
   projectId: string,
@@ -112,15 +115,26 @@ export async function configureProjectProxy(
     throw new Error('Project has no container — deploy first')
   }
 
-  let hostname = project.customDomain || project.subdomain
+  // Never the internal subdomain: a site is only served on a real domain.
+  let hostname: string | null =
+    project.customDomain && !isPlatformHostname(project.customDomain, BRAND_DOMAIN)
+      ? project.customDomain
+      : null
   const upstream = `${project.containerName}:${project.containerPort || 3000}`
   const ssl = project.sslEnabled
 
-  log(`Configuring proxy: ${hostname} → ${upstream} (SSL: ${ssl ? 'on' : 'off'})`)
+  log(
+    hostname
+      ? `Configuring proxy: ${hostname} → ${upstream} (SSL: ${ssl ? 'on' : 'off'})`
+      : `Configuring proxy: no domain connected yet — ${upstream} stays unrouted until one is verified`
+  )
 
   // Demo mode: pretend we wrote the config (but still load redirects + ipBlocks
   // so the returned snippet reflects the full site block).
   if (isServerInDemoMode(project.server)) {
+    if (!hostname) {
+      return { ok: true, message: 'No domain connected — the site is running but not routed yet.' }
+    }
     const [redirects, ipBlocks] = await Promise.all([
       db.redirect.findMany({
         where: { projectId, enabled: true },
@@ -166,8 +180,9 @@ export async function configureProjectProxy(
     await withConnection(creds, async (client) => {
       const { configs, servedHosts } = await buildServerProxyConfigs(project.serverId!, isLocal)
       // The hostname actually served (an unproven customDomain falls back to
-      // the subdomain), so the certificate probe checks the right name.
-      hostname = servedHosts.get(projectId) ?? project.subdomain
+      // a verified WebsiteDomain, or to nothing), so the certificate probe
+      // checks the right name.
+      hostname = servedHosts.get(projectId) ?? null
 
       // On single-box installs, include the panel's own block so regenerating
       // the Caddyfile for a project never knocks the control panel offline.
@@ -203,7 +218,7 @@ export async function configureProjectProxy(
       // SSL status comes from a real TLS handshake, not from "we wrote the
       // config". This used to record 'issued' with a made-up 90-day expiry
       // whether or not Caddy ever obtained a certificate.
-      if (ssl) {
+      if (ssl && hostname) {
         const cert = await recordCertificateStatus(client, projectId, hostname)
         log(
           cert.ok
@@ -213,12 +228,17 @@ export async function configureProjectProxy(
       }
     })
 
-    if (!ssl) {
+    if (!ssl || !hostname) {
+      // Unrouted: no certificate is (or will be) issued for it.
       await db.project.update({
         where: { id: projectId },
         data: { sslCertStatus: 'none', sslCertExpiry: null },
       })
     }
+    if (!hostname) {
+      return { ok: true, message: 'No domain connected — the site is running but not routed yet.' }
+    }
+    const servedHostname: string = hostname
 
     // Re-load this project's redirects + ipBlocks for the returned snippet.
     const [snippetRedirects, snippetIpBlocks] = await Promise.all([
@@ -233,9 +253,9 @@ export async function configureProjectProxy(
     ])
     return {
       ok: true,
-      message: `Proxy configured for ${hostname}`,
+      message: `Proxy configured for ${servedHostname}`,
       configSnippet: generateCaddyBlock({
-        hostname,
+        hostname: servedHostname,
         upstream,
         ssl,
         redirects: safeRedirectRows(snippetRedirects).map((r) => ({
@@ -270,9 +290,13 @@ export function activeIpRuleWhere(now = new Date()) {
  * the generated Caddyfile (configure and remove both use it).
  *
  *   - customDomain is served only when backed by a VERIFIED WebsiteDomain or
- *     an active Domain the owner holds with us; otherwise the subdomain. An
- *     unproven hostname must never reach Caddy (dangling-DNS takeover, ACME
- *     abuse) — setting a domain as primary used to skip verification.
+ *     an active Domain the owner holds with us; otherwise the primary (then
+ *     any) verified WebsiteDomain. An unproven hostname must never reach
+ *     Caddy (dangling-DNS takeover, ACME abuse).
+ *   - The platform domain is never served for a site: not the internal
+ *     `subdomain`, not any `*.<brand>` name that old data might carry. A
+ *     project with no real domain is left out entirely (running, unrouted),
+ *     so every proxy write also drops the old subdomain routes.
  *   - IP rules past their expiresAt are left out (they used to stay forever).
  */
 export async function buildServerProxyConfigs(
@@ -312,7 +336,7 @@ export async function buildServerProxyConfigs(
     // proxy — that check is the whole point of the verify step.
     db.websiteDomain.findMany({
       where: { projectId: { in: ids }, verified: true },
-      select: { projectId: true, domain: true, zoneCreated: true },
+      select: { projectId: true, domain: true, zoneCreated: true, isPrimary: true },
     }),
     db.domain.findMany({
       where: {
@@ -323,26 +347,35 @@ export async function buildServerProxyConfigs(
     }),
   ])
 
+  const brand = (process.env.BRAND_DOMAIN || BRAND_DOMAIN).toLowerCase()
+  const isCustomerHost = (h: string) => !!h && !isPlatformHostname(h, brand)
   const servedHosts = new Map<string, string>()
   for (const p of allProjects) {
     const cd = (p.customDomain || '').toLowerCase()
     const backed =
-      !!cd &&
+      isCustomerHost(cd) &&
       (allCustomDomains.some((d) => d.projectId === p.id && d.domain.toLowerCase() === cd) ||
         ownedDomains.some((d) => d.name.toLowerCase() === cd && d.userId === p.userId))
-    servedHosts.set(p.id, backed ? p.customDomain! : p.subdomain)
+    if (backed) {
+      servedHosts.set(p.id, p.customDomain!)
+      continue
+    }
+    const verified = allCustomDomains.filter(
+      (d) => d.projectId === p.id && isCustomerHost(d.domain.toLowerCase())
+    )
+    const fallback = verified.find((d) => d.isPrimary) || verified[0]
+    // No real domain → not routed at all.
+    if (fallback) servedHosts.set(p.id, fallback.domain.toLowerCase())
   }
 
-  const configs: ProxyConfig[] = allProjects.map((p) => ({
+  const routed = allProjects.filter((p) => servedHosts.has(p.id))
+  const configs: ProxyConfig[] = routed.map((p) => ({
     hostname: servedHosts.get(p.id)!,
     // A verified domain whose DNS zone we host also gets its www. name: every
     // zone we publish has www as a CNAME to the domain, so leaving it out of
     // the proxy made www.<domain> fail (no site, no certificate).
     extraHostnames: [
       ...new Set([
-        // Keep the platform subdomain working when a custom domain is the
-        // primary: links to it used to stop resolving to the site.
-        ...(servedHosts.get(p.id) !== p.subdomain ? [p.subdomain] : []),
         ...allCustomDomains
           .filter((d) => d.projectId === p.id)
           .flatMap((d) => {
@@ -350,7 +383,7 @@ export async function buildServerProxyConfigs(
             return d.zoneCreated && !name.startsWith('www.') ? [name, `www.${name}`] : [name]
           }),
       ]),
-    ].filter((h) => h !== servedHosts.get(p.id)),
+    ].filter((h) => h !== servedHosts.get(p.id) && isCustomerHost(h)),
     // Localhost single-box: the host Caddy isn't on the docker network, so it
     // reaches the container via its published host port. Remote VPS: Caddy
     // shares the deployhub network and resolves the container name.

@@ -6,7 +6,9 @@
  *   - domain order   → fulfilDomainOrder (registrar via the DomainOrder, which
  *                      carries the registrant contacts and the paid term)
  *   - hosting        → create a Project + Deployment, run deployProject()
- *                      (real Docker container on a {slug}.BRAND_DOMAIN subdomain)
+ *                      (real Docker container served on the domain chosen at
+ *                      checkout). No domain chosen → the plan is active but
+ *                      no website is created: every site needs a real domain.
  *   - email          → Mailcow domain + DKIM
  *   - email-addon    → raise an existing service's allowance
  *
@@ -41,7 +43,8 @@ import { db } from '@/lib/db'
 import { deployProject } from '@/lib/vps'
 import { fulfilDomainOrder } from '@/lib/domain-checkout'
 import { slugify } from '@/lib/utils'
-import { BRAND_DOMAIN } from '@/lib/brand-config'
+import { resolveSiteDomainChoice, internalSiteKey } from '@/lib/site-domain'
+import { generateVerificationToken } from '@/lib/custom-domains'
 import { provisionEmailService, syncMailcowLimits } from '@/lib/email-hosting'
 import { selectHostingServer, NO_SERVER_MESSAGE } from '@/lib/server-selection'
 
@@ -521,6 +524,27 @@ async function provisionHostingForPayment(
       await db.project.update({ where: { id: projectId }, data: { serverId: server.id } })
     }
   } else {
+    // Every website needs a real domain. A plan bought without one is
+    // fulfilled (the subscription is active) and the customer creates the
+    // site, with its domain, from the New website flow.
+    const siteDomain = typeof meta.siteDomain === 'string' ? meta.siteDomain : ''
+    if (!siteDomain) {
+      return {
+        outcome: 'provisioned',
+        detail: 'plan active; no website created because no domain was chosen at checkout',
+      }
+    }
+    // Re-checked now: the domain could have been claimed elsewhere between
+    // checkout and payment confirmation. Nothing has been created yet, so a
+    // refusal is final rather than retryable.
+    const choice = await resolveSiteDomainChoice({
+      userId: payment.userId,
+      domainType: meta.siteDomainType,
+      domain: siteDomain,
+    })
+    if (!choice.ok) {
+      return { outcome: 'failed', detail: `website domain ${siteDomain} refused: ${choice.error}` }
+    }
     const server = await selectHostingServer()
     if (autoDeploy && !server) {
       // Nothing created yet, so this is safely retryable once a server is up.
@@ -539,7 +563,9 @@ async function provisionHostingForPayment(
         framework: typeof meta.framework === 'string' ? meta.framework : 'nextjs',
         stack: frameworkToStack(meta.framework),
         status: autoDeploy ? 'creating' : 'stopped',
-        subdomain: `${slug}.${BRAND_DOMAIN}`,
+        // Internal identifier only; never served or shown.
+        subdomain: internalSiteKey(slug),
+        customDomain: choice.customDomain,
         serverId: server?.id || null,
         sslEnabled: true,
         autoDeploy,
@@ -549,9 +575,25 @@ async function provisionHostingForPayment(
     // Recorded at once so a retry reuses this project instead of building a
     // second one for the same payment.
     await patchPaymentMeta(payment.id, { projectId })
+    if (choice.externalDomain) {
+      // Routed only once DNS proves ownership (domain sweep).
+      await db.websiteDomain
+        .create({
+          data: {
+            projectId: project.id,
+            domain: choice.externalDomain,
+            isPrimary: true,
+            sslEnabled: true,
+            sslStatus: 'none',
+            verified: false,
+            verificationToken: generateVerificationToken(),
+          },
+        })
+        .catch((err) => console.error('[provision-on-payment] pending domain attach failed:', err))
+    }
   }
 
-  // Manual: the purchase is fulfilled — the project and its subdomain exist —
+  // Manual: the purchase is fulfilled — the project and its domain exist —
   // but nothing is built until the owner presses Deploy.
   if (!autoDeploy) {
     return {

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { siteHostname, NO_DOMAIN_LABEL } from '@/lib/site-address'
 import { toast } from 'sonner'
 import {
   HardDriveDownload,
@@ -100,8 +101,13 @@ interface Project {
   stack?: string | null
   deploymentMethod?: string | null
   status: string
+  /** Internal identifier — never shown or linked. */
   subdomain: string
-  customDomain?: string
+  customDomain?: string | null
+  /** Public address (real domain) from the API, or null: no domain connected. */
+  address?: string | null
+  /** Attached domain still waiting for DNS verification. */
+  pendingDomain?: string | null
   sslEnabled: boolean
   autoDeploy: boolean
   lastDeployment?: {
@@ -469,7 +475,13 @@ function ProjectCard({
           </Badge>
         </div>
         <CardDescription className="text-xs font-mono">
-          {project.subdomain}
+          {(project.address ?? siteHostname(project)) ? (
+            project.address ?? siteHostname(project)
+          ) : project.pendingDomain ? (
+            <span className="font-sans">{project.pendingDomain} · waiting for DNS</span>
+          ) : (
+            <span className="font-sans text-muted-foreground">{NO_DOMAIN_LABEL}</span>
+          )}
         </CardDescription>
       </CardHeader>
       <CardContent className="relative">
